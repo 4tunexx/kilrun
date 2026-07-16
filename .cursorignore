@@ -1,0 +1,10 @@
+# Ignore heavy build and dependency files
+node_modules/
+.next/
+out/
+build/
+dist/
+public/
+*.zip
+*.tar.gz
+.git/

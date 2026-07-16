@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  steamId     String   @unique
+  username    String
+  avatarUrl   String
+  vpCurrency  Int      @default(0)
+  xpProgress  Int      @default(0)
+  currentRank String   @default("Unranked")
+  createdAt   DateTime @default(now())
+
+  // Secondary email identity, verified via Clerk's OTP flow after Steam login.
+  // Nullable/optional because Steam remains the sole login mechanism -- these
+  // fields are populated only once a player completes email verification.
+  clerkId       String?  @unique
+  email         String?  @unique
+  emailVerified Boolean  @default(false)
+
+  matchStats     MatchStat[]
+  activeMissions ActiveMission[]
+}
+
+model MatchStat {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String   @db.ObjectId
+  score          Int
+  distance       Int
+  livesRemaining Int
+  datePlayed     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model StoreItem {
+  id           String  @id @default(auto()) @map("_id") @db.ObjectId
+  itemName     String
+  itemCategory String
+  itemSku      String  @unique
+  vpPrice      Int
+  isAvailable  Boolean @default(true)
+}
+
+model ActiveMission {
+  id           String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String  @db.ObjectId
+  title        String
+  description  String
+  rewardXp     Int
+  targetCount  Int
+  currentCount Int     @default(0)
+  isCompleted  Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
