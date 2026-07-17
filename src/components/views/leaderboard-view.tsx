@@ -52,7 +52,12 @@ export default function LeaderboardView() {
                   </Avatar>
                   <div className="min-w-0 flex-1">
                     <p className="font-bold truncate flex items-center gap-2">
-                      <UserHoverCard userId={row.id} className="truncate">
+                      <UserHoverCard
+                        userId={row.id}
+                        role={row.role}
+                        isVip={row.isVip}
+                        className="truncate"
+                      >
                         {row.username}
                       </UserHoverCard>
                       {row.isVip && (

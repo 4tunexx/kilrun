@@ -10,6 +10,7 @@ import { formatDistanceToNow } from 'date-fns';
 export default function NotificationsView() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [markingRead, setMarkingRead] = useState(false);
 
   const reload = async () => {
     const data = await getNotifications();
@@ -21,6 +22,8 @@ export default function NotificationsView() {
     reload().catch(() => setLoading(false));
   }, []);
 
+  const hasUnread = items.some((n) => !n.isRead);
+
   return (
     <div className="px-4 sm:px-8 py-6 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -29,12 +32,23 @@ export default function NotificationsView() {
         </h1>
         <Button
           variant="outline"
+          disabled={markingRead || !hasUnread}
           onClick={async () => {
-            await markAllNotificationsRead();
-            await reload();
+            setMarkingRead(true);
+            try {
+              await markAllNotificationsRead();
+              await reload();
+            } finally {
+              setMarkingRead(false);
+            }
           }}
         >
-          <CheckCheck className="mr-2 h-4 w-4" /> Mark all read
+          {markingRead ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <CheckCheck className="mr-2 h-4 w-4" />
+          )}
+          Mark all read
         </Button>
       </div>
 

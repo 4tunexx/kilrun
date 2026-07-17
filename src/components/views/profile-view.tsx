@@ -41,6 +41,8 @@ import {
 } from '@/lib/social-actions';
 import type { MatchStat, User as UserModel } from '@/generated/prisma';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import { getRoleTextColorClass } from '@/lib/role-colors';
+import { ShowcaseEditor } from '@/components/views/profile/showcase-editor';
 import { useToast } from '@/hooks/use-toast';
 import { EmailVerificationForm } from '@/components/email-verification-form';
 
@@ -142,7 +144,12 @@ export default function ProfileView({ userId }: { userId: string }) {
             </Avatar>
           </div>
           <div className="min-w-0 flex-1 pb-1">
-            <h1 className="text-3xl sm:text-5xl font-black truncate">
+            <h1
+              className={`text-3xl sm:text-5xl font-black truncate ${getRoleTextColorClass(
+                user?.role,
+                user?.isVip
+              )}`}
+            >
               {user?.username ?? 'Loading...'}
             </h1>
             <p className="text-base sm:text-xl text-slate-400">
@@ -175,6 +182,9 @@ export default function ProfileView({ userId }: { userId: string }) {
           </TabsTrigger>
           <TabsTrigger value="match-history" className="flex-none">
             Match History
+          </TabsTrigger>
+          <TabsTrigger value="showcase" className="flex-none">
+            Showcase
           </TabsTrigger>
           <TabsTrigger value="cosmetics" className="flex-none">
             Cosmetics
@@ -292,6 +302,10 @@ export default function ProfileView({ userId }: { userId: string }) {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="showcase" className="mt-0">
+          <ShowcaseEditor />
         </TabsContent>
 
         <TabsContent value="cosmetics" className="mt-0 space-y-4">

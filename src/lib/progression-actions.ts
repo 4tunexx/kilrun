@@ -192,6 +192,24 @@ async function metricCount(userId: string, metric: string): Promise<number> {
       const u = await prisma.user.findUnique({ where: { id: userId } });
       return u?.loginStreak ?? 0;
     }
+    case 'trapper_wins':
+      return prisma.matchResult.count({
+        where: { userId, role: 'trapper', outcome: 'win' },
+      });
+    case 'runner_survives':
+      return prisma.matchResult.count({
+        where: { userId, role: 'runner', outcome: 'survived' },
+      });
+    case 'losses':
+      return prisma.matchResult.count({ where: { userId, outcome: 'loss' } });
+    case 'eliminated':
+      return prisma.matchResult.count({ where: { userId, outcome: 'eliminated' } });
+    case 'badges_earned':
+      return prisma.userBadge.count({ where: { userId } });
+    case 'achievements_unlocked':
+      return prisma.userAchievement.count({ where: { userId } });
+    case 'support_tickets':
+      return prisma.supportTicket.count({ where: { userId } });
     default:
       return 0;
   }
@@ -242,6 +260,7 @@ export async function tryUnlockAchievement(
   const defs = await prisma.achievementDefinition.findMany({
     where: { isActive: true, metric },
   });
+  let unlockedAny = false;
   for (const def of defs) {
     const existing = await prisma.userAchievement.findFirst({
       where: { userId, achievementId: def.id },
@@ -253,6 +272,7 @@ export async function tryUnlockAchievement(
     await prisma.userAchievement.create({
       data: { userId, achievementId: def.id },
     });
+    unlockedAny = true;
     if (def.xpReward > 0) {
       await grantXp(userId, def.xpReward, `Achievement: ${def.title}`);
     }
@@ -263,12 +283,19 @@ export async function tryUnlockAchievement(
       'achievement'
     );
   }
+  // Meta-progress: re-check "N achievements unlocked" style unlocks. The
+  // metric guard means this can only ever create a *different* definition,
+  // so it terminates instead of recursing forever.
+  if (unlockedAny && metric !== 'achievements_unlocked') {
+    await tryUnlockAchievement(userId, 'achievements_unlocked');
+  }
 }
 
 export async function tryUnlockBadge(userId: string, metric: string, _delta = 1) {
   const defs = await prisma.badgeDefinition.findMany({
     where: { isActive: true, metric },
   });
+  let unlockedAny = false;
   for (const def of defs) {
     const existing = await prisma.userBadge.findFirst({
       where: { userId, badgeId: def.id },
@@ -280,6 +307,7 @@ export async function tryUnlockBadge(userId: string, metric: string, _delta = 1)
     await prisma.userBadge.create({
       data: { userId, badgeId: def.id },
     });
+    unlockedAny = true;
     await notify(
       userId,
       'Badge earned',
@@ -287,12 +315,18 @@ export async function tryUnlockBadge(userId: string, metric: string, _delta = 1)
       'badge'
     );
   }
+  // Meta-progress: re-check "N badges earned" style unlocks (guarded so it
+  // can only ever create a *different* badge, never recurse forever).
+  if (unlockedAny && metric !== 'badges_earned') {
+    await tryUnlockBadge(userId, 'badges_earned');
+  }
 }
 
 /** After a match: XP already granted separately; progress game missions + achievements. */
 export async function processMatchProgression(input: {
   userId: string;
   outcome: string;
+  role?: 'trapper' | 'runner';
   score?: number;
   distance?: number;
 }) {
@@ -300,6 +334,18 @@ export async function processMatchProgression(input: {
   await progressMissions(input.userId, 'runs', 1);
   if (input.outcome === 'win' || input.outcome === 'survived') {
     await progressMissions(input.userId, 'wins', 1);
+  }
+  if (input.role === 'trapper' && input.outcome === 'win') {
+    await progressMissions(input.userId, 'trapper_wins', 1);
+  }
+  if (input.role === 'runner' && input.outcome === 'survived') {
+    await progressMissions(input.userId, 'runner_survives', 1);
+  }
+  if (input.outcome === 'loss') {
+    await progressMissions(input.userId, 'losses', 1);
+  }
+  if (input.outcome === 'eliminated') {
+    await progressMissions(input.userId, 'eliminated', 1);
   }
   if (input.distance && input.distance > 0) {
     await progressMissions(input.userId, 'distance', input.distance);
@@ -333,9 +379,15 @@ export async function processMatchProgression(input: {
   await tryUnlockAchievement(input.userId, 'distance');
   await tryUnlockAchievement(input.userId, 'score');
   await tryUnlockAchievement(input.userId, 'level');
+  await tryUnlockAchievement(input.userId, 'trapper_wins');
+  await tryUnlockAchievement(input.userId, 'runner_survives');
+  await tryUnlockAchievement(input.userId, 'losses');
+  await tryUnlockAchievement(input.userId, 'eliminated');
   await tryUnlockBadge(input.userId, 'runs');
   await tryUnlockBadge(input.userId, 'wins');
   await tryUnlockBadge(input.userId, 'level');
+  await tryUnlockBadge(input.userId, 'trapper_wins');
+  await tryUnlockBadge(input.userId, 'runner_survives');
 }
 
 export async function processWebsiteAction(
@@ -344,11 +396,13 @@ export async function processWebsiteAction(
     | 'friends'
     | 'messages'
     | 'forum'
+    | 'forum_replies'
     | 'purchases'
     | 'email'
     | 'chat'
     | 'vip'
     | 'logins'
+    | 'support_tickets'
 ) {
   await ensurePlayerMissions(userId);
   // For threshold-style metrics (email/vip/friends count), sync from DB totals
@@ -518,6 +572,7 @@ export async function getGlobalChat(take = 40) {
 
 export async function sendGlobalChat(body: string) {
   const user = await requireUser();
+  if (user.isMuted) throw new Error('You are muted and cannot chat right now');
   const settings = await getSiteSettings();
   if (!settings.chatEnabled) throw new Error('Chat disabled');
   const text = body.trim().slice(0, 300);
@@ -527,6 +582,13 @@ export async function sendGlobalChat(body: string) {
   });
   await processWebsiteAction(user.id, 'chat');
   return msg;
+}
+
+/** Moderator tool: wipe the hub's live global chat history. */
+export async function adminClearGlobalChat() {
+  await requireStaff();
+  await prisma.globalChatMessage.deleteMany({});
+  return { ok: true };
 }
 
 export async function getUnreadNotificationCount() {

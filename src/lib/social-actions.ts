@@ -143,7 +143,7 @@ export async function getFriendRequests() {
   return prisma.friendship.findMany({
     where: { userBId: user.id, status: 'pending' },
     include: {
-      userA: { select: { id: true, username: true, avatarUrl: true } },
+      userA: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -213,15 +213,15 @@ export async function getConversations() {
     orderBy: { createdAt: 'desc' },
     take: 200,
     include: {
-      sender: { select: { id: true, username: true, avatarUrl: true } },
-      receiver: { select: { id: true, username: true, avatarUrl: true } },
+      sender: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
+      receiver: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
     },
   });
 
   const byPeer = new Map<
     string,
     {
-      peer: { id: string; username: string; avatarUrl: string };
+      peer: { id: string; username: string; avatarUrl: string; role: string; isVip: boolean };
       lastMessage: string;
       createdAt: Date;
       unread: number;
@@ -304,6 +304,7 @@ export async function createForumPost(input: {
   category?: string;
 }) {
   const user = await requireSessionUser();
+  if (user.isMuted) throw new Error('You are muted and cannot post right now');
   const title = input.title.trim().slice(0, 120);
   const body = input.body.trim().slice(0, 5000);
   if (!title || !body) throw new Error('Title and body required');
@@ -317,6 +318,41 @@ export async function createForumPost(input: {
   });
   await processWebsiteAction(user.id, 'forum');
   return post;
+}
+
+export async function getForumReplies(postId: string) {
+  return prisma.forumReply.findMany({
+    where: { postId },
+    orderBy: { createdAt: 'asc' },
+    include: {
+      author: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
+    },
+  });
+}
+
+export async function createForumReply(postId: string, body: string) {
+  const user = await requireSessionUser();
+  if (user.isMuted) throw new Error('You are muted and cannot post right now');
+  const text = body.trim().slice(0, 2000);
+  if (!text) throw new Error('Empty reply');
+  const post = await prisma.forumPost.findUnique({ where: { id: postId } });
+  if (!post) throw new Error('Thread not found');
+
+  const reply = await prisma.forumReply.create({
+    data: { postId, authorId: user.id, body: text },
+  });
+  if (post.authorId !== user.id) {
+    await prisma.notification.create({
+      data: {
+        userId: post.authorId,
+        title: 'New reply',
+        body: `${user.username} replied to "${post.title}".`,
+        type: 'forum',
+      },
+    });
+  }
+  await processWebsiteAction(user.id, 'forum_replies');
+  return reply;
 }
 
 export async function getNewsPosts() {
@@ -357,6 +393,7 @@ export async function createSupportTicket(input: {
       type: 'support',
     },
   });
+  await processWebsiteAction(user.id, 'support_tickets');
   return ticket;
 }
 
@@ -603,6 +640,7 @@ export async function adminListUsers(take = 50) {
       role: true,
       isVip: true,
       isBanned: true,
+      isMuted: true,
       vpCurrency: true,
       xpProgress: true,
       email: true,
@@ -627,6 +665,12 @@ export async function adminSetUserRole(userId: string, role: string) {
 export async function adminSetBanned(userId: string, isBanned: boolean) {
   await requireStaff();
   return prisma.user.update({ where: { id: userId }, data: { isBanned } });
+}
+
+/** Moderator tool: silence a player's global chat / forum posting without banning them. */
+export async function adminSetMuted(userId: string, isMuted: boolean) {
+  await requireStaff();
+  return prisma.user.update({ where: { id: userId }, data: { isMuted } });
 }
 
 export async function adminListTickets() {

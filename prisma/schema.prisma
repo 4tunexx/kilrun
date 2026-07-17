@@ -23,6 +23,7 @@ model User {
   bio         String   @default("")
   isBanned    Boolean  @default(false)
   isVip       Boolean  @default(false)
+  isMuted     Boolean  @default(false)
   createdAt   DateTime @default(now())
 
   clerkId       String?  @unique
@@ -42,6 +43,12 @@ model User {
   equippedBannerItemName  String?
   equippedBannerImageUrl  String?
   equippedBannerConfig    Json?
+
+  /// Profile "showcase" slots (badge/achievement/inventory/rank picks shown
+  /// on the mini hover-card and public profile). Slot count unlocks
+  /// progressively by level — see SHOWCASE_UNLOCK_LEVELS. Stored as JSON
+  /// array of { slot, itemType, refId } to avoid a join for every render.
+  showcaseItems Json?
 
   matchStats         MatchStat[]
   activeMissions     ActiveMission[]

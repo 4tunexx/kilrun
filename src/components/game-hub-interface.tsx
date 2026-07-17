@@ -55,6 +55,7 @@ import { getLevelProgress } from '@/lib/progression';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { ProfileNavigationProvider } from '@/components/providers/profile-navigation-context';
 import { InventoryDrawer } from '@/components/inventory-drawer';
+import { getRoleTextColorClass } from '@/lib/role-colors';
 
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -355,6 +356,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         };
       } else if (currentPage === 'messages') {
         props.userId = user.id;
+      } else if (currentPage === 'admin') {
+        props.viewerRole = user.role;
       } else if (currentPage === 'public-profile') {
         if (!viewingProfileUserId) {
           navigate(previousPage);
@@ -659,7 +662,12 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                           )}
                         </div>
                       </div>
-                      <h3 className="text-xl font-bold mt-4 pt-4 flex items-center gap-2">
+                      <h3
+                        className={`text-xl font-bold mt-4 pt-4 flex items-center gap-2 ${getRoleTextColorClass(
+                          user.role,
+                          isVip
+                        )}`}
+                      >
                         {user.username}
                         {isVip && <Badge className="bg-yellow-500 text-black">VIP</Badge>}
                       </h3>
