@@ -82,3 +82,44 @@ export async function recordMatchStat(input: {
     },
   });
 }
+
+const DEATHRUN_REWARDS: Record<'win' | 'loss' | 'survived' | 'eliminated', { xp: number; vp: number }> = {
+  win: { xp: 150, vp: 40 },
+  survived: { xp: 90, vp: 20 },
+  loss: { xp: 40, vp: 10 },
+  eliminated: { xp: 25, vp: 5 },
+};
+
+/**
+ * Persists a mode-agnostic `MatchResult` for a finished Deathrun round and
+ * credits the player's running XP/VP totals on `User`. Called by the
+ * client's results screen the moment the Colyseus room reports `results`.
+ */
+export async function recordDeathrunResult(input: {
+  userId: string;
+  role: 'trapper' | 'runner';
+  outcome: 'win' | 'loss' | 'survived' | 'eliminated';
+}): Promise<{ xpEarned: number; vpEarned: number }> {
+  const reward = DEATHRUN_REWARDS[input.outcome];
+
+  await prisma.matchResult.create({
+    data: {
+      userId: input.userId,
+      mode: 'deathrun',
+      role: input.role,
+      outcome: input.outcome,
+      xpEarned: reward.xp,
+      vpEarned: reward.vp,
+    },
+  });
+
+  await prisma.user.update({
+    where: { id: input.userId },
+    data: {
+      xpProgress: { increment: reward.xp },
+      vpCurrency: { increment: reward.vp },
+    },
+  });
+
+  return { xpEarned: reward.xp, vpEarned: reward.vp };
+}

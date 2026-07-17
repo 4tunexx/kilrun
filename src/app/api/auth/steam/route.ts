@@ -8,7 +8,12 @@ const STEAM_OPENID_URL = 'https://steamcommunity.com/openid/login';
  * signed OpenID assertion once the player authenticates.
  */
 export async function GET(req: NextRequest) {
-  const origin = process.env.NEXTAUTH_URL || req.nextUrl.origin;
+  // Always trust the actual incoming request's origin (Vercel correctly
+  // forwards the real public host/protocol) rather than `NEXTAUTH_URL`,
+  // which is easy to leave stale (e.g. still `localhost` after deploying) --
+  // that mismatch sends Steam's redirect to a domain that doesn't exist for
+  // the visiting user, which is exactly what "login gives broken" looks like.
+  const origin = req.nextUrl.origin;
   const returnTo = `${origin}/api/auth/steam/callback`;
 
   const params = new URLSearchParams({

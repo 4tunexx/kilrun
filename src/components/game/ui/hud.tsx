@@ -1,54 +1,70 @@
-
 'use client';
 
 import React from 'react';
-import { Trophy, Activity, Heart } from 'lucide-react';
-import { GameState } from '../types';
+import { Heart, Timer, Skull, Wind } from 'lucide-react';
+import type { NetPlayerState, NetRoomState } from '../net/types';
+import { RunnerHud } from '../modes/deathrun/runner-hud';
+import { TrapperControls } from '../modes/deathrun/trapper-controls';
 
-export const HUD: React.FC<{ state: GameState; speed: number }> = ({ state, speed }) => {
-  const speedPercentage = Math.min((speed / 0.4) * 100, 100);
+function formatClock(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+export const HUD: React.FC<{ player: NetPlayerState; room: NetRoomState }> = ({ player, room }) => {
+  const isTrapper = player.role === 'trapper';
 
   return (
-    <div className="absolute inset-0 pointer-events-none select-none font-sans">
-      <div className="absolute top-8 left-8 flex flex-col gap-4">
-        <div className="bg-slate-900/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10 flex items-center gap-4">
-          <Trophy className="text-yellow-400 w-6 h-6" />
-          <div>
-            <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Score</p>
-            <p className="text-xl font-black text-white">{state.score}</p>
-          </div>
+    <div className="absolute inset-0 pointer-events-none select-none font-sans z-[110]">
+      <div className="absolute top-6 left-6 flex flex-col gap-3">
+        <div
+          className={`px-4 py-2 rounded-xl border backdrop-blur-xl flex items-center gap-2 font-black uppercase tracking-widest text-sm ${
+            isTrapper ? 'bg-orange-950/70 border-orange-500/40 text-orange-300' : 'bg-cyan-950/70 border-cyan-500/40 text-cyan-300'
+          }`}
+        >
+          {isTrapper ? <Skull className="w-4 h-4" /> : <Wind className="w-4 h-4" />}
+          {isTrapper ? 'Trapper' : 'Runner'}
         </div>
-        <div className="bg-slate-900/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10 flex items-center gap-4">
-          <Activity className="text-primary w-6 h-6" />
-          <div>
-            <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Distance</p>
-            <p className="text-xl font-black text-white">{state.distance}m</p>
-          </div>
+        <div className="bg-slate-900/80 backdrop-blur-xl px-4 py-2 rounded-xl border border-white/10 flex items-center gap-2">
+          <Timer className="w-4 h-4 text-yellow-400" />
+          <span className="text-lg font-black text-white tabular-nums">{formatClock(room.matchTimeRemainingMs)}</span>
         </div>
       </div>
 
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-        <div className="relative">
-            <div className={`w-1 h-1 bg-primary rounded-full shadow-[0_0_5px_#ef4444] ${speed > 0.1 ? 'scale-150' : 'scale-100'}`} />
-            <div className={`absolute -inset-4 border border-white/20 rounded-full transition-all ${speed > 0.1 ? 'scale-125 opacity-100' : 'scale-75 opacity-0'}`} />
+      <div className="absolute bottom-6 left-6">{isTrapper ? <TrapperControls /> : <RunnerHud player={player} />}</div>
+
+      <div className="absolute bottom-6 right-6 w-56 bg-slate-900/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Health</p>
+          <Heart className="w-4 h-4 text-red-500" />
+        </div>
+        <div className="h-2.5 bg-white/10 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-150"
+            style={{ width: `${Math.max(0, player.health)}%` }}
+          />
         </div>
       </div>
 
-      <div className="absolute bottom-8 left-8 w-48 bg-slate-900/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10">
-        <div className="flex justify-between items-end mb-2">
-            <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Velocity</p>
-            <p className="text-lg font-black text-white">{Math.floor(speed * 1000)}</p>
+      {player.hasFinished && (
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 text-center">
+          <p className="text-4xl font-black text-yellow-400 uppercase tracking-tighter drop-shadow-[0_0_20px_rgba(250,204,21,0.6)]">
+            Finished!
+          </p>
+          <p className="text-slate-300 font-semibold">Waiting for the round to end...</p>
         </div>
-        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-            <div className="h-full bg-primary transition-all duration-100" style={{ width: `${speedPercentage}%` }} />
-        </div>
-      </div>
+      )}
 
-      <div className="absolute bottom-8 right-8 bg-slate-900/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10 flex items-center gap-3">
-        {[...Array(3)].map((_, i) => (
-            <Heart key={i} className={`w-6 h-6 ${i < state.health ? 'text-red-500 fill-current' : 'text-slate-800'}`} />
-        ))}
-      </div>
+      {!player.isAlive && !player.hasFinished && (
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 text-center">
+          <p className="text-4xl font-black text-red-500 uppercase tracking-tighter drop-shadow-[0_0_20px_rgba(239,68,68,0.6)]">
+            Eliminated
+          </p>
+          <p className="text-slate-400 font-semibold">Spectating until the round ends...</p>
+        </div>
+      )}
     </div>
   );
 };

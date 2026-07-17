@@ -1,58 +1,67 @@
-
 import { KeyboardHandler } from './keyboard';
 import { MouseHandler } from './mouse';
-import { TouchHandler } from './touch';
-import { PointerLockManager } from './pointerlock';
+import { DualJoystick } from './dual-joystick';
 import { Vector2 } from '../types';
 
 /**
- * Owns every input subsystem for a single game session. Instances are
- * created per `KilrunEngine`, never shared as module-level globals, so
- * multiple concurrent sessions (e.g. future local multiplayer/spectator
- * views) can each track their own input state independently.
+ * Owns every input subsystem for a single game session and normalizes them
+ * into one PC/mobile-agnostic API: a move vector, an aim angle, and
+ * discrete shoot/crouch/interact/jump queries. `kilrun-engine.tsx` converts
+ * the move vector from screen-space into world-space (accounting for the
+ * isometric camera) before sending it to the server -- this class only
+ * ever deals with raw input.
  */
 export class InputManager {
   public keyboard: KeyboardHandler;
   public mouse: MouseHandler;
-  public touch: TouchHandler;
-  public pointerLock: PointerLockManager;
+  public joystick: DualJoystick;
 
-  constructor(canvas: HTMLCanvasElement) {
+  private lastAimAngle = 0;
+
+  constructor(element: HTMLElement, private isMobile: boolean) {
     this.keyboard = new KeyboardHandler();
-    this.mouse = new MouseHandler();
-    this.touch = new TouchHandler(canvas);
-    this.pointerLock = new PointerLockManager(canvas);
+    this.mouse = new MouseHandler(window);
+    this.joystick = new DualJoystick(element);
   }
 
-  public getMovementVector(): Vector2 {
-    let move = this.keyboard.getAxis();
+  public getMoveVector(): Vector2 {
+    if (this.isMobile) return this.joystick.getMoveVector();
+    return this.keyboard.getAxis();
+  }
 
-    // Right touch joystick overrides for movement.
-    if (this.touch.rightStick.active) {
-      const dx = this.touch.rightStick.current.x - this.touch.rightStick.start.x;
-      const dy = this.touch.rightStick.current.y - this.touch.rightStick.start.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const max = 40;
-      if (dist > 5) {
-        move.x = (dx / dist) * Math.min(dist / max, 1);
-        move.y = (dy / dist) * Math.min(dist / max, 1);
+  /** `playerScreenPos` is only used on desktop, where aim = direction from the player's sprite to the cursor. */
+  public getAimAngle(playerScreenPos: Vector2): number {
+    if (this.isMobile) {
+      const aim = this.joystick.getAimVector();
+      if (aim.x !== 0 || aim.y !== 0) {
+        this.lastAimAngle = Math.atan2(aim.y, aim.x);
       }
+      return this.lastAimAngle;
     }
 
-    return move;
+    const cursor = this.mouse.getPosition();
+    this.lastAimAngle = Math.atan2(cursor.y - playerScreenPos.y, cursor.x - playerScreenPos.x);
+    return this.lastAimAngle;
   }
 
-  public getCameraDelta(): Vector2 {
-    let delta = this.mouse.consumeDelta();
+  public isShootPressed(): boolean {
+    return this.isMobile ? this.joystick.consumeShootPulse() : this.mouse.isFiring();
+  }
 
-    // Left touch joystick overrides for camera.
-    if (this.touch.leftStick.active) {
-      const dx = this.touch.leftStick.current.x - this.touch.leftStick.start.x;
-      const dy = this.touch.leftStick.current.y - this.touch.leftStick.start.y;
-      delta.x += dx * 0.005;
-      delta.y += dy * 0.005;
-    }
+  public isCrouchPressed(): boolean {
+    return this.keyboard.isPressed('control');
+  }
 
-    return delta;
+  public isInteractPressed(): boolean {
+    return this.keyboard.isPressed('e');
+  }
+
+  public isJumpPressed(): boolean {
+    return this.keyboard.isPressed(' ');
+  }
+
+  /** Crosshair visibility: always on desktop, only while the aim stick is actively held on mobile. */
+  public isAiming(): boolean {
+    return this.isMobile ? this.joystick.isAiming() : true;
   }
 }

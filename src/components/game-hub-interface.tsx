@@ -42,7 +42,7 @@ import PublicProfileView from '@/components/views/public-profile-view';
 import FriendsList, { type Player } from '@/components/views/friends-list';
 import LobbyView from '@/components/views/lobby-view';
 import AdminView from '@/components/views/admin-view';
-import KilrunPrototype from '@/components/game/kilrun-prototype';
+import type { KilrunMode } from '@/components/views/play-view';
 
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -120,16 +120,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [isFriendsSheetOpen, setIsFriendsSheetOpen] = useState(false);
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<Player | null>(null);
-  const [lobbyInfo, setLobbyInfo] = useState<{
-    mode: string;
-    description: string;
-  } | null>(null);
+  const [lobbyMode, setLobbyMode] = useState<KilrunMode | null>(null);
   const [isCompetitiveDialogOpen, setIsCompetitiveDialogOpen] = useState(false);
-  const [selectedGameMode, setSelectedGameMode] = useState<{
-    mode: string;
-    description: string;
-  } | null>(null);
-  const [isPlayingPrototype, setIsPlayingPrototype] = useState(false);
+  const [pendingCompetitiveMode, setPendingCompetitiveMode] = useState<KilrunMode | null>(null);
   const { toast } = useToast();
 
   const handleInvite = (name: string) => {
@@ -149,36 +142,32 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     setCurrentPage('messages');
   };
 
-  const handlePlay = (
-    mode: string,
-    description: string,
-    isCompetitive: boolean
-  ) => {
-    if (isCompetitive) {
-      setSelectedGameMode({ mode, description });
+  const handlePlay = (mode: KilrunMode) => {
+    if (mode === 'competitive') {
+      setPendingCompetitiveMode(mode);
       setIsCompetitiveDialogOpen(true);
     } else {
-      setLobbyInfo({ mode, description });
+      setLobbyMode(mode);
       setCurrentPage('lobby');
     }
   };
 
   const handleAgreeAndPlay = () => {
-    if (selectedGameMode) {
-      setLobbyInfo(selectedGameMode);
+    if (pendingCompetitiveMode) {
+      setLobbyMode(pendingCompetitiveMode);
       setCurrentPage('lobby');
     }
     setIsCompetitiveDialogOpen(false);
-    setSelectedGameMode(null);
+    setPendingCompetitiveMode(null);
   };
 
   const handleCancelLobby = () => {
-    setLobbyInfo(null);
+    setLobbyMode(null);
     setCurrentPage('play');
   };
 
   const handleLaunchGame = () => {
-    setIsPlayingPrototype(true);
+    setCurrentPage('play');
   };
 
   const menuItems = [
@@ -205,15 +194,21 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       } else if (currentPage === 'home') {
         props.onLaunchGame = handleLaunchGame;
         props.vpCurrency = user.vpCurrency;
-      } else if (currentPage === 'lobby' && lobbyInfo) {
-        props = { ...lobbyInfo, onCancel: handleCancelLobby };
+      } else if (currentPage === 'lobby' && lobbyMode) {
+        props = {
+          mode: lobbyMode,
+          onCancel: handleCancelLobby,
+          userId: user.id,
+          username: user.username,
+          avatarUrl: user.avatarUrl,
+        };
       }
 
       if (VIEWS_NEEDING_USER_ID.has(currentPage)) {
         props.userId = user.id;
       }
 
-      if (currentPage === 'lobby' && !lobbyInfo) {
+      if (currentPage === 'lobby' && !lobbyMode) {
         setCurrentPage('play');
         return <PlayView onPlay={handlePlay} />;
       }
@@ -246,10 +241,6 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   return (
     <TooltipProvider>
       <div className="min-h-screen text-white relative overflow-hidden">
-        {isPlayingPrototype && (
-          <KilrunPrototype onExit={() => setIsPlayingPrototype(false)} userId={user.id} />
-        )}
-        
         <div className="fixed inset-0 z-0">
           <Image
             src="https://i.postimg.cc/tJgX2XgN/bg.png"
@@ -486,7 +477,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setSelectedGameMode(null)}>
+            <AlertDialogCancel onClick={() => setPendingCompetitiveMode(null)}>
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction onClick={handleAgreeAndPlay}>

@@ -27,6 +27,7 @@ model User {
 
   matchStats     MatchStat[]
   activeMissions ActiveMission[]
+  matchResults   MatchResult[]
 }
 
 model MatchStat {
@@ -36,6 +37,22 @@ model MatchStat {
   distance       Int
   livesRemaining Int
   datePlayed     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+/** Mode-agnostic match outcome, shared by Deathrun/Horde/Competitive -- feeds the running totals on `User` (vpCurrency/xpProgress/currentRank). */
+model MatchResult {
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId   String   @db.ObjectId
+  mode     String // "deathrun" | "horde" | "competitive"
+  role     String? // "trapper" | "runner" (deathrun-specific)
+  outcome  String // "win" | "loss" | "survived" | "eliminated"
+  xpEarned Int
+  vpEarned Int
+  playedAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
 

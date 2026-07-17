@@ -7,11 +7,6 @@ const STEAM_CLAIMED_ID_REGEX = /^https:\/\/steamcommunity\.com\/openid\/id\/(\d+
 const FALLBACK_AVATAR =
   'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg';
 
-const isSecureDeployment = (process.env.NEXTAUTH_URL || '').startsWith('https://');
-const SESSION_COOKIE = isSecureDeployment
-  ? '__Secure-authjs.session-token'
-  : 'authjs.session-token';
-
 async function fetchSteamProfile(steamId: string) {
   const apiKey = process.env.STEAM_API_KEY;
   if (!apiKey) return null;
@@ -36,7 +31,18 @@ async function fetchSteamProfile(steamId: string) {
  * stays runtime-agnostic (no Node-only OpenID libraries).
  */
 export async function GET(req: NextRequest) {
-  const origin = process.env.NEXTAUTH_URL || req.nextUrl.origin;
+  // Same reasoning as `steam/route.ts`: derive everything from the real
+  // request instead of `NEXTAUTH_URL`. This also fixes the actual reported
+  // bug -- Auth.js's own cookie-name logic (`@auth/core`) decides the
+  // `__Secure-` prefix from `url.protocol === "https:"` on the *incoming
+  // request*, not from `NEXTAUTH_URL`. If `NEXTAUTH_URL` were unset on
+  // Vercel, this file used to name the cookie `authjs.session-token`
+  // while every HTTPS request is actually served securely, so `auth()`
+  // later looked for `__Secure-authjs.session-token`, never found it, and
+  // the player looked logged-out right after a successful Steam login.
+  const origin = req.nextUrl.origin;
+  const isSecureDeployment = req.nextUrl.protocol === 'https:';
+  const SESSION_COOKIE = isSecureDeployment ? '__Secure-authjs.session-token' : 'authjs.session-token';
   const params = req.nextUrl.searchParams;
 
   if (params.get('openid.mode') !== 'id_res') {
