@@ -109,10 +109,21 @@ export class DualJoystick {
     return this.aimStick.active;
   }
 
+  public isMoving(): boolean {
+    return this.moveStick.active;
+  }
+
   /** One-shot: returns true exactly once per double-tap, then clears itself. */
   public consumeShootPulse(): boolean {
     const pulse = this.shootPulse;
     this.shootPulse = false;
     return pulse;
+  }
+
+  public destroy() {
+    // Listeners are tied to the host element lifetime; no extra cleanup needed
+    // beyond releasing stick state when the engine unmounts.
+    this.aimStick = freshStick();
+    this.moveStick = freshStick();
   }
 }
