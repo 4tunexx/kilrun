@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { encode } from 'next-auth/jwt';
-import { prisma } from '@/lib/prisma';
+import {
+  isTransientDbConnectionError,
+  withPrismaRetry,
+} from '@/lib/prisma';
 
 const STEAM_OPENID_URL = 'https://steamcommunity.com/openid/login';
 const STEAM_CLAIMED_ID_REGEX = /^https:\/\/steamcommunity\.com\/openid\/id\/(\d+)$/;
@@ -74,14 +77,19 @@ export async function GET(req: NextRequest) {
   const username: string = profile?.personaname ?? `Player${steamId.slice(-6)}`;
   const avatarUrl: string = profile?.avatarfull ?? FALLBACK_AVATAR;
 
-  const existingUser = await prisma.user.findUnique({ where: { steamId } });
-
-  const user = existingUser
-    ? await prisma.user.update({
-        where: { steamId },
-        data: { username, avatarUrl },
-      })
-    : await prisma.user.create({
+  let user;
+  try {
+    // Upsert through a retrying Prisma helper so a poisoned warm-instance
+    // client (Atlas blip / exhausted pool) can reconnect instead of 500'ing.
+    user = await withPrismaRetry(async (db) => {
+      const existingUser = await db.user.findUnique({ where: { steamId } });
+      if (existingUser) {
+        return db.user.update({
+          where: { steamId },
+          data: { username, avatarUrl },
+        });
+      }
+      return db.user.create({
         data: {
           steamId,
           username,
@@ -99,7 +107,8 @@ export async function GET(req: NextRequest) {
               },
               {
                 title: 'Reach 500m distance',
-                description: 'Survive long enough to cover 500 meters in a single run.',
+                description:
+                  'Survive long enough to cover 500 meters in a single run.',
                 rewardXp: 500,
                 targetCount: 500,
               },
@@ -113,6 +122,14 @@ export async function GET(req: NextRequest) {
           },
         },
       });
+    });
+  } catch (error) {
+    console.error('[steam/callback] failed to upsert user', error);
+    const errorCode = isTransientDbConnectionError(error)
+      ? 'db_unavailable'
+      : 'steam_db_error';
+    return NextResponse.redirect(`${origin}/landing?error=${errorCode}`);
+  }
 
   const sessionToken = await encode({
     token: {

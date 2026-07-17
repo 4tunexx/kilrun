@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { Suspense, useRef } from 'react';
 import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -37,6 +38,33 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+
+const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  steam_auth_failed: 'Steam login was cancelled or failed. Please try again.',
+  steam_auth_invalid: 'Steam could not verify this login. Please try again.',
+  steam_id_missing: 'Steam did not return a valid account id. Please try again.',
+  db_unavailable:
+    'Could not reach the player database. Check that MongoDB Atlas Network Access allows 0.0.0.0/0 (required for Vercel) and that the cluster is not paused, then try again.',
+  steam_db_error: 'Login succeeded with Steam, but saving your profile failed. Please try again.',
+};
+
+function AuthErrorBanner() {
+  const searchParams = useSearchParams();
+  const authError = searchParams.get('error');
+  if (!authError) return null;
+
+  const message =
+    AUTH_ERROR_MESSAGES[authError] ??
+    'Something went wrong during login. Please try again.';
+
+  return (
+    <div role="alert" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-6">
+      <div className="rounded-lg border border-red-500/40 bg-red-950/70 px-4 py-3 text-sm text-red-100">
+        {message}
+      </div>
+    </div>
+  );
+}
 
 const topPlayers = [
   {
@@ -197,6 +225,10 @@ export default function LandingPage() {
       </div>
 
       <div className="relative z-10">
+        <Suspense fallback={null}>
+          <AuthErrorBanner />
+        </Suspense>
+
         {/* Header Banner */}
         <header className="pt-8 pb-8 md:pt-24 md:pb-16">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
