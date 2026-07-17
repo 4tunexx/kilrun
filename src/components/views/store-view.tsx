@@ -8,6 +8,7 @@ import Image from 'next/image';
 import { getStoreItems } from '@/lib/actions';
 import { purchaseStoreItem } from '@/lib/social-actions';
 import type { StoreItem } from '@/generated/prisma';
+import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
 import { useToast } from '@/hooks/use-toast';
 
 export default function StoreView({ userId }: { userId?: string }) {
@@ -67,12 +68,26 @@ export default function StoreView({ userId }: { userId?: string }) {
             >
               <CardContent className="p-0 w-full">
                 <div className="relative aspect-square w-full overflow-hidden rounded-t-lg bg-slate-900/80">
-                  {item.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? (
+                  {item.bannerConfig ? (
+                    <div
+                      className={`absolute inset-0 ${bannerAnimationClass(
+                        normalizeBannerConfig(item.bannerConfig)
+                      )}`}
+                      style={bannerStyle(normalizeBannerConfig(item.bannerConfig))}
+                    />
+                  ) : item.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? (
                     <Image
                       src={item.imageUrl}
                       alt={item.itemName}
                       fill
                       className="object-cover group-hover:scale-110 transition-transform duration-300"
+                    />
+                  ) : item.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={item.imageUrl}
+                      alt={item.itemName}
+                      className="absolute inset-0 h-full w-full object-cover group-hover:scale-110 transition-transform duration-300"
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950">

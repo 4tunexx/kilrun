@@ -3,6 +3,7 @@
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@/generated/prisma';
+import type { BannerConfig } from '@/lib/banner';
 import {
   canAccessAdmin,
   steamIdsPromotedToAdmin,
@@ -673,14 +674,17 @@ export async function adminUpsertStoreItem(input: {
   imageUrl?: string;
   isAvailable?: boolean;
   cosmeticSlot?: string | null;
-  bannerConfig?: Prisma.InputJsonValue | null;
+  bannerConfig?: BannerConfig | null;
 }) {
   await requireStaff();
   const cosmeticData =
     input.cosmeticSlot !== undefined
       ? {
           cosmeticSlot: input.cosmeticSlot,
-          bannerConfig: input.bannerConfig === null ? null : input.bannerConfig,
+          bannerConfig:
+            input.bannerConfig === null
+              ? null
+              : (input.bannerConfig as unknown as Prisma.InputJsonValue),
         }
       : {};
   if (input.id) {

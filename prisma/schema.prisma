@@ -120,6 +120,8 @@ model MissionTemplate {
   /// game | website
   category    String  @default("game")
   isActive    Boolean @default(true)
+  /// Optional custom icon image uploaded/set in the admin panel.
+  iconImageUrl String?
 }
 
 model ActiveMission {
@@ -133,6 +135,7 @@ model ActiveMission {
   currentCount Int     @default(0)
   metric       String  @default("runs")
   isCompleted  Boolean @default(false)
+  iconImageUrl String?
 
   user User @relation(fields: [userId], references: [id])
 
@@ -151,6 +154,8 @@ model AchievementDefinition {
   targetCount Int     @default(1)
   xpReward    Int     @default(50)
   icon        String  @default("trophy")
+  /// Optional custom icon image uploaded in the admin panel (overrides `icon`).
+  iconImageUrl String?
   isActive    Boolean @default(true)
 
   unlocks UserAchievement[]
@@ -176,6 +181,8 @@ model BadgeDefinition {
   description String
   rarity      String  @default("common")
   icon        String  @default("award")
+  /// Optional custom icon image uploaded in the admin panel (overrides `icon`).
+  iconImageUrl String?
   /// auto unlock metric or "manual" / "role"
   metric      String  @default("manual")
   targetCount Int     @default(1)

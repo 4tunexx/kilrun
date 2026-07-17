@@ -299,7 +299,18 @@ export default function PublicProfileView({
                       }`}
                     >
                       <CardContent className="pt-5 flex gap-3 items-start">
-                        <div className="text-2xl">{badge.unlocked ? '🏅' : '🔒'}</div>
+                        {badge.iconImageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={badge.iconImageUrl}
+                            alt=""
+                            className={`w-10 h-10 rounded object-cover shrink-0 ${
+                              badge.unlocked ? '' : 'opacity-40 grayscale'
+                            }`}
+                          />
+                        ) : (
+                          <div className="text-2xl">{badge.unlocked ? '🏅' : '🔒'}</div>
+                        )}
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="font-bold">{badge.title}</h3>
@@ -371,7 +382,16 @@ function AchievementRow({ ach }: { ach: PublicProfile['achievements'][number] })
     >
       <CardContent className="py-3 flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 font-medium">
-          {ach.unlocked ? (
+          {ach.iconImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={ach.iconImageUrl}
+              alt=""
+              className={`h-5 w-5 rounded object-cover shrink-0 ${
+                ach.unlocked ? '' : 'opacity-40 grayscale'
+              }`}
+            />
+          ) : ach.unlocked ? (
             <Trophy className="h-4 w-4 text-yellow-400 shrink-0" />
           ) : (
             <Lock className="h-4 w-4 text-slate-500 shrink-0" />

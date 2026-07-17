@@ -18,6 +18,9 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
+import { ImageUploadField } from '@/components/ui/image-upload-field';
+import { RequirementTypeSelect } from '@/components/views/admin/requirement-type-select';
+import { BannerGenerator } from '@/components/views/admin/banner-generator';
 import {
   adminCreateGuide,
   adminCreateNews,
@@ -46,6 +49,7 @@ import {
   adminSeedProgression,
 } from '@/lib/progression-actions';
 import { ACCOUNT_ROLES } from '@/lib/roles';
+import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
 import { useToast } from '@/hooks/use-toast';
 
 export default function AdminView() {
@@ -102,6 +106,7 @@ export default function AdminView() {
     targetCount: 1,
     metric: 'runs',
     category: 'game',
+    iconImageUrl: '',
   });
   const [achForm, setAchForm] = useState({
     key: '',
@@ -112,6 +117,7 @@ export default function AdminView() {
     targetCount: 1,
     xpReward: 50,
     icon: 'trophy',
+    iconImageUrl: '',
   });
   const [badgeForm, setBadgeForm] = useState({
     key: '',
@@ -121,6 +127,7 @@ export default function AdminView() {
     icon: 'award',
     metric: 'manual',
     targetCount: 1,
+    iconImageUrl: '',
   });
 
   const reload = async () => {
@@ -252,11 +259,26 @@ export default function AdminView() {
               <CardTitle>Website & landing settings</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
+              <ImageUploadField
+                label="Logo"
+                value={siteForm.logoUrl}
+                onChange={(v) => setSiteForm((f) => ({ ...f, logoUrl: v }))}
+                className="space-y-1 sm:col-span-2"
+              />
+              <ImageUploadField
+                label="Background"
+                value={siteForm.backgroundUrl}
+                onChange={(v) => setSiteForm((f) => ({ ...f, backgroundUrl: v }))}
+                className="space-y-1 sm:col-span-2"
+              />
+              <ImageUploadField
+                label="Landing hero image"
+                value={siteForm.landingHeroImage}
+                onChange={(v) => setSiteForm((f) => ({ ...f, landingHeroImage: v }))}
+                className="space-y-1 sm:col-span-2"
+              />
               {(
                 [
-                  ['logoUrl', 'Logo URL'],
-                  ['backgroundUrl', 'Background URL'],
-                  ['landingHeroImage', 'Landing hero image URL'],
                   ['headerTitle', 'Header / home title'],
                   ['headerSubtitle', 'Header subtitle'],
                   ['gameDisabledMsg', 'Game disabled message'],
@@ -489,20 +511,40 @@ export default function AdminView() {
               <CardTitle>Add mission template</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
-              {(['key', 'title', 'description', 'metric', 'category'] as const).map(
-                (field) => (
-                  <div key={field} className="space-y-1">
-                    <Label className="capitalize">{field}</Label>
-                    <Input
-                      value={missionForm[field]}
-                      onChange={(e) =>
-                        setMissionForm((f) => ({ ...f, [field]: e.target.value }))
-                      }
-                      className="bg-slate-900/50 border-slate-700"
-                    />
-                  </div>
-                )
-              )}
+              {(['key', 'title', 'description'] as const).map((field) => (
+                <div key={field} className="space-y-1">
+                  <Label className="capitalize">{field}</Label>
+                  <Input
+                    value={missionForm[field]}
+                    onChange={(e) =>
+                      setMissionForm((f) => ({ ...f, [field]: e.target.value }))
+                    }
+                    className="bg-slate-900/50 border-slate-700"
+                  />
+                </div>
+              ))}
+              <div className="space-y-1">
+                <Label>Category</Label>
+                <Select
+                  value={missionForm.category}
+                  onValueChange={(v) => setMissionForm((f) => ({ ...f, category: v }))}
+                >
+                  <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="game">In-Game</SelectItem>
+                    <SelectItem value="website">Website</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <Label>Requirement type</Label>
+                <RequirementTypeSelect
+                  value={missionForm.metric}
+                  onValueChange={(v) => setMissionForm((f) => ({ ...f, metric: v }))}
+                />
+              </div>
               <div className="space-y-1">
                 <Label>Reward XP</Label>
                 <Input
@@ -531,6 +573,12 @@ export default function AdminView() {
                   className="bg-slate-900/50 border-slate-700"
                 />
               </div>
+              <ImageUploadField
+                label="Icon image (optional)"
+                value={missionForm.iconImageUrl}
+                onChange={(v) => setMissionForm((f) => ({ ...f, iconImageUrl: v }))}
+                className="space-y-1 sm:col-span-2"
+              />
               <Button
                 className="sm:col-span-2"
                 onClick={async () => {
@@ -550,7 +598,15 @@ export default function AdminView() {
           <div className="space-y-2">
             {missions.map((m) => (
               <Card key={m.id} className="bg-slate-800/40 border-slate-700/30">
-                <CardContent className="py-3 flex justify-between gap-2 flex-wrap">
+                <CardContent className="py-3 flex justify-between gap-2 flex-wrap items-center">
+                  {m.iconImageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={m.iconImageUrl}
+                      alt=""
+                      className="w-8 h-8 rounded object-cover shrink-0"
+                    />
+                  )}
                   <div>
                     <p className="font-semibold">
                       {m.title}{' '}
@@ -575,16 +631,7 @@ export default function AdminView() {
               <CardTitle>Add achievement</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
-              {(
-                [
-                  'key',
-                  'title',
-                  'description',
-                  'category',
-                  'metric',
-                  'icon',
-                ] as const
-              ).map((field) => (
+              {(['key', 'title', 'description', 'icon'] as const).map((field) => (
                 <div key={field} className="space-y-1">
                   <Label className="capitalize">{field}</Label>
                   <Input
@@ -596,6 +643,28 @@ export default function AdminView() {
                   />
                 </div>
               ))}
+              <div className="space-y-1">
+                <Label>Category</Label>
+                <Select
+                  value={achForm.category}
+                  onValueChange={(v) => setAchForm((f) => ({ ...f, category: v }))}
+                >
+                  <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="game">In-Game</SelectItem>
+                    <SelectItem value="website">Website</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <Label>Requirement type</Label>
+                <RequirementTypeSelect
+                  value={achForm.metric}
+                  onValueChange={(v) => setAchForm((f) => ({ ...f, metric: v }))}
+                />
+              </div>
               <div className="space-y-1">
                 <Label>Target</Label>
                 <Input
@@ -624,6 +693,12 @@ export default function AdminView() {
                   className="bg-slate-900/50 border-slate-700"
                 />
               </div>
+              <ImageUploadField
+                label="Icon image (optional, overrides icon keyword)"
+                value={achForm.iconImageUrl}
+                onChange={(v) => setAchForm((f) => ({ ...f, iconImageUrl: v }))}
+                className="space-y-1 sm:col-span-2"
+              />
               <Button
                 className="sm:col-span-2"
                 onClick={async () => {
@@ -643,14 +718,24 @@ export default function AdminView() {
           <div className="space-y-2">
             {achievements.map((a) => (
               <Card key={a.id} className="bg-slate-800/40 border-slate-700/30">
-                <CardContent className="py-3">
-                  <p className="font-semibold">
-                    {a.title}{' '}
-                    <Badge variant="outline">{a.category}</Badge>
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    {a.key} · {a.metric} ≥ {a.targetCount} · +{a.xpReward} XP
-                  </p>
+                <CardContent className="py-3 flex items-center gap-3">
+                  {a.iconImageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={a.iconImageUrl}
+                      alt=""
+                      className="w-8 h-8 rounded object-cover shrink-0"
+                    />
+                  )}
+                  <div>
+                    <p className="font-semibold">
+                      {a.title}{' '}
+                      <Badge variant="outline">{a.category}</Badge>
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {a.key} · {a.metric} ≥ {a.targetCount} · +{a.xpReward} XP
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
             ))}
@@ -663,9 +748,7 @@ export default function AdminView() {
               <CardTitle>Add badge</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
-              {(
-                ['key', 'title', 'description', 'rarity', 'icon', 'metric'] as const
-              ).map((field) => (
+              {(['key', 'title', 'description', 'icon'] as const).map((field) => (
                 <div key={field} className="space-y-1">
                   <Label className="capitalize">{field}</Label>
                   <Input
@@ -677,6 +760,35 @@ export default function AdminView() {
                   />
                 </div>
               ))}
+              <div className="space-y-1">
+                <Label>Rarity</Label>
+                <Select
+                  value={badgeForm.rarity}
+                  onValueChange={(v) => setBadgeForm((f) => ({ ...f, rarity: v }))}
+                >
+                  <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {['common', 'uncommon', 'rare', 'epic', 'legendary'].map((r) => (
+                      <SelectItem key={r} value={r} className="capitalize">
+                        {r}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <Label>Requirement type</Label>
+                <RequirementTypeSelect
+                  value={badgeForm.metric}
+                  onValueChange={(v) => setBadgeForm((f) => ({ ...f, metric: v }))}
+                />
+                <p className="text-xs text-slate-500">
+                  Use &quot;manual&quot; (type it directly) for staff-only awards with no
+                  automatic unlock.
+                </p>
+              </div>
               <div className="space-y-1">
                 <Label>Target</Label>
                 <Input
@@ -691,6 +803,12 @@ export default function AdminView() {
                   className="bg-slate-900/50 border-slate-700"
                 />
               </div>
+              <ImageUploadField
+                label="Icon image (optional, overrides icon keyword)"
+                value={badgeForm.iconImageUrl}
+                onChange={(v) => setBadgeForm((f) => ({ ...f, iconImageUrl: v }))}
+                className="space-y-1 sm:col-span-2"
+              />
               <Button
                 className="sm:col-span-2"
                 onClick={async () => {
@@ -710,14 +828,24 @@ export default function AdminView() {
           <div className="space-y-2">
             {badges.map((b) => (
               <Card key={b.id} className="bg-slate-800/40 border-slate-700/30">
-                <CardContent className="py-3">
-                  <p className="font-semibold">
-                    {b.title}{' '}
-                    <Badge variant="outline">{b.rarity}</Badge>
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    {b.key} · {b.metric} ≥ {b.targetCount}
-                  </p>
+                <CardContent className="py-3 flex items-center gap-3">
+                  {b.iconImageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={b.iconImageUrl}
+                      alt=""
+                      className="w-8 h-8 rounded object-cover shrink-0"
+                    />
+                  )}
+                  <div>
+                    <p className="font-semibold">
+                      {b.title}{' '}
+                      <Badge variant="outline">{b.rarity}</Badge>
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {b.key} · {b.metric} ≥ {b.targetCount}
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
             ))}
@@ -774,6 +902,8 @@ export default function AdminView() {
         </TabsContent>
 
         <TabsContent value="shop" className="mt-4 space-y-4">
+          <BannerGenerator onCreated={reload} />
+
           <Card className="bg-slate-800/40 border-slate-700/30">
             <CardHeader>
               <CardTitle>Add store item</CardTitle>
@@ -823,16 +953,12 @@ export default function AdminView() {
                   className="bg-slate-900/50 border-slate-700"
                 />
               </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label>Image URL (optional)</Label>
-                <Input
-                  value={itemForm.imageUrl}
-                  onChange={(e) =>
-                    setItemForm((f) => ({ ...f, imageUrl: e.target.value }))
-                  }
-                  className="bg-slate-900/50 border-slate-700"
-                />
-              </div>
+              <ImageUploadField
+                label="Image (optional)"
+                value={itemForm.imageUrl}
+                onChange={(v) => setItemForm((f) => ({ ...f, imageUrl: v }))}
+                className="space-y-1 sm:col-span-2"
+              />
               <Button
                 className="sm:col-span-2"
                 onClick={async () => {
@@ -861,28 +987,53 @@ export default function AdminView() {
           </Card>
 
           <div className="space-y-2">
-            {items.map((item) => (
-              <Card key={item.id} className="bg-slate-800/40 border-slate-700/30">
-                <CardContent className="py-3 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="font-semibold">{item.itemName}</p>
-                    <p className="text-xs text-slate-400">
-                      {item.itemSku} · {item.vpPrice} VP · {item.itemCategory}
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={async () => {
-                      await adminDeleteStoreItem(item.id);
-                      await reload();
-                    }}
-                  >
-                    Delete
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+            {items.map((item) => {
+              const banner = item.bannerConfig ? normalizeBannerConfig(item.bannerConfig) : null;
+              return (
+                <Card key={item.id} className="bg-slate-800/40 border-slate-700/30">
+                  <CardContent className="py-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {banner ? (
+                        <div
+                          className={`w-12 h-8 rounded shrink-0 ${bannerAnimationClass(banner)}`}
+                          style={bannerStyle(banner)}
+                        />
+                      ) : item.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={item.imageUrl}
+                          alt=""
+                          className="w-8 h-8 rounded object-cover shrink-0"
+                        />
+                      ) : null}
+                      <div className="min-w-0">
+                        <p className="font-semibold truncate">
+                          {item.itemName}{' '}
+                          {item.cosmeticSlot && (
+                            <Badge variant="outline" className="ml-1 capitalize text-[10px]">
+                              {item.cosmeticSlot}
+                            </Badge>
+                          )}
+                        </p>
+                        <p className="text-xs text-slate-400 truncate">
+                          {item.itemSku} · {item.vpPrice} VP · {item.itemCategory}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={async () => {
+                        await adminDeleteStoreItem(item.id);
+                        await reload();
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </TabsContent>
 

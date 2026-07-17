@@ -65,7 +65,18 @@ export default function BadgesView({ userId }: { userId: string }) {
                   }`}
                 >
                   <CardContent className="pt-5 flex gap-3 items-start">
-                    <div className="text-2xl">{badge.unlocked ? '🏅' : '🔒'}</div>
+                    {badge.iconImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={badge.iconImageUrl}
+                        alt=""
+                        className={`w-10 h-10 rounded object-cover shrink-0 ${
+                          badge.unlocked ? '' : 'opacity-40 grayscale'
+                        }`}
+                      />
+                    ) : (
+                      <div className="text-2xl">{badge.unlocked ? '🏅' : '🔒'}</div>
+                    )}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-bold">{badge.title}</h3>
@@ -119,7 +130,14 @@ function AchievementRow({ ach }: { ach: any }) {
       <CardHeader className="py-3">
         <CardTitle className="text-base flex items-center justify-between gap-2">
           <span className="flex items-center gap-2">
-            {ach.unlocked ? (
+            {ach.iconImageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={ach.iconImageUrl}
+                alt=""
+                className={`w-5 h-5 rounded object-cover ${ach.unlocked ? '' : 'opacity-40 grayscale'}`}
+              />
+            ) : ach.unlocked ? (
               <Trophy className="w-4 h-4 text-yellow-400" />
             ) : (
               <Lock className="w-4 h-4 text-slate-500" />

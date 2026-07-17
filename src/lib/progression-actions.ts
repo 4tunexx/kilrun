@@ -92,6 +92,7 @@ export async function ensurePlayerMissions(userId: string) {
         metric: t.metric,
         currentCount: 0,
         isCompleted: false,
+        iconImageUrl: t.iconImageUrl,
       },
     });
   }
@@ -580,6 +581,7 @@ export async function adminUpsertMissionTemplate(input: {
   metric: string;
   category: string;
   isActive?: boolean;
+  iconImageUrl?: string;
 }) {
   await requireStaff();
   if (input.id) {
@@ -594,6 +596,7 @@ export async function adminUpsertMissionTemplate(input: {
         metric: input.metric,
         category: input.category,
         isActive: input.isActive ?? true,
+        iconImageUrl: input.iconImageUrl || null,
       },
     });
   }
@@ -607,6 +610,7 @@ export async function adminUpsertMissionTemplate(input: {
       metric: input.metric,
       category: input.category,
       isActive: input.isActive ?? true,
+      iconImageUrl: input.iconImageUrl || null,
     },
   });
 }
@@ -626,6 +630,7 @@ export async function adminUpsertAchievement(input: {
   targetCount: number;
   xpReward: number;
   icon?: string;
+  iconImageUrl?: string;
   isActive?: boolean;
 }) {
   await requireStaff();
@@ -633,7 +638,7 @@ export async function adminUpsertAchievement(input: {
     const { id, ...data } = input;
     return prisma.achievementDefinition.update({
       where: { id },
-      data: { ...data, isActive: input.isActive ?? true },
+      data: { ...data, isActive: input.isActive ?? true, iconImageUrl: input.iconImageUrl || null },
     });
   }
   return prisma.achievementDefinition.create({
@@ -646,6 +651,7 @@ export async function adminUpsertAchievement(input: {
       targetCount: input.targetCount,
       xpReward: input.xpReward,
       icon: input.icon ?? 'trophy',
+      iconImageUrl: input.iconImageUrl || null,
       isActive: input.isActive ?? true,
     },
   });
@@ -663,6 +669,7 @@ export async function adminUpsertBadge(input: {
   description: string;
   rarity: string;
   icon?: string;
+  iconImageUrl?: string;
   metric: string;
   targetCount: number;
   isActive?: boolean;
@@ -672,7 +679,7 @@ export async function adminUpsertBadge(input: {
     const { id, ...data } = input;
     return prisma.badgeDefinition.update({
       where: { id },
-      data: { ...data, isActive: input.isActive ?? true },
+      data: { ...data, isActive: input.isActive ?? true, iconImageUrl: input.iconImageUrl || null },
     });
   }
   return prisma.badgeDefinition.create({
@@ -682,6 +689,7 @@ export async function adminUpsertBadge(input: {
       description: input.description,
       rarity: input.rarity,
       icon: input.icon ?? 'award',
+      iconImageUrl: input.iconImageUrl || null,
       metric: input.metric,
       targetCount: input.targetCount,
       isActive: input.isActive ?? true,

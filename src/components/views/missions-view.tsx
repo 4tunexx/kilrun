@@ -101,11 +101,20 @@ function MissionList({
             >
               <div className="flex justify-between items-start mb-2 gap-4">
                 <div className="flex items-start gap-3">
-                  {mission.isCompleted ? (
-                    <CheckCircle className="w-5 h-5 text-green-400 mt-0.5 shrink-0" />
-                  ) : (
-                    <div className="w-5 h-5 shrink-0" />
-                  )}
+                  <div className="w-8 h-8 rounded-md overflow-hidden bg-slate-800 flex items-center justify-center shrink-0">
+                    {mission.iconImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={mission.iconImageUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    ) : mission.isCompleted ? (
+                      <CheckCircle className="w-5 h-5 text-green-400" />
+                    ) : (
+                      <Target className="w-4 h-4 text-slate-500" />
+                    )}
+                  </div>
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <p
@@ -127,7 +136,7 @@ function MissionList({
                 </p>
               </div>
               {!mission.isCompleted && (
-                <div className="pl-8">
+                <div className="pl-11">
                   <Progress value={progress} className="h-3" />
                   <p className="text-xs text-slate-500 mt-1">
                     {mission.currentCount} / {mission.targetCount}

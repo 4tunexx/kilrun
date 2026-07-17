@@ -24,6 +24,7 @@ import {
   ShieldAlert,
   Shield,
   CheckCircle2,
+  Package,
 } from 'lucide-react';
 import HomeView from '@/components/views/home-view';
 import StoreView from '@/components/views/store-view';
@@ -53,6 +54,7 @@ import {
 import { getLevelProgress } from '@/lib/progression';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { ProfileNavigationProvider } from '@/components/providers/profile-navigation-context';
+import { InventoryDrawer } from '@/components/inventory-drawer';
 
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -148,6 +150,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [currentPage, setCurrentPage] = useState('home');
   const [isVipDialogOpen, setIsVipDialogOpen] = useState(false);
   const [isFriendsSheetOpen, setIsFriendsSheetOpen] = useState(false);
+  const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
   const [previousPage, setPreviousPage] = useState('home');
   const [lobbyMode, setLobbyMode] = useState<KilrunMode | null>(null);
@@ -558,6 +561,25 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                   />
                 </SheetContent>
               </Sheet>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => setIsInventoryOpen(true)}
+                    className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 hover:bg-primary/20 shrink-0 group ${
+                      isInventoryOpen
+                        ? 'bg-primary/20 text-primary'
+                        : 'text-slate-400 hover:text-primary'
+                    }`}
+                  >
+                    <Package className="w-5 h-5 group-hover:text-primary transition-colors" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Inventory</p>
+                </TooltipContent>
+              </Tooltip>
+              <InventoryDrawer open={isInventoryOpen} onOpenChange={setIsInventoryOpen} />
             </div>
 
             <button
