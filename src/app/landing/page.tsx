@@ -43,7 +43,7 @@ import {
   type LandingStoreItem,
   type LandingTopPlayer,
 } from '@/lib/actions';
-import { getLevelFromXp, getXpIntoLevel } from '@/lib/progression';
+import { getLevelProgressPercent, getLevelFromXp } from '@/lib/progression';
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   steam_auth_failed: 'Steam login was cancelled or failed. Please try again.',
@@ -378,7 +378,7 @@ export default function LandingPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
                 {topPlayers.map((player, index) => {
                   const level = getLevelFromXp(player.xpProgress);
-                  const xpPct = getXpIntoLevel(player.xpProgress);
+                  const xpPct = getLevelProgressPercent(player.xpProgress);
                   return (
                     <TooltipProvider key={player.id}>
                       <Tooltip>

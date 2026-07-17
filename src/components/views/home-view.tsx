@@ -33,6 +33,7 @@ import { getNewsPosts } from '@/lib/social-actions';
 import type { ActiveMission } from '@/generated/prisma';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { UserHoverCard } from '@/components/user-hover-card';
 
 interface HomeViewProps {
   onLaunchGame?: () => void;
@@ -192,9 +193,9 @@ export default function HomeView({
                         </Avatar>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-semibold">
+                            <UserHoverCard userId={msg.user.id} className="text-sm">
                               {msg.user.username}
-                            </span>
+                            </UserHoverCard>
                             {msg.user.isVip && (
                               <Badge className="h-4 text-[10px] bg-yellow-500 text-black">
                                 VIP

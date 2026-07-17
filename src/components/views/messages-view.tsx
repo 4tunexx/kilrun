@@ -13,6 +13,7 @@ import {
   sendDirectMessage,
 } from '@/lib/social-actions';
 import { useToast } from '@/hooks/use-toast';
+import { UserHoverCard } from '@/components/user-hover-card';
 
 type Conversation = {
   peer: { id: string; username: string; avatarUrl: string };
@@ -159,7 +160,7 @@ export default function MessagesView({ userId }: { userId: string }) {
                   <AvatarImage src={activePeer.avatarUrl} />
                   <AvatarFallback>{activePeer.username.charAt(0)}</AvatarFallback>
                 </Avatar>
-                <p className="font-semibold">{activePeer.username}</p>
+                <UserHoverCard userId={activePeer.id}>{activePeer.username}</UserHoverCard>
               </div>
               <ScrollArea className="flex-1 p-4">
                 <div className="space-y-3">

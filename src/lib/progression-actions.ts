@@ -2,7 +2,7 @@
 
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import { getLevelFromXp, getRankForLevel } from '@/lib/progression';
+import { getLevelFromXp, getLevelProgress, getRankForLevel } from '@/lib/progression';
 import { canAccessAdmin } from '@/lib/roles';
 
 async function requireUser() {
@@ -177,9 +177,60 @@ async function metricCount(userId: string, metric: string): Promise<number> {
       return prisma.activeMission.count({
         where: { userId, isCompleted: true },
       });
+    case 'forum_replies':
+      return prisma.forumReply.count({ where: { authorId: userId } });
+    case 'vp_spent': {
+      const purchases = await prisma.purchase.findMany({ where: { userId } });
+      return purchases.reduce((sum, p) => sum + p.vpSpent, 0);
+    }
+    case 'reputation': {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      return Math.max(0, u?.reputation ?? 0);
+    }
+    case 'daily_login_streak': {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      return u?.loginStreak ?? 0;
+    }
     default:
       return 0;
   }
+}
+
+/**
+ * Advances the player's consecutive-day login streak. Call once per hub
+ * bootstrap (idempotent per calendar day): same-day repeat visits are a
+ * no-op, a visit on the following day increments the streak, and a gap of
+ * 2+ days resets it back to 1.
+ */
+export async function updateLoginStreak(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) return;
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const last = user.lastLoginAt
+    ? new Date(
+        user.lastLoginAt.getFullYear(),
+        user.lastLoginAt.getMonth(),
+        user.lastLoginAt.getDate()
+      )
+    : null;
+
+  if (last && last.getTime() === today.getTime()) {
+    return; // already counted today
+  }
+
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  const isConsecutive = last && today.getTime() - last.getTime() <= oneDayMs;
+  const nextStreak = isConsecutive ? user.loginStreak + 1 : 1;
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { loginStreak: nextStreak, lastLoginAt: now },
+  });
+
+  await tryUnlockAchievement(userId, 'daily_login_streak');
+  await tryUnlockBadge(userId, 'daily_login_streak');
 }
 
 export async function tryUnlockAchievement(
@@ -339,6 +390,7 @@ export async function bootstrapHubProgression() {
   const user = await requireUser();
   await ensurePlayerMissions(user.id);
   await processWebsiteAction(user.id, 'logins');
+  await updateLoginStreak(user.id);
   if (user.emailVerified) {
     await processWebsiteAction(user.id, 'email');
   }
@@ -357,7 +409,7 @@ export async function getLivePlayerState(userId?: string) {
   const unread = await prisma.notification.count({
     where: { userId: user.id, isRead: false },
   });
-  const level = getLevelFromXp(user.xpProgress);
+  const progress = getLevelProgress(user.xpProgress);
   return {
     id: user.id,
     xpProgress: user.xpProgress,
@@ -368,8 +420,10 @@ export async function getLivePlayerState(userId?: string) {
     emailVerified: user.emailVerified,
     avatarUrl: user.avatarUrl,
     username: user.username,
-    level,
-    xpIntoLevel: user.xpProgress % 100,
+    level: progress.level,
+    xpIntoLevel: progress.xpIntoLevel,
+    xpForNextLevel: progress.xpForNextLevel,
+    levelProgressPercent: progress.percent,
     unreadNotifications: unread,
   };
 }

@@ -30,17 +30,9 @@ import {
   sendFriendRequest,
 } from '@/lib/social-actions';
 import { getLevelFromXp } from '@/lib/progression';
+import { UserHoverCard } from '@/components/user-hover-card';
+import { useProfileNavigation } from '@/components/providers/profile-navigation-context';
 import { useToast } from '@/hooks/use-toast';
-
-export type Player = {
-  id: string;
-  name: string;
-  avatar: string;
-  rankName: string;
-  level: number;
-  isVip?: boolean;
-  role?: string;
-};
 
 type FriendRow = {
   id: string;
@@ -54,12 +46,10 @@ type FriendRow = {
 
 export const FriendsList = ({
   onInvite,
-  onViewProfile,
   onMessage,
 }: {
   onInvite: (name: string) => void;
-  onViewProfile: (player: Player) => void;
-  onMessage: (player?: Player) => void;
+  onMessage: (peerId: string) => void;
 }) => {
   const [friends, setFriends] = useState<FriendRow[]>([]);
   const [requests, setRequests] = useState<
@@ -68,6 +58,7 @@ export const FriendsList = ({
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const { openProfile } = useProfileNavigation();
 
   const reload = async () => {
     const [f, r] = await Promise.all([getFriends(), getFriendRequests()]);
@@ -79,16 +70,6 @@ export const FriendsList = ({
   useEffect(() => {
     reload().catch(() => setLoading(false));
   }, []);
-
-  const toPlayer = (f: FriendRow): Player => ({
-    id: f.id,
-    name: f.username,
-    avatar: f.avatarUrl,
-    rankName: f.currentRank ?? 'Unranked',
-    level: getLevelFromXp(f.xpProgress ?? 0),
-    isVip: f.isVip,
-    role: f.role,
-  });
 
   const filtered = useMemo(
     () =>
@@ -131,7 +112,9 @@ export const FriendsList = ({
                   <AvatarImage src={req.userA.avatarUrl} />
                   <AvatarFallback>{req.userA.username.charAt(0)}</AvatarFallback>
                 </Avatar>
-                <span className="truncate text-sm">{req.userA.username}</span>
+                <UserHoverCard userId={req.userA.id} className="truncate text-sm">
+                  {req.userA.username}
+                </UserHoverCard>
               </div>
               <div className="flex gap-1 shrink-0">
                 <Button
@@ -170,7 +153,7 @@ export const FriendsList = ({
             </p>
           ) : (
             filtered.map((friend) => {
-              const player = toPlayer(friend);
+              const level = getLevelFromXp(friend.xpProgress ?? 0);
               return (
                 <div
                   key={friend.id}
@@ -182,9 +165,11 @@ export const FriendsList = ({
                       <AvatarFallback>{friend.username.charAt(0)}</AvatarFallback>
                     </Avatar>
                     <div className="min-w-0">
-                      <p className="font-semibold truncate">{friend.username}</p>
+                      <UserHoverCard userId={friend.id} className="truncate block">
+                        {friend.username}
+                      </UserHoverCard>
                       <p className="text-xs text-slate-400">
-                        {player.rankName} · Lv {player.level}
+                        {friend.currentRank ?? 'Unranked'} · Lv {level}
                       </p>
                     </div>
                   </div>
@@ -203,13 +188,13 @@ export const FriendsList = ({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         className="cursor-pointer gap-2"
-                        onClick={() => onMessage(player)}
+                        onClick={() => onMessage(friend.id)}
                       >
                         <MessageSquare /> Message
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         className="cursor-pointer gap-2"
-                        onClick={() => onViewProfile(player)}
+                        onClick={() => openProfile(friend.id)}
                       >
                         <User /> View Profile
                       </DropdownMenuItem>
