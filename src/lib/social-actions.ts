@@ -84,6 +84,22 @@ export async function getLeaderboard(take = 20) {
   });
 }
 
+/** Public profile snippet for messaging / profile deep-links. */
+export async function getUserBrief(userId: string) {
+  return prisma.user.findFirst({
+    where: { id: userId, isBanned: false },
+    select: {
+      id: true,
+      username: true,
+      avatarUrl: true,
+      currentRank: true,
+      xpProgress: true,
+      isVip: true,
+      role: true,
+    },
+  });
+}
+
 export async function getFriends() {
   const user = await requireSessionUser();
   const rows = await prisma.friendship.findMany({
@@ -92,8 +108,28 @@ export async function getFriends() {
       status: 'accepted',
     },
     include: {
-      userA: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
-      userB: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
+      userA: {
+        select: {
+          id: true,
+          username: true,
+          avatarUrl: true,
+          role: true,
+          isVip: true,
+          xpProgress: true,
+          currentRank: true,
+        },
+      },
+      userB: {
+        select: {
+          id: true,
+          username: true,
+          avatarUrl: true,
+          role: true,
+          isVip: true,
+          xpProgress: true,
+          currentRank: true,
+        },
+      },
     },
   });
   return rows.map((f) => (f.userAId === user.id ? f.userB : f.userA));

@@ -18,10 +18,8 @@ import {
   Gamepad2,
   Gem,
   Crown,
-  ShieldCheck,
-  Award,
-  Sword,
   ShoppingBag,
+  Loader2,
 } from 'lucide-react';
 import {
   Carousel,
@@ -39,6 +37,13 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { getSiteSettings } from '@/lib/progression-actions';
+import {
+  getLandingPageData,
+  type LandingStats,
+  type LandingStoreItem,
+  type LandingTopPlayer,
+} from '@/lib/actions';
+import { getLevelFromXp, getXpIntoLevel } from '@/lib/progression';
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   steam_auth_failed: 'Steam login was cancelled or failed. Please try again.',
@@ -48,6 +53,13 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
     'Could not reach the player database. Check that MongoDB Atlas Network Access allows 0.0.0.0/0 (required for Vercel) and that the cluster is not paused, then try again.',
   steam_db_error: 'Login succeeded with Steam, but saving your profile failed. Please try again.',
   banned: 'This account has been banned. Contact support if you believe this is a mistake.',
+};
+
+const EMPTY_STATS: LandingStats = {
+  registeredPlayers: 0,
+  matchesPlayed: 0,
+  matchesPlayedToday: 0,
+  vpEarned: 0,
 };
 
 function AuthErrorBanner() {
@@ -68,113 +80,6 @@ function AuthErrorBanner() {
   );
 }
 
-const topPlayers = [
-  {
-    name: 'ShadowStriker',
-    level: 99,
-    xp: 75,
-    rankName: 'Immortal',
-    avatar: 'https://picsum.photos/seed/p1/80/80',
-    icons: [Award, ShieldCheck, Sword],
-    isFirst: true,
-  },
-  {
-    name: 'Vortex',
-    level: 92,
-    xp: 40,
-    rankName: 'Diamond III',
-    avatar: 'https://picsum.photos/seed/p2/80/80',
-    icons: [Award, ShieldCheck],
-  },
-  {
-    name: 'Phoenix',
-    level: 88,
-    xp: 90,
-    rankName: 'Diamond I',
-    avatar: 'https://picsum.photos/seed/p3/80/80',
-    icons: [ShieldCheck, Sword],
-  },
-  {
-    name: 'Wraith',
-    level: 85,
-    xp: 25,
-    rankName: 'Platinum II',
-    avatar: 'https://picsum.photos/seed/p4/80/80',
-    icons: [Award],
-  },
-  {
-    name: 'Fury',
-    level: 81,
-    xp: 60,
-    rankName: 'Platinum I',
-    avatar: 'https://picsum.photos/seed/p5/80/80',
-    icons: [Sword],
-  },
-];
-
-const carouselImages = [
-  {
-    src: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=1600&q=80',
-    alt: 'Kilrun game banner 1',
-    hint: 'gameplay esports',
-  },
-  {
-    src: 'https://picsum.photos/seed/slide2/1600/900',
-    alt: 'Kilrun game banner 2',
-    hint: 'action scene',
-  },
-  {
-    src: 'https://picsum.photos/seed/slide3/1600/900',
-    alt: 'Kilrun game banner 3',
-    hint: 'futuristic character',
-  },
-];
-
-const popularItems = [
-  {
-    name: 'Cyber Blade Skin',
-    price: 1999,
-    category: 'Weapon Skin',
-    image: 'https://picsum.photos/seed/item1/400/400',
-    hint: 'glowing sword',
-  },
-  {
-    name: 'Neon Runner Pack',
-    price: 2499,
-    category: 'Bundle',
-    image: 'https://picsum.photos/seed/item2/400/400',
-    hint: 'futuristic gear',
-  },
-  {
-    name: 'Quantum Armor',
-    price: 1499,
-    category: 'Outfit',
-    image: 'https://picsum.photos/seed/item3/400/400',
-    hint: 'glowing armor',
-  },
-  {
-    name: 'Holographic Emote',
-    price: 599,
-    category: 'Emote',
-    image: 'https://picsum.photos/seed/item4/400/400',
-    hint: 'dancing hologram',
-  },
-  {
-    name: 'Dragonfire Shotgun',
-    price: 2199,
-    category: 'Weapon Skin',
-    image: 'https://picsum.photos/seed/item5/400/400',
-    hint: 'fire shotgun',
-  },
-  {
-    name: 'Celestial Wings',
-    price: 1899,
-    category: 'Back Bling',
-    image: 'https://picsum.photos/seed/item6/400/400',
-    hint: 'glowing wings',
-  },
-];
-
 export default function LandingPage() {
   const autoplayPlugin = useRef(
     Autoplay({ delay: 3000, stopOnInteraction: true })
@@ -185,6 +90,10 @@ export default function LandingPage() {
   );
   const [bgUrl, setBgUrl] = useState('https://i.postimg.cc/tJgX2XgN/bg.png');
   const [heroImage, setHeroImage] = useState('');
+  const [stats, setStats] = useState<LandingStats>(EMPTY_STATS);
+  const [topPlayers, setTopPlayers] = useState<LandingTopPlayer[]>([]);
+  const [popularItems, setPopularItems] = useState<LandingStoreItem[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
     getSiteSettings()
@@ -195,11 +104,24 @@ export default function LandingPage() {
         if (s.landingHeroImage) setHeroImage(s.landingHeroImage);
       })
       .catch(() => {});
+
+    getLandingPageData()
+      .then((data) => {
+        setStats(data.stats);
+        setTopPlayers(data.topPlayers);
+        setPopularItems(data.popularItems);
+      })
+      .catch(() => {})
+      .finally(() => setDataLoading(false));
   }, []);
 
   const handleNavigation = () => {
     window.location.href = '/api/auth/steam';
   };
+
+  const heroSlides = heroImage
+    ? [{ src: heroImage, alt: 'Kilrun' }]
+    : [];
 
   const renderAuthCard = () => (
     <Card className="bg-slate-900/60 backdrop-blur-md border-slate-700/50 w-full max-w-sm animate-in fade-in duration-1000 delay-400">
@@ -252,31 +174,36 @@ export default function LandingPage() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="relative rounded-2xl overflow-hidden shadow-2xl">
               <div className="relative">
-                <Carousel
-                  opts={{ loop: true }}
-                  plugins={[autoplayPlugin.current]}
-                  className="w-full"
-                  onMouseEnter={autoplayPlugin.current.stop}
-                  onMouseLeave={autoplayPlugin.current.reset}
-                >
-                  <CarouselContent className="-ml-0">
-                    {(heroImage
-                      ? [{ src: heroImage, alt: 'Kilrun', hint: 'hero' }]
-                      : carouselImages
-                    ).map((image, index) => (
-                      <CarouselItem key={index} className="pl-0">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={image.src}
-                          alt={image.alt}
-                          className="w-full h-56 sm:h-72 md:h-[32rem] object-cover"
-                        />
-                      </CarouselItem>
-                    ))}
-                  </CarouselContent>
-                  <CarouselPrevious className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2 z-10" />
-                  <CarouselNext className="absolute right-4 md:right-6 top-1/2 -translate-y-1/2 z-10" />
-                </Carousel>
+                {heroSlides.length > 0 ? (
+                  <Carousel
+                    opts={{ loop: true }}
+                    plugins={[autoplayPlugin.current]}
+                    className="w-full"
+                    onMouseEnter={autoplayPlugin.current.stop}
+                    onMouseLeave={autoplayPlugin.current.reset}
+                  >
+                    <CarouselContent className="-ml-0">
+                      {heroSlides.map((image, index) => (
+                        <CarouselItem key={index} className="pl-0">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={image.src}
+                            alt={image.alt}
+                            className="w-full h-56 sm:h-72 md:h-[32rem] object-cover"
+                          />
+                        </CarouselItem>
+                      ))}
+                    </CarouselContent>
+                    {heroSlides.length > 1 && (
+                      <>
+                        <CarouselPrevious className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2 z-10" />
+                        <CarouselNext className="absolute right-4 md:right-6 top-1/2 -translate-y-1/2 z-10" />
+                      </>
+                    )}
+                  </Carousel>
+                ) : (
+                  <div className="w-full h-56 sm:h-72 md:h-[32rem] bg-gradient-to-br from-slate-900 via-slate-800 to-cyan-950" />
+                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/40 to-transparent md:bg-gradient-to-r md:from-slate-900/90 md:via-slate-900/50 md:to-transparent" />
 
                 {/* Title overlay; auth card only on md+ so it is not clipped on mobile */}
@@ -305,38 +232,55 @@ export default function LandingPage() {
         </header>
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24">
-          {/* Stats Section */}
+          {/* Stats Section — live MongoDB aggregates */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full mb-24 animate-in fade-in-0 slide-in-from-bottom-10 duration-1000 delay-500">
             <Card className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 shadow-lg">
               <CardContent className="pt-6 flex flex-col items-center justify-center">
                 <Users className="w-10 h-10 mb-3 text-primary" />
                 <div className="text-4xl font-black">
-                  <AnimatedCounter end={342123} />
+                  {dataLoading ? (
+                    <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+                  ) : (
+                    <AnimatedCounter end={stats.registeredPlayers} />
+                  )}
                 </div>
-                <p className="text-slate-400 mt-1">Players Online</p>
+                <p className="text-slate-400 mt-1">Registered Players</p>
               </CardContent>
             </Card>
             <Card className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 shadow-lg">
               <CardContent className="pt-6 flex flex-col items-center justify-center">
                 <Gamepad2 className="w-10 h-10 mb-3 text-primary" />
                 <div className="text-4xl font-black">
-                  <AnimatedCounter end={1250345} />
+                  {dataLoading ? (
+                    <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+                  ) : (
+                    <AnimatedCounter end={stats.matchesPlayed} />
+                  )}
                 </div>
-                <p className="text-slate-400 mt-1">Games Played Today</p>
+                <p className="text-slate-400 mt-1">
+                  Matches Played
+                  {!dataLoading && stats.matchesPlayedToday > 0
+                    ? ` · ${stats.matchesPlayedToday.toLocaleString()} today`
+                    : ''}
+                </p>
               </CardContent>
             </Card>
             <Card className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 shadow-lg">
               <CardContent className="pt-6 flex flex-col items-center justify-center">
                 <Gem className="w-10 h-10 mb-3 text-primary" />
                 <div className="text-4xl font-black">
-                  <AnimatedCounter end={8900000} />
+                  {dataLoading ? (
+                    <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+                  ) : (
+                    <AnimatedCounter end={stats.vpEarned} />
+                  )}
                 </div>
-                <p className="text-slate-400 mt-1">Diamonds Earned</p>
+                <p className="text-slate-400 mt-1">VP Earned</p>
               </CardContent>
             </Card>
           </div>
 
-          {/* Popular Items Section */}
+          {/* Popular Items — live store catalog / purchase rankings */}
           <div className="w-full mb-24 animate-in fade-in-0 slide-in-from-bottom-10 duration-1000 delay-700">
             <div className="flex items-center justify-center mb-8">
               <h2 className="text-3xl font-bold flex items-center justify-center gap-2">
@@ -344,58 +288,77 @@ export default function LandingPage() {
                 Popular Items
               </h2>
             </div>
-            <Carousel
-              opts={{
-                align: 'start',
-                loop: true,
-              }}
-              plugins={[Autoplay({ delay: 5000, stopOnInteraction: true })]}
-              className="w-full"
-            >
-              <CarouselContent className="-ml-4">
-                {popularItems.map((item, index) => (
-                  <CarouselItem
-                    key={index}
-                    className="pl-4 md:basis-1/2 lg:basis-1/4"
-                  >
-                    <div className="p-1">
-                      <Card className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 hover:border-primary/50 transition-all duration-300 hover:-translate-y-2 group shadow-lg cursor-pointer flex flex-col items-center justify-start h-full">
-                        <CardContent className="p-0 w-full">
-                          <div className="relative aspect-square w-full overflow-hidden rounded-t-lg">
-                            <Image
-                              src={item.image}
-                              alt={item.name}
-                              fill
-                              className="object-cover group-hover:scale-110 transition-transform duration-300"
-                              data-ai-hint={item.hint}
-                            />
-                          </div>
-                          <div className="p-4 w-full">
-                            <p className="text-xs text-slate-400 uppercase">
-                              {item.category}
-                            </p>
-                            <h3 className="font-bold text-lg truncate">
-                              {item.name}
-                            </h3>
-                            <div className="flex items-center justify-between mt-2">
-                              <p className="font-bold text-yellow-400">
-                                {item.price} VP
-                              </p>
-                              <Button size="sm">Buy Now</Button>
+            {dataLoading ? (
+              <div className="flex justify-center py-12 text-slate-400">
+                <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading store...
+              </div>
+            ) : popularItems.length === 0 ? (
+              <p className="text-center text-slate-400 py-8">
+                Store items will appear here once the catalog is seeded.
+              </p>
+            ) : (
+              <Carousel
+                opts={{
+                  align: 'start',
+                  loop: popularItems.length > 3,
+                }}
+                plugins={[Autoplay({ delay: 5000, stopOnInteraction: true })]}
+                className="w-full"
+              >
+                <CarouselContent className="-ml-4">
+                  {popularItems.map((item) => (
+                    <CarouselItem
+                      key={item.id}
+                      className="pl-4 md:basis-1/2 lg:basis-1/4"
+                    >
+                      <div className="p-1">
+                        <Card className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 hover:border-primary/50 transition-all duration-300 hover:-translate-y-2 group shadow-lg flex flex-col items-center justify-start h-full">
+                          <CardContent className="p-0 w-full">
+                            <div className="relative aspect-square w-full overflow-hidden rounded-t-lg bg-slate-900/80">
+                              {item.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? (
+                                <Image
+                                  src={item.imageUrl}
+                                  alt={item.itemName}
+                                  fill
+                                  className="object-cover group-hover:scale-110 transition-transform duration-300"
+                                />
+                              ) : (
+                                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950">
+                                  <span className="text-4xl font-black uppercase tracking-wider text-slate-600">
+                                    {item.itemCategory.slice(0, 1)}
+                                  </span>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </CarouselItem>
-                ))}
-              </CarouselContent>
-              <CarouselPrevious className="absolute left-0 top-1/2 -translate-y-1/2 z-10" />
-              <CarouselNext className="absolute right-0 top-1/2 -translate-y-1/2 z-10" />
-            </Carousel>
+                            <div className="p-4 w-full">
+                              <p className="text-xs text-slate-400 uppercase">
+                                {item.itemCategory}
+                              </p>
+                              <h3 className="font-bold text-lg truncate">
+                                {item.itemName}
+                              </h3>
+                              <div className="flex items-center justify-between mt-2">
+                                <p className="font-bold text-yellow-400">
+                                  {item.vpPrice} VP
+                                </p>
+                                <Button size="sm" onClick={handleNavigation}>
+                                  Login to Buy
+                                </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+                <CarouselPrevious className="absolute left-0 top-1/2 -translate-y-1/2 z-10" />
+                <CarouselNext className="absolute right-0 top-1/2 -translate-y-1/2 z-10" />
+              </Carousel>
+            )}
           </div>
 
-          {/* Top Players */}
+          {/* Top Players — live leaderboard */}
           <div className="w-full animate-in fade-in-0 slide-in-from-bottom-10 duration-1000 delay-900">
             <div className="flex items-center justify-center mb-8">
               <h2 className="text-3xl font-bold flex items-center justify-center gap-2">
@@ -403,60 +366,69 @@ export default function LandingPage() {
                 Top Players
               </h2>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
-              {topPlayers.map((player) => (
-                <TooltipProvider key={player.name}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Card className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 text-center hover:border-primary/50 transition-all duration-300 hover:-translate-y-2 group shadow-lg cursor-pointer flex flex-col items-center justify-start pt-6 pb-4 px-4 h-full">
-                        <div className="relative mb-8">
-                          <CircularProgress
-                            progress={player.xp}
-                            level={player.level}
-                            size={110}
-                            strokeWidth={6}
-                          >
-                            <Avatar className="h-24 w-24">
-                              <AvatarImage
-                                src={player.avatar}
-                                alt={player.name}
-                                data-ai-hint="player avatar"
-                              />
-                              <AvatarFallback>
-                                {player.name.charAt(0)}
-                              </AvatarFallback>
-                            </Avatar>
-                          </CircularProgress>
-                          {player.isFirst && (
-                            <Crown className="absolute -top-4 -right-2 w-8 h-8 text-yellow-400 -rotate-[30deg] drop-shadow-lg" />
-                          )}
-                        </div>
-                        <p className="font-bold text-xl truncate mt-auto">
-                          {player.name}
-                        </p>
-                      </Card>
-                    </TooltipTrigger>
-                    <TooltipContent className="bg-slate-900/80 backdrop-blur-md border-slate-700 text-white">
-                      <div className="p-1 min-w-[150px] text-center">
-                        <p className="font-bold text-lg text-yellow-400">
-                          {player.rankName}
-                        </p>
-                        {player.icons.length > 0 && (
-                          <div className="flex gap-3 mt-2 justify-center border-t border-slate-700/50 pt-2">
-                            {player.icons.map((Icon, i) => (
-                              <Icon
-                                key={i}
-                                className="w-5 h-5 text-slate-300"
-                              />
-                            ))}
+            {dataLoading ? (
+              <div className="flex justify-center py-12 text-slate-400">
+                <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading rankings...
+              </div>
+            ) : topPlayers.length === 0 ? (
+              <p className="text-center text-slate-400 py-8">
+                Be the first to sign in and claim the top spot.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
+                {topPlayers.map((player, index) => {
+                  const level = getLevelFromXp(player.xpProgress);
+                  const xpPct = getXpIntoLevel(player.xpProgress);
+                  return (
+                    <TooltipProvider key={player.id}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Card className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 text-center hover:border-primary/50 transition-all duration-300 hover:-translate-y-2 group shadow-lg cursor-default flex flex-col items-center justify-start pt-6 pb-4 px-4 h-full">
+                            <div className="relative mb-8">
+                              <CircularProgress
+                                progress={xpPct}
+                                level={level}
+                                size={110}
+                                strokeWidth={6}
+                              >
+                                <Avatar className="h-24 w-24">
+                                  <AvatarImage
+                                    src={player.avatarUrl}
+                                    alt={player.username}
+                                  />
+                                  <AvatarFallback>
+                                    {player.username.charAt(0)}
+                                  </AvatarFallback>
+                                </Avatar>
+                              </CircularProgress>
+                              {index === 0 && (
+                                <Crown className="absolute -top-4 -right-2 w-8 h-8 text-yellow-400 -rotate-[30deg] drop-shadow-lg" />
+                              )}
+                            </div>
+                            <p className="font-bold text-xl truncate mt-auto">
+                              {player.username}
+                            </p>
+                          </Card>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-slate-900/80 backdrop-blur-md border-slate-700 text-white">
+                          <div className="p-1 min-w-[150px] text-center">
+                            <p className="font-bold text-lg text-yellow-400">
+                              {player.currentRank}
+                            </p>
+                            <p className="text-xs text-slate-300 mt-1">
+                              Level {level} · {player.xpProgress.toLocaleString()} XP
+                            </p>
+                            {player.isVip && (
+                              <p className="text-xs text-yellow-400/90 mt-1">VIP</p>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ))}
-            </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </main>
 

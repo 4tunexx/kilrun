@@ -9,6 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   getConversations,
   getThreadWith,
+  getUserBrief,
   sendDirectMessage,
 } from '@/lib/social-actions';
 import { useToast } from '@/hooks/use-toast';
@@ -31,6 +32,11 @@ type ThreadMessage = {
 export default function MessagesView({ userId }: { userId: string }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activePeerId, setActivePeerId] = useState<string | null>(null);
+  const [deepLinkPeer, setDeepLinkPeer] = useState<{
+    id: string;
+    username: string;
+    avatarUrl: string;
+  } | null>(null);
   const [thread, setThread] = useState<ThreadMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -47,6 +53,11 @@ export default function MessagesView({ userId }: { userId: string }) {
     if (deepLink) {
       sessionStorage.removeItem('kilrun.messagePeerId');
       setActivePeerId(deepLink);
+      getUserBrief(deepLink)
+        .then((u) => {
+          if (u) setDeepLinkPeer(u);
+        })
+        .catch(() => {});
     }
     reloadConversations().catch(() => setLoading(false));
   }, []);
@@ -63,9 +74,7 @@ export default function MessagesView({ userId }: { userId: string }) {
 
   const activePeer =
     conversations.find((c) => c.peer.id === activePeerId)?.peer ??
-    (activePeerId
-      ? { id: activePeerId, username: 'Player', avatarUrl: '' }
-      : null);
+    (deepLinkPeer && deepLinkPeer.id === activePeerId ? deepLinkPeer : null);
 
   const handleSend = async () => {
     if (!activePeerId || !draft.trim()) return;

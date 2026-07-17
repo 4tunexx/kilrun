@@ -33,6 +33,130 @@ export async function getStoreItems() {
   });
 }
 
+export type LandingStats = {
+  registeredPlayers: number;
+  matchesPlayed: number;
+  matchesPlayedToday: number;
+  vpEarned: number;
+};
+
+export type LandingTopPlayer = {
+  id: string;
+  username: string;
+  avatarUrl: string;
+  xpProgress: number;
+  currentRank: string;
+  isVip: boolean;
+  role: string;
+};
+
+export type LandingStoreItem = {
+  id: string;
+  itemName: string;
+  itemCategory: string;
+  vpPrice: number;
+  imageUrl: string | null;
+};
+
+/**
+ * Public landing aggregates — real MongoDB counts/users/catalog only.
+ * No auth required; safe for the unauthenticated landing page.
+ */
+export async function getLandingPageData(): Promise<{
+  stats: LandingStats;
+  topPlayers: LandingTopPlayer[];
+  popularItems: LandingStoreItem[];
+}> {
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
+
+  const [
+    registeredPlayers,
+    matchesPlayed,
+    matchesPlayedToday,
+    vpAgg,
+    topPlayers,
+    purchaseGroups,
+    catalogFallback,
+  ] = await Promise.all([
+    prisma.user.count({ where: { isBanned: false } }),
+    prisma.matchResult.count(),
+    prisma.matchResult.count({ where: { playedAt: { gte: startOfToday } } }),
+    prisma.matchResult.aggregate({ _sum: { vpEarned: true } }),
+    prisma.user.findMany({
+      where: { isBanned: false },
+      orderBy: [{ xpProgress: 'desc' }, { vpCurrency: 'desc' }],
+      take: 5,
+      select: {
+        id: true,
+        username: true,
+        avatarUrl: true,
+        xpProgress: true,
+        currentRank: true,
+        isVip: true,
+        role: true,
+      },
+    }),
+    prisma.purchase.groupBy({
+      by: ['itemSku'],
+      _count: { itemSku: true },
+      orderBy: { _count: { itemSku: 'desc' } },
+      take: 6,
+    }),
+    prisma.storeItem.findMany({
+      where: { isAvailable: true },
+      orderBy: { vpPrice: 'asc' },
+      take: 6,
+      select: {
+        id: true,
+        itemName: true,
+        itemCategory: true,
+        vpPrice: true,
+        imageUrl: true,
+      },
+    }),
+  ]);
+
+  let popularItems: LandingStoreItem[] = catalogFallback;
+  if (purchaseGroups.length > 0) {
+    const skus = purchaseGroups.map((g) => g.itemSku);
+    const purchasedItems = await prisma.storeItem.findMany({
+      where: { itemSku: { in: skus }, isAvailable: true },
+      select: {
+        id: true,
+        itemName: true,
+        itemCategory: true,
+        vpPrice: true,
+        imageUrl: true,
+        itemSku: true,
+      },
+    });
+    const bySku = new Map(purchasedItems.map((i) => [i.itemSku, i]));
+    const ranked = skus
+      .map((sku) => bySku.get(sku))
+      .filter((i): i is NonNullable<typeof i> => Boolean(i))
+      .map(({ id, itemName, itemCategory, vpPrice, imageUrl }) => ({
+        id,
+        itemName,
+        itemCategory,
+        vpPrice,
+        imageUrl,
+      }));
+    if (ranked.length > 0) popularItems = ranked;
+  }
+
+  return {
+    stats: {
+      registeredPlayers,
+      matchesPlayed,
+      matchesPlayedToday,
+      vpEarned: vpAgg._sum.vpEarned ?? 0,
+    },
+    topPlayers,
+    popularItems,
+  };
+}
+
 /** A player's live mission board, replacing the old hardcoded mission arrays. */
 export async function getActiveMissions(userId: string) {
   return prisma.activeMission.findMany({

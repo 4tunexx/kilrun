@@ -29,17 +29,15 @@ import {
   respondFriendRequest,
   sendFriendRequest,
 } from '@/lib/social-actions';
+import { getLevelFromXp } from '@/lib/progression';
 import { useToast } from '@/hooks/use-toast';
 
 export type Player = {
   id: string;
   name: string;
   avatar: string;
-  status: string;
   rankName: string;
   level: number;
-  kd: string;
-  winRate: string;
   isVip?: boolean;
   role?: string;
 };
@@ -50,6 +48,8 @@ type FriendRow = {
   avatarUrl: string;
   role?: string;
   isVip?: boolean;
+  xpProgress?: number;
+  currentRank?: string;
 };
 
 export const FriendsList = ({
@@ -84,11 +84,8 @@ export const FriendsList = ({
     id: f.id,
     name: f.username,
     avatar: f.avatarUrl,
-    status: 'online',
-    rankName: f.role ?? 'player',
-    level: 1,
-    kd: '-',
-    winRate: '-',
+    rankName: f.currentRank ?? 'Unranked',
+    level: getLevelFromXp(f.xpProgress ?? 0),
     isVip: f.isVip,
     role: f.role,
   });
@@ -186,8 +183,8 @@ export const FriendsList = ({
                     </Avatar>
                     <div className="min-w-0">
                       <p className="font-semibold truncate">{friend.username}</p>
-                      <p className="text-xs text-slate-400 capitalize">
-                        {friend.role ?? 'player'}
+                      <p className="text-xs text-slate-400">
+                        {player.rankName} · Lv {player.level}
                       </p>
                     </div>
                   </div>

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { getLeaderboard, sendFriendRequest } from '@/lib/social-actions';
 import type { Player } from '@/components/views/friends-list';
+import { getLevelFromXp } from '@/lib/progression';
 import { useToast } from '@/hooks/use-toast';
 
 export default function LeaderboardView({
@@ -44,11 +45,8 @@ export default function LeaderboardView({
               id: row.id,
               name: row.username,
               avatar: row.avatarUrl,
-              status: 'online',
               rankName: row.currentRank,
-              level: Math.floor(row.xpProgress / 100),
-              kd: '-',
-              winRate: '-',
+              level: getLevelFromXp(row.xpProgress),
               isVip: row.isVip,
               role: row.role,
             };
