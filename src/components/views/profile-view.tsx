@@ -5,6 +5,8 @@ import {
   KeyRound,
   Loader2,
   LogOut,
+  ShieldCheck,
+  Mail,
 } from 'lucide-react';
 import { signOut } from 'next-auth/react';
 import { formatDistanceToNow } from 'date-fns';
@@ -246,21 +248,48 @@ export default function ProfileView({ userId }: { userId: string }) {
                   className="bg-slate-900/50 border-slate-700 capitalize"
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
+
+              <div className="space-y-3 rounded-lg border border-slate-700/50 bg-slate-900/30 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label className="flex items-center gap-2">
+                    <Mail className="w-4 h-4" /> Email
+                  </Label>
+                  {user?.emailVerified ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Confirmed
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-300">
+                      Not confirmed
+                    </span>
+                  )}
+                </div>
                 <Input
-                  value={user?.email ?? 'Not verified'}
+                  value={user?.emailVerified ? (user.email ?? '') : 'No email on file'}
                   readOnly
-                  className="bg-slate-900/50 border-slate-700"
+                  className={`bg-slate-900/50 border-slate-700 ${
+                    user?.emailVerified
+                      ? 'border-emerald-500/40 text-emerald-100'
+                      : 'text-slate-400'
+                  }`}
                 />
+                <div className="flex flex-col sm:flex-row gap-2">
+                  {user?.emailVerified ? (
+                    <Button asChild variant="outline" className="w-full sm:w-auto">
+                      <Link href="/verify-email?change=1">
+                        <Mail className="mr-2 h-4 w-4" /> Change email
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild className="w-full sm:w-auto">
+                      <Link href="/verify-email">
+                        <KeyRound className="mr-2 h-4 w-4" /> Confirm email (+100 VP)
+                      </Link>
+                    </Button>
+                  )}
+                </div>
               </div>
-              {!user?.emailVerified && (
-                <Button asChild variant="outline">
-                  <Link href="/verify-email">
-                    <KeyRound className="mr-2 h-4 w-4" /> Verify email
-                  </Link>
-                </Button>
-              )}
             </CardContent>
           </Card>
         </TabsContent>

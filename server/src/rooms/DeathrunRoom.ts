@@ -126,19 +126,34 @@ export class DeathrunRoom extends Room<RoomState> {
 
   private startRound() {
     const sessionIds = Array.from(this.state.players.keys());
-    const trapperIndex = Math.floor(Math.random() * sessionIds.length);
-    const trapperSessionId = sessionIds[trapperIndex];
-    this.state.trapperSessionId = trapperSessionId;
 
-    sessionIds.forEach((sessionId, i) => {
-      const player = this.state.players.get(sessionId)!;
-      player.role = sessionId === trapperSessionId ? 'trapper' : 'runner';
+    // Solo / test lobby: one player runs the course alone (no Trapper).
+    // With 2+ players, pick a random Trapper as usual.
+    if (sessionIds.length === 1) {
+      const only = sessionIds[0];
+      const player = this.state.players.get(only)!;
+      player.role = 'runner';
       player.health = 100;
       player.isAlive = true;
       player.hasFinished = false;
       player.x = SPAWN_X;
-      player.y = ((i % 5) + 1) / 6 * WORLD_HEIGHT;
-    });
+      player.y = (1 / 6) * WORLD_HEIGHT;
+      this.state.trapperSessionId = '';
+    } else {
+      const trapperIndex = Math.floor(Math.random() * sessionIds.length);
+      const trapperSessionId = sessionIds[trapperIndex];
+      this.state.trapperSessionId = trapperSessionId;
+
+      sessionIds.forEach((sessionId, i) => {
+        const player = this.state.players.get(sessionId)!;
+        player.role = sessionId === trapperSessionId ? 'trapper' : 'runner';
+        player.health = 100;
+        player.isAlive = true;
+        player.hasFinished = false;
+        player.x = SPAWN_X;
+        player.y = (((i % 5) + 1) / 6) * WORLD_HEIGHT;
+      });
+    }
 
     this.obstacleTimers = this.state.obstacles.map(() => 0);
     this.state.obstacles.forEach((o) => (o.active = false));

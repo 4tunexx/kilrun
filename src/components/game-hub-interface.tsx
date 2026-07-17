@@ -96,6 +96,8 @@ export interface SessionPlayer {
   role: string;
   isVip: boolean;
   bio: string;
+  email: string | null;
+  emailVerified: boolean;
 }
 
 const pageComponents: { [key: string]: React.ComponentType<any> } = {
@@ -143,6 +145,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [pendingCompetitiveMode, setPendingCompetitiveMode] = useState<KilrunMode | null>(null);
   const [vpBalance, setVpBalance] = useState(user.vpCurrency);
   const [isVip, setIsVip] = useState(user.isVip);
+  const [isEmailPromptOpen, setIsEmailPromptOpen] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -152,6 +155,16 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       setIsLeftMenuOpen(false);
     }
   }, [isMobile]);
+
+  useEffect(() => {
+    if (user.emailVerified) return;
+    const dismissed =
+      typeof window !== 'undefined' &&
+      sessionStorage.getItem('kilrun.emailPromptDismissed') === '1';
+    if (!dismissed) {
+      setIsEmailPromptOpen(true);
+    }
+  }, [user.emailVerified]);
 
   const navigate = (page: string) => {
     setCurrentPage(page);
@@ -579,6 +592,51 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
               }}
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isEmailPromptOpen}
+        onOpenChange={(open) => {
+          setIsEmailPromptOpen(open);
+          if (!open) {
+            sessionStorage.setItem('kilrun.emailPromptDismissed', '1');
+          }
+        }}
+      >
+        <DialogContent className="bg-slate-900/95 border-slate-700 text-white max-w-md mx-4">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+              <Mail className="w-6 h-6 text-primary" />
+              Confirm your email
+            </DialogTitle>
+            <DialogDescription className="text-slate-300">
+              Welcome to Kilrun! Verify your email to unlock a{' '}
+              <span className="text-primary font-semibold">100 VP Welcome Bonus</span> and secure
+              your account.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <Button
+              className="w-full"
+              onClick={() => {
+                sessionStorage.setItem('kilrun.emailPromptDismissed', '1');
+                window.location.href = '/verify-email';
+              }}
+            >
+              Verify email
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                sessionStorage.setItem('kilrun.emailPromptDismissed', '1');
+                setIsEmailPromptOpen(false);
+              }}
+            >
+              Later
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
