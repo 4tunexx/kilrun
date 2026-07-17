@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import {
   Save,
-  KeyRound,
   Loader2,
   LogOut,
   ShieldCheck,
@@ -35,6 +33,7 @@ import { getMatchStats, getSessionUser, getStatsSummary, type StatsSummary } fro
 import { updateProfileBio } from '@/lib/social-actions';
 import type { MatchStat, User as UserModel } from '@/generated/prisma';
 import { useToast } from '@/hooks/use-toast';
+import { EmailVerificationForm } from '@/components/email-verification-form';
 
 export default function ProfileView({ userId }: { userId: string }) {
   const [user, setUser] = useState<UserModel | null>(null);
@@ -43,6 +42,7 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [isLoading, setIsLoading] = useState(true);
   const [bio, setBio] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showEmailForm, setShowEmailForm] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -55,6 +55,8 @@ export default function ProfileView({ userId }: { userId: string }) {
         setSummary(s);
         setHistory(h);
         setIsLoading(false);
+        // Unverified accounts: show the typeable email form immediately.
+        if (u && !u.emailVerified) setShowEmailForm(true);
       }
     );
     return () => {
@@ -265,30 +267,45 @@ export default function ProfileView({ userId }: { userId: string }) {
                     </span>
                   )}
                 </div>
-                <Input
-                  value={user?.emailVerified ? (user.email ?? '') : 'No email on file'}
-                  readOnly
-                  className={`bg-slate-900/50 border-slate-700 ${
-                    user?.emailVerified
-                      ? 'border-emerald-500/40 text-emerald-100'
-                      : 'text-slate-400'
-                  }`}
-                />
-                <div className="flex flex-col sm:flex-row gap-2">
-                  {user?.emailVerified ? (
-                    <Button asChild variant="outline" className="w-full sm:w-auto">
-                      <Link href="/verify-email?change=1">
-                        <Mail className="mr-2 h-4 w-4" /> Change email
-                      </Link>
+
+                {user?.emailVerified && !showEmailForm ? (
+                  <>
+                    <Input
+                      value={user.email ?? ''}
+                      readOnly
+                      className="bg-slate-900/50 border-emerald-500/40 text-emerald-100"
+                    />
+                    <Button
+                      variant="outline"
+                      className="w-full sm:w-auto"
+                      onClick={() => setShowEmailForm(true)}
+                    >
+                      <Mail className="mr-2 h-4 w-4" /> Change email
                     </Button>
-                  ) : (
-                    <Button asChild className="w-full sm:w-auto">
-                      <Link href="/verify-email">
-                        <KeyRound className="mr-2 h-4 w-4" /> Confirm email (+100 VP)
-                      </Link>
-                    </Button>
-                  )}
-                </div>
+                  </>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-slate-400">
+                      Type your email here and send a verification code.
+                    </p>
+                    <EmailVerificationForm
+                      compact
+                      onComplete={() => {
+                        setShowEmailForm(false);
+                        getSessionUser().then((u) => setUser(u));
+                      }}
+                    />
+                    {user?.emailVerified && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowEmailForm(false)}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
