@@ -42,6 +42,8 @@ export default async function Page() {
         role: user.role,
         isVip: user.isVip,
         bio: user.bio,
+        email: user.email,
+        emailVerified: user.emailVerified,
       }}
     />
   );

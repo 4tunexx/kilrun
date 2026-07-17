@@ -5,7 +5,7 @@ export const FINISH_X = WORLD_WIDTH - 2;
 export const SPAWN_X = 2;
 
 export const MATCH_DURATION_MS = 120_000;
-export const MIN_PLAYERS_TO_START = 2;
+export const MIN_PLAYERS_TO_START = 1;
 
 export const NETWORK_SEND_HZ = 25;
 export const NETWORK_SEND_INTERVAL_MS = 1000 / NETWORK_SEND_HZ;

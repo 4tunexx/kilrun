@@ -59,7 +59,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
-  if (event.type !== 'user.created') {
+  // Attach email on first verify (user.created) and on later email changes
+  // (Clerk may emit user.updated when a new address is verified).
+  if (event.type !== 'user.created' && event.type !== 'user.updated') {
     return NextResponse.json({ received: true, skipped: event.type });
   }
 

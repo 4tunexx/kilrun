@@ -3,7 +3,7 @@
 export const TICK_RATE_HZ = 20;
 export const TICK_DT_MS = 1000 / TICK_RATE_HZ;
 
-export const MIN_PLAYERS_TO_START = 2;
+export const MIN_PLAYERS_TO_START = 1;
 export const LOBBY_COUNTDOWN_MS = 5000;
 export const MATCH_DURATION_MS = 120_000;
 
