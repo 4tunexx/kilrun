@@ -77,12 +77,27 @@ export default {
           "0%, 100%": { transform: "translateX(0)" },
           "50%": { transform: "translateX(-4px)" },
         },
+        "banner-shimmer": {
+          "0%": { backgroundPosition: "0% 50%" },
+          "100%": { backgroundPosition: "200% 50%" },
+        },
+        "banner-pulse-glow": {
+          "0%, 100%": { filter: "brightness(1) saturate(1)" },
+          "50%": { filter: "brightness(1.35) saturate(1.2)" },
+        },
+        "banner-rotate-hue": {
+          "0%": { filter: "hue-rotate(0deg)" },
+          "100%": { filter: "hue-rotate(360deg)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "progress-pulse": "progress-pulse 2.5s ease-in-out infinite",
         "slow-pulse-horizontal": "slow-pulse-horizontal 3s ease-in-out infinite",
+        "banner-shimmer": "banner-shimmer 3s linear infinite",
+        "banner-pulse-glow": "banner-pulse-glow 2.5s ease-in-out infinite",
+        "banner-rotate-hue": "banner-rotate-hue 6s linear infinite",
       },
     },
   },

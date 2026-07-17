@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { createForumPost, getForumPosts } from '@/lib/social-actions';
+import { UserHoverCard } from '@/components/user-hover-card';
 import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -105,7 +106,9 @@ export default function DiscussionsView() {
                     <AvatarImage src={post.author.avatarUrl} />
                     <AvatarFallback>{post.author.username.charAt(0)}</AvatarFallback>
                   </Avatar>
-                  <span>{post.author.username}</span>
+                  <UserHoverCard userId={post.author.id} className="text-slate-300">
+                    {post.author.username}
+                  </UserHoverCard>
                   <span>·</span>
                   <span>{formatDistanceToNow(new Date(post.createdAt))} ago</span>
                   <span>·</span>

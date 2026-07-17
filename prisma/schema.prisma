@@ -29,6 +29,20 @@ model User {
   email         String?  @unique
   emailVerified Boolean  @default(false)
 
+  /// Net community reputation (+rep / -rep from other players).
+  reputation Int @default(0)
+
+  /// Consecutive-day login streak, used for "daily login" style requirements.
+  loginStreak  Int       @default(0)
+  lastLoginAt  DateTime?
+
+  /// Denormalized snapshot of the equipped profile banner cosmetic, copied
+  /// from the owned InventoryItem at equip time so rendering the profile
+  /// header never needs an extra lookup.
+  equippedBannerItemName  String?
+  equippedBannerImageUrl  String?
+  equippedBannerConfig    Json?
+
   matchStats         MatchStat[]
   activeMissions     ActiveMission[]
   matchResults       MatchResult[]
@@ -44,6 +58,9 @@ model User {
   userAchievements   UserAchievement[]
   userBadges         UserBadge[]
   globalChatMessages GlobalChatMessage[]
+  inventoryItems     InventoryItem[]
+  reputationGiven    ReputationVote[] @relation("ReputationVotesGiven")
+  reputationReceived ReputationVote[] @relation("ReputationVotesReceived")
 }
 
 model MatchStat {
@@ -82,6 +99,13 @@ model StoreItem {
   vpPrice      Int
   imageUrl     String?
   isAvailable  Boolean @default(true)
+
+  /// Which equip slot this cosmetic occupies, e.g. "banner". Null for
+  /// non-equippable items (boosts, emotes, one-off consumables, ...).
+  cosmeticSlot String?
+  /// Generated banner config (colors, gradient angle, animation style) for
+  /// items created via the admin banner generator.
+  bannerConfig Json?
 }
 
 model MissionTemplate {
@@ -96,6 +120,8 @@ model MissionTemplate {
   /// game | website
   category    String  @default("game")
   isActive    Boolean @default(true)
+  /// Optional custom icon image uploaded/set in the admin panel.
+  iconImageUrl String?
 }
 
 model ActiveMission {
@@ -109,6 +135,7 @@ model ActiveMission {
   currentCount Int     @default(0)
   metric       String  @default("runs")
   isCompleted  Boolean @default(false)
+  iconImageUrl String?
 
   user User @relation(fields: [userId], references: [id])
 
@@ -127,6 +154,8 @@ model AchievementDefinition {
   targetCount Int     @default(1)
   xpReward    Int     @default(50)
   icon        String  @default("trophy")
+  /// Optional custom icon image uploaded in the admin panel (overrides `icon`).
+  iconImageUrl String?
   isActive    Boolean @default(true)
 
   unlocks UserAchievement[]
@@ -152,6 +181,8 @@ model BadgeDefinition {
   description String
   rarity      String  @default("common")
   icon        String  @default("award")
+  /// Optional custom icon image uploaded in the admin panel (overrides `icon`).
+  iconImageUrl String?
   /// auto unlock metric or "manual" / "role"
   metric      String  @default("manual")
   targetCount Int     @default(1)
@@ -315,4 +346,43 @@ model Purchase {
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
+}
+
+/// An owned copy of a store item, shown in the player's inventory drawer.
+/// Snapshots cosmetic data at acquisition time so later admin edits to the
+/// shop catalog don't retroactively change items players already own.
+model InventoryItem {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String   @db.ObjectId
+  itemSku      String
+  itemName     String
+  itemCategory String
+  cosmeticSlot String?
+  bannerConfig Json?
+  imageUrl     String?
+  /// Original VP price paid; resale refunds a fraction of this.
+  vpValue      Int      @default(0)
+  isEquipped   Boolean  @default(false)
+  acquiredAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([userId, cosmeticSlot])
+}
+
+/// A single player's +1/-1 reputation vote on another player. Unique per
+/// (voter, target) pair so a player can change their vote but not spam it.
+model ReputationVote {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  voterId   String   @db.ObjectId
+  targetId  String   @db.ObjectId
+  value     Int
+  createdAt DateTime @default(now())
+
+  voter  User @relation("ReputationVotesGiven", fields: [voterId], references: [id])
+  target User @relation("ReputationVotesReceived", fields: [targetId], references: [id])
+
+  @@unique([voterId, targetId])
+  @@index([targetId])
 }

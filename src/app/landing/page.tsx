@@ -43,7 +43,7 @@ import {
   type LandingStoreItem,
   type LandingTopPlayer,
 } from '@/lib/actions';
-import { getLevelFromXp, getXpIntoLevel } from '@/lib/progression';
+import { getLevelProgressPercent, getLevelFromXp } from '@/lib/progression';
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   steam_auth_failed: 'Steam login was cancelled or failed. Please try again.',
@@ -322,6 +322,13 @@ export default function LandingPage() {
                                   fill
                                   className="object-cover group-hover:scale-110 transition-transform duration-300"
                                 />
+                              ) : item.imageUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={item.imageUrl}
+                                  alt={item.itemName}
+                                  className="absolute inset-0 h-full w-full object-cover group-hover:scale-110 transition-transform duration-300"
+                                />
                               ) : (
                                 <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950">
                                   <span className="text-4xl font-black uppercase tracking-wider text-slate-600">
@@ -378,7 +385,7 @@ export default function LandingPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
                 {topPlayers.map((player, index) => {
                   const level = getLevelFromXp(player.xpProgress);
-                  const xpPct = getXpIntoLevel(player.xpProgress);
+                  const xpPct = getLevelProgressPercent(player.xpProgress);
                   return (
                     <TooltipProvider key={player.id}>
                       <Tooltip>

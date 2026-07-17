@@ -24,6 +24,7 @@ import {
   ShieldAlert,
   Shield,
   CheckCircle2,
+  Package,
 } from 'lucide-react';
 import HomeView from '@/components/views/home-view';
 import StoreView from '@/components/views/store-view';
@@ -39,7 +40,7 @@ import BadgesView from '@/components/views/badges-view';
 import NotificationsView from '@/components/views/notifications-view';
 import MessagesView from '@/components/views/messages-view';
 import PublicProfileView from '@/components/views/public-profile-view';
-import FriendsList, { type Player } from '@/components/views/friends-list';
+import FriendsList from '@/components/views/friends-list';
 import LobbyView from '@/components/views/lobby-view';
 import AdminView from '@/components/views/admin-view';
 import type { KilrunMode } from '@/components/views/play-view';
@@ -50,8 +51,10 @@ import {
   getLivePlayerState,
   getSiteSettings,
 } from '@/lib/progression-actions';
-import { getLevelFromXp, getXpIntoLevel } from '@/lib/progression';
+import { getLevelProgress } from '@/lib/progression';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { ProfileNavigationProvider } from '@/components/providers/profile-navigation-context';
+import { InventoryDrawer } from '@/components/inventory-drawer';
 
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -123,6 +126,7 @@ const pageComponents: { [key: string]: React.ComponentType<any> } = {
   messages: MessagesView,
   lobby: LobbyView,
   admin: AdminView,
+  'public-profile': PublicProfileView,
 };
 
 const VIEWS_NEEDING_USER_ID = new Set([
@@ -146,8 +150,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [currentPage, setCurrentPage] = useState('home');
   const [isVipDialogOpen, setIsVipDialogOpen] = useState(false);
   const [isFriendsSheetOpen, setIsFriendsSheetOpen] = useState(false);
-  const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
-  const [selectedProfile, setSelectedProfile] = useState<Player | null>(null);
+  const [isInventoryOpen, setIsInventoryOpen] = useState(false);
+  const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
+  const [previousPage, setPreviousPage] = useState('home');
   const [lobbyMode, setLobbyMode] = useState<KilrunMode | null>(null);
   const [isCompetitiveDialogOpen, setIsCompetitiveDialogOpen] = useState(false);
   const [pendingCompetitiveMode, setPendingCompetitiveMode] = useState<KilrunMode | null>(null);
@@ -162,8 +167,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [isEmailPromptOpen, setIsEmailPromptOpen] = useState(false);
   const { toast } = useToast();
 
-  const level = getLevelFromXp(xpProgress);
-  const xpIntoLevel = getXpIntoLevel(xpProgress);
+  const { level, xpIntoLevel, xpForNextLevel, percent: levelProgressPercent } =
+    getLevelProgress(xpProgress);
 
   useEffect(() => {
     // Keep rails closed whenever we cross into mobile widths.
@@ -241,9 +246,16 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     });
   };
 
-  const handleViewProfile = (player: Player) => {
-    setSelectedProfile(player);
-    setIsProfileDialogOpen(true);
+  const handleViewProfile = (userId: string) => {
+    if (currentPage !== 'public-profile') {
+      setPreviousPage(currentPage);
+    }
+    setViewingProfileUserId(userId);
+    navigate('public-profile');
+  };
+
+  const handleBackFromProfile = () => {
+    navigate(previousPage === 'public-profile' ? 'home' : previousPage);
   };
 
   const handleMessage = (peerId?: string) => {
@@ -328,9 +340,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     const PageComponent = pageComponents[currentPage];
     if (PageComponent) {
       let props: any = {};
-      if (currentPage === 'leaderboard') {
-        props.onViewProfile = handleViewProfile;
-      } else if (currentPage === 'play') {
+      if (currentPage === 'play') {
         props.onPlay = handlePlay;
       } else if (currentPage === 'home') {
         props.onLaunchGame = handleLaunchGame;
@@ -345,6 +355,16 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         };
       } else if (currentPage === 'messages') {
         props.userId = user.id;
+      } else if (currentPage === 'public-profile') {
+        if (!viewingProfileUserId) {
+          navigate(previousPage);
+          return null;
+        }
+        props = {
+          userId: viewingProfileUserId,
+          onMessage: (peerId: string) => handleMessage(peerId),
+          onBack: handleBackFromProfile,
+        };
       }
 
       if (VIEWS_NEEDING_USER_ID.has(currentPage)) {
@@ -402,6 +422,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   );
 
   return (
+    <ProfileNavigationProvider value={{ openProfile: handleViewProfile }}>
     <TooltipProvider>
       <div className="min-h-screen text-white relative overflow-hidden">
         <div className="fixed inset-0 z-0">
@@ -536,11 +557,29 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                   </SheetHeader>
                   <FriendsList
                     onInvite={handleInvite}
-                    onViewProfile={handleViewProfile}
-                    onMessage={(peer) => handleMessage(peer?.id)}
+                    onMessage={(peerId) => handleMessage(peerId)}
                   />
                 </SheetContent>
               </Sheet>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => setIsInventoryOpen(true)}
+                    className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 hover:bg-primary/20 shrink-0 group ${
+                      isInventoryOpen
+                        ? 'bg-primary/20 text-primary'
+                        : 'text-slate-400 hover:text-primary'
+                    }`}
+                  >
+                    <Package className="w-5 h-5 group-hover:text-primary transition-colors" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Inventory</p>
+                </TooltipContent>
+              </Tooltip>
+              <InventoryDrawer open={isInventoryOpen} onOpenChange={setIsInventoryOpen} />
             </div>
 
             <button
@@ -589,7 +628,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                     <div className="flex flex-col items-center mb-8 animate-in fade-in duration-500">
                       <div className="relative">
                         <CircularProgress
-                          progress={xpIntoLevel}
+                          progress={levelProgressPercent}
                           level={level}
                         >
                           <Avatar className="h-28 w-28 border-4 border-slate-800">
@@ -625,7 +664,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                         {isVip && <Badge className="bg-yellow-500 text-black">VIP</Badge>}
                       </h3>
                       <p className="text-xs uppercase tracking-wide text-slate-400 mt-1">
-                        {user.role} · Lv {level} · {xpIntoLevel}/100 XP
+                        {user.role} · Lv {level} · {xpIntoLevel.toLocaleString()}/
+                        {xpForNextLevel.toLocaleString()} XP
                       </p>
                       <div className="mt-4 bg-slate-800/50 px-4 py-2 rounded-lg text-center w-full">
                         <div className="text-xs text-slate-400">Rank</div>
@@ -673,20 +713,6 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           </div>
         </div>
       </div>
-
-      <Dialog open={isProfileDialogOpen} onOpenChange={setIsProfileDialogOpen}>
-        <DialogContent className="bg-slate-900/90 border-slate-700 text-white max-w-lg mx-4 max-h-[85vh] overflow-y-auto">
-          {selectedProfile && (
-            <PublicProfileView
-              player={selectedProfile}
-              onMessage={() => {
-                setIsProfileDialogOpen(false);
-                handleMessage(selectedProfile.id);
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
 
       <Dialog
         open={isEmailPromptOpen}
@@ -756,5 +782,6 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         </AlertDialogContent>
       </AlertDialog>
     </TooltipProvider>
+    </ProfileNavigationProvider>
   );
 }

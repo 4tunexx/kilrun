@@ -2,6 +2,9 @@
 
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import { Prisma } from '@/generated/prisma';
+import type { BannerConfig } from '@/lib/banner';
+import { INVENTORY_RESELL_RATE } from '@/lib/inventory-constants';
 import {
   canAccessAdmin,
   steamIdsPromotedToAdmin,
@@ -401,6 +404,20 @@ export async function purchaseStoreItem(itemId: string) {
       vpSpent: item.vpPrice,
     },
   });
+  // Snapshot cosmetic data onto a personal inventory copy so later admin
+  // edits to the shop catalog never retroactively change owned items.
+  await prisma.inventoryItem.create({
+    data: {
+      userId: user.id,
+      itemSku: item.itemSku,
+      itemName: item.itemName,
+      itemCategory: item.itemCategory,
+      cosmeticSlot: item.cosmeticSlot ?? null,
+      bannerConfig: item.bannerConfig ?? undefined,
+      imageUrl: item.imageUrl ?? null,
+      vpValue: item.vpPrice,
+    },
+  });
   await prisma.notification.create({
     data: {
       userId: user.id,
@@ -411,6 +428,164 @@ export async function purchaseStoreItem(itemId: string) {
   });
   await processWebsiteAction(user.id, 'purchases');
   return { ok: true as const };
+}
+
+// --- Inventory (owned cosmetics / items) ---
+
+export async function getMyInventory() {
+  const user = await requireSessionUser();
+  return prisma.inventoryItem.findMany({
+    where: { userId: user.id },
+    orderBy: [{ isEquipped: 'desc' }, { acquiredAt: 'desc' }],
+  });
+}
+
+/** Equips a cosmetic (currently only "banner"), unequipping any other item in that slot. */
+export async function equipInventoryItem(inventoryItemId: string) {
+  const user = await requireSessionUser();
+  const item = await prisma.inventoryItem.findUnique({ where: { id: inventoryItemId } });
+  if (!item || item.userId !== user.id) throw new Error('Item not found');
+  if (!item.cosmeticSlot) throw new Error('This item cannot be equipped');
+
+  await prisma.inventoryItem.updateMany({
+    where: { userId: user.id, cosmeticSlot: item.cosmeticSlot, isEquipped: true },
+    data: { isEquipped: false },
+  });
+  await prisma.inventoryItem.update({
+    where: { id: item.id },
+    data: { isEquipped: true },
+  });
+
+  if (item.cosmeticSlot === 'banner') {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        equippedBannerItemName: item.itemName,
+        equippedBannerImageUrl: item.imageUrl ?? null,
+        equippedBannerConfig: item.bannerConfig ?? undefined,
+      },
+    });
+  }
+  return { ok: true as const };
+}
+
+export async function unequipCosmeticSlot(cosmeticSlot: string) {
+  const user = await requireSessionUser();
+  await prisma.inventoryItem.updateMany({
+    where: { userId: user.id, cosmeticSlot, isEquipped: true },
+    data: { isEquipped: false },
+  });
+  if (cosmeticSlot === 'banner') {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        equippedBannerItemName: null,
+        equippedBannerImageUrl: null,
+        equippedBannerConfig: null,
+      },
+    });
+  }
+  return { ok: true as const };
+}
+
+/** Sells an owned item back for a fraction of its original VP price. */
+export async function resellInventoryItem(inventoryItemId: string) {
+  const user = await requireSessionUser();
+  const item = await prisma.inventoryItem.findUnique({ where: { id: inventoryItemId } });
+  if (!item || item.userId !== user.id) throw new Error('Item not found');
+
+  const refund = Math.floor(item.vpValue * INVENTORY_RESELL_RATE);
+  await prisma.$transaction([
+    prisma.inventoryItem.delete({ where: { id: item.id } }),
+    prisma.user.update({
+      where: { id: user.id },
+      data: { vpCurrency: { increment: refund } },
+    }),
+  ]);
+
+  if (item.isEquipped && item.cosmeticSlot === 'banner') {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        equippedBannerItemName: null,
+        equippedBannerImageUrl: null,
+        equippedBannerConfig: null,
+      },
+    });
+  }
+  return { ok: true as const, refund };
+}
+
+/** Permanently discards an owned item with no refund (inventory cleanup). */
+export async function deleteInventoryItem(inventoryItemId: string) {
+  const user = await requireSessionUser();
+  const item = await prisma.inventoryItem.findUnique({ where: { id: inventoryItemId } });
+  if (!item || item.userId !== user.id) throw new Error('Item not found');
+
+  await prisma.inventoryItem.delete({ where: { id: item.id } });
+
+  if (item.isEquipped && item.cosmeticSlot === 'banner') {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        equippedBannerItemName: null,
+        equippedBannerImageUrl: null,
+        equippedBannerConfig: null,
+      },
+    });
+  }
+  return { ok: true as const };
+}
+
+// --- Reputation (+rep / -rep) ---
+
+export async function voteReputation(targetUserId: string, value: 1 | -1) {
+  const user = await requireSessionUser();
+  if (user.id === targetUserId) throw new Error('Cannot rep yourself');
+
+  const existing = await prisma.reputationVote.findUnique({
+    where: { voterId_targetId: { voterId: user.id, targetId: targetUserId } },
+  });
+
+  let delta: number = value;
+  if (existing) {
+    if (existing.value === value) {
+      // Same vote again = retract it.
+      await prisma.reputationVote.delete({ where: { id: existing.id } });
+      delta = -existing.value;
+    } else {
+      await prisma.reputationVote.update({
+        where: { id: existing.id },
+        data: { value },
+      });
+      delta = value - existing.value;
+    }
+  } else {
+    await prisma.reputationVote.create({
+      data: { voterId: user.id, targetId: targetUserId, value },
+    });
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: targetUserId },
+    data: { reputation: { increment: delta } },
+  });
+  await tryUnlockAchievementIfPositive(targetUserId);
+  return { ok: true as const, reputation: updated.reputation };
+}
+
+async function tryUnlockAchievementIfPositive(userId: string) {
+  const { tryUnlockAchievement, tryUnlockBadge } = await import('@/lib/progression-actions');
+  await tryUnlockAchievement(userId, 'reputation');
+  await tryUnlockBadge(userId, 'reputation');
+}
+
+export async function getMyReputationVote(targetUserId: string) {
+  const user = await requireSessionUser();
+  const vote = await prisma.reputationVote.findUnique({
+    where: { voterId_targetId: { voterId: user.id, targetId: targetUserId } },
+  });
+  return vote?.value ?? 0;
 }
 
 // --- Admin / moderator ---
@@ -497,8 +672,20 @@ export async function adminUpsertStoreItem(input: {
   vpPrice: number;
   imageUrl?: string;
   isAvailable?: boolean;
+  cosmeticSlot?: string | null;
+  bannerConfig?: BannerConfig | null;
 }) {
   await requireStaff();
+  const cosmeticData =
+    input.cosmeticSlot !== undefined
+      ? {
+          cosmeticSlot: input.cosmeticSlot,
+          bannerConfig:
+            input.bannerConfig === null
+              ? null
+              : (input.bannerConfig as unknown as Prisma.InputJsonValue),
+        }
+      : {};
   if (input.id) {
     return prisma.storeItem.update({
       where: { id: input.id },
@@ -509,6 +696,7 @@ export async function adminUpsertStoreItem(input: {
         vpPrice: input.vpPrice,
         imageUrl: input.imageUrl,
         isAvailable: input.isAvailable ?? true,
+        ...cosmeticData,
       },
     });
   }
@@ -520,6 +708,7 @@ export async function adminUpsertStoreItem(input: {
       vpPrice: input.vpPrice,
       imageUrl: input.imageUrl,
       isAvailable: input.isAvailable ?? true,
+      ...cosmeticData,
     },
   });
 }
