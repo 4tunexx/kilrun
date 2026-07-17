@@ -1,96 +1,69 @@
-import { BookOpen, User, Tag, Eye } from 'lucide-react';
-import Image from 'next/image';
+'use client';
 
-const guides = [
-  {
-    title: 'Advanced Movement Techniques',
-    author: 'ProGamer',
-    category: 'Movement',
-    views: 12840,
-    image: 'https://picsum.photos/seed/g1/600/400',
-    hint: 'parkour character',
-  },
-  {
-    title: 'Vandal vs. Phantom: Which to Choose?',
-    author: 'TacticGuru',
-    category: 'Weapons',
-    views: 25987,
-    image: 'https://picsum.photos/seed/g2/600/400',
-    hint: 'weapon loadout',
-  },
-  {
-    title: 'Mastering Agent X: A Complete Guide',
-    author: 'AgentMain',
-    category: 'Agents',
-    views: 8950,
-    image: 'https://picsum.photos/seed/g3/600/400',
-    hint: 'futuristic soldier',
-  },
-  {
-    title: 'Economy Guide: How to Manage Your Credits',
-    author: 'EcoMaster',
-    category: 'Strategy',
-    views: 15300,
-    image: 'https://picsum.photos/seed/g4/600/400',
-    hint: 'gold coins',
-  },
-  {
-    title: 'Top 10 Lineups for Ascent',
-    author: 'LineupLarry',
-    category: 'Maps',
-    views: 19870,
-    image: 'https://picsum.photos/seed/g5/600/400',
-    hint: 'map strategy',
-  },
-   {
-    title: 'Improving Your Aim: Drills and Tips',
-    author: 'AimGod',
-    category: 'Aiming',
-    views: 32045,
-    image: 'https://picsum.photos/seed/g6/600/400',
-    hint: 'target practice',
-  },
-];
+import { useEffect, useState } from 'react';
+import { BookOpen, Loader2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { getGuides } from '@/lib/social-actions';
+import { formatDistanceToNow } from 'date-fns';
 
 export default function GuidesView() {
+  const [guides, setGuides] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    getGuides()
+      .then(setGuides)
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
-    <div className="px-12 py-8">
-      <h1 className="text-5xl font-black mb-8 flex items-center gap-4">
-        <BookOpen className="w-12 h-12 text-blue-400" />
-        Guides & Tutorials
+    <div className="px-4 sm:px-8 py-6 space-y-4">
+      <h1 className="text-3xl sm:text-4xl font-black flex items-center gap-2">
+        <BookOpen className="w-8 h-8" /> Guides
       </h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {guides.map((guide, i) => (
-          <div key={i} className="bg-slate-800/60 backdrop-blur-md rounded-lg overflow-hidden border border-slate-700/50 hover:border-primary/50 transition-all duration-300 group cursor-pointer hover:scale-[1.03]">
-            <div className="relative h-40">
-              <Image
-                src={guide.image}
-                alt={guide.title}
-                fill
-                className="object-cover group-hover:scale-110 transition-transform"
-                data-ai-hint={guide.hint}
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-900/70 to-transparent" />
-            </div>
-            <div className="p-4">
-              <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-                <Tag size={14} /> {guide.category}
-              </div>
-              <h3 className="font-bold text-lg mb-2 group-hover:text-primary transition-colors">
-                {guide.title}
-              </h3>
-              <div className="flex items-center justify-between text-sm text-slate-500">
-                <div className="flex items-center gap-1.5">
-                  <User size={14} /> {guide.author}
+
+      {loading ? (
+        <div className="text-slate-400 flex items-center gap-2 py-12 justify-center">
+          <Loader2 className="w-5 h-5 animate-spin" /> Loading guides...
+        </div>
+      ) : guides.length === 0 ? (
+        <p className="text-slate-400 text-center py-12">
+          No guides yet. Staff can publish from the Admin panel.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {guides.map((guide) => (
+            <Card key={guide.id} className="bg-slate-800/40 border-slate-700/30">
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between gap-2">
+                  <CardTitle className="text-lg sm:text-xl">{guide.title}</CardTitle>
+                  <Badge variant="outline" className="capitalize shrink-0">
+                    {guide.category}
+                  </Badge>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <Eye size={14} /> {guide.views.toLocaleString()}
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+                <CardDescription>
+                  {formatDistanceToNow(new Date(guide.createdAt))} ago · {guide.summary}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {expandedId === guide.id ? (
+                  <p className="text-slate-300 whitespace-pre-wrap mb-3">{guide.body}</p>
+                ) : null}
+                <button
+                  className="text-sm text-primary hover:underline"
+                  onClick={() =>
+                    setExpandedId((id) => (id === guide.id ? null : guide.id))
+                  }
+                >
+                  {expandedId === guide.id ? 'Show less' : 'Read guide'}
+                </button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

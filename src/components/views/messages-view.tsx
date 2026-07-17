@@ -1,117 +1,202 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
-import { Input } from '../ui/input';
-import { Button } from '../ui/button';
-import { Mail, Paperclip, Search, Send, Smile } from 'lucide-react';
-import { ScrollArea } from '../ui/scroll-area';
-import { Card } from '../ui/card';
+import { useEffect, useState } from 'react';
+import { Loader2, Send } from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  getConversations,
+  getThreadWith,
+  sendDirectMessage,
+} from '@/lib/social-actions';
+import { useToast } from '@/hooks/use-toast';
 
-const conversations = [
-  { name: 'ShadowStriker', avatar: 'https://picsum.photos/seed/p1/80/80', lastMessage: 'Sure, I can join for a ranked', time: '10:42 AM', unread: 0 },
-  { name: 'Vortex', avatar: 'https://picsum.photos/seed/p2/80/80', lastMessage: 'Wanna duo later?', time: '9:30 AM', unread: 2 },
-  { name: 'Phoenix', avatar: 'https://picsum.photos/seed/p3/80/80', lastMessage: 'gg', time: 'Yesterday', unread: 0 },
-  { name: 'System', avatar: 'https://picsum.photos/seed/system/80/80', lastMessage: 'Patch 5.04 is now live!', time: '2 days ago', unread: 1 },
-];
+type Conversation = {
+  peer: { id: string; username: string; avatarUrl: string };
+  lastMessage: string;
+  createdAt: Date;
+  unread: number;
+};
 
-const initialMessages = [
-    { from: 'them', text: 'Hey, you on?' },
-    { from: 'me', text: 'Yeah, just logging in now. What\'s up?' },
-    { from: 'them', text: 'Down for a comp game? Need one more for a 5-stack.' },
-    { from: 'me', text: 'For sure, let me just finish my warm-up. 5 mins.' },
-    { from: 'them', text: 'Sounds good, I\'ll send the invite.' },
-];
+type ThreadMessage = {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  body: string;
+  createdAt: Date;
+};
 
-export default function MessagesView() {
-  const [selectedConvo, setSelectedConvo] = useState(conversations[0]);
-  const [messages, setMessages] = useState(initialMessages);
-  const [newMessage, setNewMessage] = useState('');
+export default function MessagesView({ userId }: { userId: string }) {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activePeerId, setActivePeerId] = useState<string | null>(null);
+  const [thread, setThread] = useState<ThreadMessage[]>([]);
+  const [draft, setDraft] = useState('');
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
 
-  const handleSendMessage = () => {
-    if (newMessage.trim()) {
-      setMessages([...messages, { from: 'me', text: newMessage.trim() }]);
-      setNewMessage('');
+  const reloadConversations = async () => {
+    const data = await getConversations();
+    setConversations(data as Conversation[]);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    const deepLink = sessionStorage.getItem('kilrun.messagePeerId');
+    if (deepLink) {
+      sessionStorage.removeItem('kilrun.messagePeerId');
+      setActivePeerId(deepLink);
+    }
+    reloadConversations().catch(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!activePeerId) {
+      setThread([]);
+      return;
+    }
+    getThreadWith(activePeerId)
+      .then((msgs) => setThread(msgs as ThreadMessage[]))
+      .catch(() => setThread([]));
+  }, [activePeerId]);
+
+  const activePeer =
+    conversations.find((c) => c.peer.id === activePeerId)?.peer ??
+    (activePeerId
+      ? { id: activePeerId, username: 'Player', avatarUrl: '' }
+      : null);
+
+  const handleSend = async () => {
+    if (!activePeerId || !draft.trim()) return;
+    try {
+      await sendDirectMessage(activePeerId, draft);
+      setDraft('');
+      const msgs = await getThreadWith(activePeerId);
+      setThread(msgs as ThreadMessage[]);
+      await reloadConversations();
+    } catch {
+      toast({ title: 'Failed to send', variant: 'destructive' });
     }
   };
 
   return (
-    <div className="px-12 py-8 h-full flex flex-col">
-      <h1 className="text-5xl font-black mb-8 flex items-center gap-4">
-        <Mail className="w-12 h-12 text-blue-400" />
-        Messages
-      </h1>
-
-      <Card className="flex-1 flex overflow-hidden bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-        {/* Conversations List */}
-        <div className="w-1/3 min-w-[300px] border-r border-slate-700/30 flex flex-col">
-          <div className="p-4 border-b border-slate-700/30">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-              <Input placeholder="Search conversations..." className="pl-10 bg-slate-800 border-slate-700" />
-            </div>
-          </div>
+    <div className="px-4 sm:px-8 py-6 h-[calc(100vh-1rem)] flex flex-col">
+      <h1 className="text-3xl sm:text-4xl font-black mb-4">Messages</h1>
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 md:gap-4 border border-slate-700/40 rounded-xl overflow-hidden bg-slate-900/40">
+        <div
+          className={`md:w-80 border-b md:border-b-0 md:border-r border-slate-700/40 ${
+            activePeerId ? 'hidden md:flex' : 'flex'
+          } flex-col min-h-[40%] md:min-h-0`}
+        >
           <ScrollArea className="flex-1">
-            {conversations.map((convo, i) => (
-              <div
-                key={i}
-                className={`flex items-center p-4 cursor-pointer border-l-4 ${selectedConvo.name === convo.name ? 'border-primary bg-slate-700/20' : 'border-transparent hover:bg-slate-800/50'}`}
-                onClick={() => setSelectedConvo(convo)}
-              >
-                <Avatar>
-                  <AvatarImage src={convo.avatar} alt={convo.name} />
-                  <AvatarFallback>{convo.name.charAt(0)}</AvatarFallback>
-                </Avatar>
-                <div className="ml-4 flex-1">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-semibold">{convo.name}</h3>
-                    <p className="text-xs text-slate-400">{convo.time}</p>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <p className="text-sm text-slate-400 truncate w-4/5">{convo.lastMessage}</p>
-                    {convo.unread > 0 && <div className="w-5 h-5 bg-primary text-xs rounded-full flex items-center justify-center">{convo.unread}</div>}
-                  </div>
+            <div className="p-2 space-y-1">
+              {loading ? (
+                <div className="p-6 text-slate-400 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Loading...
                 </div>
-              </div>
-            ))}
+              ) : conversations.length === 0 ? (
+                <p className="p-6 text-sm text-slate-400">
+                  No conversations yet. Message someone from Friends or Leaderboard.
+                </p>
+              ) : (
+                conversations.map((c) => (
+                  <button
+                    key={c.peer.id}
+                    onClick={() => setActivePeerId(c.peer.id)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-lg text-left hover:bg-slate-800/60 ${
+                      activePeerId === c.peer.id ? 'bg-slate-800/80' : ''
+                    }`}
+                  >
+                    <Avatar>
+                      <AvatarImage src={c.peer.avatarUrl} />
+                      <AvatarFallback>{c.peer.username.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex justify-between gap-2">
+                        <p className="font-semibold truncate">{c.peer.username}</p>
+                        {c.unread > 0 && (
+                          <span className="text-xs bg-primary px-1.5 rounded-full">
+                            {c.unread}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-400 truncate">{c.lastMessage}</p>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
           </ScrollArea>
         </div>
 
-        {/* Chat Area */}
-        <div className="w-2/3 flex flex-col">
-          <div className="p-4 border-b border-slate-700/30 flex items-center justify-between bg-slate-900/50">
-            <h2 className="text-xl font-bold">{selectedConvo.name}</h2>
-            {/* Could add more actions here */}
-          </div>
-          <ScrollArea className="flex-1 p-6">
-            <div className="space-y-6">
-              {messages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.from === 'me' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-xs lg:max-w-md p-3 rounded-2xl ${msg.from === 'me' ? 'bg-primary text-primary-foreground rounded-br-none' : 'bg-slate-700/50 rounded-bl-none'}`}>
-                    <p>{msg.text}</p>
-                  </div>
+        <div
+          className={`flex-1 flex flex-col min-h-0 ${
+            !activePeerId ? 'hidden md:flex' : 'flex'
+          }`}
+        >
+          {activePeer ? (
+            <>
+              <div className="p-3 border-b border-slate-700/40 flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="md:hidden"
+                  onClick={() => setActivePeerId(null)}
+                >
+                  Back
+                </Button>
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={activePeer.avatarUrl} />
+                  <AvatarFallback>{activePeer.username.charAt(0)}</AvatarFallback>
+                </Avatar>
+                <p className="font-semibold">{activePeer.username}</p>
+              </div>
+              <ScrollArea className="flex-1 p-4">
+                <div className="space-y-3">
+                  {thread.map((m) => {
+                    const mine = m.senderId === userId;
+                    return (
+                      <div
+                        key={m.id}
+                        className={`flex ${mine ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div
+                          className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
+                            mine
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-slate-800 text-slate-100'
+                          }`}
+                        >
+                          {m.body}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
+              </ScrollArea>
+              <div className="p-3 border-t border-slate-700/40 flex gap-2">
+                <Input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="Type a message..."
+                  className="bg-slate-800 border-slate-700"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSend();
+                  }}
+                />
+                <Button onClick={handleSend} size="icon" className="shrink-0">
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-slate-400 p-6 text-center">
+              Select a conversation
             </div>
-          </ScrollArea>
-          <div className="p-4 bg-slate-900/50 border-t border-slate-700/30">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon"><Smile /></Button>
-              <Button variant="ghost" size="icon"><Paperclip /></Button>
-              <Input
-                placeholder="Type a message..."
-                className="bg-slate-800 border-slate-700 focus:ring-primary/50"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              />
-              <Button onClick={handleSendMessage}>
-                <Send className="w-4 h-4 mr-2"/> Send
-              </Button>
-            </div>
-          </div>
+          )}
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

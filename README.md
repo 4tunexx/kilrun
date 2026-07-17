@@ -95,12 +95,22 @@ See `.env.example` for the full list with comments. In short:
 | `NEXTAUTH_URL` | Local dev only | Not used to derive redirect origin/cookies in production (see note below) |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` / `CLERK_WEBHOOK_SECRET` | Yes (for email verification) | Clerk email-OTP verification layer |
 | `NEXT_PUBLIC_GAME_SERVER_URL` | Yes (for Deathrun) | WebSocket URL of the deployed Colyseus server |
+| `ADMIN_STEAM_IDS` | Recommended | Comma-separated SteamID64 values promoted to `admin` on login |
 
 > **Note on Steam auth in production**: the Steam login/callback routes derive the redirect origin and secure-cookie flag directly from the incoming request (`req.nextUrl`), not from `NEXTAUTH_URL`. This avoids a class of bugs where a stale/unset `NEXTAUTH_URL` causes Steam to redirect to the wrong domain, or the session cookie's `__Secure-` prefix to mismatch what Auth.js expects.
 
-> **Note on Prisma + serverless**: `src/lib/prisma.ts` always caches the `PrismaClient` singleton on `globalThis`, in every environment. Vercel reuses the same warm serverless instance across requests; without this cache, each request would spin up a brand-new client with its own MongoDB connection pool that never closed, eventually exhausting Atlas's connection limit.
+> **Note on Prisma + serverless**: `src/lib/prisma.ts` always caches the `PrismaClient` singleton on `globalThis`, in every environment. Vercel reuses the same warm serverless instance across requests; without this cache, each request would spin up a brand-new client with its own MongoDB connection pool that never closed, eventually exhausting Atlas's connection limit. On connection failures it recreates the client once (so a poisoned warm instance can recover) and defaults `maxPoolSize=1` on the connection string when unset.
+
+> **MongoDB Atlas checklist (required for Steam login on Vercel)**:
+> 1. **Network Access** → Add IP Access List entry `0.0.0.0/0` (allow from anywhere). Vercel serverless IPs are dynamic; locking to a single IP will cause Steam callback `prisma.user.findUnique()` to fail with `Server selection timeout` / `received fatal alert: InternalError`.
+> 2. Confirm the Atlas cluster is **not paused**.
+> 3. Set `DATABASE_URL` in the Vercel project env (same value as local `.env`), including `maxPoolSize=1`.
+> 4. Redeploy after changing Atlas Network Access or `DATABASE_URL`.
 
 ## Deployment
 
+- **Production domain**: set Vercel **Production Branch** to `main`. Only merges into `main` update `https://kilrun.vercel.app/`. Pull request previews use temporary URLs like `kilrun-xxx.vercel.app` — those are for testing, not the live site.
+- After merging a PR: Vercel auto-deploys Production to `kilrun.vercel.app` (or trigger **Redeploy** on the Production deployment).
 - **Frontend**: deploy to Vercel. Set all env vars above in the Vercel project settings (values from `.env` are not synced automatically). Steam login and the Clerk webhook both require the deployed HTTPS origin to be reachable.
+- Set `ADMIN_STEAM_IDS` to your SteamID64 so your account becomes `admin` on login and can open the Admin Panel.
 - **Game server**: deploy separately (Vercel cannot run always-on WebSocket processes) -- see [`server/README.md`](./server/README.md) for step-by-step instructions for Koyeb (free), Fly.io, and Railway.

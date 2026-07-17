@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { prisma } from '@/lib/prisma';
+import { withPrismaRetry } from '@/lib/prisma';
 import GameHubInterface from '@/components/game-hub-interface';
 
 export default async function Page() {
@@ -11,10 +11,22 @@ export default async function Page() {
     redirect('/landing');
   }
 
-  const user = await prisma.user.findUnique({ where: { steamId } });
+  let user;
+  try {
+    user = await withPrismaRetry((db) =>
+      db.user.findUnique({ where: { steamId } })
+    );
+  } catch (error) {
+    console.error('[home] failed to load user', error);
+    redirect('/landing?error=db_unavailable');
+  }
 
   if (!user) {
     redirect('/landing');
+  }
+
+  if (user.isBanned) {
+    redirect('/landing?error=banned');
   }
 
   return (
@@ -27,6 +39,9 @@ export default async function Page() {
         vpCurrency: user.vpCurrency,
         xpProgress: user.xpProgress,
         currentRank: user.currentRank,
+        role: user.role,
+        isVip: user.isVip,
+        bio: user.bio,
       }}
     />
   );

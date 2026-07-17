@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { Suspense, useRef } from 'react';
 import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -37,6 +38,34 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+
+const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  steam_auth_failed: 'Steam login was cancelled or failed. Please try again.',
+  steam_auth_invalid: 'Steam could not verify this login. Please try again.',
+  steam_id_missing: 'Steam did not return a valid account id. Please try again.',
+  db_unavailable:
+    'Could not reach the player database. Check that MongoDB Atlas Network Access allows 0.0.0.0/0 (required for Vercel) and that the cluster is not paused, then try again.',
+  steam_db_error: 'Login succeeded with Steam, but saving your profile failed. Please try again.',
+  banned: 'This account has been banned. Contact support if you believe this is a mistake.',
+};
+
+function AuthErrorBanner() {
+  const searchParams = useSearchParams();
+  const authError = searchParams.get('error');
+  if (!authError) return null;
+
+  const message =
+    AUTH_ERROR_MESSAGES[authError] ??
+    'Something went wrong during login. Please try again.';
+
+  return (
+    <div role="alert" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-6">
+      <div className="rounded-lg border border-red-500/40 bg-red-950/70 px-4 py-3 text-sm text-red-100">
+        {message}
+      </div>
+    </div>
+  );
+}
 
 const topPlayers = [
   {
@@ -154,6 +183,34 @@ export default function LandingPage() {
     window.location.href = '/api/auth/steam';
   };
 
+  const renderAuthCard = () => (
+    <Card className="bg-slate-900/60 backdrop-blur-md border-slate-700/50 w-full max-w-sm animate-in fade-in duration-1000 delay-400">
+      <CardHeader className="text-center">
+        <CardTitle className="text-2xl">Ready to Play?</CardTitle>
+        <CardDescription>
+          Login or create an account to get started.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col space-y-4">
+        <Button
+          onClick={handleNavigation}
+          size="lg"
+          className="w-full text-lg font-bold"
+        >
+          Login
+        </Button>
+        <Button
+          onClick={handleNavigation}
+          size="lg"
+          variant="outline"
+          className="w-full text-lg font-bold"
+        >
+          Register
+        </Button>
+      </CardContent>
+    </Card>
+  );
+
   return (
     <div className="min-h-screen text-white relative">
       {/* Background Image */}
@@ -169,72 +226,62 @@ export default function LandingPage() {
       </div>
 
       <div className="relative z-10">
+        <Suspense fallback={null}>
+          <AuthErrorBanner />
+        </Suspense>
+
         {/* Header Banner */}
-        <header className="pt-16 pb-8 md:pt-24 md:pb-16">
+        <header className="pt-8 pb-8 md:pt-24 md:pb-16">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="relative rounded-2xl overflow-hidden shadow-2xl">
-              <Carousel
-                opts={{ loop: true }}
-                plugins={[autoplayPlugin.current]}
-                className="w-full"
-                onMouseEnter={autoplayPlugin.current.stop}
-                onMouseLeave={autoplayPlugin.current.reset}
-              >
-                <CarouselContent className="-ml-0">
-                  {carouselImages.map((image, index) => (
-                    <CarouselItem key={index} className="pl-0">
-                      <Image
-                        src={image.src}
-                        alt={image.alt}
-                        width={1600}
-                        height={900}
-                        className="w-full h-auto md:h-[32rem] object-cover"
-                        data-ai-hint={image.hint}
-                      />
-                    </CarouselItem>
-                  ))}
-                </CarouselContent>
-                <CarouselPrevious className="absolute left-6 top-1/2 -translate-y-1/2 z-10" />
-                <CarouselNext className="absolute right-6 top-1/2 -translate-y-1/2 z-10" />
-              </Carousel>
-              <div className="absolute inset-0 bg-gradient-to-r from-slate-900/90 via-slate-900/50 to-transparent" />
+              <div className="relative">
+                <Carousel
+                  opts={{ loop: true }}
+                  plugins={[autoplayPlugin.current]}
+                  className="w-full"
+                  onMouseEnter={autoplayPlugin.current.stop}
+                  onMouseLeave={autoplayPlugin.current.reset}
+                >
+                  <CarouselContent className="-ml-0">
+                    {carouselImages.map((image, index) => (
+                      <CarouselItem key={index} className="pl-0">
+                        <Image
+                          src={image.src}
+                          alt={image.alt}
+                          width={1600}
+                          height={900}
+                          className="w-full h-56 sm:h-72 md:h-[32rem] object-cover"
+                          data-ai-hint={image.hint}
+                        />
+                      </CarouselItem>
+                    ))}
+                  </CarouselContent>
+                  <CarouselPrevious className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2 z-10" />
+                  <CarouselNext className="absolute right-4 md:right-6 top-1/2 -translate-y-1/2 z-10" />
+                </Carousel>
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/40 to-transparent md:bg-gradient-to-r md:from-slate-900/90 md:via-slate-900/50 md:to-transparent" />
 
-              <div className="absolute inset-0 flex flex-wrap items-center justify-between p-8 md:p-24 gap-8">
-                <div className="max-w-lg">
-                  <h1 className="text-5xl md:text-7xl font-black tracking-tight drop-shadow-2xl mb-4 animate-in fade-in-0 slide-in-from-bottom-10 zoom-in-90 duration-1000">
-                    Welcome to Kilrun
-                  </h1>
-                  <p className="text-lg md:text-xl text-slate-200 animate-in fade-in-0 slide-in-from-bottom-10 zoom-in-90 duration-1000 delay-200">
-                    The ultimate deathrun experience. Compete, conquer, and
-                    climb the ranks.
-                  </p>
+                {/* Title overlay; auth card only on md+ so it is not clipped on mobile */}
+                <div className="absolute inset-0 flex items-end md:items-center justify-between p-6 md:p-24 gap-8">
+                  <div className="max-w-lg">
+                    <h1 className="text-4xl sm:text-5xl md:text-7xl font-black tracking-tight drop-shadow-2xl mb-2 md:mb-4 animate-in fade-in-0 slide-in-from-bottom-10 zoom-in-90 duration-1000">
+                      Welcome to Kilrun
+                    </h1>
+                    <p className="text-base sm:text-lg md:text-xl text-slate-200 animate-in fade-in-0 slide-in-from-bottom-10 zoom-in-90 duration-1000 delay-200">
+                      The ultimate deathrun experience. Compete, conquer, and
+                      climb the ranks.
+                    </p>
+                  </div>
+
+                  <div className="hidden md:block w-full max-w-sm shrink-0">
+                    {renderAuthCard()}
+                  </div>
                 </div>
+              </div>
 
-                <Card className="bg-slate-900/60 backdrop-blur-md border-slate-700/50 w-full max-w-sm animate-in fade-in duration-1000 delay-400">
-                  <CardHeader className="text-center">
-                    <CardTitle className="text-2xl">Ready to Play?</CardTitle>
-                    <CardDescription>
-                      Login or create an account to get started.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-col space-y-4">
-                    <Button
-                      onClick={handleNavigation}
-                      size="lg"
-                      className="w-full text-lg font-bold"
-                    >
-                      Login
-                    </Button>
-                    <Button
-                      onClick={handleNavigation}
-                      size="lg"
-                      variant="outline"
-                      className="w-full text-lg font-bold"
-                    >
-                      Register
-                    </Button>
-                  </CardContent>
-                </Card>
+              {/* Mobile auth actions — in normal flow so they stay visible */}
+              <div className="md:hidden flex justify-center p-4 sm:p-6 bg-slate-900/70 border-t border-slate-700/50">
+                {renderAuthCard()}
               </div>
             </div>
           </div>

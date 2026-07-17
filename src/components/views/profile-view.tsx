@@ -1,16 +1,10 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  User,
   Save,
-  Bell,
-  Lock,
-  Trophy,
   KeyRound,
   Loader2,
   LogOut,
-  Mail,
-  ShieldCheck,
 } from 'lucide-react';
 import { signOut } from 'next-auth/react';
 import { formatDistanceToNow } from 'date-fns';
@@ -26,8 +20,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Separator } from '@/components/ui/separator';
 import {
   Table,
   TableBody,
@@ -38,13 +30,18 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { getMatchStats, getSessionUser, getStatsSummary, type StatsSummary } from '@/lib/actions';
+import { updateProfileBio } from '@/lib/social-actions';
 import type { MatchStat, User as UserModel } from '@/generated/prisma';
+import { useToast } from '@/hooks/use-toast';
 
 export default function ProfileView({ userId }: { userId: string }) {
   const [user, setUser] = useState<UserModel | null>(null);
   const [summary, setSummary] = useState<StatsSummary | null>(null);
   const [history, setHistory] = useState<MatchStat[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [bio, setBio] = useState('');
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     let isMounted = true;
@@ -52,6 +49,7 @@ export default function ProfileView({ userId }: { userId: string }) {
       ([u, s, h]) => {
         if (!isMounted) return;
         setUser(u);
+        setBio(u?.bio ?? '');
         setSummary(s);
         setHistory(h);
         setIsLoading(false);
@@ -63,10 +61,10 @@ export default function ProfileView({ userId }: { userId: string }) {
   }, [userId]);
 
   return (
-    <div className="px-12 py-8">
-      <div className="flex items-center gap-6 mb-8">
-        <div className="relative">
-          <Avatar className="h-32 w-32 border-4 border-primary">
+    <div className="px-4 sm:px-8 py-6">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 mb-6">
+        <div className="relative shrink-0">
+          <Avatar className="h-24 w-24 sm:h-32 sm:w-32 border-4 border-primary">
             <AvatarImage
               src={user?.avatarUrl}
               alt={user?.username ?? 'Player avatar'}
@@ -74,51 +72,77 @@ export default function ProfileView({ userId }: { userId: string }) {
             <AvatarFallback>{user?.username?.charAt(0) ?? '?'}</AvatarFallback>
           </Avatar>
         </div>
-        <div>
-          <h1 className="text-5xl font-black">{user?.username ?? 'Loading...'}</h1>
-          <p className="text-xl text-slate-400">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-3xl sm:text-5xl font-black truncate">
+            {user?.username ?? 'Loading...'}
+          </h1>
+          <p className="text-base sm:text-xl text-slate-400">
             {user?.createdAt
               ? `Joined ${formatDistanceToNow(new Date(user.createdAt))} ago`
               : ''}
           </p>
+          <p className="text-sm text-slate-400 capitalize mt-1">
+            Role: {user?.role ?? 'player'}
+            {user?.isVip ? ' · VIP' : ''}
+          </p>
         </div>
-        <Button variant="outline" className="ml-auto" onClick={() => signOut({ callbackUrl: '/landing' })}>
+        <Button
+          variant="outline"
+          className="sm:ml-auto w-full sm:w-auto"
+          onClick={() => signOut({ callbackUrl: '/landing' })}
+        >
           <LogOut className="mr-2 h-4 w-4" />
           Logout
         </Button>
       </div>
 
       <Tabs defaultValue="profile" className="w-full">
-        <TabsList className="grid w-full grid-cols-5 bg-slate-800/60 mb-6">
-          <TabsTrigger value="profile">Profile</TabsTrigger>
-          <TabsTrigger value="statistics">Statistics</TabsTrigger>
-          <TabsTrigger value="match-history">Match History</TabsTrigger>
-          <TabsTrigger value="achievements">Achievements</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
+        <TabsList className="w-full h-auto flex flex-wrap justify-start gap-1 bg-slate-800/60 p-1 mb-4">
+          <TabsTrigger value="profile" className="flex-none">
+            Profile
+          </TabsTrigger>
+          <TabsTrigger value="statistics" className="flex-none">
+            Statistics
+          </TabsTrigger>
+          <TabsTrigger value="match-history" className="flex-none">
+            Match History
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="flex-none">
+            Settings
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile" className="mt-0">
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>
               <CardTitle>Public Profile</CardTitle>
-              <CardDescription>
-                This is how other players see you.
-              </CardDescription>
+              <CardDescription>This is how other players see you.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="bio">Bio</Label>
                 <Textarea
                   id="bio"
-                  defaultValue="Competitive player from EU. Streaming every weekend. Looking for a duo to climb the ranks."
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  placeholder="Tell other players about yourself..."
                   className="bg-slate-900/50 border-slate-700 min-h-[100px]"
                 />
               </div>
-              <div className="flex items-center gap-4">
-                <Label>Profile Banner</Label>
-                <Button variant="outline">Change Banner</Button>
-              </div>
-              <Button>
+              <Button
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    await updateProfileBio(bio);
+                    toast({ title: 'Profile saved' });
+                  } catch {
+                    toast({ title: 'Save failed', variant: 'destructive' });
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              >
                 <Save className="mr-2 h-4 w-4" />
                 Save Profile
               </Button>
@@ -198,131 +222,45 @@ export default function ProfileView({ userId }: { userId: string }) {
           </Card>
         </TabsContent>
 
-        <TabsContent value="achievements" className="mt-0">
-          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-            <CardHeader>
-              <CardTitle>Achievements</CardTitle>
-              <CardDescription>Show off your accomplishments.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col items-center justify-center py-16 text-center text-slate-400 gap-2">
-                <Trophy className="w-10 h-10 text-slate-600" />
-                <p>Achievement tracking isn&apos;t part of the current data model yet.</p>
-                <p className="text-sm">
-                  Check the <span className="font-semibold text-slate-300">Statistics</span> and{' '}
-                  <span className="font-semibold text-slate-300">Match History</span> tabs for your live
-                  performance data.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         <TabsContent value="settings" className="mt-0">
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>
               <CardTitle>Settings</CardTitle>
-              <CardDescription>
-                Manage your account and preferences.
-              </CardDescription>
+              <CardDescription>Account details from your Steam login.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-8 max-w-2xl mx-auto">
-              {/* Account */}
-              <div>
-                <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                  <User className="w-5 h-5" /> Account
-                </h3>
-                <div className="space-y-4 pl-7">
-                  <div className="space-y-2">
-                    <Label htmlFor="username">Steam Username</Label>
-                    <Input id="username" value={user?.username ?? ''} readOnly className="bg-slate-900/50 border-slate-700" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="steamid">Steam ID</Label>
-                    <Input id="steamid" value={user?.steamId ?? ''} readOnly className="bg-slate-900/50 border-slate-700 font-mono" />
-                  </div>
-                  <p className="text-xs text-slate-500 flex items-center gap-2">
-                    <KeyRound className="w-3.5 h-3.5" />
-                    Your identity is managed by Steam. Update your username/avatar from your Steam profile.
-                  </p>
-                </div>
+            <CardContent className="space-y-6 max-w-2xl">
+              <div className="space-y-2">
+                <Label htmlFor="username">Steam Username</Label>
+                <Input
+                  id="username"
+                  value={user?.username ?? ''}
+                  readOnly
+                  className="bg-slate-900/50 border-slate-700"
+                />
               </div>
-              <Separator className="bg-slate-700/50" />
-              {/* Email Verification */}
-              <div>
-                <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                  <Mail className="w-5 h-5" /> Email Verification
-                </h3>
-                <div className="space-y-3 pl-7">
-                  {user?.emailVerified ? (
-                    <div className="flex items-center gap-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-4 py-3">
-                      <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
-                      <div>
-                        <p className="text-sm font-medium text-emerald-300">Verified</p>
-                        <p className="text-xs text-slate-400">{user.email}</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between gap-3 rounded-lg bg-primary/10 border border-primary/30 px-4 py-3">
-                      <div>
-                        <p className="text-sm font-medium text-primary">Not verified</p>
-                        <p className="text-xs text-slate-400">
-                          Verify your email to unlock a 100 VP Welcome Bonus.
-                        </p>
-                      </div>
-                      <Button asChild size="sm">
-                        <Link href="/verify-email">Verify Now</Link>
-                      </Button>
-                    </div>
-                  )}
-                </div>
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <Input
+                  value={user?.role ?? 'player'}
+                  readOnly
+                  className="bg-slate-900/50 border-slate-700 capitalize"
+                />
               </div>
-              <Separator className="bg-slate-700/50" />
-              {/* Notifications */}
-              <div>
-                <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                  <Bell className="w-5 h-5" /> Notifications
-                </h3>
-                <div className="space-y-4 pl-7">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="friend-requests">Friend Requests</Label>
-                    <Switch id="friend-requests" defaultChecked />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="game-invites">Game Invites</Label>
-                    <Switch id="game-invites" defaultChecked />
-                  </div>
-                   <div className="flex items-center justify-between">
-                    <Label htmlFor="patch-notes">Patch Notes & Updates</Label>
-                    <Switch id="patch-notes" />
-                  </div>
-                </div>
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <Input
+                  value={user?.email ?? 'Not verified'}
+                  readOnly
+                  className="bg-slate-900/50 border-slate-700"
+                />
               </div>
-              <Separator className="bg-slate-700/50" />
-              {/* Privacy */}
-              <div>
-                <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                  <Lock className="w-5 h-5" /> Privacy
-                </h3>
-                <div className="space-y-4 pl-7">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="show-online">Show my online status</Label>
-                    <Switch id="show-online" defaultChecked />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="allow-spectate">
-                      Allow others to spectate my games
-                    </Label>
-                    <Switch id="allow-spectate" />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="allow-friend-requests">
-                      Allow friend requests
-                    </Label>
-                    <Switch id="allow-friend-requests" defaultChecked />
-                  </div>
-                </div>
-              </div>
+              {!user?.emailVerified && (
+                <Button asChild variant="outline">
+                  <Link href="/verify-email">
+                    <KeyRound className="mr-2 h-4 w-4" /> Verify email
+                  </Link>
+                </Button>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
