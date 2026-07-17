@@ -4,7 +4,7 @@ import {
   isTransientDbConnectionError,
   withPrismaRetry,
 } from '@/lib/prisma';
-
+import { steamIdsPromotedToAdmin } from '@/lib/roles';
 const STEAM_OPENID_URL = 'https://steamcommunity.com/openid/login';
 const STEAM_CLAIMED_ID_REGEX = /^https:\/\/steamcommunity\.com\/openid\/id\/(\d+)$/;
 const FALLBACK_AVATAR =
@@ -82,11 +82,16 @@ export async function GET(req: NextRequest) {
     // Upsert through a retrying Prisma helper so a poisoned warm-instance
     // client (Atlas blip / exhausted pool) can reconnect instead of 500'ing.
     user = await withPrismaRetry(async (db) => {
+      const promoteAdmin = steamIdsPromotedToAdmin().has(steamId);
       const existingUser = await db.user.findUnique({ where: { steamId } });
       if (existingUser) {
         return db.user.update({
           where: { steamId },
-          data: { username, avatarUrl },
+          data: {
+            username,
+            avatarUrl,
+            ...(promoteAdmin ? { role: 'admin', isVip: true } : {}),
+          },
         });
       }
       return db.user.create({
@@ -97,6 +102,8 @@ export async function GET(req: NextRequest) {
           vpCurrency: 0,
           xpProgress: 0,
           currentRank: 'Unranked',
+          role: promoteAdmin ? 'admin' : 'player',
+          isVip: promoteAdmin,
           activeMissions: {
             create: [
               {

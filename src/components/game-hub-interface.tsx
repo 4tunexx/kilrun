@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { signOut } from 'next-auth/react';
 import {
@@ -43,6 +43,9 @@ import FriendsList, { type Player } from '@/components/views/friends-list';
 import LobbyView from '@/components/views/lobby-view';
 import AdminView from '@/components/views/admin-view';
 import type { KilrunMode } from '@/components/views/play-view';
+import { canAccessAdmin, VIP_UNLOCK_VP_COST } from '@/lib/roles';
+import { unlockVipWithVp } from '@/lib/social-actions';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -80,6 +83,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 
 export interface SessionPlayer {
   id: string;
@@ -89,6 +93,9 @@ export interface SessionPlayer {
   vpCurrency: number;
   xpProgress: number;
   currentRank: string;
+  role: string;
+  isVip: boolean;
+  bio: string;
 }
 
 const pageComponents: { [key: string]: React.ComponentType<any> } = {
@@ -109,12 +116,23 @@ const pageComponents: { [key: string]: React.ComponentType<any> } = {
   admin: AdminView,
 };
 
-// Views that read live telemetry from Prisma need to know which player to query for.
-const VIEWS_NEEDING_USER_ID = new Set(['home', 'profile', 'stats', 'missions']);
+const VIEWS_NEEDING_USER_ID = new Set([
+  'home',
+  'profile',
+  'stats',
+  'missions',
+  'messages',
+  'notifications',
+  'support',
+  'store',
+  'admin',
+]);
 
 export default function GameHubInterface({ user }: { user: SessionPlayer }) {
-  const [isMenuOpen, setIsMenuOpen] = useState(true);
-  const [isLeftMenuOpen, setIsLeftMenuOpen] = useState(true);
+  const isMobile = useIsMobile();
+  // Both rails stay collapsed until the player opens them (esp. important on mobile).
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isLeftMenuOpen, setIsLeftMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState('home');
   const [isVipDialogOpen, setIsVipDialogOpen] = useState(false);
   const [isFriendsSheetOpen, setIsFriendsSheetOpen] = useState(false);
@@ -123,7 +141,25 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [lobbyMode, setLobbyMode] = useState<KilrunMode | null>(null);
   const [isCompetitiveDialogOpen, setIsCompetitiveDialogOpen] = useState(false);
   const [pendingCompetitiveMode, setPendingCompetitiveMode] = useState<KilrunMode | null>(null);
+  const [vpBalance, setVpBalance] = useState(user.vpCurrency);
+  const [isVip, setIsVip] = useState(user.isVip);
   const { toast } = useToast();
+
+  useEffect(() => {
+    // Keep rails closed whenever we cross into mobile widths.
+    if (isMobile) {
+      setIsMenuOpen(false);
+      setIsLeftMenuOpen(false);
+    }
+  }, [isMobile]);
+
+  const navigate = (page: string) => {
+    setCurrentPage(page);
+    if (isMobile) {
+      setIsMenuOpen(false);
+      setIsLeftMenuOpen(false);
+    }
+  };
 
   const handleInvite = (name: string) => {
     toast({
@@ -137,9 +173,13 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     setIsProfileDialogOpen(true);
   };
 
-  const handleMessage = () => {
+  const handleMessage = (peerId?: string) => {
     setIsFriendsSheetOpen(false);
-    setCurrentPage('messages');
+    navigate('messages');
+    if (peerId) {
+      // Messages view reads optional peer via sessionStorage for deep-link.
+      sessionStorage.setItem('kilrun.messagePeerId', peerId);
+    }
   };
 
   const handlePlay = (mode: KilrunMode) => {
@@ -148,14 +188,14 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       setIsCompetitiveDialogOpen(true);
     } else {
       setLobbyMode(mode);
-      setCurrentPage('lobby');
+      navigate('lobby');
     }
   };
 
   const handleAgreeAndPlay = () => {
     if (pendingCompetitiveMode) {
       setLobbyMode(pendingCompetitiveMode);
-      setCurrentPage('lobby');
+      navigate('lobby');
     }
     setIsCompetitiveDialogOpen(false);
     setPendingCompetitiveMode(null);
@@ -163,11 +203,29 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
 
   const handleCancelLobby = () => {
     setLobbyMode(null);
-    setCurrentPage('play');
+    navigate('play');
   };
 
   const handleLaunchGame = () => {
-    setCurrentPage('play');
+    navigate('play');
+  };
+
+  const handleUnlockVip = async () => {
+    const result = await unlockVipWithVp();
+    if (!result.ok) {
+      toast({
+        title: 'Not enough VP',
+        description: `VIP costs ${VIP_UNLOCK_VP_COST} VP. Play matches to earn more.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsVip(true);
+    if (!result.already) {
+      setVpBalance((v) => v - VIP_UNLOCK_VP_COST);
+    }
+    setIsVipDialogOpen(false);
+    toast({ title: 'VIP unlocked', description: 'Welcome to VIP.' });
   };
 
   const menuItems = [
@@ -183,7 +241,17 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     signOut({ callbackUrl: '/landing' });
   };
 
+  const showAdmin = canAccessAdmin(user.role);
+
   const renderContent = () => {
+    if (currentPage === 'admin' && !showAdmin) {
+      return (
+        <div className="p-6 text-center text-slate-300">
+          Staff access required.
+        </div>
+      );
+    }
+
     const PageComponent = pageComponents[currentPage];
     if (PageComponent) {
       let props: any = {};
@@ -193,7 +261,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         props.onPlay = handlePlay;
       } else if (currentPage === 'home') {
         props.onLaunchGame = handleLaunchGame;
-        props.vpCurrency = user.vpCurrency;
+        props.vpCurrency = vpBalance;
       } else if (currentPage === 'lobby' && lobbyMode) {
         props = {
           mode: lobbyMode,
@@ -202,6 +270,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           username: user.username,
           avatarUrl: user.avatarUrl,
         };
+      } else if (currentPage === 'messages') {
+        props.userId = user.id;
       }
 
       if (VIEWS_NEEDING_USER_ID.has(currentPage)) {
@@ -209,27 +279,47 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       }
 
       if (currentPage === 'lobby' && !lobbyMode) {
-        setCurrentPage('play');
+        navigate('play');
         return <PlayView onPlay={handlePlay} />;
       }
 
       return <PageComponent {...props} />;
     }
-    return <HomeView onLaunchGame={handleLaunchGame} userId={user.id} vpCurrency={user.vpCurrency} />;
+    return (
+      <HomeView
+        onLaunchGame={handleLaunchGame}
+        userId={user.id}
+        vpCurrency={vpBalance}
+      />
+    );
   };
 
-  const NavButton = ({ icon: Icon, label, page, glow = false }: { icon: any, label: string, page: string, glow?: boolean }) => (
+  const NavButton = ({
+    icon: Icon,
+    label,
+    page,
+    glow = false,
+  }: {
+    icon: any;
+    label: string;
+    page: string;
+    glow?: boolean;
+  }) => (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          onClick={() => setCurrentPage(page)}
+          onClick={() => navigate(page)}
           className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 hover:bg-primary/20 shrink-0 group ${
             currentPage === page || (page === 'play' && currentPage === 'lobby')
               ? 'bg-primary/20 text-primary shadow-[0_0_15px_rgba(239,68,68,0.2)]'
               : 'text-slate-400 hover:text-primary'
           } ${glow ? 'bg-primary/10 text-primary border border-primary/20' : ''}`}
         >
-          <Icon className={`w-6 h-6 transition-colors duration-300 ${currentPage === page ? 'text-primary' : 'group-hover:text-primary'}`} />
+          <Icon
+            className={`w-6 h-6 transition-colors duration-300 ${
+              currentPage === page ? 'text-primary' : 'group-hover:text-primary'
+            }`}
+          />
         </button>
       </TooltipTrigger>
       <TooltipContent side="right">
@@ -255,9 +345,20 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         </div>
 
         <div className="relative z-10 flex h-screen">
-          <div className={`relative h-full transition-all duration-300 ease-in-out ${isLeftMenuOpen ? 'w-24' : 'w-0'}`}>
-            <div className={`w-24 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 h-full overflow-hidden transition-opacity duration-300 ${isLeftMenuOpen ? 'opacity-100' : 'opacity-0'}`}>
-              <div className="w-14 h-14 bg-primary rounded-xl flex items-center justify-center mb-6 shadow-lg cursor-pointer hover:bg-primary/90 transition shrink-0 hover:scale-110 active:scale-95 duration-300" onClick={() => setCurrentPage('home')}>
+          <div
+            className={`relative h-full transition-all duration-300 ease-in-out ${
+              isLeftMenuOpen ? 'w-20 sm:w-24' : 'w-0'
+            }`}
+          >
+            <div
+              className={`w-20 sm:w-24 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 h-full overflow-hidden transition-opacity duration-300 ${
+                isLeftMenuOpen ? 'opacity-100' : 'opacity-0'
+              }`}
+            >
+              <div
+                className="w-12 h-12 sm:w-14 sm:h-14 bg-primary rounded-xl flex items-center justify-center mb-4 sm:mb-6 shadow-lg cursor-pointer hover:bg-primary/90 transition shrink-0 hover:scale-110 active:scale-95 duration-300"
+                onClick={() => navigate('home')}
+              >
                 <div className="text-2xl font-bold">K</div>
               </div>
 
@@ -283,49 +384,47 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                     </DialogTrigger>
                   </TooltipTrigger>
                   <TooltipContent side="right">
-                    <p>Unlock VIP</p>
+                    <p>{isVip ? 'VIP Active' : 'Unlock VIP'}</p>
                   </TooltipContent>
                 </Tooltip>
-                <DialogContent className="bg-slate-900/80 backdrop-blur-md border-slate-700 text-white max-w-md">
+                <DialogContent className="bg-slate-900/80 backdrop-blur-md border-slate-700 text-white max-w-md mx-4">
                   <DialogHeader>
                     <DialogTitle className="text-2xl font-bold text-primary flex items-center gap-2">
                       <Crown className="w-6 h-6" />
-                      Unlock VIP Access
+                      {isVip ? 'VIP Active' : 'Unlock VIP Access'}
                     </DialogTitle>
                     <DialogDescription className="text-slate-300">
-                      Get exclusive perks and stand out from the crowd.
+                      {isVip
+                        ? 'You already have VIP perks on this account.'
+                        : `Spend ${VIP_UNLOCK_VP_COST} VP (balance: ${vpBalance}) for exclusive perks.`}
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="py-4 space-y-4">
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-slate-700/50 rounded-lg">
-                        <Star className="w-6 h-6 text-primary" />
+                  {!isVip && (
+                    <div className="py-4 space-y-4">
+                      <div className="flex items-center gap-4">
+                        <div className="p-3 bg-slate-700/50 rounded-lg">
+                          <Star className="w-6 h-6 text-primary" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold">Exclusive VIP Badge</h4>
+                          <p className="text-sm text-slate-400">
+                            Show off your status next to your name.
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="font-bold">Exclusive VIP Badge</h4>
-                        <p className="text-sm text-slate-400">
-                          Show off your status with a unique badge next to your
-                          name.
-                        </p>
-                      </div>
+                      <Button size="lg" className="w-full text-lg" onClick={handleUnlockVip}>
+                        Unlock for {VIP_UNLOCK_VP_COST} VP
+                      </Button>
                     </div>
-                  </div>
-                  <div className="text-center">
-                    <Button size="lg" className="w-full text-lg">
-                      Purchase for $9.99/month
-                    </Button>
-                  </div>
+                  )}
                 </DialogContent>
               </Dialog>
 
               <div className="flex-1 shrink-0" />
 
-              <NavButton icon={Shield} label="Admin Panel" page="admin" />
+              {showAdmin && <NavButton icon={Shield} label="Admin Panel" page="admin" />}
 
-              <Sheet
-                open={isFriendsSheetOpen}
-                onOpenChange={setIsFriendsSheetOpen}
-              >
+              <Sheet open={isFriendsSheetOpen} onOpenChange={setIsFriendsSheetOpen}>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <SheetTrigger asChild>
@@ -346,25 +445,24 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                 </Tooltip>
                 <SheetContent
                   side="bottom"
-                  className="h-1/2 bg-slate-900/80 backdrop-blur-md border-t border-slate-700 text-white"
+                  className="h-[70vh] sm:h-1/2 bg-slate-900/80 backdrop-blur-md border-t border-slate-700 text-white"
                 >
-                  <SheetHeader className="flex-row items-center justify-between">
-                    <div className="space-y-1">
-                      <SheetTitle className="text-2xl font-bold flex items-center gap-2">
-                        <Users /> Friends List
-                      </SheetTitle>
-                    </div>
+                  <SheetHeader>
+                    <SheetTitle className="text-2xl font-bold flex items-center gap-2">
+                      <Users /> Friends List
+                    </SheetTitle>
                   </SheetHeader>
                   <FriendsList
                     onInvite={handleInvite}
                     onViewProfile={handleViewProfile}
-                    onMessage={handleMessage}
+                    onMessage={(peer) => handleMessage(peer?.id)}
                   />
                 </SheetContent>
               </Sheet>
             </div>
-            
+
             <button
+              aria-label={isLeftMenuOpen ? 'Collapse navigation' : 'Expand navigation'}
               onClick={() => setIsLeftMenuOpen(!isLeftMenuOpen)}
               className={`absolute -right-5 top-1/2 -translate-y-1/2 w-10 h-10 bg-primary hover:bg-primary/90 backdrop-blur-md border border-slate-700/30 rounded-lg flex items-center justify-center transition shadow-lg z-20 hover:scale-110 ${
                 !isLeftMenuOpen ? 'animate-slow-pulse-horizontal' : ''
@@ -378,10 +476,11 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
             </button>
           </div>
 
-          <ScrollArea className="flex-1">{renderContent()}</ScrollArea>
+          <ScrollArea className="flex-1 min-w-0">{renderContent()}</ScrollArea>
 
           <div className="relative">
             <button
+              aria-label={isMenuOpen ? 'Collapse profile menu' : 'Expand profile menu'}
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className={`absolute -left-5 top-1/2 -translate-y-1/2 w-10 h-10 bg-primary hover:bg-primary/90 backdrop-blur-md border border-slate-700/30 rounded-lg flex items-center justify-center transition shadow-lg z-20 hover:scale-110 ${
                 !isMenuOpen ? 'animate-slow-pulse-horizontal rotate-180' : ''
@@ -395,51 +494,57 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
             </button>
             <div
               className={`bg-slate-900/60 backdrop-blur-md border-l border-slate-700/30 transition-all duration-300 ease-in-out overflow-hidden h-full ${
-                isMenuOpen ? 'w-80' : 'w-0'
+                isMenuOpen ? 'w-72 sm:w-80' : 'w-0'
               }`}
             >
-              <ScrollArea className="h-full w-80">
+              <ScrollArea className="h-full w-72 sm:w-80">
                 <div
-                  className={`p-6 ${
+                  className={`p-4 sm:p-6 ${
                     isMenuOpen ? 'opacity-100' : 'opacity-0'
                   } transition-opacity duration-300`}
                 >
                   <div className={isMenuOpen ? 'block' : 'hidden'}>
                     <div className="flex flex-col items-center mb-8 animate-in fade-in duration-500">
-                      <CircularProgress progress={user.xpProgress} level={Math.floor(user.xpProgress / 100)}>
+                      <CircularProgress
+                        progress={user.xpProgress % 100}
+                        level={Math.floor(user.xpProgress / 100)}
+                      >
                         <Avatar className="h-28 w-28 border-4 border-slate-800">
-                          <AvatarImage
-                            src={user.avatarUrl}
-                            alt={user.username}
-                          />
+                          <AvatarImage src={user.avatarUrl} alt={user.username} />
                           <AvatarFallback>{user.username.charAt(0)}</AvatarFallback>
                         </Avatar>
                       </CircularProgress>
-                      <h3 className="text-xl font-bold mt-4 pt-4">{user.username}</h3>
+                      <h3 className="text-xl font-bold mt-4 pt-4 flex items-center gap-2">
+                        {user.username}
+                        {isVip && <Badge className="bg-yellow-500 text-black">VIP</Badge>}
+                      </h3>
+                      <p className="text-xs uppercase tracking-wide text-slate-400 mt-1">
+                        {user.role}
+                      </p>
                       <div className="mt-4 bg-slate-800/50 px-4 py-2 rounded-lg text-center">
                         <div className="text-xs text-slate-400">Rank</div>
                         <div className="text-lg font-bold text-yellow-400">
                           {user.currentRank}
                         </div>
                       </div>
+                      <div className="mt-2 text-sm text-slate-300">{vpBalance} VP</div>
                     </div>
 
                     <div className="w-full h-px bg-slate-700/50 my-6" />
 
-                    <h2 className="text-xl font-bold mb-6 tracking-tight">
-                      Shortcuts
-                    </h2>
+                    <h2 className="text-xl font-bold mb-6 tracking-tight">Shortcuts</h2>
                     <div className="space-y-2">
                       {menuItems.map((item, i) => (
                         <button
                           key={i}
-                          onClick={() => item.page && setCurrentPage(item.page)}
+                          onClick={() => item.page && navigate(item.page)}
                           className="w-full flex items-center justify-start px-4 py-3.5 rounded-lg hover:bg-primary/10 transition-all duration-300 text-left group relative overflow-hidden hover:-translate-y-0.5"
                         >
-                          <div className="absolute inset-0 bg-gradient-to-r from-primary/0 to-primary/0 group-hover:from-primary/5 group-hover:to-primary/10 transition-all duration-300" />
                           <div className="flex items-center space-x-4 relative z-10 transition-transform duration-300 group-hover:translate-x-1">
                             <item.icon className="w-5 h-5 text-slate-400 group-hover:text-primary transition-colors" />
-                            <span className="font-medium group-hover:text-white transition-colors">{item.label}</span>
+                            <span className="font-medium group-hover:text-white transition-colors">
+                              {item.label}
+                            </span>
                           </div>
                         </button>
                       ))}
@@ -449,7 +554,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                       >
                         <div className="flex items-center space-x-4 relative z-10">
                           <ShieldAlert className="w-5 h-5 text-slate-400 group-hover:text-destructive transition-colors" />
-                          <span className="font-medium group-hover:text-destructive transition-colors">Log Out</span>
+                          <span className="font-medium group-hover:text-destructive transition-colors">
+                            Log Out
+                          </span>
                         </div>
                       </button>
                     </div>
@@ -460,11 +567,26 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           </div>
         </div>
       </div>
+
+      <Dialog open={isProfileDialogOpen} onOpenChange={setIsProfileDialogOpen}>
+        <DialogContent className="bg-slate-900/90 border-slate-700 text-white max-w-lg mx-4 max-h-[85vh] overflow-y-auto">
+          {selectedProfile && (
+            <PublicProfileView
+              player={selectedProfile}
+              onMessage={() => {
+                setIsProfileDialogOpen(false);
+                handleMessage(selectedProfile.id);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog
         open={isCompetitiveDialogOpen}
         onOpenChange={setIsCompetitiveDialogOpen}
       >
-        <AlertDialogContent className="bg-slate-900/80 backdrop-blur-md border-slate-700 text-white">
+        <AlertDialogContent className="bg-slate-900/80 backdrop-blur-md border-slate-700 text-white mx-4">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-2xl">
               <ShieldAlert className="w-6 h-6 text-primary" />

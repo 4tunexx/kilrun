@@ -25,6 +25,10 @@ export default async function Page() {
     redirect('/landing');
   }
 
+  if (user.isBanned) {
+    redirect('/landing?error=banned');
+  }
+
   return (
     <GameHubInterface
       user={{
@@ -35,6 +39,9 @@ export default async function Page() {
         vpCurrency: user.vpCurrency,
         xpProgress: user.xpProgress,
         currentRank: user.currentRank,
+        role: user.role,
+        isVip: user.isVip,
+        bio: user.bio,
       }}
     />
   );

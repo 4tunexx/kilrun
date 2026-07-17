@@ -46,6 +46,7 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   db_unavailable:
     'Could not reach the player database. Check that MongoDB Atlas Network Access allows 0.0.0.0/0 (required for Vercel) and that the cluster is not paused, then try again.',
   steam_db_error: 'Login succeeded with Steam, but saving your profile failed. Please try again.',
+  banned: 'This account has been banned. Contact support if you believe this is a mistake.',
 };
 
 function AuthErrorBanner() {

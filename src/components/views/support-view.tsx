@@ -1,106 +1,153 @@
-import { HelpCircle, Mail, Phone } from 'lucide-react';
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+'use client';
+
+import { useEffect, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import {
+  createSupportTicket,
+  getMySupportTickets,
+} from '@/lib/social-actions';
+import { useToast } from '@/hooks/use-toast';
 
-const faqs = [
-  {
-    question: 'How do I reset my password?',
-    answer:
-      "You can reset your password from the login screen by clicking 'Forgot Password'. You will receive an email with instructions.",
-  },
-  {
-    question: 'How do I change my username?',
-    answer:
-      'Usernames cannot be changed at this time. We are working on adding this feature in a future update.',
-  },
-  {
-    question: 'How does the ranking system work?',
-    answer:
-      'The ranking system is based on your performance in competitive matches. Winning matches against higher-ranked opponents will increase your rank faster.',
-  },
-  {
-    question: 'I found a bug. Where can I report it?',
-    answer:
-      'You can report bugs through our official Discord server or by using the contact form on this page. Please provide as much detail as possible.',
-  },
-];
+export default function SupportView({ userId }: { userId?: string }) {
+  const [subject, setSubject] = useState('');
+  const [category, setCategory] = useState('account');
+  const [body, setBody] = useState('');
+  const [tickets, setTickets] = useState<
+    { id: string; subject: string; category: string; status: string; staffNote: string; createdAt: Date }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const { toast } = useToast();
 
-export default function SupportView() {
+  const reload = async () => {
+    const data = await getMySupportTickets();
+    setTickets(data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    reload().catch(() => setLoading(false));
+  }, [userId]);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subject.trim() || !body.trim()) return;
+    setSubmitting(true);
+    try {
+      await createSupportTicket({ subject, category, body });
+      setSubject('');
+      setBody('');
+      toast({ title: 'Ticket submitted' });
+      await reload();
+    } catch {
+      toast({ title: 'Failed to submit ticket', variant: 'destructive' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
-    <div className="px-12 py-8">
-      <h1 className="text-5xl font-black mb-8 flex items-center gap-4">
-        <HelpCircle className="w-12 h-12 text-blue-400" />
-        Support Center
-      </h1>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div>
-          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-            <CardHeader>
-              <CardTitle>Frequently Asked Questions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Accordion type="single" collapsible className="w-full">
-                {faqs.map((faq, index) => (
-                  <AccordionItem
-                    value={`item-${index}`}
-                    key={index}
-                    className="border-slate-700/50"
-                  >
-                    <AccordionTrigger className="hover:no-underline text-left">
-                      {faq.question}
-                    </AccordionTrigger>
-                    <AccordionContent className="text-slate-300">
-                      {faq.answer}
-                    </AccordionContent>
-                  </AccordionItem>
-                ))}
-              </Accordion>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div>
-          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-            <CardHeader>
-              <CardTitle>Contact Us</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Input
-                placeholder="Your Email"
-                className="bg-slate-900/50 border-slate-700 focus:ring-primary/50"
-              />
-              <Input
-                placeholder="Subject"
-                className="bg-slate-900/50 border-slate-700 focus:ring-primary/50"
-              />
-              <Textarea
-                placeholder="Describe your issue..."
-                className="bg-slate-900/50 border-slate-700 focus:ring-primary/50 h-32"
-              />
-              <Button className="w-full">Send Message</Button>
-              <div className="flex items-center justify-center space-x-6 pt-4 text-slate-400">
-                <div className="flex items-center gap-2 hover:text-primary transition cursor-pointer">
-                  <Mail size={16} />
-                  <span>support@kilrun.com</span>
-                </div>
-                <div className="flex items-center gap-2 hover:text-primary transition cursor-pointer">
-                  <Phone size={16} />
-                  <span>+1 (234) 567-890</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+    <div className="px-4 sm:px-8 py-6 space-y-6">
+      <div>
+        <h1 className="text-3xl sm:text-4xl font-black">Support</h1>
+        <p className="text-slate-400 mt-1">Open a ticket — staff will update the status in Admin.</p>
       </div>
+
+      <Card className="bg-slate-800/40 border-slate-700/30">
+        <CardHeader>
+          <CardTitle>New ticket</CardTitle>
+          <CardDescription>Describe the issue as clearly as you can.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="subject">Subject</Label>
+              <Input
+                id="subject"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="bg-slate-900/50 border-slate-700"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="account">Account</SelectItem>
+                  <SelectItem value="billing">Billing / VP</SelectItem>
+                  <SelectItem value="gameplay">Gameplay</SelectItem>
+                  <SelectItem value="report">Player report</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="body">Details</Label>
+              <Textarea
+                id="body"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                className="bg-slate-900/50 border-slate-700 min-h-[120px]"
+                required
+              />
+            </div>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Submit ticket
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-slate-800/40 border-slate-700/30">
+        <CardHeader>
+          <CardTitle>Your tickets</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {loading ? (
+            <div className="text-slate-400 flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading...
+            </div>
+          ) : tickets.length === 0 ? (
+            <p className="text-slate-400 text-sm">No tickets yet.</p>
+          ) : (
+            tickets.map((t) => (
+              <div
+                key={t.id}
+                className="p-3 rounded-lg bg-slate-900/40 border border-slate-700/40 space-y-1"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">{t.subject}</p>
+                  <Badge variant="outline" className="capitalize">
+                    {t.status}
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-400 capitalize">{t.category}</p>
+                {t.staffNote ? (
+                  <p className="text-sm text-slate-300 mt-2">Staff: {t.staffNote}</p>
+                ) : null}
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

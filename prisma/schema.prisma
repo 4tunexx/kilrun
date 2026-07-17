@@ -8,6 +8,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Account privilege: player | vip | moderator | admin
 model User {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
   steamId     String   @unique
@@ -16,18 +17,28 @@ model User {
   vpCurrency  Int      @default(0)
   xpProgress  Int      @default(0)
   currentRank String   @default("Unranked")
+  role        String   @default("player")
+  bio         String   @default("")
+  isBanned    Boolean  @default(false)
+  isVip       Boolean  @default(false)
   createdAt   DateTime @default(now())
 
-  // Secondary email identity, verified via Clerk's OTP flow after Steam login.
-  // Nullable/optional because Steam remains the sole login mechanism -- these
-  // fields are populated only once a player completes email verification.
   clerkId       String?  @unique
   email         String?  @unique
   emailVerified Boolean  @default(false)
 
-  matchStats     MatchStat[]
-  activeMissions ActiveMission[]
-  matchResults   MatchResult[]
+  matchStats         MatchStat[]
+  activeMissions     ActiveMission[]
+  matchResults       MatchResult[]
+  sentMessages       Message[]       @relation("SentMessages")
+  receivedMessages   Message[]       @relation("ReceivedMessages")
+  forumPosts         ForumPost[]
+  forumReplies       ForumReply[]
+  supportTickets     SupportTicket[]
+  notifications      Notification[]
+  friendshipsA       Friendship[]    @relation("FriendshipA")
+  friendshipsB       Friendship[]    @relation("FriendshipB")
+  purchases          Purchase[]
 }
 
 model MatchStat {
@@ -43,13 +54,12 @@ model MatchStat {
   @@index([userId])
 }
 
-/** Mode-agnostic match outcome, shared by Deathrun/Horde/Competitive -- feeds the running totals on `User` (vpCurrency/xpProgress/currentRank). */
 model MatchResult {
   id       String   @id @default(auto()) @map("_id") @db.ObjectId
   userId   String   @db.ObjectId
-  mode     String // "deathrun" | "horde" | "competitive"
-  role     String? // "trapper" | "runner" (deathrun-specific)
-  outcome  String // "win" | "loss" | "survived" | "eliminated"
+  mode     String
+  role     String?
+  outcome  String
   xpEarned Int
   vpEarned Int
   playedAt DateTime @default(now())
@@ -65,6 +75,7 @@ model StoreItem {
   itemCategory String
   itemSku      String  @unique
   vpPrice      Int
+  imageUrl     String?
   isAvailable  Boolean @default(true)
 }
 
@@ -77,6 +88,126 @@ model ActiveMission {
   targetCount  Int
   currentCount Int     @default(0)
   isCompleted  Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Friendship {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userAId   String   @db.ObjectId
+  userBId   String   @db.ObjectId
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
+
+  userA User @relation("FriendshipA", fields: [userAId], references: [id])
+  userB User @relation("FriendshipB", fields: [userBId], references: [id])
+
+  @@unique([userAId, userBId])
+  @@index([userBId])
+}
+
+model Message {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  senderId   String    @db.ObjectId
+  receiverId String    @db.ObjectId
+  body       String
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  sender   User @relation("SentMessages", fields: [senderId], references: [id])
+  receiver User @relation("ReceivedMessages", fields: [receiverId], references: [id])
+
+  @@index([senderId, receiverId])
+  @@index([receiverId, createdAt])
+}
+
+model ForumPost {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  authorId  String   @db.ObjectId
+  title     String
+  body      String
+  category  String   @default("general")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author  User         @relation(fields: [authorId], references: [id])
+  replies ForumReply[]
+
+  @@index([createdAt])
+}
+
+model ForumReply {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  postId    String   @db.ObjectId
+  authorId  String   @db.ObjectId
+  body      String
+  createdAt DateTime @default(now())
+
+  post   ForumPost @relation(fields: [postId], references: [id])
+  author User      @relation(fields: [authorId], references: [id])
+
+  @@index([postId])
+}
+
+model SupportTicket {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  subject   String
+  category  String
+  body      String
+  status    String   @default("open")
+  staffNote String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([status])
+  @@index([userId])
+}
+
+model Notification {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  title     String
+  body      String
+  type      String   @default("info")
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+}
+
+model NewsPost {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  title     String
+  summary   String
+  body      String
+  published Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Guide {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  title     String
+  summary   String
+  body      String
+  category  String   @default("general")
+  published Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Purchase {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  itemSku   String
+  itemName  String
+  vpSpent   Int
+  createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
 
