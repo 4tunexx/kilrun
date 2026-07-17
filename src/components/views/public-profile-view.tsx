@@ -30,6 +30,8 @@ import {
 } from '@/lib/social-actions';
 import { getPublicProfile, type PublicProfile } from '@/lib/public-profile-actions';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import { getRoleTextColorClass } from '@/lib/role-colors';
+import { ShowcaseChips } from '@/components/showcase-chips';
 import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -44,7 +46,7 @@ export default function PublicProfileView({
 }) {
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const { toast } = useToast();
 
   const reload = () => {
@@ -87,7 +89,7 @@ export default function PublicProfileView({
     : null;
 
   const handleAddFriend = async () => {
-    setBusy(true);
+    setBusyAction('add-friend');
     try {
       await sendFriendRequest(profile.id);
       toast({ title: 'Friend request sent' });
@@ -95,35 +97,39 @@ export default function PublicProfileView({
     } catch (e: any) {
       toast({ title: e?.message ?? 'Could not send request', variant: 'destructive' });
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const handleRemoveFriend = async () => {
-    setBusy(true);
+    setBusyAction('remove-friend');
     try {
       await removeFriend(profile.id);
       toast({ title: 'Friend removed' });
       reload();
+    } catch (e: any) {
+      toast({ title: e?.message ?? 'Could not remove friend', variant: 'destructive' });
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const handleRespondRequest = async (accept: boolean) => {
     if (!profile.incomingFriendshipId) return;
-    setBusy(true);
+    setBusyAction(accept ? 'accept-friend' : 'decline-friend');
     try {
       await respondFriendRequest(profile.incomingFriendshipId, accept);
       toast({ title: accept ? 'Friend request accepted' : 'Friend request declined' });
       reload();
+    } catch (e: any) {
+      toast({ title: e?.message ?? 'Could not update request', variant: 'destructive' });
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const handleVote = async (value: 1 | -1) => {
-    setBusy(true);
+    setBusyAction(value === 1 ? 'rep-up' : 'rep-down');
     try {
       const result = await voteReputation(profile.id, value);
       setProfile((p) =>
@@ -138,7 +144,7 @@ export default function PublicProfileView({
     } catch (e: any) {
       toast({ title: e?.message ?? 'Could not vote', variant: 'destructive' });
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -172,13 +178,23 @@ export default function PublicProfileView({
             <AvatarFallback>{profile.username.charAt(0)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1 pb-1">
-            <h1 className="text-2xl sm:text-4xl font-black truncate flex items-center gap-2">
+            <h1
+              className={`text-2xl sm:text-4xl font-black truncate flex items-center gap-2 ${getRoleTextColorClass(
+                profile.role,
+                profile.isVip
+              )}`}
+            >
               {profile.username}
               {profile.isVip && <Badge className="bg-yellow-500 text-black">VIP</Badge>}
             </h1>
             <p className="text-sm text-slate-400 capitalize">
               {profile.role} · Joined {formatDistanceToNow(new Date(profile.createdAt))} ago
             </p>
+            {profile.showcase.length > 0 && (
+              <div className="mt-2">
+                <ShowcaseChips items={profile.showcase} />
+              </div>
+            )}
           </div>
 
           {profile.friendStatus !== 'self' && (
@@ -186,20 +202,28 @@ export default function PublicProfileView({
               <Button
                 variant={profile.myReputationVote === 1 ? 'default' : 'outline'}
                 size="sm"
-                disabled={busy}
+                disabled={busyAction !== null}
                 onClick={() => handleVote(1)}
                 title="+rep"
               >
-                <ThumbsUp className="h-4 w-4" />
+                {busyAction === 'rep-up' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ThumbsUp className="h-4 w-4" />
+                )}
               </Button>
               <Button
                 variant={profile.myReputationVote === -1 ? 'destructive' : 'outline'}
                 size="sm"
-                disabled={busy}
+                disabled={busyAction !== null}
                 onClick={() => handleVote(-1)}
                 title="-rep"
               >
-                <ThumbsDown className="h-4 w-4" />
+                {busyAction === 'rep-down' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ThumbsDown className="h-4 w-4" />
+                )}
               </Button>
 
               {profile.friendStatus === 'friends' && (
@@ -210,16 +234,26 @@ export default function PublicProfileView({
                   <Button
                     variant="destructive"
                     size="sm"
-                    disabled={busy}
+                    disabled={busyAction !== null}
                     onClick={handleRemoveFriend}
                   >
-                    <Trash2 className="mr-2 h-4 w-4" /> Remove Friend
+                    {busyAction === 'remove-friend' ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="mr-2 h-4 w-4" />
+                    )}
+                    Remove Friend
                   </Button>
                 </>
               )}
               {profile.friendStatus === 'none' && (
-                <Button size="sm" disabled={busy} onClick={handleAddFriend}>
-                  <UserPlus className="mr-2 h-4 w-4" /> Add Friend
+                <Button size="sm" disabled={busyAction !== null} onClick={handleAddFriend}>
+                  {busyAction === 'add-friend' ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <UserPlus className="mr-2 h-4 w-4" />
+                  )}
+                  Add Friend
                 </Button>
               )}
               {profile.friendStatus === 'pending_sent' && (
@@ -229,16 +263,30 @@ export default function PublicProfileView({
               )}
               {profile.friendStatus === 'pending_received' && (
                 <>
-                  <Button size="sm" disabled={busy} onClick={() => handleRespondRequest(true)}>
-                    <Check className="mr-2 h-4 w-4" /> Accept
+                  <Button
+                    size="sm"
+                    disabled={busyAction !== null}
+                    onClick={() => handleRespondRequest(true)}
+                  >
+                    {busyAction === 'accept-friend' ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="mr-2 h-4 w-4" />
+                    )}
+                    Accept
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={busyAction !== null}
                     onClick={() => handleRespondRequest(false)}
                   >
-                    <X className="mr-2 h-4 w-4" /> Decline
+                    {busyAction === 'decline-friend' ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <X className="mr-2 h-4 w-4" />
+                    )}
+                    Decline
                   </Button>
                 </>
               )}

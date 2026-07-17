@@ -14,9 +14,10 @@ import {
 } from '@/lib/social-actions';
 import { useToast } from '@/hooks/use-toast';
 import { UserHoverCard } from '@/components/user-hover-card';
+import { getRoleTextColorClass } from '@/lib/role-colors';
 
 type Conversation = {
-  peer: { id: string; username: string; avatarUrl: string };
+  peer: { id: string; username: string; avatarUrl: string; role?: string; isVip?: boolean };
   lastMessage: string;
   createdAt: Date;
   unread: number;
@@ -37,6 +38,8 @@ export default function MessagesView({ userId }: { userId: string }) {
     id: string;
     username: string;
     avatarUrl: string;
+    role?: string;
+    isVip?: boolean;
   } | null>(null);
   const [thread, setThread] = useState<ThreadMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -124,7 +127,14 @@ export default function MessagesView({ userId }: { userId: string }) {
                     </Avatar>
                     <div className="min-w-0 flex-1">
                       <div className="flex justify-between gap-2">
-                        <p className="font-semibold truncate">{c.peer.username}</p>
+                        <p
+                          className={`font-semibold truncate ${getRoleTextColorClass(
+                            c.peer.role,
+                            c.peer.isVip
+                          )}`}
+                        >
+                          {c.peer.username}
+                        </p>
                         {c.unread > 0 && (
                           <span className="text-xs bg-primary px-1.5 rounded-full">
                             {c.unread}
@@ -160,7 +170,13 @@ export default function MessagesView({ userId }: { userId: string }) {
                   <AvatarImage src={activePeer.avatarUrl} />
                   <AvatarFallback>{activePeer.username.charAt(0)}</AvatarFallback>
                 </Avatar>
-                <UserHoverCard userId={activePeer.id}>{activePeer.username}</UserHoverCard>
+                <UserHoverCard
+                  userId={activePeer.id}
+                  role={activePeer.role}
+                  isVip={activePeer.isVip}
+                >
+                  {activePeer.username}
+                </UserHoverCard>
               </div>
               <ScrollArea className="flex-1 p-4">
                 <div className="space-y-3">

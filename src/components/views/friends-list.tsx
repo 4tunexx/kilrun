@@ -53,7 +53,10 @@ export const FriendsList = ({
 }) => {
   const [friends, setFriends] = useState<FriendRow[]>([]);
   const [requests, setRequests] = useState<
-    { id: string; userA: { id: string; username: string; avatarUrl: string } }[]
+    {
+      id: string;
+      userA: { id: string; username: string; avatarUrl: string; role?: string; isVip?: boolean };
+    }[]
   >([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -112,7 +115,12 @@ export const FriendsList = ({
                   <AvatarImage src={req.userA.avatarUrl} />
                   <AvatarFallback>{req.userA.username.charAt(0)}</AvatarFallback>
                 </Avatar>
-                <UserHoverCard userId={req.userA.id} className="truncate text-sm">
+                <UserHoverCard
+                  userId={req.userA.id}
+                  role={req.userA.role}
+                  isVip={req.userA.isVip}
+                  className="truncate text-sm"
+                >
                   {req.userA.username}
                 </UserHoverCard>
               </div>
@@ -165,7 +173,12 @@ export const FriendsList = ({
                       <AvatarFallback>{friend.username.charAt(0)}</AvatarFallback>
                     </Avatar>
                     <div className="min-w-0">
-                      <UserHoverCard userId={friend.id} className="truncate block">
+                      <UserHoverCard
+                        userId={friend.id}
+                        role={friend.role}
+                        isVip={friend.isVip}
+                        className="truncate block"
+                      >
                         {friend.username}
                       </UserHoverCard>
                       <p className="text-xs text-slate-400">

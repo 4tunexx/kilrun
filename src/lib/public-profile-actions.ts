@@ -6,6 +6,8 @@ import { getLevelProgress, getRankForLevel } from '@/lib/progression';
 import { getPlayerAchievements, getPlayerBadges } from '@/lib/progression-actions';
 import { getMyReputationVote } from '@/lib/social-actions';
 import { normalizeBannerConfig, type BannerConfig } from '@/lib/banner';
+import { parseShowcaseEntries, type ShowcaseDisplayItem } from '@/lib/showcase';
+import { resolveShowcaseEntries } from '@/lib/showcase-actions';
 
 async function getViewer() {
   const session = await auth();
@@ -34,6 +36,7 @@ export type PublicProfile = {
   equippedBannerConfig: BannerConfig | null;
   equippedBannerImageUrl: string | null;
   equippedBannerItemName: string | null;
+  showcase: ShowcaseDisplayItem[];
   leaderboardPosition: number;
   totalPlayers: number;
   friendStatus: FriendStatus;
@@ -108,6 +111,8 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     myReputationVote = await getMyReputationVote(target.id);
   }
 
+  const showcase = await resolveShowcaseEntries(target.id, parseShowcaseEntries(target.showcaseItems));
+
   return {
     id: target.id,
     username: target.username,
@@ -128,6 +133,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
       : null,
     equippedBannerImageUrl: target.equippedBannerImageUrl,
     equippedBannerItemName: target.equippedBannerItemName,
+    showcase,
     leaderboardPosition: higherRanked + 1,
     totalPlayers,
     friendStatus,
@@ -139,11 +145,15 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
   };
 }
 
-/** Lightweight payload for the hover-card mini profile (fast, no achievement queries). */
+/** Lightweight payload for the hover-card mini profile (fast, minimal joins). */
 export async function getPublicProfileSummary(userId: string) {
   const target = await prisma.user.findUnique({ where: { id: userId } });
   if (!target || target.isBanned) return null;
   const progress = getLevelProgress(target.xpProgress);
+  const showcase = await resolveShowcaseEntries(
+    target.id,
+    parseShowcaseEntries(target.showcaseItems)
+  );
   return {
     id: target.id,
     username: target.username,
@@ -160,5 +170,6 @@ export async function getPublicProfileSummary(userId: string) {
       ? normalizeBannerConfig(target.equippedBannerConfig)
       : null,
     equippedBannerImageUrl: target.equippedBannerImageUrl,
+    showcase,
   };
 }

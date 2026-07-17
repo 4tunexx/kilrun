@@ -6,10 +6,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { LevelBar } from '@/components/ui/level-bar';
+import { ShowcaseChips } from '@/components/showcase-chips';
 import { useHoverCapable } from '@/hooks/use-hover-capable';
 import { useProfileNavigation } from '@/components/providers/profile-navigation-context';
 import { getPublicProfileSummary } from '@/lib/public-profile-actions';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import { getRoleTextColorClass } from '@/lib/role-colors';
 import { cn } from '@/lib/utils';
 
 type Summary = Awaited<ReturnType<typeof getPublicProfileSummary>>;
@@ -19,13 +21,21 @@ type Summary = Awaited<ReturnType<typeof getPublicProfileSummary>>;
  * messages...). Desktop: hovering shows a mini profile card; clicking the
  * username or the card navigates to the full public profile. Touch: first
  * tap opens the card, tapping again (the username or the card) navigates.
+ *
+ * Pass `role`/`isVip` when already known so the name is colored correctly
+ * (admin red / moderator green / VIP orange) even before the hover card's
+ * own fetch resolves.
  */
 export function UserHoverCard({
   userId,
+  role,
+  isVip,
   children,
   className,
 }: {
   userId: string;
+  role?: string | null;
+  isVip?: boolean | null;
   children: ReactNode;
   className?: string;
 }) {
@@ -76,7 +86,8 @@ export function UserHoverCard({
         <button
           type="button"
           className={cn(
-            'text-left font-semibold transition-colors hover:text-primary hover:underline underline-offset-2',
+            'text-left font-semibold transition-colors hover:underline underline-offset-2',
+            getRoleTextColorClass(role, isVip),
             className
           )}
           onMouseEnter={
@@ -137,7 +148,12 @@ function MiniProfileCard({
           <AvatarFallback>{summary.username.charAt(0)}</AvatarFallback>
         </Avatar>
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <p className="truncate font-bold text-lg text-white transition-colors group-hover:text-primary">
+          <p
+            className={cn(
+              'truncate font-bold text-lg transition-colors',
+              getRoleTextColorClass(summary.role, summary.isVip)
+            )}
+          >
             {summary.username}
           </p>
           {summary.isVip && (
@@ -155,6 +171,11 @@ function MiniProfileCard({
             percent={summary.levelProgressPercent}
           />
         </div>
+        {summary.showcase.length > 0 && (
+          <div className="mt-3">
+            <ShowcaseChips items={summary.showcase} compact />
+          </div>
+        )}
         <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
           <span className="flex items-center gap-1">
             <ThumbsUp className="h-3 w-3" /> {summary.reputation} reputation

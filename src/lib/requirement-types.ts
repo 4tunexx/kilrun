@@ -47,6 +47,30 @@ export const REQUIREMENT_TYPES: RequirementType[] = [
     description: 'Highest single-run score reached.',
     category: 'game',
   },
+  {
+    value: 'trapper_wins',
+    label: 'Trapper round wins',
+    description: 'Deathrun rounds won while playing as the Trapper.',
+    category: 'game',
+  },
+  {
+    value: 'runner_survives',
+    label: 'Runner survivals',
+    description: 'Deathrun rounds survived while playing as a Runner.',
+    category: 'game',
+  },
+  {
+    value: 'losses',
+    label: 'Matches lost',
+    description: 'Deathrun matches lost (for "keep trying" style unlocks).',
+    category: 'game',
+  },
+  {
+    value: 'eliminated',
+    label: 'Times eliminated',
+    description: 'Runner rounds ending in elimination before the finish line.',
+    category: 'game',
+  },
 
   // Progression / leveling
   {
@@ -65,6 +89,18 @@ export const REQUIREMENT_TYPES: RequirementType[] = [
     value: 'missions_completed',
     label: 'Missions completed',
     description: 'Total missions completed.',
+    category: 'progression',
+  },
+  {
+    value: 'badges_earned',
+    label: 'Badges earned',
+    description: 'Total badges unlocked (a "collector" style meta-badge).',
+    category: 'progression',
+  },
+  {
+    value: 'achievements_unlocked',
+    label: 'Achievements unlocked',
+    description: 'Total achievements unlocked across the whole platform.',
     category: 'progression',
   },
 
@@ -97,6 +133,12 @@ export const REQUIREMENT_TYPES: RequirementType[] = [
     value: 'vp_spent',
     label: 'Total VP spent',
     description: 'Cumulative VP spent in the store.',
+    category: 'website',
+  },
+  {
+    value: 'support_tickets',
+    label: 'Support tickets opened',
+    description: 'Support tickets a player has submitted.',
     category: 'website',
   },
 
