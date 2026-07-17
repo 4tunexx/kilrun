@@ -104,29 +104,6 @@ export async function GET(req: NextRequest) {
           currentRank: 'Unranked',
           role: promoteAdmin ? 'admin' : 'player',
           isVip: promoteAdmin,
-          activeMissions: {
-            create: [
-              {
-                title: 'Complete your first run',
-                description: 'Finish a full Kilrun deathrun without quitting.',
-                rewardXp: 250,
-                targetCount: 1,
-              },
-              {
-                title: 'Reach 500m distance',
-                description:
-                  'Survive long enough to cover 500 meters in a single run.',
-                rewardXp: 500,
-                targetCount: 500,
-              },
-              {
-                title: 'Score 1,000 points',
-                description: 'Rack up 1,000 points in a single run.',
-                rewardXp: 400,
-                targetCount: 1000,
-              },
-            ],
-          },
         },
       });
     });
@@ -136,6 +113,17 @@ export async function GET(req: NextRequest) {
       ? 'db_unavailable'
       : 'steam_db_error';
     return NextResponse.redirect(`${origin}/landing?error=${errorCode}`);
+  }
+
+  // Bootstrap mission board from templates (non-blocking for login cookie).
+  try {
+    const { ensurePlayerMissions, processWebsiteAction } = await import(
+      '@/lib/progression-actions'
+    );
+    await ensurePlayerMissions(user.id);
+    await processWebsiteAction(user.id, 'logins');
+  } catch (err) {
+    console.error('[steam/callback] progression bootstrap failed', err);
   }
 
   const sessionToken = await encode({

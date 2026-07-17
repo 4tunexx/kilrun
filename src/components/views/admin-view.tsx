@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Switch } from '@/components/ui/switch';
 import {
   adminCreateGuide,
   adminCreateNews,
@@ -29,7 +30,20 @@ import {
   adminUpdateTicketStatus,
   adminUpsertStoreItem,
 } from '@/lib/social-actions';
-import { getStoreItems } from '@/lib/actions';
+import {
+  getStoreItems,
+  getSiteSettings,
+  updateSiteSettings,
+  adminAwardXp,
+  adminAwardVp,
+  adminAwardBadge,
+  adminListMissionTemplates,
+  adminUpsertMissionTemplate,
+  adminListAchievements,
+  adminUpsertAchievement,
+  adminListBadges,
+  adminUpsertBadge,
+} from '@/lib/actions';
 import { ACCOUNT_ROLES } from '@/lib/roles';
 import { useToast } from '@/hooks/use-toast';
 
@@ -43,6 +57,9 @@ export default function AdminView() {
   const [users, setUsers] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
+  const [missions, setMissions] = useState<any[]>([]);
+  const [achievements, setAchievements] = useState<any[]>([]);
+  const [badges, setBadges] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -60,18 +77,79 @@ export default function AdminView() {
     body: '',
     category: 'general',
   });
+  const [siteForm, setSiteForm] = useState({
+    logoUrl: '',
+    backgroundUrl: '',
+    headerTitle: '',
+    headerSubtitle: '',
+    landingHeroImage: '',
+    gameDisabled: false,
+    gameDisabledMsg: '',
+    chatEnabled: true,
+  });
+  const [awardForm, setAwardForm] = useState({
+    userId: '',
+    xp: 100,
+    vp: 100,
+    badgeKey: '',
+  });
+  const [missionForm, setMissionForm] = useState({
+    key: '',
+    title: '',
+    description: '',
+    rewardXp: 50,
+    targetCount: 1,
+    metric: 'runs',
+    category: 'game',
+  });
+  const [achForm, setAchForm] = useState({
+    key: '',
+    title: '',
+    description: '',
+    category: 'game',
+    metric: 'runs',
+    targetCount: 1,
+    xpReward: 50,
+    icon: 'trophy',
+  });
+  const [badgeForm, setBadgeForm] = useState({
+    key: '',
+    title: '',
+    description: '',
+    rarity: 'common',
+    icon: 'award',
+    metric: 'manual',
+    targetCount: 1,
+  });
 
   const reload = async () => {
-    const [s, u, t, store] = await Promise.all([
+    const [s, u, t, store, settings, m, a, b] = await Promise.all([
       adminDashboardStats(),
       adminListUsers(),
       adminListTickets(),
       getStoreItems(),
+      getSiteSettings(),
+      adminListMissionTemplates(),
+      adminListAchievements(),
+      adminListBadges(),
     ]);
     setStats(s);
     setUsers(u);
     setTickets(t);
     setItems(store);
+    setMissions(m);
+    setAchievements(a);
+    setBadges(b);
+    setSiteForm({
+      logoUrl: settings.logoUrl ?? '',
+      backgroundUrl: settings.backgroundUrl ?? '',
+      headerTitle: settings.headerTitle ?? '',
+      headerSubtitle: settings.headerSubtitle ?? '',
+      landingHeroImage: settings.landingHeroImage ?? '',
+      gameDisabled: settings.gameDisabled,
+      gameDisabledMsg: settings.gameDisabledMsg ?? '',
+      chatEnabled: settings.chatEnabled,
+    });
     setLoading(false);
   };
 
@@ -98,21 +176,22 @@ export default function AdminView() {
 
       <Tabs defaultValue="dashboard" className="w-full">
         <TabsList className="w-full h-auto flex flex-wrap justify-start gap-1 bg-slate-800/60 p-1">
-          <TabsTrigger value="dashboard" className="flex-none">
-            Dashboard
-          </TabsTrigger>
-          <TabsTrigger value="users" className="flex-none">
-            Users
-          </TabsTrigger>
-          <TabsTrigger value="support" className="flex-none">
-            Support
-          </TabsTrigger>
-          <TabsTrigger value="shop" className="flex-none">
-            Shop
-          </TabsTrigger>
-          <TabsTrigger value="content" className="flex-none">
-            Content
-          </TabsTrigger>
+          {[
+            'dashboard',
+            'site',
+            'users',
+            'awards',
+            'missions',
+            'achievements',
+            'badges',
+            'support',
+            'shop',
+            'content',
+          ].map((tab) => (
+            <TabsTrigger key={tab} value={tab} className="flex-none capitalize">
+              {tab}
+            </TabsTrigger>
+          ))}
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-4">
@@ -135,6 +214,77 @@ export default function AdminView() {
           </div>
         </TabsContent>
 
+        <TabsContent value="site" className="mt-4">
+          <Card className="bg-slate-800/40 border-slate-700/30">
+            <CardHeader>
+              <CardTitle>Website & landing settings</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              {(
+                [
+                  ['logoUrl', 'Logo URL'],
+                  ['backgroundUrl', 'Background URL'],
+                  ['landingHeroImage', 'Landing hero image URL'],
+                  ['headerTitle', 'Header / home title'],
+                  ['headerSubtitle', 'Header subtitle'],
+                  ['gameDisabledMsg', 'Game disabled message'],
+                ] as const
+              ).map(([key, label]) => (
+                <div key={key} className="space-y-1 sm:col-span-2">
+                  <Label>{label}</Label>
+                  <Input
+                    value={siteForm[key]}
+                    onChange={(e) =>
+                      setSiteForm((f) => ({ ...f, [key]: e.target.value }))
+                    }
+                    className="bg-slate-900/50 border-slate-700"
+                  />
+                </div>
+              ))}
+              <div className="flex items-center justify-between sm:col-span-1 rounded-lg border border-slate-700/50 p-3">
+                <div>
+                  <p className="font-medium">Disable game</p>
+                  <p className="text-xs text-slate-400">Blocks Play → Deathrun</p>
+                </div>
+                <Switch
+                  checked={siteForm.gameDisabled}
+                  onCheckedChange={(v) =>
+                    setSiteForm((f) => ({ ...f, gameDisabled: v }))
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between sm:col-span-1 rounded-lg border border-slate-700/50 p-3">
+                <div>
+                  <p className="font-medium">Enable live chat</p>
+                  <p className="text-xs text-slate-400">Home hub chat</p>
+                </div>
+                <Switch
+                  checked={siteForm.chatEnabled}
+                  onCheckedChange={(v) =>
+                    setSiteForm((f) => ({ ...f, chatEnabled: v }))
+                  }
+                />
+              </div>
+              <Button
+                className="sm:col-span-2"
+                onClick={async () => {
+                  try {
+                    await updateSiteSettings(siteForm);
+                    toast({ title: 'Site settings saved' });
+                  } catch (e: any) {
+                    toast({
+                      title: e?.message ?? 'Failed',
+                      variant: 'destructive',
+                    });
+                  }
+                }}
+              >
+                Save site settings
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="users" className="mt-4 space-y-2">
           {users.map((u) => (
             <Card key={u.id} className="bg-slate-800/40 border-slate-700/30">
@@ -147,7 +297,7 @@ export default function AdminView() {
                   <div className="min-w-0">
                     <p className="font-semibold truncate">{u.username}</p>
                     <p className="text-xs text-slate-400 truncate">
-                      {u.steamId} · {u.vpCurrency} VP
+                      {u.id} · {u.steamId} · {u.vpCurrency} VP · {u.xpProgress} XP
                       {u.isBanned ? ' · BANNED' : ''}
                     </p>
                   </div>
@@ -193,6 +343,353 @@ export default function AdminView() {
               </CardContent>
             </Card>
           ))}
+        </TabsContent>
+
+        <TabsContent value="awards" className="mt-4">
+          <Card className="bg-slate-800/40 border-slate-700/30">
+            <CardHeader>
+              <CardTitle>Award players</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1 sm:col-span-2">
+                <Label>User ID</Label>
+                <Input
+                  value={awardForm.userId}
+                  onChange={(e) =>
+                    setAwardForm((f) => ({ ...f, userId: e.target.value }))
+                  }
+                  placeholder="Paste user ObjectId from Users tab"
+                  className="bg-slate-900/50 border-slate-700"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>XP amount</Label>
+                <Input
+                  type="number"
+                  value={awardForm.xp}
+                  onChange={(e) =>
+                    setAwardForm((f) => ({
+                      ...f,
+                      xp: Number(e.target.value) || 0,
+                    }))
+                  }
+                  className="bg-slate-900/50 border-slate-700"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>VP amount</Label>
+                <Input
+                  type="number"
+                  value={awardForm.vp}
+                  onChange={(e) =>
+                    setAwardForm((f) => ({
+                      ...f,
+                      vp: Number(e.target.value) || 0,
+                    }))
+                  }
+                  className="bg-slate-900/50 border-slate-700"
+                />
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <Label>Badge key</Label>
+                <Select
+                  value={awardForm.badgeKey || undefined}
+                  onValueChange={(v) =>
+                    setAwardForm((f) => ({ ...f, badgeKey: v }))
+                  }
+                >
+                  <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                    <SelectValue placeholder="Select badge" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {badges.map((b) => (
+                      <SelectItem key={b.id} value={b.key}>
+                        {b.title} ({b.key})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                onClick={async () => {
+                  try {
+                    await adminAwardXp(awardForm.userId, awardForm.xp);
+                    toast({ title: `Awarded ${awardForm.xp} XP` });
+                  } catch (e: any) {
+                    toast({ title: e?.message ?? 'Failed', variant: 'destructive' });
+                  }
+                }}
+              >
+                Award XP
+              </Button>
+              <Button
+                onClick={async () => {
+                  try {
+                    await adminAwardVp(awardForm.userId, awardForm.vp);
+                    toast({ title: `Awarded ${awardForm.vp} VP` });
+                  } catch (e: any) {
+                    toast({ title: e?.message ?? 'Failed', variant: 'destructive' });
+                  }
+                }}
+              >
+                Award VP
+              </Button>
+              <Button
+                className="sm:col-span-2"
+                onClick={async () => {
+                  try {
+                    await adminAwardBadge(awardForm.userId, awardForm.badgeKey);
+                    toast({ title: 'Badge awarded' });
+                  } catch (e: any) {
+                    toast({ title: e?.message ?? 'Failed', variant: 'destructive' });
+                  }
+                }}
+              >
+                Award badge
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="missions" className="mt-4 space-y-4">
+          <Card className="bg-slate-800/40 border-slate-700/30">
+            <CardHeader>
+              <CardTitle>Add mission template</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              {(['key', 'title', 'description', 'metric', 'category'] as const).map(
+                (field) => (
+                  <div key={field} className="space-y-1">
+                    <Label className="capitalize">{field}</Label>
+                    <Input
+                      value={missionForm[field]}
+                      onChange={(e) =>
+                        setMissionForm((f) => ({ ...f, [field]: e.target.value }))
+                      }
+                      className="bg-slate-900/50 border-slate-700"
+                    />
+                  </div>
+                )
+              )}
+              <div className="space-y-1">
+                <Label>Reward XP</Label>
+                <Input
+                  type="number"
+                  value={missionForm.rewardXp}
+                  onChange={(e) =>
+                    setMissionForm((f) => ({
+                      ...f,
+                      rewardXp: Number(e.target.value) || 0,
+                    }))
+                  }
+                  className="bg-slate-900/50 border-slate-700"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Target</Label>
+                <Input
+                  type="number"
+                  value={missionForm.targetCount}
+                  onChange={(e) =>
+                    setMissionForm((f) => ({
+                      ...f,
+                      targetCount: Number(e.target.value) || 1,
+                    }))
+                  }
+                  className="bg-slate-900/50 border-slate-700"
+                />
+              </div>
+              <Button
+                className="sm:col-span-2"
+                onClick={async () => {
+                  try {
+                    await adminUpsertMissionTemplate(missionForm);
+                    toast({ title: 'Mission saved' });
+                    await reload();
+                  } catch (e: any) {
+                    toast({ title: e?.message ?? 'Failed', variant: 'destructive' });
+                  }
+                }}
+              >
+                Create mission
+              </Button>
+            </CardContent>
+          </Card>
+          <div className="space-y-2">
+            {missions.map((m) => (
+              <Card key={m.id} className="bg-slate-800/40 border-slate-700/30">
+                <CardContent className="py-3 flex justify-between gap-2 flex-wrap">
+                  <div>
+                    <p className="font-semibold">
+                      {m.title}{' '}
+                      <Badge variant="outline" className="ml-1">
+                        {m.category}
+                      </Badge>
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {m.key} · {m.metric} · target {m.targetCount} · +{m.rewardXp}{' '}
+                      XP · {m.isActive ? 'active' : 'off'}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="achievements" className="mt-4 space-y-4">
+          <Card className="bg-slate-800/40 border-slate-700/30">
+            <CardHeader>
+              <CardTitle>Add achievement</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              {(
+                [
+                  'key',
+                  'title',
+                  'description',
+                  'category',
+                  'metric',
+                  'icon',
+                ] as const
+              ).map((field) => (
+                <div key={field} className="space-y-1">
+                  <Label className="capitalize">{field}</Label>
+                  <Input
+                    value={achForm[field]}
+                    onChange={(e) =>
+                      setAchForm((f) => ({ ...f, [field]: e.target.value }))
+                    }
+                    className="bg-slate-900/50 border-slate-700"
+                  />
+                </div>
+              ))}
+              <div className="space-y-1">
+                <Label>Target</Label>
+                <Input
+                  type="number"
+                  value={achForm.targetCount}
+                  onChange={(e) =>
+                    setAchForm((f) => ({
+                      ...f,
+                      targetCount: Number(e.target.value) || 1,
+                    }))
+                  }
+                  className="bg-slate-900/50 border-slate-700"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>XP reward</Label>
+                <Input
+                  type="number"
+                  value={achForm.xpReward}
+                  onChange={(e) =>
+                    setAchForm((f) => ({
+                      ...f,
+                      xpReward: Number(e.target.value) || 0,
+                    }))
+                  }
+                  className="bg-slate-900/50 border-slate-700"
+                />
+              </div>
+              <Button
+                className="sm:col-span-2"
+                onClick={async () => {
+                  try {
+                    await adminUpsertAchievement(achForm);
+                    toast({ title: 'Achievement saved' });
+                    await reload();
+                  } catch (e: any) {
+                    toast({ title: e?.message ?? 'Failed', variant: 'destructive' });
+                  }
+                }}
+              >
+                Create achievement
+              </Button>
+            </CardContent>
+          </Card>
+          <div className="space-y-2">
+            {achievements.map((a) => (
+              <Card key={a.id} className="bg-slate-800/40 border-slate-700/30">
+                <CardContent className="py-3">
+                  <p className="font-semibold">
+                    {a.title}{' '}
+                    <Badge variant="outline">{a.category}</Badge>
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {a.key} · {a.metric} ≥ {a.targetCount} · +{a.xpReward} XP
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="badges" className="mt-4 space-y-4">
+          <Card className="bg-slate-800/40 border-slate-700/30">
+            <CardHeader>
+              <CardTitle>Add badge</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              {(
+                ['key', 'title', 'description', 'rarity', 'icon', 'metric'] as const
+              ).map((field) => (
+                <div key={field} className="space-y-1">
+                  <Label className="capitalize">{field}</Label>
+                  <Input
+                    value={badgeForm[field]}
+                    onChange={(e) =>
+                      setBadgeForm((f) => ({ ...f, [field]: e.target.value }))
+                    }
+                    className="bg-slate-900/50 border-slate-700"
+                  />
+                </div>
+              ))}
+              <div className="space-y-1">
+                <Label>Target</Label>
+                <Input
+                  type="number"
+                  value={badgeForm.targetCount}
+                  onChange={(e) =>
+                    setBadgeForm((f) => ({
+                      ...f,
+                      targetCount: Number(e.target.value) || 1,
+                    }))
+                  }
+                  className="bg-slate-900/50 border-slate-700"
+                />
+              </div>
+              <Button
+                className="sm:col-span-2"
+                onClick={async () => {
+                  try {
+                    await adminUpsertBadge(badgeForm);
+                    toast({ title: 'Badge saved' });
+                    await reload();
+                  } catch (e: any) {
+                    toast({ title: e?.message ?? 'Failed', variant: 'destructive' });
+                  }
+                }}
+              >
+                Create badge
+              </Button>
+            </CardContent>
+          </Card>
+          <div className="space-y-2">
+            {badges.map((b) => (
+              <Card key={b.id} className="bg-slate-800/40 border-slate-700/30">
+                <CardContent className="py-3">
+                  <p className="font-semibold">
+                    {b.title}{' '}
+                    <Badge variant="outline">{b.rarity}</Badge>
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {b.key} · {b.metric} ≥ {b.targetCount}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </TabsContent>
 
         <TabsContent value="support" className="mt-4 space-y-2">

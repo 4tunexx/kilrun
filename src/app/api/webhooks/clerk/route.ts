@@ -105,5 +105,14 @@ export async function POST(req: Request) {
     },
   });
 
+  if (!alreadyVerified) {
+    try {
+      const { processWebsiteAction } = await import('@/lib/progression-actions');
+      await processWebsiteAction(existing.id, 'email');
+    } catch (err) {
+      console.error('[clerk webhook] email progression failed', err);
+    }
+  }
+
   return NextResponse.json({ received: true });
 }

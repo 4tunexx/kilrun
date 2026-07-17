@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useRef } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -38,6 +38,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { getSiteSettings } from '@/lib/actions';
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   steam_auth_failed: 'Steam login was cancelled or failed. Please try again.',
@@ -178,6 +179,23 @@ export default function LandingPage() {
   const autoplayPlugin = useRef(
     Autoplay({ delay: 3000, stopOnInteraction: true })
   );
+  const [headerTitle, setHeaderTitle] = useState('Welcome to Kilrun');
+  const [headerSubtitle, setHeaderSubtitle] = useState(
+    'The ultimate deathrun experience. Compete, conquer, and climb the ranks.'
+  );
+  const [bgUrl, setBgUrl] = useState('https://i.postimg.cc/tJgX2XgN/bg.png');
+  const [heroImage, setHeroImage] = useState('');
+
+  useEffect(() => {
+    getSiteSettings()
+      .then((s) => {
+        if (s.headerTitle) setHeaderTitle(s.headerTitle);
+        if (s.headerSubtitle) setHeaderSubtitle(s.headerSubtitle);
+        if (s.backgroundUrl) setBgUrl(s.backgroundUrl);
+        if (s.landingHeroImage) setHeroImage(s.landingHeroImage);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleNavigation = () => {
     window.location.href = '/api/auth/steam';
@@ -215,12 +233,11 @@ export default function LandingPage() {
     <div className="min-h-screen text-white relative">
       {/* Background Image */}
       <div className="fixed inset-0 z-0">
-        <Image
-          src="https://i.postimg.cc/tJgX2XgN/bg.png"
-          alt="Futuristic game background"
-          fill
-          className="object-cover"
-          data-ai-hint="futuristic game background"
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={bgUrl}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
         />
         <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" />
       </div>
@@ -243,15 +260,16 @@ export default function LandingPage() {
                   onMouseLeave={autoplayPlugin.current.reset}
                 >
                   <CarouselContent className="-ml-0">
-                    {carouselImages.map((image, index) => (
+                    {(heroImage
+                      ? [{ src: heroImage, alt: 'Kilrun', hint: 'hero' }]
+                      : carouselImages
+                    ).map((image, index) => (
                       <CarouselItem key={index} className="pl-0">
-                        <Image
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
                           src={image.src}
                           alt={image.alt}
-                          width={1600}
-                          height={900}
                           className="w-full h-56 sm:h-72 md:h-[32rem] object-cover"
-                          data-ai-hint={image.hint}
                         />
                       </CarouselItem>
                     ))}
@@ -265,11 +283,10 @@ export default function LandingPage() {
                 <div className="absolute inset-0 flex items-end md:items-center justify-between p-6 md:p-24 gap-8">
                   <div className="max-w-lg">
                     <h1 className="text-4xl sm:text-5xl md:text-7xl font-black tracking-tight drop-shadow-2xl mb-2 md:mb-4 animate-in fade-in-0 slide-in-from-bottom-10 zoom-in-90 duration-1000">
-                      Welcome to Kilrun
+                      {headerTitle}
                     </h1>
                     <p className="text-base sm:text-lg md:text-xl text-slate-200 animate-in fade-in-0 slide-in-from-bottom-10 zoom-in-90 duration-1000 delay-200">
-                      The ultimate deathrun experience. Compete, conquer, and
-                      climb the ranks.
+                      {headerSubtitle}
                     </p>
                   </div>
 

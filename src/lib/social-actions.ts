@@ -9,6 +9,7 @@ import {
   type AccountRole,
   isAccountRole,
 } from '@/lib/roles';
+import { processWebsiteAction } from '@/lib/progression-actions';
 
 async function requireSessionUser() {
   const session = await auth();
@@ -62,6 +63,7 @@ export async function unlockVipWithVp() {
       type: 'vip',
     },
   });
+  await processWebsiteAction(user.id, 'vip');
   return { ok: true as const, already: false };
 }
 
@@ -142,10 +144,13 @@ export async function respondFriendRequest(friendshipId: string, accept: boolean
     await prisma.friendship.delete({ where: { id: friendshipId } });
     return { ok: true };
   }
-  return prisma.friendship.update({
+  const updated = await prisma.friendship.update({
     where: { id: friendshipId },
     data: { status: 'accepted' },
   });
+  await processWebsiteAction(user.id, 'friends');
+  await processWebsiteAction(friendship.userAId, 'friends');
+  return updated;
 }
 
 export async function removeFriend(friendUserId: string) {
@@ -239,6 +244,7 @@ export async function sendDirectMessage(receiverId: string, body: string) {
       type: 'message',
     },
   });
+  await processWebsiteAction(user.id, 'messages');
   return message;
 }
 
@@ -262,7 +268,7 @@ export async function createForumPost(input: {
   const title = input.title.trim().slice(0, 120);
   const body = input.body.trim().slice(0, 5000);
   if (!title || !body) throw new Error('Title and body required');
-  return prisma.forumPost.create({
+  const post = await prisma.forumPost.create({
     data: {
       authorId: user.id,
       title,
@@ -270,6 +276,8 @@ export async function createForumPost(input: {
       category: (input.category || 'general').slice(0, 40),
     },
   });
+  await processWebsiteAction(user.id, 'forum');
+  return post;
 }
 
 export async function getNewsPosts() {
@@ -365,6 +373,7 @@ export async function purchaseStoreItem(itemId: string) {
       type: 'store',
     },
   });
+  await processWebsiteAction(user.id, 'purchases');
   return { ok: true as const };
 }
 
