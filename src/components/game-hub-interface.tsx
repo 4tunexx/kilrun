@@ -84,6 +84,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import { EmailVerificationForm } from '@/components/email-verification-form';
 
 export interface SessionPlayer {
   id: string;
@@ -604,39 +605,35 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           }
         }}
       >
-        <DialogContent className="bg-slate-900/95 border-slate-700 text-white max-w-md mx-4">
+        <DialogContent className="bg-slate-900/95 border-slate-700 text-white max-w-md mx-4 max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold flex items-center gap-2">
               <Mail className="w-6 h-6 text-primary" />
               Confirm your email
             </DialogTitle>
             <DialogDescription className="text-slate-300">
-              Welcome to Kilrun! Verify your email to unlock a{' '}
-              <span className="text-primary font-semibold">100 VP Welcome Bonus</span> and secure
-              your account.
+              Type your email below. First-time verify unlocks a{' '}
+              <span className="text-primary font-semibold">100 VP Welcome Bonus</span>.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col sm:flex-row gap-2 pt-2">
-            <Button
-              className="w-full"
-              onClick={() => {
-                sessionStorage.setItem('kilrun.emailPromptDismissed', '1');
-                window.location.href = '/verify-email';
-              }}
-            >
-              Verify email
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => {
-                sessionStorage.setItem('kilrun.emailPromptDismissed', '1');
-                setIsEmailPromptOpen(false);
-              }}
-            >
-              Later
-            </Button>
-          </div>
+          <EmailVerificationForm
+            compact
+            onComplete={() => {
+              sessionStorage.setItem('kilrun.emailPromptDismissed', '1');
+              setIsEmailPromptOpen(false);
+              window.location.reload();
+            }}
+          />
+          <Button
+            variant="ghost"
+            className="w-full text-slate-400"
+            onClick={() => {
+              sessionStorage.setItem('kilrun.emailPromptDismissed', '1');
+              setIsEmailPromptOpen(false);
+            }}
+          >
+            Later
+          </Button>
         </DialogContent>
       </Dialog>
 
