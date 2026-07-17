@@ -193,7 +193,12 @@ export default function HomeView({
                         </Avatar>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <UserHoverCard userId={msg.user.id} className="text-sm">
+                            <UserHoverCard
+                              userId={msg.user.id}
+                              role={msg.user.role}
+                              isVip={msg.user.isVip}
+                              className="text-sm"
+                            >
                               {msg.user.username}
                             </UserHoverCard>
                             {msg.user.isVip && (
@@ -227,7 +232,11 @@ export default function HomeView({
                     }}
                   />
                   <Button onClick={handleSend} disabled={sending || !chatInput.trim()}>
-                    <Send className="w-4 h-4" />
+                    {sending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
                   </Button>
                 </div>
               </>

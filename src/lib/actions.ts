@@ -255,6 +255,7 @@ export async function recordDeathrunResult(input: {
   await processMatchProgression({
     userId: input.userId,
     outcome: input.outcome,
+    role: input.role,
     score: input.score,
     distance: input.distance,
   });

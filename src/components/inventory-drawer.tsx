@@ -170,7 +170,11 @@ export function InventoryDrawer({
                               withBusy(item.id, () => unequipCosmeticSlot(item.cosmeticSlot!).then(() => {}))
                             }
                           >
-                            Unequip
+                            {busyId === item.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              'Unequip'
+                            )}
                           </Button>
                         ) : (
                           <Button
@@ -179,7 +183,13 @@ export function InventoryDrawer({
                             disabled={busyId === item.id}
                             onClick={() => withBusy(item.id, () => equipInventoryItem(item.id).then(() => {}))}
                           >
-                            <ShieldCheck className="w-3 h-3 mr-1" /> Equip
+                            {busyId === item.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <>
+                                <ShieldCheck className="w-3 h-3 mr-1" /> Equip
+                              </>
+                            )}
                           </Button>
                         ))}
                       <Button
@@ -195,7 +205,11 @@ export function InventoryDrawer({
                           )
                         }
                       >
-                        Sell {Math.floor(item.vpValue * INVENTORY_RESELL_RATE)} VP
+                        {busyId === item.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          `Sell ${Math.floor(item.vpValue * INVENTORY_RESELL_RATE)} VP`
+                        )}
                       </Button>
                       <Button
                         size="icon"
@@ -205,7 +219,11 @@ export function InventoryDrawer({
                         title="Discard"
                         onClick={() => withBusy(item.id, () => deleteInventoryItem(item.id).then(() => {}))}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        {busyId === item.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
                       </Button>
                     </div>
                   </CardContent>
