@@ -22,11 +22,13 @@ import { Badge } from '@/components/ui/badge';
 import {
   getActiveMissions,
   getStatsSummary,
+  type StatsSummary,
+} from '@/lib/actions';
+import {
   getGlobalChat,
   sendGlobalChat,
   getSiteSettings,
-  type StatsSummary,
-} from '@/lib/actions';
+} from '@/lib/progression-actions';
 import { getNewsPosts } from '@/lib/social-actions';
 import type { ActiveMission } from '@/generated/prisma';
 import { formatDistanceToNow } from 'date-fns';

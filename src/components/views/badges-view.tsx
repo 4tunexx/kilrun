@@ -5,7 +5,7 @@ import { Award, CheckCircle, Loader2, Lock, Trophy } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { getPlayerAchievements, getPlayerBadges } from '@/lib/actions';
+import { getPlayerAchievements, getPlayerBadges } from '@/lib/progression-actions';
 
 export default function BadgesView({ userId }: { userId: string }) {
   const [achievements, setAchievements] = useState<any[]>([]);

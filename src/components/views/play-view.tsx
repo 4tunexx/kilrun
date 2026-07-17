@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { getSiteSettings } from '@/lib/actions';
+import { getSiteSettings } from '@/lib/progression-actions';
 
 export type KilrunMode = 'deathrun' | 'horde' | 'competitive';
 

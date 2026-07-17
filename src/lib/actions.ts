@@ -8,35 +8,14 @@ import {
   processMatchProgression,
 } from '@/lib/progression-actions';
 
-export {
-  bootstrapHubProgression,
-  getLivePlayerState,
-  getPlayerAchievements,
-  getPlayerBadges,
-  getSiteSettings,
-  getGlobalChat,
-  sendGlobalChat,
-  getUnreadNotificationCount,
-  updateSiteSettings,
-  adminAwardXp,
-  adminAwardVp,
-  adminAwardBadge,
-  adminListMissionTemplates,
-  adminUpsertMissionTemplate,
-  adminListAchievements,
-  adminUpsertAchievement,
-  adminListBadges,
-  adminUpsertBadge,
-} from '@/lib/progression-actions';
-
-export interface StatsSummary {
+export type StatsSummary = {
   totalRuns: number;
   bestScore: number;
   bestDistance: number;
   avgScore: number;
   avgDistance: number;
   lastPlayedAt: Date | null;
-}
+};
 
 /** Reads the authenticated player's profile document directly from MongoDB. */
 export async function getSessionUser() {

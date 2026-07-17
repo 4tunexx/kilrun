@@ -49,7 +49,7 @@ import {
   bootstrapHubProgression,
   getLivePlayerState,
   getSiteSettings,
-} from '@/lib/actions';
+} from '@/lib/progression-actions';
 import { getLevelFromXp, getXpIntoLevel } from '@/lib/progression';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -625,25 +625,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                         {isVip && <Badge className="bg-yellow-500 text-black">VIP</Badge>}
                       </h3>
                       <p className="text-xs uppercase tracking-wide text-slate-400 mt-1">
-                        {user.role}
+                        {user.role} · Lv {level} · {xpIntoLevel}/100 XP
                       </p>
-                      <div className="w-full mt-4 space-y-2">
-                        <div className="flex justify-between text-xs text-slate-400">
-                          <span>Level {level}</span>
-                          <span>
-                            {xpIntoLevel}/{100} XP
-                          </span>
-                        </div>
-                        <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-                          <div
-                            className="h-full bg-primary transition-all duration-700 ease-out"
-                            style={{ width: `${xpIntoLevel}%` }}
-                          />
-                        </div>
-                        <p className="text-[11px] text-slate-500 text-center">
-                          Total XP {xpProgress.toLocaleString()}
-                        </p>
-                      </div>
                       <div className="mt-4 bg-slate-800/50 px-4 py-2 rounded-lg text-center w-full">
                         <div className="text-xs text-slate-400">Rank</div>
                         <div className="text-lg font-bold text-yellow-400">

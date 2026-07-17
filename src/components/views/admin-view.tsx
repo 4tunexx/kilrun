@@ -30,8 +30,8 @@ import {
   adminUpdateTicketStatus,
   adminUpsertStoreItem,
 } from '@/lib/social-actions';
+import { getStoreItems } from '@/lib/actions';
 import {
-  getStoreItems,
   getSiteSettings,
   updateSiteSettings,
   adminAwardXp,
@@ -43,7 +43,8 @@ import {
   adminUpsertAchievement,
   adminListBadges,
   adminUpsertBadge,
-} from '@/lib/actions';
+  adminSeedProgression,
+} from '@/lib/progression-actions';
 import { ACCOUNT_ROLES } from '@/lib/roles';
 import { useToast } from '@/hooks/use-toast';
 
@@ -194,7 +195,7 @@ export default function AdminView() {
           ))}
         </TabsList>
 
-        <TabsContent value="dashboard" className="mt-4">
+        <TabsContent value="dashboard" className="mt-4 space-y-4">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
               ['Players', stats.users],
@@ -212,6 +213,37 @@ export default function AdminView() {
               </Card>
             ))}
           </div>
+          <Card className="bg-slate-800/40 border-slate-700/30">
+            <CardHeader>
+              <CardTitle>Seed progression (mobile-friendly)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <p className="text-sm text-slate-400">
+                Loads the 20 missions, 20 achievements, badges, shop items, and
+                default site settings into MongoDB. Use this instead of running
+                npm on your phone.
+              </p>
+              <Button
+                onClick={async () => {
+                  try {
+                    const result = await adminSeedProgression();
+                    toast({
+                      title: 'Progression seeded',
+                      description: `${result.missions} missions · ${result.achievements} achievements · ${result.badges} badges`,
+                    });
+                    await reload();
+                  } catch (e: any) {
+                    toast({
+                      title: e?.message ?? 'Seed failed',
+                      variant: 'destructive',
+                    });
+                  }
+                }}
+              >
+                Seed missions / achievements / badges
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="site" className="mt-4">

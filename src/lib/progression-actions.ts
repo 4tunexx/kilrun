@@ -634,3 +634,61 @@ export async function adminUpsertBadge(input: {
     },
   });
 }
+
+/**
+ * One-tap seed from Admin (no local npm needed).
+ * Upserts missions, achievements, badges, shop items, and site settings.
+ */
+export async function adminSeedProgression() {
+  await requireStaff();
+  const {
+    missionTemplates,
+    achievements,
+    badges,
+    shopItems,
+  } = await import('@/lib/progression-seed-data');
+
+  for (const m of missionTemplates) {
+    await prisma.missionTemplate.upsert({
+      where: { key: m.key },
+      update: m,
+      create: m,
+    });
+  }
+  for (const a of achievements) {
+    await prisma.achievementDefinition.upsert({
+      where: { key: a.key },
+      update: a,
+      create: a,
+    });
+  }
+  for (const b of badges) {
+    await prisma.badgeDefinition.upsert({
+      where: { key: b.key },
+      update: b,
+      create: b,
+    });
+  }
+  for (const item of shopItems) {
+    await prisma.storeItem.upsert({
+      where: { itemSku: item.itemSku },
+      update: {
+        itemName: item.itemName,
+        itemCategory: item.itemCategory,
+        vpPrice: item.vpPrice,
+        imageUrl: item.imageUrl,
+        isAvailable: true,
+      },
+      create: item,
+    });
+  }
+  await getSiteSettings();
+
+  return {
+    ok: true as const,
+    missions: missionTemplates.length,
+    achievements: achievements.length,
+    badges: badges.length,
+    shopItems: shopItems.length,
+  };
+}
