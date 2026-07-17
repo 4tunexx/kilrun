@@ -98,7 +98,13 @@ See `.env.example` for the full list with comments. In short:
 
 > **Note on Steam auth in production**: the Steam login/callback routes derive the redirect origin and secure-cookie flag directly from the incoming request (`req.nextUrl`), not from `NEXTAUTH_URL`. This avoids a class of bugs where a stale/unset `NEXTAUTH_URL` causes Steam to redirect to the wrong domain, or the session cookie's `__Secure-` prefix to mismatch what Auth.js expects.
 
-> **Note on Prisma + serverless**: `src/lib/prisma.ts` always caches the `PrismaClient` singleton on `globalThis`, in every environment. Vercel reuses the same warm serverless instance across requests; without this cache, each request would spin up a brand-new client with its own MongoDB connection pool that never closed, eventually exhausting Atlas's connection limit.
+> **Note on Prisma + serverless**: `src/lib/prisma.ts` always caches the `PrismaClient` singleton on `globalThis`, in every environment. Vercel reuses the same warm serverless instance across requests; without this cache, each request would spin up a brand-new client with its own MongoDB connection pool that never closed, eventually exhausting Atlas's connection limit. On connection failures it recreates the client once (so a poisoned warm instance can recover) and defaults `maxPoolSize=1` on the connection string when unset.
+
+> **MongoDB Atlas checklist (required for Steam login on Vercel)**:
+> 1. **Network Access** → Add IP Access List entry `0.0.0.0/0` (allow from anywhere). Vercel serverless IPs are dynamic; locking to a single IP will cause Steam callback `prisma.user.findUnique()` to fail with `Server selection timeout` / `received fatal alert: InternalError`.
+> 2. Confirm the Atlas cluster is **not paused**.
+> 3. Set `DATABASE_URL` in the Vercel project env (same value as local `.env`), including `maxPoolSize=1`.
+> 4. Redeploy after changing Atlas Network Access or `DATABASE_URL`.
 
 ## Deployment
 
