@@ -1,32 +1,73 @@
-import { PrismaClient } from '../src/generated/prisma';
+import { PrismaClient } from "../src/generated/prisma";
+import {
+  missionTemplates,
+  achievements,
+  badges,
+  shopItems,
+} from "../src/lib/progression-seed-data";
 
 const prisma = new PrismaClient();
 
-const storeCatalog = [
-  { itemName: 'Cyber Blade Skin', itemCategory: 'Weapon Skin', itemSku: 'SKIN-CYBER-BLADE', vpPrice: 1999 },
-  { itemName: 'Neon Runner Pack', itemCategory: 'Bundle', itemSku: 'BUNDLE-NEON-RUNNER', vpPrice: 2499 },
-  { itemName: 'Quantum Armor', itemCategory: 'Outfit', itemSku: 'OUTFIT-QUANTUM-ARMOR', vpPrice: 1499 },
-  { itemName: 'Holographic Emote', itemCategory: 'Emote', itemSku: 'EMOTE-HOLOGRAPHIC', vpPrice: 599 },
-  { itemName: 'Dragonfire Shotgun', itemCategory: 'Weapon Skin', itemSku: 'SKIN-DRAGONFIRE-SHOTGUN', vpPrice: 2199 },
-  { itemName: 'Celestial Wings', itemCategory: 'Back Bling', itemSku: 'BLING-CELESTIAL-WINGS', vpPrice: 1899 },
-  { itemName: 'Void Reaver Knife', itemCategory: 'Melee', itemSku: 'MELEE-VOID-REAVER', vpPrice: 1799 },
-  { itemName: 'Chrono-Guardian Set', itemCategory: 'Bundle', itemSku: 'BUNDLE-CHRONO-GUARDIAN', vpPrice: 3499 },
-];
-
 async function main() {
-  for (const item of storeCatalog) {
+  for (const m of missionTemplates) {
+    await prisma.missionTemplate.upsert({
+      where: { key: m.key },
+      update: m,
+      create: m,
+    });
+  }
+
+  for (const a of achievements) {
+    await prisma.achievementDefinition.upsert({
+      where: { key: a.key },
+      update: a,
+      create: a,
+    });
+  }
+
+  for (const b of badges) {
+    await prisma.badgeDefinition.upsert({
+      where: { key: b.key },
+      update: b,
+      create: b,
+    });
+  }
+
+  for (const item of shopItems) {
     await prisma.storeItem.upsert({
       where: { itemSku: item.itemSku },
-      update: item,
+      update: {
+        itemName: item.itemName,
+        itemCategory: item.itemCategory,
+        vpPrice: item.vpPrice,
+        imageUrl: item.imageUrl,
+        isAvailable: true,
+      },
       create: item,
     });
   }
-  console.log(`Seeded ${storeCatalog.length} store items.`);
+
+  await prisma.siteSettings.upsert({
+    where: { singletonKey: "default" },
+    update: {},
+    create: {
+      singletonKey: "default",
+      headerTitle: "Welcome to Kilrun",
+      headerSubtitle:
+        "The ultimate deathrun experience. Compete, conquer, and climb the ranks.",
+      chatEnabled: true,
+      gameDisabled: false,
+    },
+  });
+
+  console.log(
+    `Seeded ${missionTemplates.length} missions, ${achievements.length} achievements, ${badges.length} badges, shop, and site settings.`
+  );
 }
 
 main()
-  .catch((err) => {
-    console.error(err);
+  .catch((e) => {
+    console.error(e);
     process.exit(1);
   })
   .finally(async () => {

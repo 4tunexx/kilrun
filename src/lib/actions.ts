@@ -2,15 +2,20 @@
 
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import {
+  ensurePlayerMissions,
+  grantXp,
+  processMatchProgression,
+} from '@/lib/progression-actions';
 
-export interface StatsSummary {
+export type StatsSummary = {
   totalRuns: number;
   bestScore: number;
   bestDistance: number;
   avgScore: number;
   avgDistance: number;
   lastPlayedAt: Date | null;
-}
+};
 
 /** Reads the authenticated player's profile document directly from MongoDB. */
 export async function getSessionUser() {
@@ -99,6 +104,8 @@ export async function recordDeathrunResult(input: {
   userId: string;
   role: 'trapper' | 'runner';
   outcome: 'win' | 'loss' | 'survived' | 'eliminated';
+  score?: number;
+  distance?: number;
 }): Promise<{ xpEarned: number; vpEarned: number }> {
   const reward = DEATHRUN_REWARDS[input.outcome];
 
@@ -116,10 +123,27 @@ export async function recordDeathrunResult(input: {
   await prisma.user.update({
     where: { id: input.userId },
     data: {
-      xpProgress: { increment: reward.xp },
       vpCurrency: { increment: reward.vp },
     },
   });
 
+  await grantXp(input.userId, reward.xp, 'Deathrun match');
+  await processMatchProgression({
+    userId: input.userId,
+    outcome: input.outcome,
+    score: input.score,
+    distance: input.distance,
+  });
+
   return { xpEarned: reward.xp, vpEarned: reward.vp };
+}
+
+/** Bootstrap missions for the current session user (safe to call often). */
+export async function bootstrapMyMissions() {
+  const session = await auth();
+  const steamId = (session?.user as { steamId?: string } | undefined)?.steamId;
+  if (!steamId) return;
+  const user = await prisma.user.findUnique({ where: { steamId } });
+  if (!user) return;
+  await ensurePlayerMissions(user.id);
 }
