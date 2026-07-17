@@ -26,12 +26,11 @@ import {
   unequipCosmeticSlot,
 } from '@/lib/social-actions';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import { INVENTORY_RESELL_RATE } from '@/lib/inventory-constants';
 import { useToast } from '@/hooks/use-toast';
 
 type InventoryRow = Awaited<ReturnType<typeof getMyInventory>>[number];
 type SortMode = 'newest' | 'oldest' | 'name' | 'value';
-
-const RESELL_RATE = 0.5;
 
 export function InventoryDrawer({
   open,
@@ -196,7 +195,7 @@ export function InventoryDrawer({
                           )
                         }
                       >
-                        Sell {Math.floor(item.vpValue * RESELL_RATE)} VP
+                        Sell {Math.floor(item.vpValue * INVENTORY_RESELL_RATE)} VP
                       </Button>
                       <Button
                         size="icon"

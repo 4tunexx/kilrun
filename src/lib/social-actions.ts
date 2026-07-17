@@ -4,6 +4,7 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@/generated/prisma';
 import type { BannerConfig } from '@/lib/banner';
+import { INVENTORY_RESELL_RATE } from '@/lib/inventory-constants';
 import {
   canAccessAdmin,
   steamIdsPromotedToAdmin,
@@ -431,8 +432,6 @@ export async function purchaseStoreItem(itemId: string) {
 
 // --- Inventory (owned cosmetics / items) ---
 
-const RESELL_RATE = 0.5;
-
 export async function getMyInventory() {
   const user = await requireSessionUser();
   return prisma.inventoryItem.findMany({
@@ -495,7 +494,7 @@ export async function resellInventoryItem(inventoryItemId: string) {
   const item = await prisma.inventoryItem.findUnique({ where: { id: inventoryItemId } });
   if (!item || item.userId !== user.id) throw new Error('Item not found');
 
-  const refund = Math.floor(item.vpValue * RESELL_RATE);
+  const refund = Math.floor(item.vpValue * INVENTORY_RESELL_RATE);
   await prisma.$transaction([
     prisma.inventoryItem.delete({ where: { id: item.id } }),
     prisma.user.update({
