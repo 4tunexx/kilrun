@@ -530,6 +530,49 @@ export async function getSiteSettings() {
       data: { singletonKey: 'default' },
     });
   }
+
+  // Merge raw Mongo fields so branding always reflects admin saves even if a
+  // stale Prisma client omits newer columns (headerLogoUrl, homeHeroImage, …).
+  try {
+    const raw = (await prisma.$runCommandRaw({
+      find: 'SiteSettings',
+      filter: { singletonKey: 'default' },
+      limit: 1,
+    })) as { cursor?: { firstBatch?: Array<Record<string, unknown>> } };
+    const doc = raw?.cursor?.firstBatch?.[0];
+    if (doc) {
+      return {
+        ...settings,
+        logoUrl: String(doc.logoUrl ?? settings.logoUrl ?? ''),
+        headerLogoUrl: String(
+          doc.headerLogoUrl ??
+            (settings as { headerLogoUrl?: string }).headerLogoUrl ??
+            ''
+        ),
+        backgroundUrl: String(doc.backgroundUrl ?? settings.backgroundUrl ?? ''),
+        homeHeroImage: String(
+          doc.homeHeroImage ??
+            (settings as { homeHeroImage?: string }).homeHeroImage ??
+            ''
+        ),
+        landingHeroImage: String(
+          doc.landingHeroImage ?? settings.landingHeroImage ?? ''
+        ),
+        headerTitle: String(doc.headerTitle ?? settings.headerTitle ?? ''),
+        headerSubtitle: String(
+          doc.headerSubtitle ?? settings.headerSubtitle ?? ''
+        ),
+        gameDisabledMsg: String(
+          doc.gameDisabledMsg ?? settings.gameDisabledMsg ?? ''
+        ),
+        gameDisabled: Boolean(doc.gameDisabled ?? settings.gameDisabled),
+        chatEnabled: Boolean(doc.chatEnabled ?? settings.chatEnabled),
+      };
+    }
+  } catch {
+    // Raw merge is best-effort; Prisma row is still usable.
+  }
+
   return settings;
 }
 

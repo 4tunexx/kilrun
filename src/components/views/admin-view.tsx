@@ -35,6 +35,7 @@ import {
   adminUpsertStoreItem,
 } from '@/lib/social-actions';
 import { getStoreItems } from '@/lib/actions';
+import { broadcastSiteSettings } from '@/lib/site-branding-events';
 import {
   getSiteSettings,
   updateSiteSettings,
@@ -399,7 +400,8 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   disabled={busyKey === 'site'}
                   onClick={() =>
                     runAction('site', async () => {
-                      await updateSiteSettings(siteForm);
+                      const saved = await updateSiteSettings(siteForm);
+                      broadcastSiteSettings(saved);
                       toast({ title: 'Site settings saved' });
                     })
                   }

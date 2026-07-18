@@ -34,9 +34,10 @@ import type { ActiveMission } from '@/generated/prisma';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { UserHoverCard } from '@/components/user-hover-card';
-import { BrandLogoPair } from '@/components/interactive-wordmark';
+import { InteractiveWordmark } from '@/components/interactive-wordmark';
 import { usePointerParallax } from '@/hooks/use-pointer-parallax';
-import { resolveHomeHeroImage, resolveMarkLogo } from '@/lib/branding';
+import { resolveHeaderLogo, resolveHomeHeroImage } from '@/lib/branding';
+import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
 
 const PANEL =
   'bg-slate-900/60 backdrop-blur-md border border-slate-700/30';
@@ -50,10 +51,7 @@ interface HomeViewProps {
   userId: string;
   vpCurrency?: number;
   headerLogoUrl?: string;
-  markLogoUrl?: string;
   homeHeroImage?: string;
-  /** When true, left rail is open — mark stays tucked behind the wordmark. */
-  leftMenuOpen?: boolean;
 }
 
 export default function HomeView({
@@ -61,10 +59,8 @@ export default function HomeView({
   onNavigate,
   userId,
   vpCurrency = 0,
-  headerLogoUrl = '/kilrun.png',
-  markLogoUrl,
+  headerLogoUrl: headerLogoUrlProp,
   homeHeroImage,
-  leftMenuOpen = false,
 }: HomeViewProps) {
   const [missions, setMissions] = useState<ActiveMission[]>([]);
   const [summary, setSummary] = useState<StatsSummary | null>(null);
@@ -74,6 +70,10 @@ export default function HomeView({
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  /** Admin SiteSettings win over any prop/default. */
+  const [wordmarkSrc, setWordmarkSrc] = useState(
+    resolveHeaderLogo(headerLogoUrlProp)
+  );
   const [heroSrc, setHeroSrc] = useState(resolveHomeHeroImage(homeHeroImage));
   const heroParallax = usePointerParallax(22);
   const { toast } = useToast();
@@ -98,13 +98,30 @@ export default function HomeView({
       setNews(n.slice(0, 3));
       setChat([...c].reverse());
       setChatEnabled(settings.chatEnabled);
-      setHeroSrc(resolveHomeHeroImage(homeHeroImage || settings.homeHeroImage));
+      // SiteSettings first — prop is only a fallback while settings load.
+      setWordmarkSrc(
+        resolveHeaderLogo(settings.headerLogoUrl || headerLogoUrlProp)
+      );
+      setHeroSrc(
+        resolveHomeHeroImage(settings.homeHeroImage || homeHeroImage)
+      );
       setIsLoading(false);
     });
     return () => {
       isMounted = false;
     };
-  }, [userId, homeHeroImage]);
+  }, [userId, homeHeroImage, headerLogoUrlProp]);
+
+  useEffect(() => {
+    return onSiteSettingsUpdated((s) => {
+      if (s.headerLogoUrl !== undefined) {
+        setWordmarkSrc(resolveHeaderLogo(s.headerLogoUrl));
+      }
+      if (s.homeHeroImage !== undefined) {
+        setHeroSrc(resolveHomeHeroImage(s.homeHeroImage));
+      }
+    });
+  }, []);
 
   // Slow chat refresh — only while this tab is visible (cuts idle POST spam).
   useEffect(() => {
@@ -160,10 +177,9 @@ export default function HomeView({
             <p className="text-xs uppercase tracking-[0.2em] text-slate-300 mb-2">
               Live Arena
             </p>
-            <BrandLogoPair
-              wordmarkSrc={headerLogoUrl}
-              markSrc={resolveMarkLogo(markLogoUrl)}
-              markRevealed={!leftMenuOpen}
+            <InteractiveWordmark
+              src={wordmarkSrc}
+              className="h-12 sm:h-16 md:h-20 w-auto max-w-[min(100%,22rem)]"
             />
           </div>
           <Button

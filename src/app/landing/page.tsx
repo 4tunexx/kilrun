@@ -44,7 +44,13 @@ import {
   type LandingTopPlayer,
 } from '@/lib/actions';
 import { getLevelProgressPercent, getLevelFromXp } from '@/lib/progression';
-import { resolveHeaderLogo, resolveMarkLogo } from '@/lib/branding';
+import {
+  resolveHeaderLogo,
+  resolveHubBackground,
+  resolveLandingHeroImage,
+  resolveMarkLogo,
+} from '@/lib/branding';
+import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
 import { InteractiveWordmark } from '@/components/interactive-wordmark';
 import { usePointerParallax } from '@/hooks/use-pointer-parallax';
 
@@ -91,26 +97,43 @@ export default function LandingPage() {
   const [headerSubtitle, setHeaderSubtitle] = useState(
     'The ultimate deathrun experience. Compete, conquer, and climb the ranks.'
   );
-  const [bgUrl, setBgUrl] = useState('https://i.postimg.cc/tJgX2XgN/bg.png');
+  const [bgUrl, setBgUrl] = useState(resolveHubBackground());
   const [heroImage, setHeroImage] = useState('');
-  const [markLogoUrl, setMarkLogoUrl] = useState(resolveMarkLogo());
-  const [headerLogoUrl, setHeaderLogoUrl] = useState(resolveHeaderLogo());
+  const [markLogoUrl, setMarkLogoUrl] = useState('');
+  const [headerLogoUrl, setHeaderLogoUrl] = useState('');
   const heroParallax = usePointerParallax(20);
   const [stats, setStats] = useState<LandingStats>(EMPTY_STATS);
   const [topPlayers, setTopPlayers] = useState<LandingTopPlayer[]>([]);
   const [popularItems, setPopularItems] = useState<LandingStoreItem[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
+  const applyBranding = (s: {
+    headerTitle?: string | null;
+    headerSubtitle?: string | null;
+    backgroundUrl?: string | null;
+    landingHeroImage?: string | null;
+    logoUrl?: string | null;
+    headerLogoUrl?: string | null;
+  }) => {
+    if (s.headerTitle) setHeaderTitle(s.headerTitle);
+    if (s.headerSubtitle) setHeaderSubtitle(s.headerSubtitle);
+    if (s.backgroundUrl !== undefined && s.backgroundUrl !== null) {
+      setBgUrl(resolveHubBackground(s.backgroundUrl));
+    }
+    if (s.landingHeroImage !== undefined && s.landingHeroImage !== null) {
+      setHeroImage(resolveLandingHeroImage(s.landingHeroImage));
+    }
+    if (s.logoUrl !== undefined && s.logoUrl !== null) {
+      setMarkLogoUrl(s.logoUrl);
+    }
+    if (s.headerLogoUrl !== undefined && s.headerLogoUrl !== null) {
+      setHeaderLogoUrl(s.headerLogoUrl);
+    }
+  };
+
   useEffect(() => {
     getSiteSettings()
-      .then((s) => {
-        if (s.headerTitle) setHeaderTitle(s.headerTitle);
-        if (s.headerSubtitle) setHeaderSubtitle(s.headerSubtitle);
-        if (s.backgroundUrl) setBgUrl(s.backgroundUrl);
-        if (s.landingHeroImage) setHeroImage(s.landingHeroImage);
-        setMarkLogoUrl(resolveMarkLogo(s.logoUrl));
-        setHeaderLogoUrl(resolveHeaderLogo(s.headerLogoUrl));
-      })
+      .then((s) => applyBranding(s))
       .catch(() => {});
 
     getLandingPageData()
@@ -122,6 +145,11 @@ export default function LandingPage() {
       .catch(() => {})
       .finally(() => setDataLoading(false));
   }, []);
+
+  useEffect(() => onSiteSettingsUpdated(applyBranding), []);
+
+  const markSrc = resolveMarkLogo(markLogoUrl);
+  const wordmarkSrc = resolveHeaderLogo(headerLogoUrl);
 
   const handleNavigation = () => {
     window.location.href = '/api/auth/steam';
@@ -180,18 +208,6 @@ export default function LandingPage() {
         {/* Header Banner */}
         <header className="pt-8 pb-8 md:pt-24 md:pb-16">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center gap-3 mb-6">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={markLogoUrl}
-                alt="Kilrun"
-                className="h-10 w-10 sm:h-12 sm:w-12 object-contain"
-              />
-              <InteractiveWordmark
-                src={headerLogoUrl}
-                className="h-8 sm:h-10 w-auto max-w-[14rem]"
-              />
-            </div>
             <div
               ref={heroParallax.ref}
               className="relative rounded-2xl overflow-hidden shadow-2xl touch-pan-y"
@@ -245,7 +261,7 @@ export default function LandingPage() {
                   <div className="max-w-xl min-w-0">
                     <div className="mb-3 md:mb-5">
                       <InteractiveWordmark
-                        src={headerLogoUrl}
+                        src={wordmarkSrc}
                         alt={headerTitle}
                         className="h-14 sm:h-20 md:h-24 w-auto max-w-full"
                       />
@@ -478,7 +494,7 @@ export default function LandingPage() {
             <div className="flex items-center gap-2.5 min-w-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={markLogoUrl}
+                src={markSrc}
                 alt=""
                 className="h-7 w-7 object-contain shrink-0"
               />

@@ -46,7 +46,6 @@ import { canAccessAdmin, VIP_UNLOCK_VP_COST } from '@/lib/roles';
 import { unlockVipWithVp } from '@/lib/social-actions';
 import {
   bootstrapHubProgression,
-  ensureSiteLogoBackgroundStripped,
   getLivePlayerState,
   getSiteSettings,
 } from '@/lib/progression-actions';
@@ -58,11 +57,8 @@ import { getRoleTextColorClass } from '@/lib/role-colors';
 import { PageBanner, PAGE_META } from '@/components/page-banner';
 import { HubHeaderToolbar } from '@/components/hub-header-toolbar';
 import { HubFooter } from '@/components/hub-footer';
-import {
-  resolveHeaderLogo,
-  resolveHomeHeroImage,
-  resolveMarkLogo,
-} from '@/lib/branding';
+import { resolveHubBackground, resolveMarkLogo } from '@/lib/branding';
+import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
 
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -168,7 +164,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [currentRank, setCurrentRank] = useState(user.currentRank);
   const [emailVerified, setEmailVerified] = useState(user.emailVerified);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [bgUrl, setBgUrl] = useState('https://i.postimg.cc/tJgX2XgN/bg.png');
+  const [bgUrl, setBgUrl] = useState(resolveHubBackground());
+  /** Raw SiteSettings values — resolve*() only at render so admin always wins. */
   const [logoUrl, setLogoUrl] = useState('');
   const [headerLogoUrl, setHeaderLogoUrl] = useState('');
   const [homeHeroImage, setHomeHeroImage] = useState('');
@@ -222,17 +219,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         ]);
         if (cancelled) return;
         applyLive(live);
-        if (settings.backgroundUrl) setBgUrl(settings.backgroundUrl);
-        setLogoUrl(resolveMarkLogo(settings.logoUrl));
-        setHeaderLogoUrl(resolveHeaderLogo(settings.headerLogoUrl));
-        setHomeHeroImage(resolveHomeHeroImage(settings.homeHeroImage));
-        // Remove solid plate baked into admin-uploaded logos (updates DB once).
-        if (settings.logoUrl) {
-          const cleaned = await ensureSiteLogoBackgroundStripped();
-          if (!cancelled && cleaned.logoUrl && cleaned.logoUrl !== settings.logoUrl) {
-            setLogoUrl(resolveMarkLogo(cleaned.logoUrl));
-          }
-        }
+        setBgUrl(resolveHubBackground(settings.backgroundUrl));
+        setLogoUrl(settings.logoUrl ?? '');
+        setHeaderLogoUrl(settings.headerLogoUrl ?? '');
+        setHomeHeroImage(settings.homeHeroImage ?? '');
         if (settings.headerTitle) setHomeTitle(settings.headerTitle);
         if (settings.headerSubtitle) setHomeSubtitle(settings.headerSubtitle);
       } catch (err) {
@@ -260,6 +250,22 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [user.id]);
+
+  // Admin "Save site settings" broadcasts — apply logos immediately (no reload).
+  useEffect(() => {
+    return onSiteSettingsUpdated((s) => {
+      if (s.backgroundUrl !== undefined) {
+        setBgUrl(resolveHubBackground(s.backgroundUrl));
+      }
+      if (s.logoUrl !== undefined) setLogoUrl(s.logoUrl ?? '');
+      if (s.headerLogoUrl !== undefined) setHeaderLogoUrl(s.headerLogoUrl ?? '');
+      if (s.homeHeroImage !== undefined) {
+        setHomeHeroImage(s.homeHeroImage ?? '');
+      }
+      if (s.headerTitle) setHomeTitle(s.headerTitle);
+      if (s.headerSubtitle) setHomeSubtitle(s.headerSubtitle);
+    });
+  }, []);
 
   const navigate = (page: string) => {
     setCurrentPage(page);
@@ -375,10 +381,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         props.onLaunchGame = handleLaunchGame;
         props.onNavigate = navigate;
         props.vpCurrency = vpBalance;
-        props.headerLogoUrl = resolveHeaderLogo(headerLogoUrl);
-        props.markLogoUrl = resolveMarkLogo(logoUrl);
-        props.homeHeroImage = resolveHomeHeroImage(homeHeroImage);
-        props.leftMenuOpen = isLeftMenuOpen;
+        // Pass raw SiteSettings values — HomeView resolves + re-fetches admin truth.
+        props.headerLogoUrl = headerLogoUrl;
+        props.homeHeroImage = homeHeroImage;
       } else if (currentPage === 'lobby' && lobbyMode) {
         props = {
           mode: lobbyMode,
@@ -420,10 +425,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         onNavigate={navigate}
         userId={user.id}
         vpCurrency={vpBalance}
-        headerLogoUrl={resolveHeaderLogo(headerLogoUrl)}
-        markLogoUrl={resolveMarkLogo(logoUrl)}
-        homeHeroImage={resolveHomeHeroImage(homeHeroImage)}
-        leftMenuOpen={isLeftMenuOpen}
+        headerLogoUrl={headerLogoUrl}
+        homeHeroImage={homeHeroImage}
       />
     );
   };
@@ -622,7 +625,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
               {renderContent()}
             </ScrollArea>
             {currentPage !== 'lobby' && (
-              <HubFooter markLogoUrl={resolveMarkLogo(logoUrl)} />
+              <HubFooter markLogoUrl={logoUrl} />
             )}
           </div>
 

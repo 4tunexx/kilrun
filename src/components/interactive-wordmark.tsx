@@ -34,7 +34,7 @@ export function InteractiveWordmark({
     <div
       className={cn(
         'inline-block origin-left will-change-transform cursor-pointer',
-        entered ? 'opacity-[0.88]' : 'opacity-0'
+        entered ? 'opacity-100' : 'opacity-0'
       )}
       style={{
         transform: `translate3d(${tx}px, ${ty}px, 0) rotate(${rot}deg)`,
@@ -66,55 +66,6 @@ export function InteractiveWordmark({
         draggable={false}
         className={cn('select-none pointer-events-none object-contain', className)}
       />
-    </div>
-  );
-}
-
-const MARK_SIZE = 'h-12 w-12 sm:h-16 sm:w-16 md:h-20 md:w-20';
-const WORDMARK_SIZE = 'h-12 sm:h-16 md:h-20 w-auto max-w-[min(100%,22rem)]';
-
-/**
- * Wordmark + mark pair. When `markRevealed` (left nav collapsed), the small K
- * slides out from behind the wordmark and sits beside it at the same height.
- * When the nav is expanded, the mark tucks back under the wordmark.
- */
-export function BrandLogoPair({
-  wordmarkSrc,
-  markSrc,
-  markRevealed,
-}: {
-  wordmarkSrc: string;
-  markSrc: string;
-  /** true when left nav is collapsed — mark sits beside the wordmark */
-  markRevealed: boolean;
-}) {
-  return (
-    <div className="relative flex items-center">
-      {/* Reserves space so the wordmark shifts right as the mark slides out */}
-      <div
-        className={cn(
-          'shrink-0 transition-[width,margin] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]',
-          markRevealed ? 'w-12 sm:w-16 md:w-20 mr-2 sm:mr-3' : 'w-0 mr-0'
-        )}
-      />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={markSrc}
-        alt=""
-        draggable={false}
-        aria-hidden
-        className={cn(
-          MARK_SIZE,
-          'absolute top-1/2 -translate-y-1/2 object-contain select-none pointer-events-none',
-          'transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]',
-          markRevealed
-            ? 'left-0 z-0 opacity-[0.88]'
-            : 'left-10 sm:left-14 md:left-16 z-0 opacity-0 scale-90'
-        )}
-      />
-      <div className="relative z-10 min-w-0">
-        <InteractiveWordmark src={wordmarkSrc} className={WORDMARK_SIZE} />
-      </div>
     </div>
   );
 }
