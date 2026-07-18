@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { BookOpen, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { getGuides } from '@/lib/social-actions';
@@ -20,10 +20,6 @@ export default function GuidesView() {
 
   return (
     <div className="px-4 sm:px-8 py-6 space-y-4">
-      <h1 className="text-3xl sm:text-4xl font-black flex items-center gap-2">
-        <BookOpen className="w-8 h-8" /> Guides
-      </h1>
-
       {loading ? (
         <div className="text-slate-400 flex items-center gap-2 py-12 justify-center">
           <Loader2 className="w-5 h-5 animate-spin" /> Loading guides...

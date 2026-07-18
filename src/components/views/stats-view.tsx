@@ -54,7 +54,6 @@ export default function StatsView({ userId }: { userId: string }) {
 
   return (
     <div className="px-12 py-8">
-      <h1 className="text-5xl font-black mb-8">Statistics</h1>
       {summary?.totalRuns === 0 ? (
         <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
           <CardContent className="py-16 text-center text-slate-400">

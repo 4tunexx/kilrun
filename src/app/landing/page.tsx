@@ -44,6 +44,9 @@ import {
   type LandingTopPlayer,
 } from '@/lib/actions';
 import { getLevelProgressPercent, getLevelFromXp } from '@/lib/progression';
+import { resolveHeaderLogo, resolveMarkLogo } from '@/lib/branding';
+import { InteractiveWordmark } from '@/components/interactive-wordmark';
+import { usePointerParallax } from '@/hooks/use-pointer-parallax';
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   steam_auth_failed: 'Steam login was cancelled or failed. Please try again.',
@@ -90,6 +93,9 @@ export default function LandingPage() {
   );
   const [bgUrl, setBgUrl] = useState('https://i.postimg.cc/tJgX2XgN/bg.png');
   const [heroImage, setHeroImage] = useState('');
+  const [markLogoUrl, setMarkLogoUrl] = useState(resolveMarkLogo());
+  const [headerLogoUrl, setHeaderLogoUrl] = useState(resolveHeaderLogo());
+  const heroParallax = usePointerParallax(20);
   const [stats, setStats] = useState<LandingStats>(EMPTY_STATS);
   const [topPlayers, setTopPlayers] = useState<LandingTopPlayer[]>([]);
   const [popularItems, setPopularItems] = useState<LandingStoreItem[]>([]);
@@ -102,6 +108,8 @@ export default function LandingPage() {
         if (s.headerSubtitle) setHeaderSubtitle(s.headerSubtitle);
         if (s.backgroundUrl) setBgUrl(s.backgroundUrl);
         if (s.landingHeroImage) setHeroImage(s.landingHeroImage);
+        setMarkLogoUrl(resolveMarkLogo(s.logoUrl));
+        setHeaderLogoUrl(resolveHeaderLogo(s.headerLogoUrl));
       })
       .catch(() => {});
 
@@ -172,47 +180,77 @@ export default function LandingPage() {
         {/* Header Banner */}
         <header className="pt-8 pb-8 md:pt-24 md:pb-16">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="relative rounded-2xl overflow-hidden shadow-2xl">
-              <div className="relative">
+            <div className="flex items-center gap-3 mb-6">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={markLogoUrl}
+                alt="Kilrun"
+                className="h-10 w-10 sm:h-12 sm:w-12 object-contain"
+              />
+              <InteractiveWordmark
+                src={headerLogoUrl}
+                className="h-8 sm:h-10 w-auto max-w-[14rem]"
+              />
+            </div>
+            <div
+              ref={heroParallax.ref}
+              className="relative rounded-2xl overflow-hidden shadow-2xl touch-pan-y"
+              onPointerMove={heroParallax.onPointerMove}
+              onPointerLeave={heroParallax.onPointerLeave}
+            >
+              <div className="relative h-56 sm:h-72 md:h-[32rem] overflow-hidden">
                 {heroSlides.length > 0 ? (
-                  <Carousel
-                    opts={{ loop: true }}
-                    plugins={[autoplayPlugin.current]}
-                    className="w-full"
-                    onMouseEnter={autoplayPlugin.current.stop}
-                    onMouseLeave={autoplayPlugin.current.reset}
+                  <div
+                    className="absolute inset-[-8%] h-[116%] w-[116%]"
+                    style={heroParallax.mediaStyle}
                   >
-                    <CarouselContent className="-ml-0">
-                      {heroSlides.map((image, index) => (
-                        <CarouselItem key={index} className="pl-0">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={image.src}
-                            alt={image.alt}
-                            className="w-full h-56 sm:h-72 md:h-[32rem] object-cover"
-                          />
-                        </CarouselItem>
-                      ))}
-                    </CarouselContent>
-                    {heroSlides.length > 1 && (
-                      <>
-                        <CarouselPrevious className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2 z-10" />
-                        <CarouselNext className="absolute right-4 md:right-6 top-1/2 -translate-y-1/2 z-10" />
-                      </>
-                    )}
-                  </Carousel>
+                    <Carousel
+                      opts={{ loop: true }}
+                      plugins={[autoplayPlugin.current]}
+                      className="w-full h-full"
+                      onMouseEnter={autoplayPlugin.current.stop}
+                      onMouseLeave={autoplayPlugin.current.reset}
+                    >
+                      <CarouselContent className="-ml-0 h-full">
+                        {heroSlides.map((image, index) => (
+                          <CarouselItem key={index} className="pl-0 h-full">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={image.src}
+                              alt={image.alt}
+                              className="w-full h-56 sm:h-72 md:h-[32rem] object-cover pointer-events-none select-none"
+                              draggable={false}
+                            />
+                          </CarouselItem>
+                        ))}
+                      </CarouselContent>
+                      {heroSlides.length > 1 && (
+                        <>
+                          <CarouselPrevious className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2 z-10" />
+                          <CarouselNext className="absolute right-4 md:right-6 top-1/2 -translate-y-1/2 z-10" />
+                        </>
+                      )}
+                    </Carousel>
+                  </div>
                 ) : (
-                  <div className="w-full h-56 sm:h-72 md:h-[32rem] bg-gradient-to-br from-slate-900 via-slate-800 to-cyan-950" />
+                  <div
+                    className="absolute inset-[-8%] h-[116%] w-[116%] bg-gradient-to-br from-slate-900 via-slate-800 to-cyan-950"
+                    style={heroParallax.mediaStyle}
+                  />
                 )}
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/40 to-transparent md:bg-gradient-to-r md:from-slate-900/90 md:via-slate-900/50 md:to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/40 to-transparent md:bg-gradient-to-r md:from-slate-900/90 md:via-slate-900/50 md:to-transparent pointer-events-none" />
 
                 {/* Title overlay; auth card only on md+ so it is not clipped on mobile */}
                 <div className="absolute inset-0 flex items-end md:items-center justify-between p-6 md:p-24 gap-8">
-                  <div className="max-w-lg">
-                    <h1 className="text-4xl sm:text-5xl md:text-7xl font-black tracking-tight drop-shadow-2xl mb-2 md:mb-4 animate-in fade-in-0 slide-in-from-bottom-10 zoom-in-90 duration-1000">
-                      {headerTitle}
-                    </h1>
-                    <p className="text-base sm:text-lg md:text-xl text-slate-200 animate-in fade-in-0 slide-in-from-bottom-10 zoom-in-90 duration-1000 delay-200">
+                  <div className="max-w-xl min-w-0">
+                    <div className="mb-3 md:mb-5">
+                      <InteractiveWordmark
+                        src={headerLogoUrl}
+                        alt={headerTitle}
+                        className="h-14 sm:h-20 md:h-24 w-auto max-w-full"
+                      />
+                    </div>
+                    <p className="text-base sm:text-lg md:text-xl text-slate-200 animate-in fade-in-0 slide-in-from-bottom-10 duration-1000 delay-200">
                       {headerSubtitle}
                     </p>
                   </div>
@@ -315,19 +353,13 @@ export default function LandingPage() {
                         <Card className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 hover:border-primary/50 transition-all duration-300 hover:-translate-y-2 group shadow-lg flex flex-col items-center justify-start h-full">
                           <CardContent className="p-0 w-full">
                             <div className="relative aspect-square w-full overflow-hidden rounded-t-lg bg-slate-900/80">
-                              {item.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? (
+                              {item.imageUrl ? (
                                 <Image
                                   src={item.imageUrl}
                                   alt={item.itemName}
                                   fill
                                   className="object-cover group-hover:scale-110 transition-transform duration-300"
-                                />
-                              ) : item.imageUrl ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={item.imageUrl}
-                                  alt={item.itemName}
-                                  className="absolute inset-0 h-full w-full object-cover group-hover:scale-110 transition-transform duration-300"
+                                  unoptimized={item.imageUrl.includes('placehold.co')}
                                 />
                               ) : (
                                 <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950">
@@ -384,8 +416,10 @@ export default function LandingPage() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
                 {topPlayers.map((player, index) => {
-                  const level = getLevelFromXp(player.xpProgress);
-                  const xpPct = getLevelProgressPercent(player.xpProgress);
+                  const xp = player.xpProgress ?? 0;
+                  const level = getLevelFromXp(xp);
+                  const xpPct = getLevelProgressPercent(xp);
+                  const name = player.username || 'Player';
                   return (
                     <TooltipProvider key={player.id}>
                       <Tooltip>
@@ -401,10 +435,10 @@ export default function LandingPage() {
                                 <Avatar className="h-24 w-24">
                                   <AvatarImage
                                     src={player.avatarUrl}
-                                    alt={player.username}
+                                    alt={name}
                                   />
                                   <AvatarFallback>
-                                    {player.username.charAt(0)}
+                                    {name.charAt(0)}
                                   </AvatarFallback>
                                 </Avatar>
                               </CircularProgress>
@@ -413,17 +447,17 @@ export default function LandingPage() {
                               )}
                             </div>
                             <p className="font-bold text-xl truncate mt-auto">
-                              {player.username}
+                              {name}
                             </p>
                           </Card>
                         </TooltipTrigger>
-                        <TooltipContent className="bg-slate-900/80 backdrop-blur-md border-slate-700 text-white">
+                        <TooltipContent className="bg-slate-900/60 backdrop-blur-md border-slate-700/30 text-white">
                           <div className="p-1 min-w-[150px] text-center">
                             <p className="font-bold text-lg text-yellow-400">
-                              {player.currentRank}
+                              {player.currentRank || 'Unranked'}
                             </p>
                             <p className="text-xs text-slate-300 mt-1">
-                              Level {level} · {player.xpProgress.toLocaleString()} XP
+                              Level {level} · {xp.toLocaleString()} XP
                             </p>
                             {player.isVip && (
                               <p className="text-xs text-yellow-400/90 mt-1">VIP</p>
@@ -440,8 +474,18 @@ export default function LandingPage() {
         </main>
 
         <footer className="border-t border-slate-700/50">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-wrap justify-between items-center text-slate-400 text-sm">
-            <p>&copy; {new Date().getFullYear()} Kilrun. All Rights Reserved.</p>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-wrap justify-between items-center gap-4 text-slate-400 text-sm">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={markLogoUrl}
+                alt=""
+                className="h-7 w-7 object-contain shrink-0"
+              />
+              <p className="truncate">
+                &copy; {new Date().getFullYear()} Kilrun. All Rights Reserved.
+              </p>
+            </div>
             <div className="flex items-center space-x-6">
               <a href="#" className="hover:text-primary transition">
                 Terms of Service

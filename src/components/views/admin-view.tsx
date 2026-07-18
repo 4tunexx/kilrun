@@ -117,7 +117,9 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
   });
   const [siteForm, setSiteForm] = useState({
     logoUrl: '',
+    headerLogoUrl: '',
     backgroundUrl: '',
+    homeHeroImage: '',
     headerTitle: '',
     headerSubtitle: '',
     landingHeroImage: '',
@@ -184,7 +186,9 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
       setBadges(b);
       setSiteForm({
         logoUrl: settings.logoUrl ?? '',
+        headerLogoUrl: settings.headerLogoUrl ?? '',
         backgroundUrl: settings.backgroundUrl ?? '',
+        homeHeroImage: settings.homeHeroImage ?? '',
         headerTitle: settings.headerTitle ?? '',
         headerSubtitle: settings.headerSubtitle ?? '',
         landingHeroImage: settings.landingHeroImage ?? '',
@@ -224,10 +228,6 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
 
   return (
     <div className="px-4 sm:px-8 py-6 space-y-4">
-      <h1 className="text-3xl sm:text-4xl font-black flex items-center gap-2">
-        <Shield className="text-primary" /> {isAdmin ? 'Admin Panel' : 'Moderator Panel'}
-      </h1>
-
       <Tabs defaultValue="dashboard" className="w-full">
         <TabsList className="w-full h-auto flex flex-wrap justify-start gap-1 bg-slate-800/60 p-1">
           {visibleTabs.map((tab) => (
@@ -295,23 +295,63 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
               </CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-2">
                 <ImageUploadField
-                  label="Logo"
+                  label="Sidebar / mark logo (K)"
                   value={siteForm.logoUrl}
                   onChange={(v) => setSiteForm((f) => ({ ...f, logoUrl: v }))}
                   className="space-y-1 sm:col-span-2"
+                  kind="mark"
                 />
+                <p className="text-xs text-slate-500 sm:col-span-2 -mt-2">
+                  Small mark used in the left rail and footer. Leave empty to use{' '}
+                  <code className="text-slate-400">/K2.png</code>.
+                </p>
                 <ImageUploadField
-                  label="Background"
+                  label="Header logo (wordmark)"
+                  value={siteForm.headerLogoUrl}
+                  onChange={(v) => setSiteForm((f) => ({ ...f, headerLogoUrl: v }))}
+                  className="space-y-1 sm:col-span-2"
+                  kind="wordmark"
+                  widePreview
+                />
+                <p className="text-xs text-slate-500 sm:col-span-2 -mt-2">
+                  Replaces the big Kilrun word on the home hero and landing. Leave empty
+                  to use <code className="text-slate-400">/kilrun.png</code>. Upload saves
+                  to disk automatically — then hit Save.
+                </p>
+                <ImageUploadField
+                  label="Hub page background"
                   value={siteForm.backgroundUrl}
                   onChange={(v) => setSiteForm((f) => ({ ...f, backgroundUrl: v }))}
                   className="space-y-1 sm:col-span-2"
+                  kind="bg"
+                  widePreview
                 />
+                <p className="text-xs text-slate-500 sm:col-span-2 -mt-2">
+                  Full-page backdrop behind the entire hub chrome.
+                </p>
+                <ImageUploadField
+                  label="Home hero background"
+                  value={siteForm.homeHeroImage}
+                  onChange={(v) => setSiteForm((f) => ({ ...f, homeHeroImage: v }))}
+                  className="space-y-1 sm:col-span-2"
+                  kind="hero"
+                  widePreview
+                />
+                <p className="text-xs text-slate-500 sm:col-span-2 -mt-2">
+                  Live Arena banner on the homepage (mouse / tap parallax). Leave empty
+                  for the default arena image.
+                </p>
                 <ImageUploadField
                   label="Landing hero image"
                   value={siteForm.landingHeroImage}
                   onChange={(v) => setSiteForm((f) => ({ ...f, landingHeroImage: v }))}
                   className="space-y-1 sm:col-span-2"
+                  kind="hero"
+                  widePreview
                 />
+                <p className="text-xs text-slate-500 sm:col-span-2 -mt-2">
+                  Big banner on the public landing page (also pointer-reactive).
+                </p>
                 {(
                   [
                     ['headerTitle', 'Header / home title'],

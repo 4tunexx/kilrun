@@ -32,11 +32,6 @@ export default function MissionsView({ userId }: { userId: string }) {
 
   return (
     <div className="px-4 sm:px-8 py-6">
-      <h1 className="text-3xl sm:text-5xl font-black mb-2">Missions</h1>
-      <p className="text-slate-400 mb-6">
-        Complete in-game and website challenges for XP. Completions notify you instantly.
-      </p>
-
       {isLoading ? (
         <div className="flex items-center justify-center py-12 text-slate-400">
           <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading missions...

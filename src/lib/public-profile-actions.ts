@@ -23,6 +23,7 @@ export type PublicProfile = {
   username: string;
   avatarUrl: string;
   bio: string;
+  countryCode: string;
   role: string;
   isVip: boolean;
   currentRank: string;
@@ -66,9 +67,12 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
   const [higherRanked, totalPlayers, achievements, badges, matchStats, matchResults] =
     await Promise.all([
       prisma.user.count({
-        where: { isBanned: false, xpProgress: { gt: target.xpProgress } },
+        where: {
+          NOT: { isBanned: true },
+          xpProgress: { gt: target.xpProgress },
+        },
       }),
-      prisma.user.count({ where: { isBanned: false } }),
+      prisma.user.count({ where: { NOT: { isBanned: true } } }),
       getPlayerAchievements(userId),
       getPlayerBadges(userId),
       prisma.matchStat.findMany({ where: { userId } }),
@@ -118,6 +122,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     username: target.username,
     avatarUrl: target.avatarUrl,
     bio: target.bio,
+    countryCode: target.countryCode ?? '',
     role: target.role,
     isVip: target.isVip,
     currentRank: target.currentRank || getRankForLevel(progress.level),

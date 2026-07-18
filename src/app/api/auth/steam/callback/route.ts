@@ -90,7 +90,10 @@ export async function GET(req: NextRequest) {
           data: {
             username,
             avatarUrl,
-            ...(promoteAdmin ? { role: 'admin', isVip: true } : {}),
+            // Keep boolean flags materialized so Mongo filters match.
+            isBanned: existingUser.isBanned ?? false,
+            isMuted: existingUser.isMuted ?? false,
+            ...(promoteAdmin ? { role: 'admin' } : {}),
           },
         });
       }
@@ -103,7 +106,9 @@ export async function GET(req: NextRequest) {
           xpProgress: 0,
           currentRank: 'Unranked',
           role: promoteAdmin ? 'admin' : 'player',
-          isVip: promoteAdmin,
+          isVip: false,
+          isBanned: false,
+          isMuted: false,
         },
       });
     });

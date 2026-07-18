@@ -70,8 +70,13 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
-        "progress-pulse": {
-          "50%": { opacity: "0.8" },
+        "xp-bar-charge": {
+          "0%": { transform: "translateX(-40%)" },
+          "100%": { transform: "translateX(140%)" },
+        },
+        "xp-spin": {
+          "0%": { transform: "rotate(0deg)" },
+          "100%": { transform: "rotate(360deg)" },
         },
         "slow-pulse-horizontal": {
           "0%, 100%": { transform: "translateX(0)" },
@@ -93,7 +98,8 @@ export default {
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        "progress-pulse": "progress-pulse 2.5s ease-in-out infinite",
+        "xp-bar-charge": "xp-bar-charge 3.2s linear infinite",
+        "xp-spin": "xp-spin 7s linear infinite",
         "slow-pulse-horizontal": "slow-pulse-horizontal 3s ease-in-out infinite",
         "banner-shimmer": "banner-shimmer 3s linear infinite",
         "banner-pulse-glow": "banner-pulse-glow 2.5s ease-in-out infinite",

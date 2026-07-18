@@ -33,14 +33,6 @@ export default function BadgesView({ userId }: { userId: string }) {
 
   return (
     <div className="px-4 sm:px-8 py-6 space-y-4">
-      <h1 className="text-3xl sm:text-4xl font-black mb-2 flex items-center gap-3">
-        <Award className="w-8 h-8 text-primary" />
-        Badges & Achievements
-      </h1>
-      <p className="text-slate-400 mb-4">
-        Unlock rewards in-game and across the website hub.
-      </p>
-
       {loading ? (
         <div className="text-slate-400 flex items-center gap-2 py-12 justify-center">
           <Loader2 className="w-5 h-5 animate-spin" /> Loading...
@@ -58,10 +50,8 @@ export default function BadgesView({ userId }: { userId: string }) {
               {badges.map((badge) => (
                 <Card
                   key={badge.id}
-                  className={`border ${
-                    badge.unlocked
-                      ? 'bg-slate-800/50 border-primary/40'
-                      : 'bg-slate-900/30 border-slate-700/40 opacity-60'
+                  className={`bg-slate-900/60 backdrop-blur-md border border-slate-700/30 ${
+                    badge.unlocked ? 'border-primary/40' : 'opacity-60'
                   }`}
                 >
                   <CardContent className="pt-5 flex gap-3 items-start">
@@ -74,8 +64,10 @@ export default function BadgesView({ userId }: { userId: string }) {
                           badge.unlocked ? '' : 'opacity-40 grayscale'
                         }`}
                       />
+                    ) : badge.unlocked ? (
+                      <Award className="w-10 h-10 text-primary shrink-0" />
                     ) : (
-                      <div className="text-2xl">{badge.unlocked ? '🏅' : '🔒'}</div>
+                      <Lock className="w-10 h-10 text-slate-500 shrink-0" />
                     )}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">

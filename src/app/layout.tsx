@@ -14,6 +14,10 @@ const spaceGrotesk = SpaceGrotesk({
 export const metadata: Metadata = {
   title: 'Kilrun',
   description: 'A deathrun game launcher and hub.',
+  icons: {
+    icon: [{ url: '/K2.png', type: 'image/png' }],
+    apple: [{ url: '/apple-icon.png', type: 'image/png' }],
+  },
 };
 
 export default function RootLayout({
@@ -34,6 +38,7 @@ export default function RootLayout({
     >
       <html lang="en" className="dark">
         <body
+          suppressHydrationWarning
           className={cn(
             'min-h-screen bg-background font-sans antialiased',
             spaceGrotesk.variable

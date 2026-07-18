@@ -16,10 +16,8 @@ import {
   CheckSquare,
   Trophy,
   BarChart3,
-  ShieldCheck,
   Crown,
   Star,
-  Bell,
   Mail,
   ShieldAlert,
   Shield,
@@ -48,6 +46,7 @@ import { canAccessAdmin, VIP_UNLOCK_VP_COST } from '@/lib/roles';
 import { unlockVipWithVp } from '@/lib/social-actions';
 import {
   bootstrapHubProgression,
+  ensureSiteLogoBackgroundStripped,
   getLivePlayerState,
   getSiteSettings,
 } from '@/lib/progression-actions';
@@ -56,6 +55,14 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { ProfileNavigationProvider } from '@/components/providers/profile-navigation-context';
 import { InventoryDrawer } from '@/components/inventory-drawer';
 import { getRoleTextColorClass } from '@/lib/role-colors';
+import { PageBanner, PAGE_META } from '@/components/page-banner';
+import { HubHeaderToolbar } from '@/components/hub-header-toolbar';
+import { HubFooter } from '@/components/hub-footer';
+import {
+  resolveHeaderLogo,
+  resolveHomeHeroImage,
+  resolveMarkLogo,
+} from '@/lib/branding';
 
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -79,7 +86,6 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -164,8 +170,12 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [bgUrl, setBgUrl] = useState('https://i.postimg.cc/tJgX2XgN/bg.png');
   const [logoUrl, setLogoUrl] = useState('');
+  const [headerLogoUrl, setHeaderLogoUrl] = useState('');
+  const [homeHeroImage, setHomeHeroImage] = useState('');
   const [isVip, setIsVip] = useState(user.isVip);
   const [isEmailPromptOpen, setIsEmailPromptOpen] = useState(false);
+  const [homeTitle, setHomeTitle] = useState(PAGE_META.home.title);
+  const [homeSubtitle, setHomeSubtitle] = useState(PAGE_META.home.subtitle);
   const { toast } = useToast();
 
   const { level, xpIntoLevel, xpForNextLevel, percent: levelProgressPercent } =
@@ -189,9 +199,21 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     }
   }, [user.emailVerified]);
 
-  // Bootstrap missions / login XP and poll live XP bar on the right rail.
+  // Bootstrap once; poll rail state slowly and only while the tab is visible.
   useEffect(() => {
     let cancelled = false;
+    let poll: ReturnType<typeof setInterval> | null = null;
+
+    const applyLive = (live: Awaited<ReturnType<typeof getLivePlayerState>>) => {
+      if (cancelled) return;
+      setXpProgress(live.xpProgress);
+      setVpBalance(live.vpCurrency);
+      setCurrentRank(live.currentRank);
+      setIsVip(live.isVip);
+      setEmailVerified(live.emailVerified);
+      setUnreadCount(live.unreadNotifications);
+    };
+
     (async () => {
       try {
         const [live, settings] = await Promise.all([
@@ -199,38 +221,45 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           getSiteSettings(),
         ]);
         if (cancelled) return;
-        setXpProgress(live.xpProgress);
-        setVpBalance(live.vpCurrency);
-        setCurrentRank(live.currentRank);
-        setIsVip(live.isVip);
-        setEmailVerified(live.emailVerified);
-        setUnreadCount(live.unreadNotifications);
+        applyLive(live);
         if (settings.backgroundUrl) setBgUrl(settings.backgroundUrl);
-        if (settings.logoUrl) setLogoUrl(settings.logoUrl);
+        setLogoUrl(resolveMarkLogo(settings.logoUrl));
+        setHeaderLogoUrl(resolveHeaderLogo(settings.headerLogoUrl));
+        setHomeHeroImage(resolveHomeHeroImage(settings.homeHeroImage));
+        // Remove solid plate baked into admin-uploaded logos (updates DB once).
+        if (settings.logoUrl) {
+          const cleaned = await ensureSiteLogoBackgroundStripped();
+          if (!cancelled && cleaned.logoUrl && cleaned.logoUrl !== settings.logoUrl) {
+            setLogoUrl(resolveMarkLogo(cleaned.logoUrl));
+          }
+        }
+        if (settings.headerTitle) setHomeTitle(settings.headerTitle);
+        if (settings.headerSubtitle) setHomeSubtitle(settings.headerSubtitle);
       } catch (err) {
         console.error(err);
       }
     })();
 
-    const poll = setInterval(() => {
-      getLivePlayerState()
-        .then((live) => {
-          if (cancelled) return;
-          setXpProgress(live.xpProgress);
-          setVpBalance(live.vpCurrency);
-          setCurrentRank(live.currentRank);
-          setIsVip(live.isVip);
-          setEmailVerified(live.emailVerified);
-          setUnreadCount(live.unreadNotifications);
-        })
-        .catch(() => {});
-    }, 5000);
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
+      getLivePlayerState(user.id).then(applyLive).catch(() => {});
+    };
+
+    poll = setInterval(tick, 30000);
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       cancelled = true;
-      clearInterval(poll);
+      if (poll) clearInterval(poll);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, []);
+  }, [user.id]);
 
   const navigate = (page: string) => {
     setCurrentPage(page);
@@ -315,10 +344,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   };
 
   const menuItems = [
-    { icon: Store, label: 'Store', page: 'store' },
+    { icon: Award, label: 'Badges', page: 'badges' },
     { icon: Users, label: 'Community', page: 'community' },
     { icon: BookOpen, label: 'Guides', page: 'guides' },
-    { icon: Award, label: 'Leaderboard', page: 'leaderboard' },
     { icon: HelpCircle, label: 'Support', page: 'support' },
     { icon: User, label: 'Profile', page: 'profile' },
   ];
@@ -345,7 +373,12 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         props.onPlay = handlePlay;
       } else if (currentPage === 'home') {
         props.onLaunchGame = handleLaunchGame;
+        props.onNavigate = navigate;
         props.vpCurrency = vpBalance;
+        props.headerLogoUrl = resolveHeaderLogo(headerLogoUrl);
+        props.markLogoUrl = resolveMarkLogo(logoUrl);
+        props.homeHeroImage = resolveHomeHeroImage(homeHeroImage);
+        props.leftMenuOpen = isLeftMenuOpen;
       } else if (currentPage === 'lobby' && lobbyMode) {
         props = {
           mode: lobbyMode,
@@ -384,8 +417,13 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     return (
       <HomeView
         onLaunchGame={handleLaunchGame}
+        onNavigate={navigate}
         userId={user.id}
         vpCurrency={vpBalance}
+        headerLogoUrl={resolveHeaderLogo(headerLogoUrl)}
+        markLogoUrl={resolveMarkLogo(logoUrl)}
+        homeHeroImage={resolveHomeHeroImage(homeHeroImage)}
+        leftMenuOpen={isLeftMenuOpen}
       />
     );
   };
@@ -450,15 +488,15 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
               }`}
             >
               <div
-                className="w-12 h-12 sm:w-14 sm:h-14 bg-primary rounded-xl flex items-center justify-center mb-4 sm:mb-6 shadow-lg cursor-pointer hover:bg-primary/90 transition shrink-0 hover:scale-110 active:scale-95 duration-300 overflow-hidden"
+                className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center mb-4 sm:mb-6 cursor-pointer transition shrink-0 hover:scale-110 active:scale-95 duration-300 overflow-hidden bg-transparent shadow-none hover:bg-white/5"
                 onClick={() => navigate('home')}
               >
-                {logoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="text-2xl font-bold">K</div>
-                )}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={resolveMarkLogo(logoUrl)}
+                  alt="Kilrun"
+                  className="w-full h-full object-contain p-0.5"
+                />
               </div>
 
               <NavButton icon={Home} label="Home" page="home" />
@@ -466,19 +504,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
               <NavButton icon={CheckSquare} label="Missions" page="missions" />
               <NavButton icon={Trophy} label="Leaderboard" page="leaderboard" />
               <NavButton icon={BarChart3} label="Stats" page="stats" />
-              <NavButton icon={ShieldCheck} label="Badges" page="badges" />
+              <NavButton icon={Store} label="Store" page="store" />
 
               <div className="my-2 w-3/4 h-px bg-slate-700/50 shrink-0" />
-
-              <div className="relative shrink-0">
-                <NavButton icon={Bell} label="Notifications" page="notifications" />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-[10px] font-bold flex items-center justify-center pointer-events-none">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
-                )}
-              </div>
-              <NavButton icon={Mail} label="Messages" page="messages" />
 
               <Dialog open={isVipDialogOpen} onOpenChange={setIsVipDialogOpen}>
                 <Tooltip>
@@ -530,41 +558,6 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
 
               {showAdmin && <NavButton icon={Shield} label="Admin Panel" page="admin" />}
 
-              <Sheet open={isFriendsSheetOpen} onOpenChange={setIsFriendsSheetOpen}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <SheetTrigger asChild>
-                      <button
-                        className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 hover:bg-primary/20 shrink-0 group ${
-                          isFriendsSheetOpen
-                            ? 'bg-primary/20 text-primary'
-                            : 'text-slate-400 hover:text-primary'
-                        }`}
-                      >
-                        <Users className="w-5 h-5 group-hover:text-primary transition-colors" />
-                      </button>
-                    </SheetTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    <p>Friends</p>
-                  </TooltipContent>
-                </Tooltip>
-                <SheetContent
-                  side="bottom"
-                  className="h-[70vh] sm:h-1/2 bg-slate-900/80 backdrop-blur-md border-t border-slate-700 text-white"
-                >
-                  <SheetHeader>
-                    <SheetTitle className="text-2xl font-bold flex items-center gap-2">
-                      <Users /> Friends List
-                    </SheetTitle>
-                  </SheetHeader>
-                  <FriendsList
-                    onInvite={handleInvite}
-                    onMessage={(peerId) => handleMessage(peerId)}
-                  />
-                </SheetContent>
-              </Sheet>
-
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -600,7 +593,55 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
             </button>
           </div>
 
-          <ScrollArea className="flex-1 min-w-0">{renderContent()}</ScrollArea>
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+            {currentPage !== 'lobby' && PAGE_META[currentPage] && (
+              <PageBanner
+                title={
+                  currentPage === 'home'
+                    ? homeTitle
+                    : PAGE_META[currentPage].title
+                }
+                subtitle={
+                  currentPage === 'home'
+                    ? homeSubtitle
+                    : PAGE_META[currentPage].subtitle
+                }
+                toolbar={
+                  <HubHeaderToolbar
+                    unreadCount={unreadCount}
+                    onOpenFriends={() => setIsFriendsSheetOpen(true)}
+                    onOpenNotifications={() => navigate('notifications')}
+                    onOpenMessages={() => navigate('messages')}
+                    onLogout={handleLogout}
+                    onOpenProfile={handleViewProfile}
+                  />
+                }
+              />
+            )}
+            <ScrollArea className="relative z-0 flex-1 min-w-0">
+              {renderContent()}
+            </ScrollArea>
+            {currentPage !== 'lobby' && (
+              <HubFooter markLogoUrl={resolveMarkLogo(logoUrl)} />
+            )}
+          </div>
+
+          <Sheet open={isFriendsSheetOpen} onOpenChange={setIsFriendsSheetOpen}>
+            <SheetContent
+              side="bottom"
+              className="h-[70vh] sm:h-1/2 bg-slate-900/60 backdrop-blur-md border-t border-slate-700/30 text-white"
+            >
+              <SheetHeader>
+                <SheetTitle className="text-2xl font-bold flex items-center gap-2">
+                  <Users /> Friends List
+                </SheetTitle>
+              </SheetHeader>
+              <FriendsList
+                onInvite={handleInvite}
+                onMessage={(peerId) => handleMessage(peerId)}
+              />
+            </SheetContent>
+          </Sheet>
 
           <div className="relative">
             <button
@@ -639,37 +680,39 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                             <AvatarFallback>{user.username.charAt(0)}</AvatarFallback>
                           </Avatar>
                         </CircularProgress>
-                        <div className="absolute top-1 right-1 flex flex-col gap-1">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="w-6 h-6 rounded-full bg-[#1b2838] border border-slate-600 flex items-center justify-center shadow">
-                                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-white" aria-hidden>
-                                  <path d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.371 1.203-.59 1.912-.59.063 0 .125.004.188.006l2.861-4.142V8.91c0-2.495 2.028-4.524 4.524-4.524 2.494 0 4.524 2.031 4.524 4.527s-2.03 4.525-4.524 4.525h-.105l-4.076 2.911c0 .052.004.105.004.159 0 1.875-1.515 3.396-3.39 3.396-1.635 0-3.016-1.173-3.331-2.727L.436 15.27C1.962 20.607 6.59 24 11.979 24c6.627 0 11.999-5.373 11.999-12S18.605 0 11.979 0zM7.54 18.205l-1.837-.76c.331.823 1.023 1.486 1.928 1.761l1.854.766c-.41-.802-.443-1.778-.09-2.767zm11.195-7.695c0-1.662-1.353-3.015-3.015-3.015-1.665 0-3.015 1.353-3.015 3.015 0 1.665 1.35 3.015 3.015 3.015 1.663 0 3.015-1.35 3.015-3.015zm-5.386-.198c0-.986.805-1.787 1.79-1.787.982 0 1.787.801 1.787 1.787s-.805 1.79-1.787 1.79c-.985 0-1.79-.804-1.79-1.79z" />
-                                </svg>
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>Steam confirmed</TooltipContent>
-                          </Tooltip>
-                          {emailVerified && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="w-6 h-6 rounded-full bg-emerald-600 border border-emerald-400 flex items-center justify-center shadow">
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-white" />
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>Email confirmed</TooltipContent>
-                            </Tooltip>
-                          )}
-                        </div>
                       </div>
                       <h3
-                        className={`text-xl font-bold mt-4 pt-4 flex items-center gap-2 ${getRoleTextColorClass(
+                        className={`text-xl font-bold mt-2 flex items-center justify-center gap-1.5 flex-wrap ${getRoleTextColorClass(
                           user.role,
                           isVip
                         )}`}
                       >
-                        {user.username}
-                        {isVip && <Badge className="bg-yellow-500 text-black">VIP</Badge>}
+                        <span className="truncate max-w-[10rem]">{user.username}</span>
+                        {isVip && (
+                          <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px]">
+                            VIP
+                          </Badge>
+                        )}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex w-5 h-5 rounded-full bg-[#1b2838] border border-slate-600 items-center justify-center shrink-0 align-middle">
+                              <svg viewBox="0 0 24 24" className="w-3 h-3 fill-white" aria-hidden>
+                                <path d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.371 1.203-.59 1.912-.59.063 0 .125.004.188.006l2.861-4.142V8.91c0-2.495 2.028-4.524 4.524-4.524 2.494 0 4.524 2.031 4.524 4.527s-2.03 4.525-4.524 4.525h-.105l-4.076 2.911c0 .052.004.105.004.159 0 1.875-1.515 3.396-3.39 3.396-1.635 0-3.016-1.173-3.331-2.727L.436 15.27C1.962 20.607 6.59 24 11.979 24c6.627 0 11.999-5.373 11.999-12S18.605 0 11.979 0zM7.54 18.205l-1.837-.76c.331.823 1.023 1.486 1.928 1.761l1.854.766c-.41-.802-.443-1.778-.09-2.767zm11.195-7.695c0-1.662-1.353-3.015-3.015-3.015-1.665 0-3.015 1.353-3.015 3.015 0 1.665 1.35 3.015 3.015 3.015 1.663 0 3.015-1.35 3.015-3.015zm-5.386-.198c0-.986.805-1.787 1.79-1.787.982 0 1.787.801 1.787 1.787s-.805 1.79-1.787 1.79c-.985 0-1.79-.804-1.79-1.79z" />
+                              </svg>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Steam confirmed</TooltipContent>
+                        </Tooltip>
+                        {emailVerified && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex w-5 h-5 rounded-full bg-emerald-600 border border-emerald-400 items-center justify-center shrink-0 align-middle">
+                                <CheckCircle2 className="w-3 h-3 text-white" />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Email confirmed</TooltipContent>
+                          </Tooltip>
+                        )}
                       </h3>
                       <p className="text-xs uppercase tracking-wide text-slate-400 mt-1">
                         {user.role} · Lv {level} · {xpIntoLevel.toLocaleString()}/
@@ -702,17 +745,6 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                           </div>
                         </button>
                       ))}
-                      <button
-                        onClick={handleLogout}
-                        className="w-full flex items-center justify-start px-4 py-3.5 rounded-lg hover:bg-destructive/10 transition-all duration-300 text-left group relative overflow-hidden hover:-translate-y-0.5"
-                      >
-                        <div className="flex items-center space-x-4 relative z-10">
-                          <ShieldAlert className="w-5 h-5 text-slate-400 group-hover:text-destructive transition-colors" />
-                          <span className="font-medium group-hover:text-destructive transition-colors">
-                            Log Out
-                          </span>
-                        </div>
-                      </button>
                     </div>
                   </div>
                 </div>

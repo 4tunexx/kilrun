@@ -11,6 +11,7 @@ import {
   Loader2,
   Check,
   X,
+  UserPlus,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,7 @@ import {
   getFriends,
   removeFriend,
   respondFriendRequest,
+  searchPlayers,
   sendFriendRequest,
 } from '@/lib/social-actions';
 import { getLevelFromXp } from '@/lib/progression';
@@ -59,9 +61,14 @@ export const FriendsList = ({
     }[]
   >([]);
   const [query, setQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<FriendRow[]>([]);
+  const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [addingId, setAddingId] = useState<string | null>(null);
   const { toast } = useToast();
   const { openProfile } = useProfileNavigation();
+
+  const friendIds = useMemo(() => new Set(friends.map((f) => f.id)), [friends]);
 
   const reload = async () => {
     const [f, r] = await Promise.all([getFriends(), getFriendRequests()]);
@@ -74,7 +81,34 @@ export const FriendsList = ({
     reload().catch(() => setLoading(false));
   }, []);
 
-  const filtered = useMemo(
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 1) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      searchPlayers(q)
+        .then((rows) => {
+          if (!cancelled) setSearchResults(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setSearchResults([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [query]);
+
+  const filteredFriends = useMemo(
     () =>
       friends.filter((f) =>
         f.username.toLowerCase().includes(query.trim().toLowerCase())
@@ -97,8 +131,8 @@ export const FriendsList = ({
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search friends..."
-          className="pl-10 bg-slate-800 border-slate-700"
+          placeholder="Search players or friends..."
+          className="pl-10 bg-slate-900/60 backdrop-blur-md border-slate-700/30"
         />
       </div>
 
@@ -108,7 +142,7 @@ export const FriendsList = ({
           {requests.map((req) => (
             <div
               key={req.id}
-              className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-800/50"
+              className="flex items-center justify-between gap-2 p-3 rounded-lg bg-slate-900/60 backdrop-blur-md border border-slate-700/30"
             >
               <div className="flex items-center gap-2 min-w-0">
                 <Avatar className="h-8 w-8">
@@ -154,18 +188,100 @@ export const FriendsList = ({
       )}
 
       <ScrollArea className="flex-1 -mr-4 pr-4">
+        {query.trim().length > 0 && (
+          <div className="mb-4 space-y-2">
+            <p className="text-sm font-semibold text-slate-300">Players</p>
+            {searching ? (
+              <p className="text-sm text-slate-400 flex items-center gap-2 py-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Searching...
+              </p>
+            ) : searchResults.length === 0 ? (
+              <p className="text-sm text-slate-400 py-2">No players match “{query.trim()}”.</p>
+            ) : (
+              searchResults.map((player) => {
+                const level = getLevelFromXp(player.xpProgress ?? 0);
+                const alreadyFriend = friendIds.has(player.id);
+                return (
+                  <div
+                    key={player.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-slate-900/60 backdrop-blur-md border border-slate-700/30"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Avatar>
+                        <AvatarImage src={player.avatarUrl} alt={player.username} />
+                        <AvatarFallback>{player.username.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <UserHoverCard
+                          userId={player.id}
+                          role={player.role}
+                          isVip={player.isVip}
+                          className="truncate block"
+                        >
+                          {player.username}
+                        </UserHoverCard>
+                        <p className="text-xs text-slate-400">
+                          {player.role} · {player.currentRank ?? 'Unranked'} · Lv {level}
+                        </p>
+                      </div>
+                    </div>
+                    {alreadyFriend ? (
+                      <Button size="sm" variant="outline" disabled className="shrink-0">
+                        Friends
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="shrink-0"
+                        disabled={addingId === player.id}
+                        onClick={async () => {
+                          setAddingId(player.id);
+                          try {
+                            await sendFriendRequest(player.id);
+                            toast({ title: 'Friend request sent' });
+                          } catch {
+                            toast({
+                              title: 'Could not send request',
+                              variant: 'destructive',
+                            });
+                          } finally {
+                            setAddingId(null);
+                          }
+                        }}
+                      >
+                        {addingId === player.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <>
+                            <UserPlus className="w-4 h-4 mr-1" /> Add
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
         <div className="space-y-2">
-          {filtered.length === 0 ? (
+          <p className="text-sm font-semibold text-slate-300">
+            {query.trim() ? 'Matching friends' : 'Friends'}
+          </p>
+          {filteredFriends.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-8">
-              No friends yet. Add players from the leaderboard.
+              {query.trim()
+                ? 'No friends match that name.'
+                : 'No friends yet. Search for a player above to add them.'}
             </p>
           ) : (
-            filtered.map((friend) => {
+            filteredFriends.map((friend) => {
               const level = getLevelFromXp(friend.xpProgress ?? 0);
               return (
                 <div
                   key={friend.id}
-                  className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-800/50 transition-colors"
+                  className="flex items-center justify-between p-3 rounded-lg bg-slate-900/60 backdrop-blur-md border border-slate-700/30 hover:border-primary/40 transition-colors"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <Avatar>
@@ -192,7 +308,7 @@ export const FriendsList = ({
                         <MoreHorizontal className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="bg-slate-900/80 backdrop-blur-md border-slate-700 text-white">
+                    <DropdownMenuContent className="bg-slate-900/60 backdrop-blur-md border-slate-700/30 text-white">
                       <DropdownMenuItem
                         className="cursor-pointer gap-2"
                         onClick={() => onInvite(friend.username)}

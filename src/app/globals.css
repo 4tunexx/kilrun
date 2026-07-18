@@ -43,4 +43,28 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* Thin dark scrollbars — match hub panels / popovers everywhere */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(222 20% 32%) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: hsl(222 20% 32%);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(356 55% 42%);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
 }

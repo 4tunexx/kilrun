@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Crown, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,10 +26,6 @@ export default function LeaderboardView() {
 
   return (
     <div className="px-4 sm:px-8 py-6 space-y-4">
-      <h1 className="text-3xl sm:text-4xl font-black flex items-center gap-2">
-        <Crown className="text-yellow-400" /> Leaderboard
-      </h1>
-
       {loading ? (
         <div className="text-slate-400 flex items-center gap-2 py-12 justify-center">
           <Loader2 className="w-5 h-5 animate-spin" /> Loading rankings...
@@ -41,14 +37,19 @@ export default function LeaderboardView() {
           {rows.map((row, index) => {
             const level = getLevelFromXp(row.xpProgress);
             return (
-              <Card key={row.id} className="bg-slate-800/40 border-slate-700/30">
+              <Card
+                key={row.id}
+                className="bg-slate-900/60 backdrop-blur-md border-slate-700/30"
+              >
                 <CardContent className="py-3 flex flex-wrap items-center gap-3">
                   <span className="w-8 text-center font-black text-slate-400">
                     #{index + 1}
                   </span>
                   <Avatar>
                     <AvatarImage src={row.avatarUrl} />
-                    <AvatarFallback>{row.username.charAt(0)}</AvatarFallback>
+                    <AvatarFallback>
+                      {(row.username || 'P').charAt(0)}
+                    </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
                     <p className="font-bold truncate flex items-center gap-2">
@@ -58,14 +59,15 @@ export default function LeaderboardView() {
                         isVip={row.isVip}
                         className="truncate"
                       >
-                        {row.username}
+                        {row.username || 'Player'}
                       </UserHoverCard>
                       {row.isVip && (
                         <Badge className="bg-yellow-500 text-black">VIP</Badge>
                       )}
                     </p>
                     <p className="text-xs text-slate-400">
-                      {row.currentRank} · Lv {level} · {row.xpProgress.toLocaleString()} XP · {row.role}
+                      {row.currentRank || 'Unranked'} · Lv {level} ·{' '}
+                      {(row.xpProgress ?? 0).toLocaleString()} XP · {row.role}
                     </p>
                   </div>
                   <div className="flex gap-2 w-full sm:w-auto">

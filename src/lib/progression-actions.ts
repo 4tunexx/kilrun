@@ -535,7 +535,9 @@ export async function getSiteSettings() {
 
 export async function updateSiteSettings(data: {
   logoUrl?: string;
+  headerLogoUrl?: string;
   backgroundUrl?: string;
+  homeHeroImage?: string;
   headerTitle?: string;
   headerSubtitle?: string;
   landingHeroImage?: string;
@@ -545,9 +547,93 @@ export async function updateSiteSettings(data: {
 }) {
   await requireStaff();
   await getSiteSettings();
+
+  // Drop a cached PrismaClient that may predate schema fields (headerLogoUrl, etc.).
+  const { resetPrismaClient, withPrismaRetry } = await import('@/lib/prisma');
+  await resetPrismaClient();
+
+  const { persistSiteImage } = await import('@/lib/site-asset-upload');
+  const payload: Record<string, string | boolean> = {};
+
+  if (typeof data.logoUrl === 'string') {
+    payload.logoUrl = data.logoUrl
+      ? await persistSiteImage(data.logoUrl, 'mark')
+      : '';
+  }
+  if (typeof data.headerLogoUrl === 'string') {
+    payload.headerLogoUrl = data.headerLogoUrl
+      ? await persistSiteImage(data.headerLogoUrl, 'wordmark')
+      : '';
+  }
+  if (typeof data.backgroundUrl === 'string') {
+    payload.backgroundUrl = data.backgroundUrl
+      ? await persistSiteImage(data.backgroundUrl, 'bg')
+      : '';
+  }
+  if (typeof data.homeHeroImage === 'string') {
+    payload.homeHeroImage = data.homeHeroImage
+      ? await persistSiteImage(data.homeHeroImage, 'hero')
+      : '';
+  }
+  if (typeof data.landingHeroImage === 'string') {
+    payload.landingHeroImage = data.landingHeroImage
+      ? await persistSiteImage(data.landingHeroImage, 'hero')
+      : '';
+  }
+  if (typeof data.headerTitle === 'string') payload.headerTitle = data.headerTitle;
+  if (typeof data.headerSubtitle === 'string') {
+    payload.headerSubtitle = data.headerSubtitle;
+  }
+  if (typeof data.gameDisabledMsg === 'string') {
+    payload.gameDisabledMsg = data.gameDisabledMsg;
+  }
+  if (typeof data.gameDisabled === 'boolean') payload.gameDisabled = data.gameDisabled;
+  if (typeof data.chatEnabled === 'boolean') payload.chatEnabled = data.chatEnabled;
+
+  try {
+    return await withPrismaRetry((client) =>
+      client.siteSettings.update({
+        where: { singletonKey: 'default' },
+        // Cast: payload is built field-by-field from known SiteSettings keys.
+        data: payload as Parameters<typeof client.siteSettings.update>[0]['data'],
+      })
+    );
+  } catch (err: unknown) {
+    // Fallback if a stale client still rejects new fields — raw Mongo update.
+    const msg = err instanceof Error ? err.message : String(err ?? '');
+    if (!msg.includes('Unknown argument') && !msg.includes('Unknown field')) {
+      throw err;
+    }
+    console.warn(
+      '[updateSiteSettings] Prisma client rejected fields; applying raw Mongo $set'
+    );
+    await withPrismaRetry((client) =>
+      client.$runCommandRaw({
+        update: 'SiteSettings',
+        updates: [
+          {
+            q: { singletonKey: 'default' },
+            u: { $set: payload },
+          },
+        ],
+      })
+    );
+    // Fresh client after raw write so subsequent reads see new fields.
+    await resetPrismaClient();
+    return getSiteSettings();
+  }
+}
+
+/** Strip a solid plate behind the stored site logo (safe to call on hub boot). */
+export async function ensureSiteLogoBackgroundStripped() {
+  const settings = await getSiteSettings();
+  if (!settings.logoUrl) return settings;
+  const { stripLogoBackground } = await import('@/lib/strip-logo-background');
+  const logoUrl = await stripLogoBackground(settings.logoUrl);
+  if (logoUrl === settings.logoUrl) return settings;
   return prisma.siteSettings.update({
     where: { singletonKey: 'default' },
-    data,
+    data: { logoUrl },
   });
 }
 

@@ -47,7 +47,6 @@ export default function StoreView({ userId }: { userId?: string }) {
 
   return (
     <div className="px-4 sm:px-8 py-6">
-      <h1 className="text-3xl sm:text-4xl font-black mb-6">In-Game Store</h1>
       {isLoading ? (
         <div className="flex items-center justify-center h-[40vh] text-slate-400">
           <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading catalog...
@@ -64,7 +63,7 @@ export default function StoreView({ userId }: { userId?: string }) {
           {items.map((item) => (
             <Card
               key={item.id}
-              className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 hover:border-primary/50 transition-all duration-300 group shadow-lg flex flex-col"
+              className="bg-slate-900/60 backdrop-blur-md border-slate-700/30 hover:border-primary/50 transition-all duration-300 group shadow-lg flex flex-col"
             >
               <CardContent className="p-0 w-full">
                 <div className="relative aspect-square w-full overflow-hidden rounded-t-lg bg-slate-900/80">
@@ -75,19 +74,16 @@ export default function StoreView({ userId }: { userId?: string }) {
                       )}`}
                       style={bannerStyle(normalizeBannerConfig(item.bannerConfig))}
                     />
-                  ) : item.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? (
+                  ) : item.imageUrl ? (
                     <Image
                       src={item.imageUrl}
                       alt={item.itemName}
                       fill
                       className="object-cover group-hover:scale-110 transition-transform duration-300"
-                    />
-                  ) : item.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={item.imageUrl}
-                      alt={item.itemName}
-                      className="absolute inset-0 h-full w-full object-cover group-hover:scale-110 transition-transform duration-300"
+                      unoptimized={
+                        item.imageUrl.includes('placehold.co') ||
+                        !/^https?:\/\//i.test(item.imageUrl)
+                      }
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950">

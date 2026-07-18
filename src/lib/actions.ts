@@ -7,6 +7,7 @@ import {
   grantXp,
   processMatchProgression,
 } from '@/lib/progression-actions';
+import { resolveShopImageUrl } from '@/lib/shop-images';
 
 export type StatsSummary = {
   totalRuns: number;
@@ -27,10 +28,14 @@ export async function getSessionUser() {
 
 /** Live item-shop catalog, replacing the old hardcoded `shopItems` array. */
 export async function getStoreItems() {
-  return prisma.storeItem.findMany({
+  const items = await prisma.storeItem.findMany({
     where: { isAvailable: true },
     orderBy: { vpPrice: 'asc' },
   });
+  return items.map((item) => ({
+    ...item,
+    imageUrl: resolveShopImageUrl(item.imageUrl),
+  }));
 }
 
 export type LandingStats = {
@@ -79,14 +84,19 @@ export async function getLandingPageData(): Promise<{
     purchaseGroups,
     catalogFallback,
   ] = await Promise.all([
-    prisma.user.count({ where: { isBanned: false } }),
+    // Mongo: `isBanned: false` skips docs where the field was never set.
+    prisma.user.count({ where: { NOT: { isBanned: true } } }),
     prisma.matchResult.count(),
     prisma.matchResult.count({ where: { playedAt: { gte: startOfToday } } }),
     prisma.matchResult.aggregate({ _sum: { vpEarned: true } }),
     prisma.user.findMany({
-      where: { isBanned: false },
-      orderBy: [{ xpProgress: 'desc' }, { vpCurrency: 'desc' }],
-      take: 5,
+      where: { NOT: { isBanned: true } },
+      orderBy: [
+        { xpProgress: 'desc' },
+        { vpCurrency: 'desc' },
+        { createdAt: 'asc' },
+      ],
+      take: 10,
       select: {
         id: true,
         username: true,
@@ -117,7 +127,10 @@ export async function getLandingPageData(): Promise<{
     }),
   ]);
 
-  let popularItems: LandingStoreItem[] = catalogFallback;
+  let popularItems: LandingStoreItem[] = catalogFallback.map((item) => ({
+    ...item,
+    imageUrl: resolveShopImageUrl(item.imageUrl),
+  }));
   if (purchaseGroups.length > 0) {
     const skus = purchaseGroups.map((g) => g.itemSku);
     const purchasedItems = await prisma.storeItem.findMany({
@@ -140,7 +153,7 @@ export async function getLandingPageData(): Promise<{
         itemName,
         itemCategory,
         vpPrice,
-        imageUrl,
+        imageUrl: resolveShopImageUrl(imageUrl),
       }));
     if (ranked.length > 0) popularItems = ranked;
   }
@@ -152,7 +165,13 @@ export async function getLandingPageData(): Promise<{
       matchesPlayedToday,
       vpEarned: vpAgg._sum.vpEarned ?? 0,
     },
-    topPlayers,
+    topPlayers: topPlayers.map((p) => ({
+      ...p,
+      username: p.username || 'Player',
+      avatarUrl: p.avatarUrl || '',
+      xpProgress: p.xpProgress ?? 0,
+      currentRank: p.currentRank || 'Unranked',
+    })),
     popularItems,
   };
 }

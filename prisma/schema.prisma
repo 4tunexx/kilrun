@@ -21,6 +21,10 @@ model User {
   currentRank String   @default("Unranked")
   role        String   @default("player")
   bio         String   @default("")
+  /// ISO 3166-1 alpha-2 country code (e.g. "us", "gb") for public flag.
+  countryCode String   @default("")
+  notifyPush  Boolean  @default(true)
+  notifyEmail Boolean  @default(true)
   isBanned    Boolean  @default(false)
   isVip       Boolean  @default(false)
   isMuted     Boolean  @default(false)
@@ -214,8 +218,14 @@ model UserBadge {
 model SiteSettings {
   id                 String  @id @default(auto()) @map("_id") @db.ObjectId
   singletonKey       String  @unique @default("default")
+  /// Small mark (sidebar / footer) — defaults to /K2.png when empty.
   logoUrl            String  @default("")
+  /// Wordmark shown in home hero / landing — defaults to /kilrun.png when empty.
+  headerLogoUrl      String  @default("")
+  /// Full-page hub chrome background.
   backgroundUrl      String  @default("https://i.postimg.cc/tJgX2XgN/bg.png")
+  /// Home "Live Arena" hero banner image (parallax).
+  homeHeroImage      String  @default("")
   headerTitle        String  @default("Welcome to Kilrun")
   headerSubtitle     String  @default("The ultimate deathrun experience. Compete, conquer, and climb the ranks.")
   landingHeroImage   String  @default("")

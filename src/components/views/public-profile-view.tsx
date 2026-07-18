@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import {
   ArrowLeft,
+  Award,
   Check,
   Crown,
   Gauge,
@@ -34,6 +36,9 @@ import { getRoleTextColorClass } from '@/lib/role-colors';
 import { ShowcaseChips } from '@/components/showcase-chips';
 import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
+import { flagUrl, getCountryName } from '@/lib/countries';
+
+const PANEL = 'bg-slate-900/60 backdrop-blur-md border border-slate-700/30';
 
 export default function PublicProfileView({
   userId,
@@ -152,271 +157,303 @@ export default function PublicProfileView({
   const webAch = profile.achievements.filter((a) => a.category === 'website');
 
   return (
-    <div className="px-0 sm:px-0 pb-10">
+    <div className="px-4 sm:px-8 py-6 space-y-4">
       {onBack && (
-        <div className="px-4 sm:px-8 pt-4">
-          <Button variant="ghost" size="sm" onClick={onBack} className="text-slate-400">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Back
-          </Button>
-        </div>
+        <Button variant="ghost" size="sm" onClick={onBack} className="text-slate-400 -ml-2">
+          <ArrowLeft className="mr-2 h-4 w-4" /> Back
+        </Button>
       )}
 
-      {/* Banner header */}
-      <div
-        className={`relative h-32 sm:h-48 w-full ${
-          banner ? bannerAnimationClass(banner) : 'bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800'
-        }`}
-        style={banner ? bannerStyle(banner) : undefined}
-      >
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 to-transparent" />
-      </div>
+      <Card className={`${PANEL} overflow-hidden`}>
+        <div
+          className={`relative h-28 sm:h-40 w-full ${
+            banner
+              ? bannerAnimationClass(banner)
+              : 'bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800'
+          }`}
+          style={banner ? bannerStyle(banner) : undefined}
+        >
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 to-transparent" />
+        </div>
 
-      <div className="px-4 sm:px-8">
-        <div className="-mt-12 sm:-mt-16 flex flex-col sm:flex-row sm:items-end gap-4">
-          <Avatar className="h-24 w-24 sm:h-32 sm:w-32 border-4 border-slate-900 shadow-2xl shrink-0">
-            <AvatarImage src={profile.avatarUrl} alt={profile.username} />
-            <AvatarFallback>{profile.username.charAt(0)}</AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1 pb-1">
-            <h1
-              className={`text-2xl sm:text-4xl font-black truncate flex items-center gap-2 ${getRoleTextColorClass(
-                profile.role,
-                profile.isVip
-              )}`}
-            >
-              {profile.username}
-              {profile.isVip && <Badge className="bg-yellow-500 text-black">VIP</Badge>}
-            </h1>
-            <p className="text-sm text-slate-400 capitalize">
-              {profile.role} · Joined {formatDistanceToNow(new Date(profile.createdAt))} ago
-            </p>
-            {profile.showcase.length > 0 && (
-              <div className="mt-2">
-                <ShowcaseChips items={profile.showcase} />
+        <CardContent className="pt-0 pb-6">
+          <div className="-mt-12 sm:-mt-14 flex flex-col sm:flex-row sm:items-end gap-4">
+            <Avatar className="h-24 w-24 sm:h-28 sm:w-28 border-4 border-slate-900 shadow-2xl shrink-0">
+              <AvatarImage src={profile.avatarUrl} alt={profile.username} />
+              <AvatarFallback>{profile.username.charAt(0)}</AvatarFallback>
+            </Avatar>
+
+            <div className="min-w-0 flex-1 pb-1">
+              <h2
+                className={`text-2xl sm:text-3xl font-black truncate flex items-center gap-2 flex-wrap ${getRoleTextColorClass(
+                  profile.role,
+                  profile.isVip
+                )}`}
+              >
+                {profile.username}
+                {profile.countryCode && (
+                  <Image
+                    src={flagUrl(profile.countryCode, 40)}
+                    alt={getCountryName(profile.countryCode) ?? profile.countryCode}
+                    width={26}
+                    height={20}
+                    className="rounded-sm shadow-md shrink-0"
+                    title={getCountryName(profile.countryCode) ?? undefined}
+                    unoptimized
+                  />
+                )}
+                {profile.isVip && (
+                  <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px]">VIP</Badge>
+                )}
+              </h2>
+              <p className="text-sm text-slate-400 capitalize">
+                {profile.role}
+                {profile.countryCode && getCountryName(profile.countryCode)
+                  ? ` · ${getCountryName(profile.countryCode)}`
+                  : ''}{' '}
+                · Joined {formatDistanceToNow(new Date(profile.createdAt))} ago
+              </p>
+              {profile.showcase.length > 0 && (
+                <div className="mt-2">
+                  <ShowcaseChips items={profile.showcase} />
+                </div>
+              )}
+            </div>
+
+            {profile.friendStatus !== 'self' && (
+              <div className="flex flex-wrap gap-2 pb-1">
+                <Button
+                  variant={profile.myReputationVote === 1 ? 'default' : 'outline'}
+                  size="sm"
+                  disabled={busyAction !== null}
+                  onClick={() => handleVote(1)}
+                  title="+rep"
+                >
+                  {busyAction === 'rep-up' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ThumbsUp className="h-4 w-4" />
+                  )}
+                </Button>
+                <Button
+                  variant={profile.myReputationVote === -1 ? 'destructive' : 'outline'}
+                  size="sm"
+                  disabled={busyAction !== null}
+                  onClick={() => handleVote(-1)}
+                  title="-rep"
+                >
+                  {busyAction === 'rep-down' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ThumbsDown className="h-4 w-4" />
+                  )}
+                </Button>
+
+                {profile.friendStatus === 'friends' && (
+                  <>
+                    <Button size="sm" onClick={() => onMessage?.(profile.id)}>
+                      <MessageSquare className="mr-2 h-4 w-4" /> Message
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={busyAction !== null}
+                      onClick={handleRemoveFriend}
+                    >
+                      {busyAction === 'remove-friend' ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="mr-2 h-4 w-4" />
+                      )}
+                      Remove
+                    </Button>
+                  </>
+                )}
+                {profile.friendStatus === 'none' && (
+                  <Button size="sm" disabled={busyAction !== null} onClick={handleAddFriend}>
+                    {busyAction === 'add-friend' ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <UserPlus className="mr-2 h-4 w-4" />
+                    )}
+                    Add Friend
+                  </Button>
+                )}
+                {profile.friendStatus === 'pending_sent' && (
+                  <Button size="sm" variant="outline" disabled>
+                    Request Sent
+                  </Button>
+                )}
+                {profile.friendStatus === 'pending_received' && (
+                  <>
+                    <Button
+                      size="sm"
+                      disabled={busyAction !== null}
+                      onClick={() => handleRespondRequest(true)}
+                    >
+                      {busyAction === 'accept-friend' ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Check className="mr-2 h-4 w-4" />
+                      )}
+                      Accept
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busyAction !== null}
+                      onClick={() => handleRespondRequest(false)}
+                    >
+                      {busyAction === 'decline-friend' ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <X className="mr-2 h-4 w-4" />
+                      )}
+                      Decline
+                    </Button>
+                  </>
+                )}
               </div>
             )}
           </div>
 
-          {profile.friendStatus !== 'self' && (
-            <div className="flex flex-wrap gap-2 pb-1">
-              <Button
-                variant={profile.myReputationVote === 1 ? 'default' : 'outline'}
-                size="sm"
-                disabled={busyAction !== null}
-                onClick={() => handleVote(1)}
-                title="+rep"
-              >
-                {busyAction === 'rep-up' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ThumbsUp className="h-4 w-4" />
-                )}
-              </Button>
-              <Button
-                variant={profile.myReputationVote === -1 ? 'destructive' : 'outline'}
-                size="sm"
-                disabled={busyAction !== null}
-                onClick={() => handleVote(-1)}
-                title="-rep"
-              >
-                {busyAction === 'rep-down' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ThumbsDown className="h-4 w-4" />
-                )}
-              </Button>
-
-              {profile.friendStatus === 'friends' && (
-                <>
-                  <Button size="sm" onClick={() => onMessage?.(profile.id)}>
-                    <MessageSquare className="mr-2 h-4 w-4" /> Message
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    disabled={busyAction !== null}
-                    onClick={handleRemoveFriend}
-                  >
-                    {busyAction === 'remove-friend' ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="mr-2 h-4 w-4" />
-                    )}
-                    Remove Friend
-                  </Button>
-                </>
-              )}
-              {profile.friendStatus === 'none' && (
-                <Button size="sm" disabled={busyAction !== null} onClick={handleAddFriend}>
-                  {busyAction === 'add-friend' ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <UserPlus className="mr-2 h-4 w-4" />
-                  )}
-                  Add Friend
-                </Button>
-              )}
-              {profile.friendStatus === 'pending_sent' && (
-                <Button size="sm" variant="outline" disabled>
-                  Request Sent
-                </Button>
-              )}
-              {profile.friendStatus === 'pending_received' && (
-                <>
-                  <Button
-                    size="sm"
-                    disabled={busyAction !== null}
-                    onClick={() => handleRespondRequest(true)}
-                  >
-                    {busyAction === 'accept-friend' ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Check className="mr-2 h-4 w-4" />
-                    )}
-                    Accept
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busyAction !== null}
-                    onClick={() => handleRespondRequest(false)}
-                  >
-                    {busyAction === 'decline-friend' ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <X className="mr-2 h-4 w-4" />
-                    )}
-                    Decline
-                  </Button>
-                </>
-              )}
-            </div>
+          {profile.bio && (
+            <p className="mt-4 text-slate-300 whitespace-pre-wrap text-sm sm:text-base">
+              {profile.bio}
+            </p>
           )}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="space-y-4">
+          <Card className={PANEL}>
+            <CardContent className="pt-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+              <div>
+                <p className="text-2xl sm:text-3xl font-black text-primary">
+                  {profile.stats.totalRuns}
+                </p>
+                <p className="text-xs text-slate-400">Total Runs</p>
+              </div>
+              <div>
+                <p className="text-2xl sm:text-3xl font-black text-primary">
+                  {profile.stats.bestScore}
+                </p>
+                <p className="text-xs text-slate-400">Best Score</p>
+              </div>
+              <div>
+                <p className="text-2xl sm:text-3xl font-black text-primary">
+                  {profile.stats.bestDistance}m
+                </p>
+                <p className="text-xs text-slate-400">Best Distance</p>
+              </div>
+              <div>
+                <p className="text-2xl sm:text-3xl font-black text-primary">
+                  {profile.stats.winRate}%
+                </p>
+                <p className="text-xs text-slate-400">Win Rate</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className={PANEL}>
+            <CardContent className="pt-6">
+              <Tabs defaultValue="badges">
+                <TabsList className="bg-slate-800/60 w-full h-auto flex flex-wrap justify-start gap-1">
+                  <TabsTrigger value="badges" className="flex-none">
+                    Badges ({profile.badges.filter((b) => b.unlocked).length}/
+                    {profile.badges.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="game" className="flex-none">
+                    In-Game
+                  </TabsTrigger>
+                  <TabsTrigger value="web" className="flex-none">
+                    Website
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="badges" className="mt-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {profile.badges.map((badge) => (
+                      <Card
+                        key={badge.id}
+                        className={`${PANEL} ${
+                          badge.unlocked ? 'border-primary/40' : 'opacity-60'
+                        }`}
+                      >
+                        <CardContent className="pt-5 flex gap-3 items-start">
+                          {badge.iconImageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={badge.iconImageUrl}
+                              alt=""
+                              className={`w-10 h-10 rounded object-cover shrink-0 ${
+                                badge.unlocked ? '' : 'opacity-40 grayscale'
+                              }`}
+                            />
+                          ) : badge.unlocked ? (
+                            <Award className="w-10 h-10 text-primary shrink-0" />
+                          ) : (
+                            <Lock className="w-10 h-10 text-slate-500 shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-bold">{badge.title}</h3>
+                              <Badge variant="outline" className="capitalize text-[10px]">
+                                {badge.rarity}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-slate-400">{badge.description}</p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </TabsContent>
+                <TabsContent value="game" className="mt-4 space-y-2">
+                  {gameAch.map((ach) => (
+                    <AchievementRow key={ach.id} ach={ach} />
+                  ))}
+                </TabsContent>
+                <TabsContent value="web" className="mt-4 space-y-2">
+                  {webAch.map((ach) => (
+                    <AchievementRow key={ach.id} ach={ach} />
+                  ))}
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
         </div>
 
-        {profile.bio && <p className="mt-4 text-slate-300 whitespace-pre-wrap">{profile.bio}</p>}
-
-        <div className="mt-6 grid gap-4 sm:grid-cols-[minmax(0,1fr)_260px]">
-          <div className="space-y-4">
-            <Card className="bg-slate-800/40 border-slate-700/30">
-              <CardContent className="pt-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-                <div>
-                  <p className="text-2xl sm:text-3xl font-black text-primary">
-                    {profile.stats.totalRuns}
-                  </p>
-                  <p className="text-xs text-slate-400">Total Runs</p>
-                </div>
-                <div>
-                  <p className="text-2xl sm:text-3xl font-black text-primary">
-                    {profile.stats.bestScore}
-                  </p>
-                  <p className="text-xs text-slate-400">Best Score</p>
-                </div>
-                <div>
-                  <p className="text-2xl sm:text-3xl font-black text-primary">
-                    {profile.stats.bestDistance}m
-                  </p>
-                  <p className="text-xs text-slate-400">Best Distance</p>
-                </div>
-                <div>
-                  <p className="text-2xl sm:text-3xl font-black text-primary">
-                    {profile.stats.winRate}%
-                  </p>
-                  <p className="text-xs text-slate-400">Win Rate</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Tabs defaultValue="badges">
-              <TabsList className="bg-slate-800/60">
-                <TabsTrigger value="badges">
-                  Badges ({profile.badges.filter((b) => b.unlocked).length}/{profile.badges.length})
-                </TabsTrigger>
-                <TabsTrigger value="game">In-Game</TabsTrigger>
-                <TabsTrigger value="web">Website</TabsTrigger>
-              </TabsList>
-              <TabsContent value="badges" className="mt-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {profile.badges.map((badge) => (
-                    <Card
-                      key={badge.id}
-                      className={`border ${
-                        badge.unlocked
-                          ? 'bg-slate-800/50 border-primary/40'
-                          : 'bg-slate-900/30 border-slate-700/40 opacity-60'
-                      }`}
-                    >
-                      <CardContent className="pt-5 flex gap-3 items-start">
-                        {badge.iconImageUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={badge.iconImageUrl}
-                            alt=""
-                            className={`w-10 h-10 rounded object-cover shrink-0 ${
-                              badge.unlocked ? '' : 'opacity-40 grayscale'
-                            }`}
-                          />
-                        ) : (
-                          <div className="text-2xl">{badge.unlocked ? '🏅' : '🔒'}</div>
-                        )}
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-bold">{badge.title}</h3>
-                            <Badge variant="outline" className="capitalize text-[10px]">
-                              {badge.rarity}
-                            </Badge>
-                          </div>
-                          <p className="text-sm text-slate-400">{badge.description}</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </TabsContent>
-              <TabsContent value="game" className="mt-4 space-y-2">
-                {gameAch.map((ach) => (
-                  <AchievementRow key={ach.id} ach={ach} />
-                ))}
-              </TabsContent>
-              <TabsContent value="web" className="mt-4 space-y-2">
-                {webAch.map((ach) => (
-                  <AchievementRow key={ach.id} ach={ach} />
-                ))}
-              </TabsContent>
-            </Tabs>
-          </div>
-
-          <div className="space-y-4">
-            <Card className="bg-slate-800/40 border-slate-700/30">
-              <CardContent className="pt-6 space-y-4">
-                <LevelBar
-                  level={profile.level}
-                  xpIntoLevel={profile.xpIntoLevel}
-                  xpForNextLevel={profile.xpForNextLevel}
-                  percent={profile.levelProgressPercent}
-                />
-                <div className="rounded-lg bg-slate-900/40 p-3 text-center">
-                  <p className="text-xs text-slate-400">Rank</p>
-                  <p className="text-lg font-bold text-yellow-400 flex items-center justify-center gap-1">
-                    <Crown className="h-4 w-4" /> {profile.currentRank}
-                  </p>
-                </div>
-                <div className="rounded-lg bg-slate-900/40 p-3 text-center">
-                  <p className="text-xs text-slate-400">Leaderboard Position</p>
-                  <p className="text-lg font-bold flex items-center justify-center gap-1">
-                    <Trophy className="h-4 w-4 text-primary" /> #{profile.leaderboardPosition} of{' '}
-                    {profile.totalPlayers}
-                  </p>
-                </div>
-                <div className="flex items-center justify-between rounded-lg bg-slate-900/40 p-3">
-                  <span className="flex items-center gap-2 text-sm text-slate-300">
-                    <Gauge className="h-4 w-4 text-primary" /> Reputation
-                  </span>
-                  <span className="text-lg font-bold">{profile.reputation}</span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+        <div className="space-y-4">
+          <Card className={PANEL}>
+            <CardContent className="pt-6 space-y-4">
+              <LevelBar
+                level={profile.level}
+                xpIntoLevel={profile.xpIntoLevel}
+                xpForNextLevel={profile.xpForNextLevel}
+                percent={profile.levelProgressPercent}
+              />
+              <div className="rounded-lg bg-slate-900/40 border border-slate-700/30 p-3 text-center">
+                <p className="text-xs text-slate-400">Rank</p>
+                <p className="text-lg font-bold text-yellow-400 flex items-center justify-center gap-1">
+                  <Crown className="h-4 w-4" /> {profile.currentRank}
+                </p>
+              </div>
+              <div className="rounded-lg bg-slate-900/40 border border-slate-700/30 p-3 text-center">
+                <p className="text-xs text-slate-400">Leaderboard</p>
+                <p className="text-lg font-bold flex items-center justify-center gap-1">
+                  <Trophy className="h-4 w-4 text-primary" /> #{profile.leaderboardPosition} of{' '}
+                  {profile.totalPlayers}
+                </p>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-slate-900/40 border border-slate-700/30 p-3">
+                <span className="flex items-center gap-2 text-sm text-slate-300">
+                  <Gauge className="h-4 w-4 text-primary" /> Reputation
+                </span>
+                <span className="text-lg font-bold">{profile.reputation}</span>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
@@ -425,11 +462,9 @@ export default function PublicProfileView({
 
 function AchievementRow({ ach }: { ach: PublicProfile['achievements'][number] }) {
   return (
-    <Card
-      className={`bg-slate-800/40 border-slate-700/30 ${ach.unlocked ? '' : 'opacity-55'}`}
-    >
+    <Card className={`${PANEL} ${ach.unlocked ? '' : 'opacity-55'}`}>
       <CardContent className="py-3 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 font-medium">
+        <span className="flex items-center gap-2 font-medium min-w-0">
           {ach.iconImageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -444,9 +479,11 @@ function AchievementRow({ ach }: { ach: PublicProfile['achievements'][number] })
           ) : (
             <Lock className="h-4 w-4 text-slate-500 shrink-0" />
           )}
-          <span>
-            <span className="block">{ach.title}</span>
-            <span className="block text-xs text-slate-400 font-normal">{ach.description}</span>
+          <span className="min-w-0">
+            <span className="block truncate">{ach.title}</span>
+            <span className="block text-xs text-slate-400 font-normal line-clamp-2">
+              {ach.description}
+            </span>
           </span>
         </span>
         <span className="text-sm font-normal text-yellow-400 shrink-0">

@@ -42,9 +42,80 @@ export async function updateProfileBio(bio: string) {
   });
 }
 
+export async function updateProfileSettings(input: {
+  bio?: string;
+  countryCode?: string;
+  notifyPush?: boolean;
+  notifyEmail?: boolean;
+}) {
+  const user = await requireSessionUser();
+  const data: {
+    bio?: string;
+    countryCode?: string;
+    notifyPush?: boolean;
+    notifyEmail?: boolean;
+  } = {};
+
+  if (typeof input.bio === 'string') {
+    data.bio = input.bio.slice(0, 500);
+  }
+  if (typeof input.countryCode === 'string') {
+    const code = input.countryCode.trim().toLowerCase();
+    data.countryCode = code === '' || /^[a-z]{2}$/.test(code) ? code : user.countryCode;
+  }
+  if (typeof input.notifyPush === 'boolean') data.notifyPush = input.notifyPush;
+  if (typeof input.notifyEmail === 'boolean') data.notifyEmail = input.notifyEmail;
+
+  return prisma.user.update({
+    where: { id: user.id },
+    data,
+  });
+}
+
+/** Purchase history + forum posts + lifetime totals for the profile page. */
+export async function getMyProfileActivity() {
+  const user = await requireSessionUser();
+  const [purchases, forumPosts, purchaseAgg, forumPostCount] = await Promise.all([
+    prisma.purchase.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 25,
+    }),
+    prisma.forumPost.findMany({
+      where: { authorId: user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 15,
+      select: {
+        id: true,
+        title: true,
+        category: true,
+        createdAt: true,
+      },
+    }),
+    prisma.purchase.aggregate({
+      where: { userId: user.id },
+      _sum: { vpSpent: true },
+      _count: true,
+    }),
+    prisma.forumPost.count({ where: { authorId: user.id } }),
+  ]);
+
+  return {
+    purchases,
+    forumPosts,
+    totals: {
+      totalXp: user.xpProgress,
+      totalVp: user.vpCurrency,
+      purchaseCount: purchaseAgg._count,
+      vpSpent: purchaseAgg._sum.vpSpent ?? 0,
+      forumPostCount,
+    },
+  };
+}
+
 export async function unlockVipWithVp() {
   const user = await requireSessionUser();
-  if (user.isVip || user.role === 'vip' || user.role === 'admin' || user.role === 'moderator') {
+  if (user.isVip || user.role === 'vip') {
     return { ok: true as const, already: true };
   }
   if (user.vpCurrency < VIP_UNLOCK_VP_COST) {
@@ -70,10 +141,17 @@ export async function unlockVipWithVp() {
   return { ok: true as const, already: false };
 }
 
+/** Mongo: missing isBanned must still count as not banned (false filter skips unset). */
+const NOT_BANNED = { NOT: { isBanned: true } } as const;
+
 export async function getLeaderboard(take = 20) {
-  return prisma.user.findMany({
-    where: { isBanned: false },
-    orderBy: [{ xpProgress: 'desc' }, { vpCurrency: 'desc' }],
+  const rows = await prisma.user.findMany({
+    where: NOT_BANNED,
+    orderBy: [
+      { xpProgress: 'desc' },
+      { vpCurrency: 'desc' },
+      { createdAt: 'asc' },
+    ],
     take,
     select: {
       id: true,
@@ -85,12 +163,19 @@ export async function getLeaderboard(take = 20) {
       role: true,
     },
   });
+  return rows.map((row) => ({
+    ...row,
+    username: row.username || 'Player',
+    avatarUrl: row.avatarUrl || '',
+    xpProgress: row.xpProgress ?? 0,
+    currentRank: row.currentRank || 'Unranked',
+  }));
 }
 
 /** Public profile snippet for messaging / profile deep-links. */
 export async function getUserBrief(userId: string) {
   return prisma.user.findFirst({
-    where: { id: userId, isBanned: false },
+    where: { id: userId, ...NOT_BANNED },
     select: {
       id: true,
       username: true,
@@ -657,9 +742,65 @@ export async function adminSetUserRole(userId: string, role: string) {
     where: { id: userId },
     data: {
       role: role as AccountRole,
-      isVip: role === 'vip' || role === 'admin' || role === 'moderator',
+      // VIP is a paid/unlocked flag — not automatic for staff roles.
+      ...(role === 'vip' ? { isVip: true } : role === 'player' ? { isVip: false } : {}),
     },
   });
+}
+
+/** Find players by username for friend add / discovery (excludes self). */
+export async function searchPlayers(query: string) {
+  const user = await requireSessionUser();
+  const q = query.trim();
+  if (q.length < 1) return [];
+
+  // MongoDB string filters vary by Prisma version — try insensitive first.
+  let rows;
+  try {
+    rows = await prisma.user.findMany({
+      where: {
+        ...NOT_BANNED,
+        id: { not: user.id },
+        username: { contains: q, mode: 'insensitive' },
+      },
+      orderBy: [{ xpProgress: 'desc' }, { createdAt: 'asc' }],
+      take: 20,
+      select: {
+        id: true,
+        username: true,
+        avatarUrl: true,
+        role: true,
+        isVip: true,
+        xpProgress: true,
+        currentRank: true,
+      },
+    });
+  } catch {
+    const all = await prisma.user.findMany({
+      where: { ...NOT_BANNED, id: { not: user.id } },
+      orderBy: [{ xpProgress: 'desc' }, { createdAt: 'asc' }],
+      take: 100,
+      select: {
+        id: true,
+        username: true,
+        avatarUrl: true,
+        role: true,
+        isVip: true,
+        xpProgress: true,
+        currentRank: true,
+      },
+    });
+    const lower = q.toLowerCase();
+    rows = all.filter((r) => (r.username || '').toLowerCase().includes(lower)).slice(0, 20);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    username: row.username || 'Player',
+    avatarUrl: row.avatarUrl || '',
+    xpProgress: row.xpProgress ?? 0,
+    currentRank: row.currentRank || 'Unranked',
+  }));
 }
 
 export async function adminSetBanned(userId: string, isBanned: boolean) {
@@ -800,11 +941,11 @@ export async function adminDashboardStats() {
   return { users, openTickets: tickets, forumPosts: posts, purchases };
 }
 
-/** Called after Steam login to promote configured Steam IDs to admin. */
+/** Called after Steam login to promote configured Steam IDs to admin (not VIP). */
 export async function applyAdminSteamPromotion(steamId: string) {
   if (!steamIdsPromotedToAdmin().has(steamId)) return;
   await prisma.user.update({
     where: { steamId },
-    data: { role: 'admin', isVip: true },
+    data: { role: 'admin' },
   });
 }

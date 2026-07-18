@@ -76,7 +76,7 @@ export default function PlayView({ onPlay }: PlayViewProps) {
   return (
     <div className="px-4 sm:px-12 py-8">
       <div className="mb-8">
-        <h1 className="text-4xl sm:text-5xl font-black">Select Mode</h1>
+        <h2 className="text-2xl sm:text-3xl font-black">Select Mode</h2>
         <p className="text-slate-400 mt-2">
           Jump into a live match or check out what&apos;s coming next.
         </p>

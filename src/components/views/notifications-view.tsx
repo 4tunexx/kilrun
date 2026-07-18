@@ -26,10 +26,7 @@ export default function NotificationsView() {
 
   return (
     <div className="px-4 sm:px-8 py-6 space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl sm:text-4xl font-black flex items-center gap-2">
-          <Bell className="w-8 h-8" /> Notifications
-        </h1>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <Button
           variant="outline"
           disabled={markingRead || !hasUnread}

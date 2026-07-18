@@ -61,11 +61,6 @@ export default function SupportView({ userId }: { userId?: string }) {
 
   return (
     <div className="px-4 sm:px-8 py-6 space-y-6">
-      <div>
-        <h1 className="text-3xl sm:text-4xl font-black">Support</h1>
-        <p className="text-slate-400 mt-1">Open a ticket — staff will update the status in Admin.</p>
-      </div>
-
       <Card className="bg-slate-800/40 border-slate-700/30">
         <CardHeader>
           <CardTitle>New ticket</CardTitle>

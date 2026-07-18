@@ -27,6 +27,7 @@ import {
 } from '@/lib/social-actions';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
 import { INVENTORY_RESELL_RATE } from '@/lib/inventory-constants';
+import { resolveShopImageUrl } from '@/lib/shop-images';
 import { useToast } from '@/hooks/use-toast';
 
 type InventoryRow = Awaited<ReturnType<typeof getMyInventory>>[number];
@@ -89,7 +90,7 @@ export function InventoryDrawer({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full sm:w-[440px] bg-slate-900/95 backdrop-blur-md border-l border-slate-700 text-white overflow-y-auto"
+        className="w-full sm:w-[440px] bg-slate-900/60 backdrop-blur-md border-l border-slate-700/30 text-white overflow-y-auto"
       >
         <SheetHeader>
           <SheetTitle className="text-2xl font-bold flex items-center gap-2">
@@ -127,10 +128,11 @@ export function InventoryDrawer({
           <div className="mt-4 grid grid-cols-2 gap-3">
             {sorted.map((item) => {
               const banner = item.bannerConfig ? normalizeBannerConfig(item.bannerConfig) : null;
+              const imageSrc = resolveShopImageUrl(item.imageUrl);
               return (
                 <Card
                   key={item.id}
-                  className={`bg-slate-800/60 border-slate-700/50 overflow-hidden ${
+                  className={`bg-slate-900/60 backdrop-blur-md border-slate-700/30 overflow-hidden ${
                     item.isEquipped ? 'ring-2 ring-primary' : ''
                   }`}
                 >
@@ -140,13 +142,12 @@ export function InventoryDrawer({
                     }`}
                     style={banner ? bannerStyle(banner) : undefined}
                   >
-                    {!banner && item.imageUrl && (
+                    {!banner && imageSrc ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={item.imageUrl} alt="" className="h-full w-full object-cover" />
-                    )}
-                    {!banner && !item.imageUrl && (
+                      <img src={imageSrc} alt="" className="h-full w-full object-cover" />
+                    ) : !banner ? (
                       <Package className="w-8 h-8 text-slate-600" />
-                    )}
+                    ) : null}
                   </div>
                   <CardContent className="p-3 space-y-2">
                     <div className="flex items-center justify-between gap-1">

@@ -95,7 +95,6 @@ export default function MessagesView({ userId }: { userId: string }) {
 
   return (
     <div className="px-4 sm:px-8 py-6 h-[calc(100vh-1rem)] flex flex-col">
-      <h1 className="text-3xl sm:text-4xl font-black mb-4">Messages</h1>
       <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3 md:gap-4 border border-slate-700/40 rounded-xl overflow-hidden bg-slate-900/40">
         <div
           className={`md:w-80 border-b md:border-b-0 md:border-r border-slate-700/40 ${

@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import {
   Save,
   Loader2,
-  LogOut,
   ShieldCheck,
   Mail,
   Package,
   Sparkles,
+  Bell,
+  ShoppingBag,
+  MessageSquare,
+  Gem,
+  Zap,
 } from 'lucide-react';
-import { signOut } from 'next-auth/react';
 import { formatDistanceToNow } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -32,12 +36,21 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { getMatchStats, getSessionUser, getStatsSummary, type StatsSummary } from '@/lib/actions';
 import {
   equipInventoryItem,
   getMyInventory,
+  getMyProfileActivity,
   unequipCosmeticSlot,
-  updateProfileBio,
+  updateProfileSettings,
 } from '@/lib/social-actions';
 import type { MatchStat, User as UserModel } from '@/generated/prisma';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
@@ -45,17 +58,24 @@ import { getRoleTextColorClass } from '@/lib/role-colors';
 import { ShowcaseEditor } from '@/components/views/profile/showcase-editor';
 import { useToast } from '@/hooks/use-toast';
 import { EmailVerificationForm } from '@/components/email-verification-form';
+import { COUNTRIES, flagUrl, getCountryName } from '@/lib/countries';
 
 type InventoryRow = Awaited<ReturnType<typeof getMyInventory>>[number];
+type ProfileActivity = Awaited<ReturnType<typeof getMyProfileActivity>>;
 
 export default function ProfileView({ userId }: { userId: string }) {
   const [user, setUser] = useState<UserModel | null>(null);
   const [summary, setSummary] = useState<StatsSummary | null>(null);
   const [history, setHistory] = useState<MatchStat[]>([]);
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
+  const [activity, setActivity] = useState<ProfileActivity | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [bio, setBio] = useState('');
+  const [countryCode, setCountryCode] = useState('');
+  const [notifyPush, setNotifyPush] = useState(true);
+  const [notifyEmail, setNotifyEmail] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [prefsSaving, setPrefsSaving] = useState(false);
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [cosmeticBusyId, setCosmeticBusyId] = useState<string | null>(null);
   const { toast } = useToast();
@@ -74,15 +94,19 @@ export default function ProfileView({ userId }: { userId: string }) {
       getStatsSummary(userId),
       getMatchStats(userId, 5),
       getMyInventory(),
-    ]).then(([u, s, h, inv]) => {
+      getMyProfileActivity(),
+    ]).then(([u, s, h, inv, act]) => {
       if (!isMounted) return;
       setUser(u);
       setBio(u?.bio ?? '');
+      setCountryCode(u?.countryCode ?? '');
+      setNotifyPush(u?.notifyPush ?? true);
+      setNotifyEmail(u?.notifyEmail ?? true);
       setSummary(s);
       setHistory(h);
       setInventory(inv);
+      setActivity(act);
       setIsLoading(false);
-      // Unverified accounts: show the typeable email form immediately.
       if (u && !u.emailVerified) setShowEmailForm(true);
     });
     return () => {
@@ -119,6 +143,37 @@ export default function ProfileView({ userId }: { userId: string }) {
     }
   };
 
+  const savePublicProfile = async () => {
+    setSaving(true);
+    try {
+      const updated = await updateProfileSettings({ bio, countryCode });
+      setUser(updated);
+      toast({ title: 'Profile saved' });
+    } catch {
+      toast({ title: 'Save failed', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveNotificationPrefs = async (next: {
+    notifyPush?: boolean;
+    notifyEmail?: boolean;
+  }) => {
+    setPrefsSaving(true);
+    try {
+      const updated = await updateProfileSettings(next);
+      setUser(updated);
+      if (typeof next.notifyPush === 'boolean') setNotifyPush(next.notifyPush);
+      if (typeof next.notifyEmail === 'boolean') setNotifyEmail(next.notifyEmail);
+      toast({ title: 'Notification preferences saved' });
+    } catch {
+      toast({ title: 'Could not save preferences', variant: 'destructive' });
+    } finally {
+      setPrefsSaving(false);
+    }
+  };
+
   return (
     <div className="pb-6">
       <div
@@ -145,12 +200,22 @@ export default function ProfileView({ userId }: { userId: string }) {
           </div>
           <div className="min-w-0 flex-1 pb-1">
             <h1
-              className={`text-3xl sm:text-5xl font-black truncate ${getRoleTextColorClass(
+              className={`text-3xl sm:text-5xl font-black truncate flex items-center gap-3 ${getRoleTextColorClass(
                 user?.role,
                 user?.isVip
               )}`}
             >
               {user?.username ?? 'Loading...'}
+              {countryCode && (
+                <Image
+                  src={flagUrl(countryCode, 40)}
+                  alt={getCountryName(countryCode) ?? countryCode}
+                  width={28}
+                  height={21}
+                  className="rounded-sm shadow-md shrink-0"
+                  unoptimized
+                />
+              )}
             </h1>
             <p className="text-base sm:text-xl text-slate-400">
               {user?.createdAt
@@ -162,14 +227,6 @@ export default function ProfileView({ userId }: { userId: string }) {
               {user?.isVip ? ' · VIP' : ''}
             </p>
           </div>
-          <Button
-            variant="outline"
-            className="sm:ml-auto w-full sm:w-auto pb-1"
-            onClick={() => signOut({ callbackUrl: '/landing' })}
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            Logout
-          </Button>
         </div>
 
       <Tabs defaultValue="profile" className="w-full">
@@ -179,6 +236,9 @@ export default function ProfileView({ userId }: { userId: string }) {
           </TabsTrigger>
           <TabsTrigger value="statistics" className="flex-none">
             Statistics
+          </TabsTrigger>
+          <TabsTrigger value="activity" className="flex-none">
+            Activity
           </TabsTrigger>
           <TabsTrigger value="match-history" className="flex-none">
             Match History
@@ -194,7 +254,38 @@ export default function ProfileView({ userId }: { userId: string }) {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="profile" className="mt-0">
+        <TabsContent value="profile" className="mt-0 space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+              <CardContent className="pt-5 text-center">
+                <Zap className="w-5 h-5 mx-auto mb-1 text-primary" />
+                <p className="text-2xl font-black">{user?.xpProgress ?? 0}</p>
+                <p className="text-xs text-slate-400">Total XP</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+              <CardContent className="pt-5 text-center">
+                <Gem className="w-5 h-5 mx-auto mb-1 text-yellow-400" />
+                <p className="text-2xl font-black">{user?.vpCurrency ?? 0}</p>
+                <p className="text-xs text-slate-400">VP Balance</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+              <CardContent className="pt-5 text-center">
+                <ShoppingBag className="w-5 h-5 mx-auto mb-1 text-primary" />
+                <p className="text-2xl font-black">{activity?.totals.purchaseCount ?? 0}</p>
+                <p className="text-xs text-slate-400">Purchases</p>
+              </CardContent>
+            </Card>
+            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+              <CardContent className="pt-5 text-center">
+                <MessageSquare className="w-5 h-5 mx-auto mb-1 text-primary" />
+                <p className="text-2xl font-black">{activity?.totals.forumPostCount ?? 0}</p>
+                <p className="text-xs text-slate-400">Forum Posts</p>
+              </CardContent>
+            </Card>
+          </div>
+
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>
               <CardTitle>Public Profile</CardTitle>
@@ -211,20 +302,39 @@ export default function ProfileView({ userId }: { userId: string }) {
                   className="bg-slate-900/50 border-slate-700 min-h-[100px]"
                 />
               </div>
-              <Button
-                disabled={saving}
-                onClick={async () => {
-                  setSaving(true);
-                  try {
-                    await updateProfileBio(bio);
-                    toast({ title: 'Profile saved' });
-                  } catch {
-                    toast({ title: 'Save failed', variant: 'destructive' });
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
-              >
+              <div className="space-y-2">
+                <Label>Country</Label>
+                <Select
+                  value={countryCode || 'none'}
+                  onValueChange={(v) => setCountryCode(v === 'none' ? '' : v)}
+                >
+                  <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                    <SelectValue placeholder="Choose your country" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    <SelectItem value="none">No country</SelectItem>
+                    {COUNTRIES.map((c) => (
+                      <SelectItem key={c.code} value={c.code}>
+                        <span className="inline-flex items-center gap-2">
+                          <Image
+                            src={flagUrl(c.code, 20)}
+                            alt=""
+                            width={18}
+                            height={14}
+                            className="rounded-[2px]"
+                            unoptimized
+                          />
+                          {c.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-slate-500">
+                  Your flag appears on your public profile next to your name.
+                </p>
+              </div>
+              <Button disabled={saving} onClick={savePublicProfile}>
                 <Save className="mr-2 h-4 w-4" />
                 Save Profile
               </Button>
@@ -257,6 +367,81 @@ export default function ProfileView({ userId }: { userId: string }) {
                 <p className="text-4xl font-black text-primary">{summary?.avgScore ?? 0}</p>
                 <p className="text-slate-400">Avg Score</p>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="activity" className="mt-0 space-y-4">
+          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShoppingBag className="h-5 w-5 text-primary" /> Purchase History
+              </CardTitle>
+              <CardDescription>
+                {activity?.totals.purchaseCount ?? 0} purchases ·{' '}
+                {activity?.totals.vpSpent ?? 0} VP spent lifetime
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!activity || activity.purchases.length === 0 ? (
+                <p className="text-center py-8 text-slate-400">
+                  No purchases yet. Visit the Store to spend VP.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-slate-700/50 hover:bg-transparent">
+                      <TableHead>Item</TableHead>
+                      <TableHead>VP</TableHead>
+                      <TableHead className="text-right">Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {activity.purchases.map((p) => (
+                      <TableRow key={p.id} className="border-slate-700/50">
+                        <TableCell className="font-semibold">{p.itemName}</TableCell>
+                        <TableCell className="text-yellow-400">{p.vpSpent}</TableCell>
+                        <TableCell className="text-right text-slate-400">
+                          {formatDistanceToNow(new Date(p.createdAt))} ago
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 text-primary" /> Forum Posts
+              </CardTitle>
+              <CardDescription>Your recent community posts.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!activity || activity.forumPosts.length === 0 ? (
+                <p className="text-center py-8 text-slate-400">
+                  You haven&apos;t posted on the forum yet.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {activity.forumPosts.map((post) => (
+                    <li
+                      key={post.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-700/40 bg-slate-900/40 px-3 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-semibold truncate">{post.title}</p>
+                        <p className="text-xs text-slate-400 capitalize">{post.category}</p>
+                      </div>
+                      <p className="text-xs text-slate-500 shrink-0">
+                        {formatDistanceToNow(new Date(post.createdAt))} ago
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -400,10 +585,47 @@ export default function ProfileView({ userId }: { userId: string }) {
           </Card>
         </TabsContent>
 
-        <TabsContent value="settings" className="mt-0">
+        <TabsContent value="settings" className="mt-0 space-y-4">
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>
-              <CardTitle>Settings</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Bell className="h-5 w-5 text-primary" /> Notifications
+              </CardTitle>
+              <CardDescription>
+                Choose how Kilrun can reach you about rewards, friends, and updates.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-700/40 bg-slate-900/30 px-4 py-3">
+                <div>
+                  <p className="font-semibold">Push notifications</p>
+                  <p className="text-xs text-slate-400">In-hub alerts for badges, missions, and more.</p>
+                </div>
+                <Switch
+                  checked={notifyPush}
+                  disabled={prefsSaving}
+                  onCheckedChange={(checked) => saveNotificationPrefs({ notifyPush: checked })}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-700/40 bg-slate-900/30 px-4 py-3">
+                <div>
+                  <p className="font-semibold">Email notifications</p>
+                  <p className="text-xs text-slate-400">
+                    Occasional email updates (requires a verified email).
+                  </p>
+                </div>
+                <Switch
+                  checked={notifyEmail}
+                  disabled={prefsSaving || !user?.emailVerified}
+                  onCheckedChange={(checked) => saveNotificationPrefs({ notifyEmail: checked })}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+            <CardHeader>
+              <CardTitle>Account</CardTitle>
               <CardDescription>Account details from your Steam login.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6 max-w-2xl">

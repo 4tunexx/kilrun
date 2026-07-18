@@ -65,9 +65,39 @@ export const badges = [
 ];
 
 export const shopItems = [
-  { itemName: "Neon Trail", itemCategory: "cosmetic", itemSku: "neon-trail", vpPrice: 500, imageUrl: "/shop/trail.png" },
-  { itemName: "Deathrun Cape", itemCategory: "cosmetic", itemSku: "deathrun-cape", vpPrice: 1200, imageUrl: "/shop/cape.png" },
-  { itemName: "XP Boost (1 match)", itemCategory: "boost", itemSku: "xp-boost-1", vpPrice: 300, imageUrl: "/shop/xp.png" },
-  { itemName: "VP Bundle Icon", itemCategory: "cosmetic", itemSku: "vp-bundle-icon", vpPrice: 800, imageUrl: "/shop/icon.png" },
-  { itemName: "Lobby Emote Pack", itemCategory: "emote", itemSku: "lobby-emote-pack", vpPrice: 650, imageUrl: "/shop/emote.png" },
+  {
+    itemName: "Neon Trail",
+    itemCategory: "cosmetic",
+    itemSku: "neon-trail",
+    vpPrice: 500,
+    imageUrl: "https://placehold.co/400x400/0f172a/ef4444/png?text=Neon+Trail",
+  },
+  {
+    itemName: "Deathrun Cape",
+    itemCategory: "cosmetic",
+    itemSku: "deathrun-cape",
+    vpPrice: 1200,
+    imageUrl: "https://placehold.co/400x400/0f172a/f59e0b/png?text=Cape",
+  },
+  {
+    itemName: "XP Boost (1 match)",
+    itemCategory: "boost",
+    itemSku: "xp-boost-1",
+    vpPrice: 300,
+    imageUrl: "https://placehold.co/400x400/0f172a/22c55e/png?text=XP+Boost",
+  },
+  {
+    itemName: "VP Bundle Icon",
+    itemCategory: "cosmetic",
+    itemSku: "vp-bundle-icon",
+    vpPrice: 800,
+    imageUrl: "https://placehold.co/400x400/0f172a/38bdf8/png?text=VP+Icon",
+  },
+  {
+    itemName: "Lobby Emote Pack",
+    itemCategory: "emote",
+    itemSku: "lobby-emote-pack",
+    vpPrice: 650,
+    imageUrl: "https://placehold.co/400x400/0f172a/a855f7/png?text=Emote",
+  },
 ];
