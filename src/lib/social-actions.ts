@@ -45,6 +45,7 @@ export async function updateProfileBio(bio: string) {
 export async function updateProfileSettings(input: {
   bio?: string;
   countryCode?: string;
+  statusMessage?: string;
   notifyPush?: boolean;
   notifyEmail?: boolean;
 }) {
@@ -52,12 +53,16 @@ export async function updateProfileSettings(input: {
   const data: {
     bio?: string;
     countryCode?: string;
+    statusMessage?: string;
     notifyPush?: boolean;
     notifyEmail?: boolean;
   } = {};
 
   if (typeof input.bio === 'string') {
     data.bio = input.bio.slice(0, 500);
+  }
+  if (typeof input.statusMessage === 'string') {
+    data.statusMessage = input.statusMessage.slice(0, 80);
   }
   if (typeof input.countryCode === 'string') {
     const code = input.countryCode.trim().toLowerCase();
@@ -536,6 +541,7 @@ export async function purchaseStoreItem(itemId: string) {
       itemCategory: item.itemCategory,
       cosmeticSlot: item.cosmeticSlot ?? null,
       bannerConfig: item.bannerConfig ?? undefined,
+      cosmeticConfig: item.cosmeticConfig ?? undefined,
       imageUrl: item.imageUrl ?? null,
       vpValue: item.vpPrice,
     },
@@ -587,6 +593,22 @@ export async function equipInventoryItem(inventoryItemId: string) {
         equippedBannerConfig: item.bannerConfig ?? undefined,
       },
     });
+  } else if (item.cosmeticSlot === 'frame') {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        equippedFrameItemName: item.itemName,
+        equippedFrameConfig: item.cosmeticConfig ?? undefined,
+      },
+    });
+  } else if (item.cosmeticSlot === 'nickname') {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        equippedNicknameItemName: item.itemName,
+        equippedNicknameConfig: item.cosmeticConfig ?? undefined,
+      },
+    });
   }
   return { ok: true as const };
 }
@@ -606,8 +628,50 @@ export async function unequipCosmeticSlot(cosmeticSlot: string) {
         equippedBannerConfig: null,
       },
     });
+  } else if (cosmeticSlot === 'frame') {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        equippedFrameItemName: null,
+        equippedFrameConfig: null,
+      },
+    });
+  } else if (cosmeticSlot === 'nickname') {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        equippedNicknameItemName: null,
+        equippedNicknameConfig: null,
+      },
+    });
   }
   return { ok: true as const };
+}
+
+async function clearEquippedSnapshot(
+  userId: string,
+  slot: string | null | undefined
+) {
+  if (slot === 'banner') {
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        equippedBannerItemName: null,
+        equippedBannerImageUrl: null,
+        equippedBannerConfig: null,
+      },
+    });
+  } else if (slot === 'frame') {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { equippedFrameItemName: null, equippedFrameConfig: null },
+    });
+  } else if (slot === 'nickname') {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { equippedNicknameItemName: null, equippedNicknameConfig: null },
+    });
+  }
 }
 
 /** Sells an owned item back for a fraction of its original VP price. */
@@ -625,15 +689,8 @@ export async function resellInventoryItem(inventoryItemId: string) {
     }),
   ]);
 
-  if (item.isEquipped && item.cosmeticSlot === 'banner') {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        equippedBannerItemName: null,
-        equippedBannerImageUrl: null,
-        equippedBannerConfig: null,
-      },
-    });
+  if (item.isEquipped) {
+    await clearEquippedSnapshot(user.id, item.cosmeticSlot);
   }
   return { ok: true as const, refund };
 }
@@ -646,15 +703,8 @@ export async function deleteInventoryItem(inventoryItemId: string) {
 
   await prisma.inventoryItem.delete({ where: { id: item.id } });
 
-  if (item.isEquipped && item.cosmeticSlot === 'banner') {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        equippedBannerItemName: null,
-        equippedBannerImageUrl: null,
-        equippedBannerConfig: null,
-      },
-    });
+  if (item.isEquipped) {
+    await clearEquippedSnapshot(user.id, item.cosmeticSlot);
   }
   return { ok: true as const };
 }
@@ -804,21 +854,48 @@ export async function searchPlayers(query: string) {
 }
 
 export async function adminSetBanned(userId: string, isBanned: boolean) {
-  await requireStaff();
-  return prisma.user.update({ where: { id: userId }, data: { isBanned } });
+  const staff = await requireStaff();
+  const target = await prisma.user.update({
+    where: { id: userId },
+    data: { isBanned },
+  });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: isBanned ? 'ban' : 'unban',
+    targetUserId: target.id,
+    targetUsername: target.username,
+  });
+  return target;
 }
 
 /** Moderator tool: silence a player's global chat / forum posting without banning them. */
 export async function adminSetMuted(userId: string, isMuted: boolean) {
-  await requireStaff();
-  return prisma.user.update({ where: { id: userId }, data: { isMuted } });
+  const staff = await requireStaff();
+  const target = await prisma.user.update({
+    where: { id: userId },
+    data: { isMuted },
+  });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: isMuted ? 'mute' : 'unmute',
+    targetUserId: target.id,
+    targetUsername: target.username,
+  });
+  return target;
 }
 
-export async function adminListTickets() {
+export async function adminListTickets(statusFilter?: string) {
   await requireStaff();
+  const status =
+    statusFilter && statusFilter !== 'all' ? statusFilter : undefined;
   return prisma.supportTicket.findMany({
+    where: status ? { status } : undefined,
     orderBy: { createdAt: 'desc' },
-    take: 50,
+    take: 80,
     include: {
       user: { select: { id: true, username: true, avatarUrl: true } },
     },
@@ -859,6 +936,7 @@ export async function adminUpsertStoreItem(input: {
   isAvailable?: boolean;
   cosmeticSlot?: string | null;
   bannerConfig?: BannerConfig | null;
+  cosmeticConfig?: Record<string, unknown> | null;
 }) {
   await requireStaff();
   const cosmeticData =
@@ -868,7 +946,15 @@ export async function adminUpsertStoreItem(input: {
           bannerConfig:
             input.bannerConfig === null
               ? null
-              : (input.bannerConfig as unknown as Prisma.InputJsonValue),
+              : input.bannerConfig !== undefined
+                ? (input.bannerConfig as unknown as Prisma.InputJsonValue)
+                : undefined,
+          cosmeticConfig:
+            input.cosmeticConfig === null
+              ? null
+              : input.cosmeticConfig !== undefined
+                ? (input.cosmeticConfig as unknown as Prisma.InputJsonValue)
+                : undefined,
         }
       : {};
   if (input.id) {

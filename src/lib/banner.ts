@@ -5,13 +5,24 @@
  */
 import type { CSSProperties } from 'react';
 
-export type BannerAnimationStyle = 'none' | 'shimmer' | 'pulse' | 'rotate';
+export type BannerAnimationStyle =
+  | 'none'
+  | 'shimmer'
+  | 'pulse'
+  | 'rotate'
+  | 'wave'
+  | 'breathe'
+  | 'sparkle';
 
 export interface BannerConfig {
   colors: string[];
   angle: number;
   animated: boolean;
   animationStyle: BannerAnimationStyle;
+  /** Soft blur overlay intensity 0–1. */
+  blur?: number;
+  /** Overall opacity of the banner fill 0.4–1. */
+  opacity?: number;
 }
 
 export const DEFAULT_BANNER_CONFIG: BannerConfig = {
@@ -56,15 +67,25 @@ export function normalizeBannerConfig(raw: unknown): BannerConfig {
       ? Math.max(0, Math.min(360, Math.round(cfg.angle)))
       : DEFAULT_BANNER_CONFIG.angle;
   const animationStyle: BannerAnimationStyle = (
-    ['none', 'shimmer', 'pulse', 'rotate'] as const
+    ['none', 'shimmer', 'pulse', 'rotate', 'wave', 'breathe', 'sparkle'] as const
   ).includes(cfg.animationStyle as BannerAnimationStyle)
     ? (cfg.animationStyle as BannerAnimationStyle)
     : 'none';
+  const blur =
+    typeof cfg.blur === 'number' && Number.isFinite(cfg.blur)
+      ? Math.max(0, Math.min(1, cfg.blur))
+      : 0;
+  const opacity =
+    typeof cfg.opacity === 'number' && Number.isFinite(cfg.opacity)
+      ? Math.max(0.4, Math.min(1, cfg.opacity))
+      : 1;
   return {
     colors,
     angle,
     animated: Boolean(cfg.animated) && animationStyle !== 'none',
     animationStyle,
+    blur,
+    opacity,
   };
 }
 
@@ -74,22 +95,35 @@ export function bannerGradientCss(config: BannerConfig): string {
 
 /** Inline style object for a div rendering this banner. */
 export function bannerStyle(config: BannerConfig): CSSProperties {
+  const c = normalizeBannerConfig(config);
   return {
-    backgroundImage: bannerGradientCss(config),
-    backgroundSize: config.animated && config.animationStyle === 'shimmer' ? '200% 200%' : '100% 100%',
+    backgroundImage: bannerGradientCss(c),
+    backgroundSize:
+      c.animated && (c.animationStyle === 'shimmer' || c.animationStyle === 'wave')
+        ? '200% 200%'
+        : '100% 100%',
+    opacity: c.opacity ?? 1,
+    filter: (c.blur ?? 0) > 0 ? `blur(${(c.blur ?? 0) * 2}px)` : undefined,
   };
 }
 
 /** Tailwind animation utility class matching this banner's animation style. */
 export function bannerAnimationClass(config: BannerConfig): string {
-  if (!config.animated) return '';
-  switch (config.animationStyle) {
+  const c = normalizeBannerConfig(config);
+  if (!c.animated) return '';
+  switch (c.animationStyle) {
     case 'shimmer':
       return 'animate-banner-shimmer';
     case 'pulse':
       return 'animate-banner-pulse-glow';
     case 'rotate':
       return 'animate-banner-rotate-hue';
+    case 'wave':
+      return 'animate-banner-wave';
+    case 'breathe':
+      return 'animate-banner-breathe';
+    case 'sparkle':
+      return 'animate-banner-sparkle';
     default:
       return '';
   }
@@ -100,4 +134,7 @@ export const BANNER_ANIMATION_STYLES: { value: BannerAnimationStyle; label: stri
   { value: 'shimmer', label: 'Shimmer (sweeping gradient)' },
   { value: 'pulse', label: 'Pulse (glow in/out)' },
   { value: 'rotate', label: 'Rotate (shifting hues)' },
+  { value: 'wave', label: 'Wave (flowing gradient)' },
+  { value: 'breathe', label: 'Breathe (scale soft)' },
+  { value: 'sparkle', label: 'Sparkle (brightness flicker)' },
 ];

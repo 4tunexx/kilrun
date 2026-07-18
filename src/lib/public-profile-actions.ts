@@ -23,6 +23,7 @@ export type PublicProfile = {
   username: string;
   avatarUrl: string;
   bio: string;
+  statusMessage: string;
   countryCode: string;
   role: string;
   isVip: boolean;
@@ -37,6 +38,8 @@ export type PublicProfile = {
   equippedBannerConfig: BannerConfig | null;
   equippedBannerImageUrl: string | null;
   equippedBannerItemName: string | null;
+  equippedFrameConfig: unknown | null;
+  equippedNicknameConfig: unknown | null;
   showcase: ShowcaseDisplayItem[];
   leaderboardPosition: number;
   totalPlayers: number;
@@ -122,6 +125,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     username: target.username,
     avatarUrl: target.avatarUrl,
     bio: target.bio,
+    statusMessage: target.statusMessage ?? '',
     countryCode: target.countryCode ?? '',
     role: target.role,
     isVip: target.isVip,
@@ -138,6 +142,8 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
       : null,
     equippedBannerImageUrl: target.equippedBannerImageUrl,
     equippedBannerItemName: target.equippedBannerItemName,
+    equippedFrameConfig: target.equippedFrameConfig ?? null,
+    equippedNicknameConfig: target.equippedNicknameConfig ?? null,
     showcase,
     leaderboardPosition: higherRanked + 1,
     totalPlayers,
@@ -163,6 +169,7 @@ export async function getPublicProfileSummary(userId: string) {
     id: target.id,
     username: target.username,
     avatarUrl: target.avatarUrl,
+    statusMessage: target.statusMessage ?? '',
     role: target.role,
     isVip: target.isVip,
     currentRank: target.currentRank || getRankForLevel(progress.level),
@@ -175,6 +182,8 @@ export async function getPublicProfileSummary(userId: string) {
       ? normalizeBannerConfig(target.equippedBannerConfig)
       : null,
     equippedBannerImageUrl: target.equippedBannerImageUrl,
+    equippedFrameConfig: target.equippedFrameConfig ?? null,
+    equippedNicknameConfig: target.equippedNicknameConfig ?? null,
     showcase,
   };
 }

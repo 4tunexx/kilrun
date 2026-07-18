@@ -66,7 +66,10 @@ export function ImageUploadField({
         throw new Error(data.error || 'Upload failed');
       }
       onChange(data.url);
-      toast({ title: 'Image uploaded' });
+      toast({
+        title: 'Image uploaded',
+        description: 'Click Save on this tab so it survives a reload.',
+      });
     } catch (err: unknown) {
       toast({
         title: 'Upload failed',
@@ -84,8 +87,12 @@ export function ImageUploadField({
       <Label>{label}</Label>
       <div className="flex gap-2">
         <Input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
+          value={value.startsWith('data:image/') ? '(embedded image — saved in DB)' : value}
+          onChange={(e) => {
+            const next = e.target.value;
+            if (next.startsWith('(embedded')) return;
+            onChange(next);
+          }}
           placeholder="https://... or upload a file"
           className="bg-slate-900/50 border-slate-700"
           disabled={uploading}

@@ -1,7 +1,24 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Loader2, Shield, Trash2 } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { formatDistanceToNow } from 'date-fns';
+import {
+  Award,
+  ClipboardList,
+  FileText,
+  LayoutDashboard,
+  Loader2,
+  Medal,
+  ScrollText,
+  Settings2,
+  Shield,
+  ShoppingBag,
+  Target,
+  Ticket,
+  Trash2,
+  Trophy,
+  Users,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -20,11 +37,18 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
 import { ImageUploadField } from '@/components/ui/image-upload-field';
 import { RequirementTypeSelect } from '@/components/views/admin/requirement-type-select';
-import { BannerGenerator } from '@/components/views/admin/banner-generator';
+import { CosmeticsStudio } from '@/components/views/admin/cosmetics-studio';
+import { LogoStyleEditor } from '@/components/views/admin/logo-style-editor';
+import { AdminDashboardPanel } from '@/components/views/admin/admin-dashboard-panel';
+import {
+  DEFAULT_HEADER_LOGO_STYLE,
+  normalizeHeaderLogoStyle,
+  serializeHeaderLogoStyle,
+  type HeaderLogoStyle,
+} from '@/lib/logo-style';
 import {
   adminCreateGuide,
   adminCreateNews,
-  adminDashboardStats,
   adminDeleteStoreItem,
   adminListTickets,
   adminListUsers,
@@ -48,20 +72,38 @@ import {
   adminUpsertAchievement,
   adminListBadges,
   adminUpsertBadge,
-  adminSeedProgression,
   adminClearGlobalChat,
 } from '@/lib/progression-actions';
+import { adminListAuditLogs } from '@/lib/audit';
+import { syncClerkBrandingToKilrun } from '@/lib/clerk-branding';
+import { normalizeLandingSlides, type LandingHeroSlide } from '@/lib/cosmetics';
 import { ACCOUNT_ROLES } from '@/lib/roles';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import { useToast } from '@/hooks/use-toast';
 
-const MODERATOR_TABS = ['dashboard', 'users', 'moderation', 'support'] as const;
+const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
+  dashboard: { label: 'Dashboard', icon: <LayoutDashboard className="h-3.5 w-3.5" /> },
+  site: { label: 'Site', icon: <Settings2 className="h-3.5 w-3.5" /> },
+  users: { label: 'Users', icon: <Users className="h-3.5 w-3.5" /> },
+  moderation: { label: 'Moderation', icon: <Shield className="h-3.5 w-3.5" /> },
+  audit: { label: 'Audit', icon: <ScrollText className="h-3.5 w-3.5" /> },
+  awards: { label: 'Awards', icon: <Award className="h-3.5 w-3.5" /> },
+  missions: { label: 'Missions', icon: <Target className="h-3.5 w-3.5" /> },
+  achievements: { label: 'Achievements', icon: <Trophy className="h-3.5 w-3.5" /> },
+  badges: { label: 'Badges', icon: <Medal className="h-3.5 w-3.5" /> },
+  support: { label: 'Support', icon: <Ticket className="h-3.5 w-3.5" /> },
+  shop: { label: 'Shop', icon: <ShoppingBag className="h-3.5 w-3.5" /> },
+  content: { label: 'Content', icon: <FileText className="h-3.5 w-3.5" /> },
+};
+
+const MODERATOR_TABS = ['dashboard', 'users', 'moderation', 'audit', 'support'] as const;
 const ADMIN_TABS = [
   'dashboard',
   'site',
   'users',
   'moderation',
+  'audit',
   'awards',
   'missions',
   'achievements',
@@ -75,18 +117,15 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
   const isAdmin = viewerRole === 'admin';
   const visibleTabs = isAdmin ? ADMIN_TABS : MODERATOR_TABS;
 
-  const [stats, setStats] = useState({
-    users: 0,
-    openTickets: 0,
-    forumPosts: 0,
-    purchases: 0,
-  });
   const [users, setUsers] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [missions, setMissions] = useState<any[]>([]);
   const [achievements, setAchievements] = useState<any[]>([]);
   const [badges, setBadges] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [ticketFilter, setTicketFilter] = useState('all');
+  const [awardQuery, setAwardQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const { toast } = useToast();
@@ -119,15 +158,20 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
   const [siteForm, setSiteForm] = useState({
     logoUrl: '',
     headerLogoUrl: '',
+    headerLogoStyle: DEFAULT_HEADER_LOGO_STYLE as HeaderLogoStyle,
     backgroundUrl: '',
     homeHeroImage: '',
     headerTitle: '',
     headerSubtitle: '',
     landingHeroImage: '',
+    landingHeroSlides: [] as LandingHeroSlide[],
     gameDisabled: false,
     gameDisabledMsg: '',
+    gameDisabledUntil: '' as string,
     chatEnabled: true,
   });
+  const [userSearch, setUserSearch] = useState('');
+  const [siteDirty, setSiteDirty] = useState(false);
   const [awardForm, setAwardForm] = useState({
     userId: '',
     xp: 100,
@@ -167,46 +211,63 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
   });
 
   const reload = async () => {
+    const ticketStatus =
+      ticketFilter === 'all' ? undefined : ticketFilter;
     if (isAdmin) {
-      const [s, u, t, store, settings, m, a, b] = await Promise.all([
-        adminDashboardStats(),
-        adminListUsers(),
-        adminListTickets(),
+      const [u, t, store, settings, m, a, b, logs] = await Promise.all([
+        adminListUsers(200),
+        adminListTickets(ticketStatus),
         getStoreItems(),
         getSiteSettings(),
         adminListMissionTemplates(),
         adminListAchievements(),
         adminListBadges(),
+        adminListAuditLogs(),
       ]);
-      setStats(s);
       setUsers(u);
       setTickets(t);
       setItems(store);
       setMissions(m);
       setAchievements(a);
       setBadges(b);
+      setAuditLogs(logs);
+      let landingHeroSlides = normalizeLandingSlides(
+        (settings as { landingHeroSlides?: string }).landingHeroSlides
+      );
+      if (landingHeroSlides.length === 0 && settings.landingHeroImage) {
+        landingHeroSlides = [
+          { src: settings.landingHeroImage, alt: 'Kilrun' },
+        ];
+      }
       setSiteForm({
         logoUrl: settings.logoUrl ?? '',
         headerLogoUrl: settings.headerLogoUrl ?? '',
+        headerLogoStyle: normalizeHeaderLogoStyle(
+          (settings as { headerLogoStyle?: string }).headerLogoStyle
+        ),
         backgroundUrl: settings.backgroundUrl ?? '',
         homeHeroImage: settings.homeHeroImage ?? '',
         headerTitle: settings.headerTitle ?? '',
         headerSubtitle: settings.headerSubtitle ?? '',
         landingHeroImage: settings.landingHeroImage ?? '',
+        landingHeroSlides,
         gameDisabled: settings.gameDisabled,
         gameDisabledMsg: settings.gameDisabledMsg ?? '',
+        gameDisabledUntil: settings.gameDisabledUntil
+          ? new Date(settings.gameDisabledUntil).toISOString().slice(0, 16)
+          : '',
         chatEnabled: settings.chatEnabled,
       });
+      setSiteDirty(false);
     } else {
-      // Moderators get a leaner reload: dashboard counts, users (for mute/ban), and tickets.
-      const [s, u, t] = await Promise.all([
-        adminDashboardStats(),
-        adminListUsers(),
-        adminListTickets(),
+      const [u, t, logs] = await Promise.all([
+        adminListUsers(200),
+        adminListTickets(ticketStatus),
+        adminListAuditLogs(),
       ]);
-      setStats(s);
       setUsers(u);
       setTickets(t);
+      setAuditLogs(logs);
     }
     setLoading(false);
   };
@@ -231,128 +292,216 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
     <div className="px-4 sm:px-8 py-6 space-y-4">
       <Tabs defaultValue="dashboard" className="w-full">
         <TabsList className="w-full h-auto flex flex-wrap justify-start gap-1 bg-slate-800/60 p-1">
-          {visibleTabs.map((tab) => (
-            <TabsTrigger key={tab} value={tab} className="flex-none capitalize">
-              {tab}
-            </TabsTrigger>
-          ))}
+          {visibleTabs.map((tab) => {
+            const meta = TAB_META[tab] ?? { label: tab, icon: <ClipboardList className="h-3.5 w-3.5" /> };
+            return (
+              <TabsTrigger
+                key={tab}
+                value={tab}
+                className="flex-none gap-1.5 capitalize"
+              >
+                {meta.icon}
+                {meta.label}
+              </TabsTrigger>
+            );
+          })}
         </TabsList>
 
-        <TabsContent value="dashboard" className="mt-4 space-y-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {[
-              ['Players', stats.users],
-              ['Open tickets', stats.openTickets],
-              ['Forum posts', stats.forumPosts],
-              ['Purchases', stats.purchases],
-            ].map(([label, value]) => (
-              <Card key={String(label)} className="bg-slate-800/40 border-slate-700/30">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-slate-400">{label}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-3xl font-black">{value}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-          {isAdmin && (
-            <Card className="bg-slate-800/40 border-slate-700/30">
-              <CardHeader>
-                <CardTitle>Seed progression (mobile-friendly)</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <p className="text-sm text-slate-400">
-                  Loads the 20 missions, 20 achievements, badges, shop items, and
-                  default site settings into MongoDB. Use this instead of running
-                  npm on your phone.
-                </p>
-                <Button
-                  disabled={busyKey === 'seed'}
-                  onClick={() =>
-                    runAction('seed', async () => {
-                      const result = await adminSeedProgression();
-                      toast({
-                        title: 'Progression seeded',
-                        description: `${result.missions} missions · ${result.achievements} achievements · ${result.badges} badges`,
-                      });
-                      await reload();
-                    })
-                  }
-                >
-                  {busyKey === 'seed' && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                  Seed missions / achievements / badges
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+        <TabsContent value="dashboard" className="mt-4">
+          <AdminDashboardPanel isAdmin={isAdmin} />
         </TabsContent>
 
         {isAdmin && (
-          <TabsContent value="site" className="mt-4">
+          <TabsContent value="site" className="mt-4 space-y-4">
             <Card className="bg-slate-800/40 border-slate-700/30">
-              <CardHeader>
-                <CardTitle>Website & landing settings</CardTitle>
+              <CardHeader className="pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <CardTitle>Branding & logos</CardTitle>
+                  {siteDirty && (
+                    <Badge
+                      variant="outline"
+                      className="border-amber-500/50 text-amber-300"
+                    >
+                      Unsaved changes
+                    </Badge>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-2">
                 <ImageUploadField
                   label="Sidebar / mark logo (K)"
                   value={siteForm.logoUrl}
-                  onChange={(v) => setSiteForm((f) => ({ ...f, logoUrl: v }))}
+                  onChange={(v) => {
+                    setSiteForm((f) => ({ ...f, logoUrl: v }));
+                    setSiteDirty(true);
+                  }}
                   className="space-y-1 sm:col-span-2"
                   kind="mark"
                 />
                 <p className="text-xs text-slate-500 sm:col-span-2 -mt-2">
-                  Small mark used in the left rail and footer. Leave empty to use{' '}
+                  Small mark in the left rail and footer. Empty →{' '}
                   <code className="text-slate-400">/K2.png</code>.
                 </p>
                 <ImageUploadField
                   label="Header logo (wordmark)"
                   value={siteForm.headerLogoUrl}
-                  onChange={(v) => setSiteForm((f) => ({ ...f, headerLogoUrl: v }))}
+                  onChange={(v) => {
+                    setSiteForm((f) => ({ ...f, headerLogoUrl: v }));
+                    setSiteDirty(true);
+                  }}
                   className="space-y-1 sm:col-span-2"
                   kind="wordmark"
                   widePreview
                 />
                 <p className="text-xs text-slate-500 sm:col-span-2 -mt-2">
-                  Replaces the big Kilrun word on the home hero and landing. Leave empty
-                  to use <code className="text-slate-400">/kilrun.png</code>. Upload saves
-                  to disk automatically — then hit Save.
+                  Home + landing wordmark. Empty →{' '}
+                  <code className="text-slate-400">/kilrun.png</code>. After upload,
+                  adjust below, then Save.
                 </p>
+
+                <LogoStyleEditor
+                  logoUrl={siteForm.headerLogoUrl}
+                  heroImage={siteForm.homeHeroImage}
+                  style={siteForm.headerLogoStyle}
+                  onChange={(headerLogoStyle) => {
+                    setSiteForm((f) => ({ ...f, headerLogoStyle }));
+                    setSiteDirty(true);
+                  }}
+                />
+              </CardContent>
+            </Card>
+
+            <Card className="bg-slate-800/40 border-slate-700/30">
+              <CardHeader>
+                <CardTitle>Backgrounds & copy</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 sm:grid-cols-2">
                 <ImageUploadField
                   label="Hub page background"
                   value={siteForm.backgroundUrl}
-                  onChange={(v) => setSiteForm((f) => ({ ...f, backgroundUrl: v }))}
+                  onChange={(v) => {
+                    setSiteForm((f) => ({ ...f, backgroundUrl: v }));
+                    setSiteDirty(true);
+                  }}
                   className="space-y-1 sm:col-span-2"
                   kind="bg"
                   widePreview
                 />
-                <p className="text-xs text-slate-500 sm:col-span-2 -mt-2">
-                  Full-page backdrop behind the entire hub chrome.
-                </p>
                 <ImageUploadField
                   label="Home hero background"
                   value={siteForm.homeHeroImage}
-                  onChange={(v) => setSiteForm((f) => ({ ...f, homeHeroImage: v }))}
+                  onChange={(v) => {
+                    setSiteForm((f) => ({ ...f, homeHeroImage: v }));
+                    setSiteDirty(true);
+                  }}
                   className="space-y-1 sm:col-span-2"
                   kind="hero"
                   widePreview
                 />
                 <p className="text-xs text-slate-500 sm:col-span-2 -mt-2">
-                  Live Arena banner on the homepage (mouse / tap parallax). Leave empty
-                  for the default arena image.
+                  Parallax banner behind the header logo on the homepage.
                 </p>
                 <ImageUploadField
-                  label="Landing hero image"
+                  label="Landing hero image (legacy fallback)"
                   value={siteForm.landingHeroImage}
-                  onChange={(v) => setSiteForm((f) => ({ ...f, landingHeroImage: v }))}
+                  onChange={(v) => {
+                    setSiteForm((f) => ({ ...f, landingHeroImage: v }));
+                    setSiteDirty(true);
+                  }}
                   className="space-y-1 sm:col-span-2"
                   kind="hero"
                   widePreview
                 />
-                <p className="text-xs text-slate-500 sm:col-span-2 -mt-2">
-                  Big banner on the public landing page (also pointer-reactive).
-                </p>
+                <div className="sm:col-span-2 space-y-3 rounded-lg border border-slate-700/50 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-medium">Landing carousel slides</p>
+                      <p className="text-xs text-slate-400">
+                        Up to 8 hero images for the landing page carousel.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={siteForm.landingHeroSlides.length >= 8}
+                      onClick={() => {
+                        setSiteForm((f) => ({
+                          ...f,
+                          landingHeroSlides: [
+                            ...f.landingHeroSlides,
+                            { src: '', alt: 'Kilrun' },
+                          ].slice(0, 8),
+                        }));
+                        setSiteDirty(true);
+                      }}
+                    >
+                      Add slide
+                    </Button>
+                  </div>
+                  {siteForm.landingHeroSlides.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      No slides yet. Add one or keep the legacy hero image above.
+                    </p>
+                  ) : (
+                    siteForm.landingHeroSlides.map((slide, index) => (
+                      <div
+                        key={`slide-${index}`}
+                        className="space-y-2 rounded-md border border-slate-700/40 bg-slate-900/30 p-3"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <Label>Slide {index + 1}</Label>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-300 hover:text-red-200"
+                            onClick={() => {
+                              setSiteForm((f) => ({
+                                ...f,
+                                landingHeroSlides: f.landingHeroSlides.filter(
+                                  (_, i) => i !== index
+                                ),
+                              }));
+                              setSiteDirty(true);
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                        <ImageUploadField
+                          label="Image"
+                          value={slide.src}
+                          onChange={(v) => {
+                            setSiteForm((f) => ({
+                              ...f,
+                              landingHeroSlides: f.landingHeroSlides.map((s, i) =>
+                                i === index ? { ...s, src: v } : s
+                              ),
+                            }));
+                            setSiteDirty(true);
+                          }}
+                          kind="hero"
+                          widePreview
+                        />
+                        <Input
+                          value={slide.alt ?? ''}
+                          onChange={(e) => {
+                            setSiteForm((f) => ({
+                              ...f,
+                              landingHeroSlides: f.landingHeroSlides.map((s, i) =>
+                                i === index ? { ...s, alt: e.target.value } : s
+                              ),
+                            }));
+                            setSiteDirty(true);
+                          }}
+                          placeholder="Alt text"
+                          className="bg-slate-900/50 border-slate-700"
+                        />
+                      </div>
+                    ))
+                  )}
+                </div>
                 {(
                   [
                     ['headerTitle', 'Header / home title'],
@@ -364,13 +513,22 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                     <Label>{label}</Label>
                     <Input
                       value={siteForm[key]}
-                      onChange={(e) =>
-                        setSiteForm((f) => ({ ...f, [key]: e.target.value }))
-                      }
+                      onChange={(e) => {
+                        setSiteForm((f) => ({ ...f, [key]: e.target.value }));
+                        setSiteDirty(true);
+                      }}
                       className="bg-slate-900/50 border-slate-700"
                     />
                   </div>
                 ))}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-slate-800/40 border-slate-700/30">
+              <CardHeader>
+                <CardTitle>Features</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 sm:grid-cols-2">
                 <div className="flex items-center justify-between sm:col-span-1 rounded-lg border border-slate-700/50 p-3">
                   <div>
                     <p className="font-medium">Disable game</p>
@@ -378,9 +536,10 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   </div>
                   <Switch
                     checked={siteForm.gameDisabled}
-                    onCheckedChange={(v) =>
-                      setSiteForm((f) => ({ ...f, gameDisabled: v }))
-                    }
+                    onCheckedChange={(v) => {
+                      setSiteForm((f) => ({ ...f, gameDisabled: v }));
+                      setSiteDirty(true);
+                    }}
                   />
                 </div>
                 <div className="flex items-center justify-between sm:col-span-1 rounded-lg border border-slate-700/50 p-3">
@@ -390,32 +549,146 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   </div>
                   <Switch
                     checked={siteForm.chatEnabled}
-                    onCheckedChange={(v) =>
-                      setSiteForm((f) => ({ ...f, chatEnabled: v }))
-                    }
+                    onCheckedChange={(v) => {
+                      setSiteForm((f) => ({ ...f, chatEnabled: v }));
+                      setSiteDirty(true);
+                    }}
                   />
                 </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor="gameDisabledUntil">
+                    Auto re-enable at (optional)
+                  </Label>
+                  <Input
+                    id="gameDisabledUntil"
+                    type="datetime-local"
+                    value={siteForm.gameDisabledUntil}
+                    onChange={(e) => {
+                      setSiteForm((f) => ({
+                        ...f,
+                        gameDisabledUntil: e.target.value,
+                      }));
+                      setSiteDirty(true);
+                    }}
+                    className="bg-slate-900/50 border-slate-700 max-w-md"
+                  />
+                </div>
+                {siteForm.gameDisabled && (
+                  <div
+                    role="alert"
+                    className="sm:col-span-2 rounded-lg border border-amber-500/40 bg-amber-950/40 px-4 py-3 text-sm text-amber-100"
+                  >
+                    <p className="font-semibold text-amber-200">
+                      Maintenance preview
+                    </p>
+                    <p className="mt-1 text-amber-100/90">
+                      {siteForm.gameDisabledMsg ||
+                        'Kilrun is offline for maintenance.'}
+                    </p>
+                  </div>
+                )}
                 <Button
                   className="sm:col-span-2"
                   disabled={busyKey === 'site'}
                   onClick={() =>
                     runAction('site', async () => {
-                      const saved = await updateSiteSettings(siteForm);
+                      const saved = await updateSiteSettings({
+                        logoUrl: siteForm.logoUrl,
+                        headerLogoUrl: siteForm.headerLogoUrl,
+                        backgroundUrl: siteForm.backgroundUrl,
+                        homeHeroImage: siteForm.homeHeroImage,
+                        headerTitle: siteForm.headerTitle,
+                        headerSubtitle: siteForm.headerSubtitle,
+                        landingHeroImage: siteForm.landingHeroImage,
+                        gameDisabled: siteForm.gameDisabled,
+                        gameDisabledMsg: siteForm.gameDisabledMsg,
+                        chatEnabled: siteForm.chatEnabled,
+                        headerLogoStyle: serializeHeaderLogoStyle(
+                          siteForm.headerLogoStyle
+                        ),
+                        landingHeroSlides: JSON.stringify(
+                          siteForm.landingHeroSlides
+                        ),
+                        gameDisabledUntil: siteForm.gameDisabledUntil || null,
+                      });
                       broadcastSiteSettings(saved);
-                      toast({ title: 'Site settings saved' });
+                      setSiteDirty(false);
+                      toast({
+                        title: 'Site settings saved',
+                        description: 'Logos and layout are live for everyone.',
+                      });
                     })
                   }
                 >
-                  {busyKey === 'site' && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+                  {busyKey === 'site' && (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  )}
                   Save site settings
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-slate-800/40 border-slate-700/30">
+              <CardHeader>
+                <CardTitle>Email branding (Clerk)</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-slate-400">
+                  Verification emails show the Clerk application name. If players
+                  see &quot;My Application&quot;, rename the app to Kilrun in the
+                  Clerk Dashboard and upload the K logo under Customize → Emails.
+                </p>
+                <Button
+                  variant="outline"
+                  disabled={busyKey === 'clerk-brand'}
+                  onClick={() =>
+                    runAction('clerk-brand', async () => {
+                      const result = await syncClerkBrandingToKilrun();
+                      toast({
+                        title: result.ok
+                          ? 'Clerk branding tips'
+                          : 'Clerk branding incomplete',
+                        description: [result.message, ...result.steps]
+                          .filter(Boolean)
+                          .join(' · '),
+                        variant: result.ok ? 'default' : 'destructive',
+                      });
+                    })
+                  }
+                >
+                  {busyKey === 'clerk-brand' && (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  )}
+                  Sync Kilrun branding tips
                 </Button>
               </CardContent>
             </Card>
           </TabsContent>
         )}
 
-        <TabsContent value="users" className="mt-4 space-y-2">
-          {users.map((u) => (
+        <TabsContent value="users" className="mt-4 space-y-3">
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+            <Input
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              placeholder="Search by username, Steam ID, or user ID…"
+              className="bg-slate-900/50 border-slate-700 max-w-md"
+            />
+            <p className="text-xs text-slate-500">
+              {users.length} player{users.length === 1 ? '' : 's'}
+            </p>
+          </div>
+          {users
+            .filter((u) => {
+              const q = userSearch.trim().toLowerCase();
+              if (!q) return true;
+              return (
+                u.username?.toLowerCase().includes(q) ||
+                u.steamId?.toLowerCase().includes(q) ||
+                u.id?.toLowerCase().includes(q)
+              );
+            })
+            .map((u) => (
             <Card key={u.id} className="bg-slate-800/40 border-slate-700/30">
               <CardContent className="py-3 flex flex-col sm:flex-row sm:items-center gap-3">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -487,13 +760,25 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                     variant={u.isBanned ? 'default' : 'destructive'}
                     size="sm"
                     disabled={busyKey === `ban-${u.id}`}
-                    onClick={() =>
-                      runAction(`ban-${u.id}`, async () => {
+                    onClick={() => {
+                      if (
+                        !u.isBanned &&
+                        !window.confirm(
+                          `Ban ${u.username}? They will lose access until unbanned.`
+                        )
+                      ) {
+                        return;
+                      }
+                      void runAction(`ban-${u.id}`, async () => {
                         await adminSetBanned(u.id, !u.isBanned);
-                        toast({ title: u.isBanned ? `Unbanned ${u.username}` : `Banned ${u.username}` });
+                        toast({
+                          title: u.isBanned
+                            ? `Unbanned ${u.username}`
+                            : `Banned ${u.username}`,
+                        });
                         await reload();
-                      })
-                    }
+                      });
+                    }}
                   >
                     {busyKey === `ban-${u.id}` && (
                       <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
@@ -522,12 +807,19 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
               <Button
                 variant="destructive"
                 disabled={busyKey === 'clear-chat'}
-                onClick={() =>
-                  runAction('clear-chat', async () => {
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      'Clear every message in global live chat? This cannot be undone.'
+                    )
+                  ) {
+                    return;
+                  }
+                  void runAction('clear-chat', async () => {
                     await adminClearGlobalChat();
                     toast({ title: 'Global chat cleared' });
-                  })
-                }
+                  });
+                }}
               >
                 {busyKey === 'clear-chat' && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
                 Clear global chat
@@ -585,6 +877,39 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
           </Card>
         </TabsContent>
 
+        <TabsContent value="audit" className="mt-4 space-y-2">
+          {auditLogs.length === 0 ? (
+            <p className="text-slate-400">No audit log entries yet.</p>
+          ) : (
+            auditLogs.map((log) => (
+              <Card key={log.id} className="bg-slate-800/40 border-slate-700/30">
+                <CardContent className="py-3 space-y-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold">
+                      {log.actorUsername}{' '}
+                      <span className="text-primary font-normal">{log.action}</span>
+                      {log.targetUsername ? (
+                        <span className="text-slate-400 font-normal">
+                          {' '}
+                          → {log.targetUsername}
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {formatDistanceToNow(new Date(log.createdAt))} ago
+                    </p>
+                  </div>
+                  {log.detail ? (
+                    <p className="text-sm text-slate-400 whitespace-pre-wrap">
+                      {log.detail}
+                    </p>
+                  ) : null}
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </TabsContent>
+
         {isAdmin && (
           <TabsContent value="awards" className="mt-4">
             <Card className="bg-slate-800/40 border-slate-700/30">
@@ -592,16 +917,64 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                 <CardTitle>Award players</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1 sm:col-span-2">
-                  <Label>User ID</Label>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>Player</Label>
                   <Input
-                    value={awardForm.userId}
-                    onChange={(e) =>
-                      setAwardForm((f) => ({ ...f, userId: e.target.value }))
-                    }
-                    placeholder="Paste user ObjectId from Users tab"
+                    value={awardQuery}
+                    onChange={(e) => setAwardQuery(e.target.value)}
+                    placeholder="Search by username…"
                     className="bg-slate-900/50 border-slate-700"
                   />
+                  {awardForm.userId && (
+                    <p className="text-sm text-slate-300">
+                      Selected:{' '}
+                      <span className="font-semibold">
+                        {users.find((u) => u.id === awardForm.userId)?.username ??
+                          awardForm.userId}
+                      </span>
+                    </p>
+                  )}
+                  {awardQuery.trim() && (
+                    <div className="space-y-1 max-h-64 overflow-y-auto">
+                      {users
+                        .filter((u) =>
+                          u.username
+                            ?.toLowerCase()
+                            .includes(awardQuery.trim().toLowerCase())
+                        )
+                        .slice(0, 8)
+                        .map((u) => (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onClick={() => {
+                              setAwardForm((f) => ({ ...f, userId: u.id }));
+                              setAwardQuery(u.username);
+                            }}
+                            className={`w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition ${
+                              awardForm.userId === u.id
+                                ? 'border-primary bg-primary/10'
+                                : 'border-slate-700/50 bg-slate-900/40 hover:border-slate-600'
+                            }`}
+                          >
+                            <Avatar className="h-8 w-8">
+                              <AvatarImage src={u.avatarUrl} />
+                              <AvatarFallback>
+                                {u.username?.charAt(0) ?? '?'}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span
+                              className={`font-medium truncate ${getRoleTextColorClass(
+                                u.role,
+                                u.isVip
+                              )}`}
+                            >
+                              {u.username}
+                            </span>
+                          </button>
+                        ))}
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>XP amount</Label>
@@ -1050,7 +1423,36 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
           </TabsContent>
         )}
 
-        <TabsContent value="support" className="mt-4 space-y-2">
+        <TabsContent value="support" className="mt-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="text-slate-400">Status</Label>
+            <Select
+              value={ticketFilter}
+              onValueChange={(v) => {
+                setTicketFilter(v);
+                void adminListTickets(v === 'all' ? undefined : v)
+                  .then(setTickets)
+                  .catch((err) => {
+                    console.error(err);
+                    toast({
+                      title: 'Could not load tickets',
+                      variant: 'destructive',
+                    });
+                  });
+              }}
+            >
+              <SelectTrigger className="w-[180px] bg-slate-900/50 border-slate-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="open">Open</SelectItem>
+                <SelectItem value="in_progress">In progress</SelectItem>
+                <SelectItem value="resolved">Resolved</SelectItem>
+                <SelectItem value="closed">Closed</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           {tickets.length === 0 ? (
             <p className="text-slate-400">No tickets.</p>
           ) : (
@@ -1108,7 +1510,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
 
         {isAdmin && (
           <TabsContent value="shop" className="mt-4 space-y-4">
-            <BannerGenerator onCreated={reload} />
+            <CosmeticsStudio onCreated={reload} />
 
             <Card className="bg-slate-800/40 border-slate-700/30">
               <CardHeader>

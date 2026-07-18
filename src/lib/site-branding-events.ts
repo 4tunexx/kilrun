@@ -4,9 +4,11 @@ export const SITE_SETTINGS_UPDATED = 'kilrun:site-settings-updated';
 export type SiteBrandingDetail = {
   logoUrl?: string | null;
   headerLogoUrl?: string | null;
+  headerLogoStyle?: string | null;
   backgroundUrl?: string | null;
   homeHeroImage?: string | null;
   landingHeroImage?: string | null;
+  landingHeroSlides?: string | null;
   headerTitle?: string | null;
   headerSubtitle?: string | null;
 };

@@ -46,8 +46,6 @@ export async function persistSiteImage(
     throw new Error('Image too large (max ~2.5MB). Use a smaller file or a hosted URL.');
   }
 
-  await mkdir(UPLOAD_DIR, { recursive: true });
-
   const id = randomBytes(8).toString('hex');
   const filename = `${kind}-${id}.png`;
   const abs = path.join(UPLOAD_DIR, filename);
@@ -83,11 +81,42 @@ export async function persistSiteImage(
       ? floodClearEdgePlate(data, info.width, info.height, info.channels)
       : data;
 
-  await sharp(cleaned, {
+  const pngBuffer = await sharp(cleaned, {
     raw: { width: info.width, height: info.height, channels: 4 },
   })
     .png({ compressionLevel: 9 })
-    .toFile(abs);
+    .toBuffer();
+
+  // Prefer Vercel Blob when configured — durable for heroes/backgrounds/logos.
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    try {
+      const { put } = await import('@vercel/blob');
+      const blob = await put(`site/${filename}`, pngBuffer, {
+        access: 'public',
+        contentType: 'image/png',
+        addRandomSuffix: false,
+      });
+      return blob.url;
+    } catch (err) {
+      console.error('[persistSiteImage] blob upload failed, falling back', err);
+    }
+  }
+
+  // Vercel’s filesystem is ephemeral — local /uploads paths vanish on cold
+  // starts. Persist small logos as data URLs in Mongo so reloads keep them.
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  const isLogo = kind === 'mark' || kind === 'wordmark';
+  if (isServerless && isLogo && pngBuffer.length <= 400_000) {
+    return `data:image/png;base64,${pngBuffer.toString('base64')}`;
+  }
+
+  // Heroes/backgrounds on serverless without Blob: keep data URL if small enough.
+  if (isServerless && pngBuffer.length <= 900_000) {
+    return `data:image/png;base64,${pngBuffer.toString('base64')}`;
+  }
+
+  await mkdir(UPLOAD_DIR, { recursive: true });
+  await sharp(pngBuffer).png({ compressionLevel: 9 }).toFile(abs);
 
   return `/uploads/site/${filename}`;
 }

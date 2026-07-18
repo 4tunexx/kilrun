@@ -48,6 +48,17 @@ model User {
   equippedBannerImageUrl  String?
   equippedBannerConfig    Json?
 
+  /// Equipped avatar frame cosmetic (style/color JSON snapshot).
+  equippedFrameItemName String?
+  equippedFrameConfig   Json?
+
+  /// Equipped nickname effect cosmetic (effect style JSON snapshot).
+  equippedNicknameItemName String?
+  equippedNicknameConfig   Json?
+
+  /// Optional display status line shown on public profile.
+  statusMessage String @default("")
+
   /// Profile "showcase" slots (badge/achievement/inventory/rank picks shown
   /// on the mini hover-card and public profile). Slot count unlocks
   /// progressively by level — see SHOWCASE_UNLOCK_LEVELS. Stored as JSON
@@ -111,12 +122,13 @@ model StoreItem {
   imageUrl     String?
   isAvailable  Boolean @default(true)
 
-  /// Which equip slot this cosmetic occupies, e.g. "banner". Null for
-  /// non-equippable items (boosts, emotes, one-off consumables, ...).
+  /// Which equip slot this cosmetic occupies: banner | frame | nickname.
+  /// Null for non-equippable items (boosts, emotes, consumables, ...).
   cosmeticSlot String?
-  /// Generated banner config (colors, gradient angle, animation style) for
-  /// items created via the admin banner generator.
+  /// Generated banner config (colors, gradient angle, animation style).
   bannerConfig Json?
+  /// Frame / nickname effect config JSON (see src/lib/cosmetics.ts).
+  cosmeticConfig Json?
 }
 
 model MissionTemplate {
@@ -222,15 +234,21 @@ model SiteSettings {
   logoUrl            String  @default("")
   /// Wordmark shown in home hero / landing — defaults to /kilrun.png when empty.
   headerLogoUrl      String  @default("")
+  /// JSON: scale, offsetX, offsetY, opacity, effect for the header wordmark.
+  headerLogoStyle    String  @default("{\"scale\":1,\"offsetX\":0,\"offsetY\":0,\"opacity\":1,\"effect\":\"none\"}")
   /// Full-page hub chrome background.
   backgroundUrl      String  @default("https://i.postimg.cc/tJgX2XgN/bg.png")
-  /// Home "Live Arena" hero banner image (parallax).
+  /// Home hero banner image (parallax).
   homeHeroImage      String  @default("")
   headerTitle        String  @default("Welcome to Kilrun")
   headerSubtitle     String  @default("The ultimate deathrun experience. Compete, conquer, and climb the ranks.")
   landingHeroImage   String  @default("")
+  /// JSON array of { src, alt?, title? } for the landing hero carousel.
+  landingHeroSlides  String  @default("[]")
   gameDisabled       Boolean @default(false)
   gameDisabledMsg    String  @default("Kilrun is temporarily offline for maintenance. Check back soon.")
+  /// When set and in the future (with gameDisabled), show countdown / auto-enable after.
+  gameDisabledUntil  DateTime?
   chatEnabled        Boolean @default(true)
 }
 
@@ -376,6 +394,8 @@ model InventoryItem {
   itemCategory String
   cosmeticSlot String?
   bannerConfig Json?
+  /// Frame / nickname effect config snapshot at purchase time.
+  cosmeticConfig Json?
   imageUrl     String?
   /// Original VP price paid; resale refunds a fraction of this.
   vpValue      Int      @default(0)
@@ -386,6 +406,22 @@ model InventoryItem {
 
   @@index([userId])
   @@index([userId, cosmeticSlot])
+}
+
+/// Staff moderation / admin action trail.
+model AuditLog {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  actorId        String   @db.ObjectId
+  actorUsername  String
+  action         String
+  targetUserId   String?
+  targetUsername String?
+  detail         String   @default("")
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([action])
 }
 
 /// A single player's +1/-1 reputation vote on another player. Unique per

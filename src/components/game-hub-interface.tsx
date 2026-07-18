@@ -168,6 +168,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   /** Raw SiteSettings values — resolve*() only at render so admin always wins. */
   const [logoUrl, setLogoUrl] = useState('');
   const [headerLogoUrl, setHeaderLogoUrl] = useState('');
+  const [headerLogoStyle, setHeaderLogoStyle] = useState('');
   const [homeHeroImage, setHomeHeroImage] = useState('');
   const [isVip, setIsVip] = useState(user.isVip);
   const [isEmailPromptOpen, setIsEmailPromptOpen] = useState(false);
@@ -222,6 +223,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         setBgUrl(resolveHubBackground(settings.backgroundUrl));
         setLogoUrl(settings.logoUrl ?? '');
         setHeaderLogoUrl(settings.headerLogoUrl ?? '');
+        setHeaderLogoStyle(
+          (settings as { headerLogoStyle?: string }).headerLogoStyle ?? ''
+        );
         setHomeHeroImage(settings.homeHeroImage ?? '');
         if (settings.headerTitle) setHomeTitle(settings.headerTitle);
         if (settings.headerSubtitle) setHomeSubtitle(settings.headerSubtitle);
@@ -259,6 +263,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       }
       if (s.logoUrl !== undefined) setLogoUrl(s.logoUrl ?? '');
       if (s.headerLogoUrl !== undefined) setHeaderLogoUrl(s.headerLogoUrl ?? '');
+      if (s.headerLogoStyle !== undefined) {
+        setHeaderLogoStyle(s.headerLogoStyle ?? '');
+      }
       if (s.homeHeroImage !== undefined) {
         setHomeHeroImage(s.homeHeroImage ?? '');
       }
@@ -383,6 +390,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         props.vpCurrency = vpBalance;
         // Pass raw SiteSettings values — HomeView resolves + re-fetches admin truth.
         props.headerLogoUrl = headerLogoUrl;
+        props.headerLogoStyle = headerLogoStyle;
         props.homeHeroImage = homeHeroImage;
       } else if (currentPage === 'lobby' && lobbyMode) {
         props = {
@@ -426,6 +434,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         userId={user.id}
         vpCurrency={vpBalance}
         headerLogoUrl={headerLogoUrl}
+        headerLogoStyle={headerLogoStyle}
         homeHeroImage={homeHeroImage}
       />
     );

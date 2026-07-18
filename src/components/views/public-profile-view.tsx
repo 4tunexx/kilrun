@@ -18,12 +18,13 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LevelBar } from '@/components/ui/level-bar';
+import { AvatarWithFrame } from '@/components/avatar-with-frame';
+import { NicknameEffectText } from '@/components/nickname-effect';
 import {
   removeFriend,
   respondFriendRequest,
@@ -178,10 +179,13 @@ export default function PublicProfileView({
 
         <CardContent className="pt-0 pb-6">
           <div className="-mt-12 sm:-mt-14 flex flex-col sm:flex-row sm:items-end gap-4">
-            <Avatar className="h-24 w-24 sm:h-28 sm:w-28 border-4 border-slate-900 shadow-2xl shrink-0">
-              <AvatarImage src={profile.avatarUrl} alt={profile.username} />
-              <AvatarFallback>{profile.username.charAt(0)}</AvatarFallback>
-            </Avatar>
+            <AvatarWithFrame
+              src={profile.avatarUrl}
+              alt={profile.username}
+              fallback={profile.username.charAt(0)}
+              frameConfig={profile.equippedFrameConfig}
+              sizeClass="h-24 w-24 sm:h-28 sm:w-28"
+            />
 
             <div className="min-w-0 flex-1 pb-1">
               <h2
@@ -190,7 +194,11 @@ export default function PublicProfileView({
                   profile.isVip
                 )}`}
               >
-                {profile.username}
+                <NicknameEffectText
+                  name={profile.username}
+                  effect={profile.equippedNicknameConfig}
+                  className="truncate"
+                />
                 {profile.countryCode && (
                   <Image
                     src={flagUrl(profile.countryCode, 40)}
@@ -206,6 +214,11 @@ export default function PublicProfileView({
                   <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px]">VIP</Badge>
                 )}
               </h2>
+              {profile.statusMessage ? (
+                <p className="text-sm text-slate-300 mt-0.5 line-clamp-2">
+                  {profile.statusMessage}
+                </p>
+              ) : null}
               <p className="text-sm text-slate-400 capitalize">
                 {profile.role}
                 {profile.countryCode && getCountryName(profile.countryCode)

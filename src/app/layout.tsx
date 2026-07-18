@@ -15,8 +15,8 @@ export const metadata: Metadata = {
   title: 'Kilrun',
   description: 'A deathrun game launcher and hub.',
   icons: {
-    icon: [{ url: '/K2.png', type: 'image/png' }],
-    apple: [{ url: '/apple-icon.png', type: 'image/png' }],
+    icon: [{ url: '/api/site-favicon', type: 'image/png' }],
+    apple: [{ url: '/api/site-favicon', type: 'image/png' }],
   },
 };
 

@@ -33,3 +33,18 @@ export function resolveHubBackground(url?: string | null) {
 export function resolveLandingHeroImage(url?: string | null) {
   return url?.trim() || '';
 }
+
+/** True when the game is disabled and any scheduled re-enable time is still in the future. */
+export function resolveGameDisabled(settings: {
+  gameDisabled?: boolean | null;
+  gameDisabledUntil?: Date | string | null;
+}): boolean {
+  if (!settings.gameDisabled) return false;
+  if (settings.gameDisabledUntil) {
+    const until = new Date(settings.gameDisabledUntil);
+    if (!Number.isNaN(until.getTime()) && until.getTime() <= Date.now()) {
+      return false;
+    }
+  }
+  return true;
+}

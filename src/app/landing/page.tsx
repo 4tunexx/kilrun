@@ -50,9 +50,15 @@ import {
   resolveLandingHeroImage,
   resolveMarkLogo,
 } from '@/lib/branding';
+import { normalizeLandingSlides } from '@/lib/cosmetics';
 import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
 import { InteractiveWordmark } from '@/components/interactive-wordmark';
 import { usePointerParallax } from '@/hooks/use-pointer-parallax';
+import {
+  DEFAULT_HEADER_LOGO_STYLE,
+  normalizeHeaderLogoStyle,
+  type HeaderLogoStyle,
+} from '@/lib/logo-style';
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   steam_auth_failed: 'Steam login was cancelled or failed. Please try again.',
@@ -98,9 +104,14 @@ export default function LandingPage() {
     'The ultimate deathrun experience. Compete, conquer, and climb the ranks.'
   );
   const [bgUrl, setBgUrl] = useState(resolveHubBackground());
-  const [heroImage, setHeroImage] = useState('');
+  const [heroSlides, setHeroSlides] = useState<{ src: string; alt: string }[]>(
+    []
+  );
   const [markLogoUrl, setMarkLogoUrl] = useState('');
   const [headerLogoUrl, setHeaderLogoUrl] = useState('');
+  const [headerLogoStyle, setHeaderLogoStyle] = useState<HeaderLogoStyle>(
+    DEFAULT_HEADER_LOGO_STYLE
+  );
   const heroParallax = usePointerParallax(20);
   const [stats, setStats] = useState<LandingStats>(EMPTY_STATS);
   const [topPlayers, setTopPlayers] = useState<LandingTopPlayer[]>([]);
@@ -112,22 +123,41 @@ export default function LandingPage() {
     headerSubtitle?: string | null;
     backgroundUrl?: string | null;
     landingHeroImage?: string | null;
+    landingHeroSlides?: string | null;
     logoUrl?: string | null;
     headerLogoUrl?: string | null;
+    headerLogoStyle?: string | null;
   }) => {
     if (s.headerTitle) setHeaderTitle(s.headerTitle);
     if (s.headerSubtitle) setHeaderSubtitle(s.headerSubtitle);
     if (s.backgroundUrl !== undefined && s.backgroundUrl !== null) {
       setBgUrl(resolveHubBackground(s.backgroundUrl));
     }
-    if (s.landingHeroImage !== undefined && s.landingHeroImage !== null) {
-      setHeroImage(resolveLandingHeroImage(s.landingHeroImage));
+    if (
+      s.landingHeroSlides !== undefined ||
+      s.landingHeroImage !== undefined
+    ) {
+      const parsed = normalizeLandingSlides(s.landingHeroSlides);
+      let slides: { src: string; alt: string }[] = parsed
+        .map((slide) => ({
+          src: resolveLandingHeroImage(slide.src) || slide.src,
+          alt: slide.alt || 'Kilrun',
+        }))
+        .filter((slide) => Boolean(slide.src));
+      if (slides.length === 0 && s.landingHeroImage) {
+        const src = resolveLandingHeroImage(s.landingHeroImage);
+        slides = src ? [{ src, alt: 'Kilrun' }] : [];
+      }
+      setHeroSlides(slides);
     }
     if (s.logoUrl !== undefined && s.logoUrl !== null) {
       setMarkLogoUrl(s.logoUrl);
     }
     if (s.headerLogoUrl !== undefined && s.headerLogoUrl !== null) {
       setHeaderLogoUrl(s.headerLogoUrl);
+    }
+    if (s.headerLogoStyle !== undefined && s.headerLogoStyle !== null) {
+      setHeaderLogoStyle(normalizeHeaderLogoStyle(s.headerLogoStyle));
     }
   };
 
@@ -154,10 +184,6 @@ export default function LandingPage() {
   const handleNavigation = () => {
     window.location.href = '/api/auth/steam';
   };
-
-  const heroSlides = heroImage
-    ? [{ src: heroImage, alt: 'Kilrun' }]
-    : [];
 
   const renderAuthCard = () => (
     <Card className="bg-slate-900/60 backdrop-blur-md border-slate-700/50 w-full max-w-sm animate-in fade-in duration-1000 delay-400">
@@ -263,6 +289,7 @@ export default function LandingPage() {
                       <InteractiveWordmark
                         src={wordmarkSrc}
                         alt={headerTitle}
+                        logoStyle={headerLogoStyle}
                         className="h-14 sm:h-20 md:h-24 w-auto max-w-full"
                       />
                     </div>

@@ -549,6 +549,11 @@ export async function getSiteSettings() {
             (settings as { headerLogoUrl?: string }).headerLogoUrl ??
             ''
         ),
+        headerLogoStyle: String(
+          doc.headerLogoStyle ??
+            (settings as { headerLogoStyle?: string }).headerLogoStyle ??
+            ''
+        ),
         backgroundUrl: String(doc.backgroundUrl ?? settings.backgroundUrl ?? ''),
         homeHeroImage: String(
           doc.homeHeroImage ??
@@ -565,6 +570,15 @@ export async function getSiteSettings() {
         gameDisabledMsg: String(
           doc.gameDisabledMsg ?? settings.gameDisabledMsg ?? ''
         ),
+        landingHeroSlides: String(
+          doc.landingHeroSlides ??
+            (settings as { landingHeroSlides?: string }).landingHeroSlides ??
+            '[]'
+        ),
+        gameDisabledUntil:
+          (doc.gameDisabledUntil as Date | string | null | undefined) ??
+          (settings as { gameDisabledUntil?: Date | null }).gameDisabledUntil ??
+          null,
         gameDisabled: Boolean(doc.gameDisabled ?? settings.gameDisabled),
         chatEnabled: Boolean(doc.chatEnabled ?? settings.chatEnabled),
       };
@@ -573,19 +587,32 @@ export async function getSiteSettings() {
     // Raw merge is best-effort; Prisma row is still usable.
   }
 
-  return settings;
+  return {
+    ...settings,
+    headerLogoStyle: String(
+      (settings as { headerLogoStyle?: string }).headerLogoStyle ?? ''
+    ),
+    landingHeroSlides: String(
+      (settings as { landingHeroSlides?: string }).landingHeroSlides ?? '[]'
+    ),
+    gameDisabledUntil:
+      (settings as { gameDisabledUntil?: Date | null }).gameDisabledUntil ?? null,
+  };
 }
 
 export async function updateSiteSettings(data: {
   logoUrl?: string;
   headerLogoUrl?: string;
+  headerLogoStyle?: string;
   backgroundUrl?: string;
   homeHeroImage?: string;
   headerTitle?: string;
   headerSubtitle?: string;
   landingHeroImage?: string;
+  landingHeroSlides?: string;
   gameDisabled?: boolean;
   gameDisabledMsg?: string;
+  gameDisabledUntil?: string | null;
   chatEnabled?: boolean;
 }) {
   await requireStaff();
@@ -596,7 +623,11 @@ export async function updateSiteSettings(data: {
   await resetPrismaClient();
 
   const { persistSiteImage } = await import('@/lib/site-asset-upload');
-  const payload: Record<string, string | boolean> = {};
+  const { normalizeHeaderLogoStyle, serializeHeaderLogoStyle } = await import(
+    '@/lib/logo-style'
+  );
+  const { normalizeLandingSlides } = await import('@/lib/cosmetics');
+  const payload: Record<string, string | boolean | Date | null> = {};
 
   if (typeof data.logoUrl === 'string') {
     payload.logoUrl = data.logoUrl
@@ -607,6 +638,11 @@ export async function updateSiteSettings(data: {
     payload.headerLogoUrl = data.headerLogoUrl
       ? await persistSiteImage(data.headerLogoUrl, 'wordmark')
       : '';
+  }
+  if (typeof data.headerLogoStyle === 'string') {
+    payload.headerLogoStyle = serializeHeaderLogoStyle(
+      normalizeHeaderLogoStyle(data.headerLogoStyle)
+    );
   }
   if (typeof data.backgroundUrl === 'string') {
     payload.backgroundUrl = data.backgroundUrl
@@ -623,6 +659,19 @@ export async function updateSiteSettings(data: {
       ? await persistSiteImage(data.landingHeroImage, 'hero')
       : '';
   }
+  if (typeof data.landingHeroSlides === 'string') {
+    const slides = normalizeLandingSlides(data.landingHeroSlides);
+    const persisted = [];
+    for (const slide of slides.slice(0, 8)) {
+      persisted.push({
+        ...slide,
+        src: await persistSiteImage(slide.src, 'hero'),
+      });
+    }
+    payload.landingHeroSlides = JSON.stringify(persisted);
+    // Keep legacy single-image field in sync with the first slide.
+    if (persisted[0]?.src) payload.landingHeroImage = persisted[0].src;
+  }
   if (typeof data.headerTitle === 'string') payload.headerTitle = data.headerTitle;
   if (typeof data.headerSubtitle === 'string') {
     payload.headerSubtitle = data.headerSubtitle;
@@ -631,6 +680,12 @@ export async function updateSiteSettings(data: {
     payload.gameDisabledMsg = data.gameDisabledMsg;
   }
   if (typeof data.gameDisabled === 'boolean') payload.gameDisabled = data.gameDisabled;
+  if (data.gameDisabledUntil === null) {
+    payload.gameDisabledUntil = null;
+  } else if (typeof data.gameDisabledUntil === 'string') {
+    const d = new Date(data.gameDisabledUntil);
+    payload.gameDisabledUntil = Number.isNaN(d.getTime()) ? null : d;
+  }
   if (typeof data.chatEnabled === 'boolean') payload.chatEnabled = data.chatEnabled;
 
   try {
@@ -715,8 +770,15 @@ export async function sendGlobalChat(body: string) {
 
 /** Moderator tool: wipe the hub's live global chat history. */
 export async function adminClearGlobalChat() {
-  await requireStaff();
-  await prisma.globalChatMessage.deleteMany({});
+  const staff = await requireStaff();
+  const result = await prisma.globalChatMessage.deleteMany({});
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'clear_chat',
+    detail: `Deleted ${result.count} messages`,
+  });
   return { ok: true };
 }
 
@@ -728,24 +790,44 @@ export async function getUnreadNotificationCount() {
 }
 
 export async function adminAwardXp(userId: string, amount: number) {
-  await requireStaff();
+  const staff = await requireStaff();
   await grantXp(userId, amount, 'Admin award');
   await notify(userId, 'Admin award', `Staff granted you +${amount} XP.`, 'admin');
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'award_xp',
+    targetUserId: userId,
+    targetUsername: target?.username,
+    detail: `+${amount} XP`,
+  });
   return { ok: true };
 }
 
 export async function adminAwardVp(userId: string, amount: number) {
-  await requireStaff();
+  const staff = await requireStaff();
   await prisma.user.update({
     where: { id: userId },
     data: { vpCurrency: { increment: amount } },
   });
   await notify(userId, 'Admin award', `Staff granted you +${amount} VP.`, 'admin');
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'award_vp',
+    targetUserId: userId,
+    targetUsername: target?.username,
+    detail: `+${amount} VP`,
+  });
   return { ok: true };
 }
 
 export async function adminAwardBadge(userId: string, badgeKey: string) {
-  await requireStaff();
+  const staff = await requireStaff();
   const badge = await prisma.badgeDefinition.findUnique({ where: { key: badgeKey } });
   if (!badge) throw new Error('Badge not found');
   const existing = await prisma.userBadge.findFirst({
@@ -754,6 +836,16 @@ export async function adminAwardBadge(userId: string, badgeKey: string) {
   if (existing) return { ok: true, already: true };
   await prisma.userBadge.create({ data: { userId, badgeId: badge.id } });
   await notify(userId, 'Badge awarded', `Staff awarded you: ${badge.title}`, 'badge');
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'award_badge',
+    targetUserId: userId,
+    targetUsername: target?.username,
+    detail: badgeKey,
+  });
   return { ok: true };
 }
 

@@ -14,7 +14,6 @@ import {
   Zap,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   Card,
   CardContent,
@@ -44,6 +43,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { AvatarWithFrame } from '@/components/avatar-with-frame';
+import { NicknameEffectText } from '@/components/nickname-effect';
 import { getMatchStats, getSessionUser, getStatsSummary, type StatsSummary } from '@/lib/actions';
 import {
   equipInventoryItem,
@@ -71,6 +72,7 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [activity, setActivity] = useState<ProfileActivity | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [bio, setBio] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
   const [countryCode, setCountryCode] = useState('');
   const [notifyPush, setNotifyPush] = useState(true);
   const [notifyEmail, setNotifyEmail] = useState(true);
@@ -99,6 +101,7 @@ export default function ProfileView({ userId }: { userId: string }) {
       if (!isMounted) return;
       setUser(u);
       setBio(u?.bio ?? '');
+      setStatusMessage(u?.statusMessage ?? '');
       setCountryCode(u?.countryCode ?? '');
       setNotifyPush(u?.notifyPush ?? true);
       setNotifyEmail(u?.notifyEmail ?? true);
@@ -115,11 +118,13 @@ export default function ProfileView({ userId }: { userId: string }) {
   }, [userId]);
 
   const banners = inventory.filter((i) => i.cosmeticSlot === 'banner');
+  const frames = inventory.filter((i) => i.cosmeticSlot === 'frame');
+  const nicknames = inventory.filter((i) => i.cosmeticSlot === 'nickname');
   const equippedBanner = user?.equippedBannerConfig
     ? normalizeBannerConfig(user.equippedBannerConfig)
     : null;
 
-  const handleEquipBanner = async (item: InventoryRow) => {
+  const handleEquipCosmetic = async (item: InventoryRow) => {
     setCosmeticBusyId(item.id);
     try {
       await equipInventoryItem(item.id);
@@ -132,11 +137,11 @@ export default function ProfileView({ userId }: { userId: string }) {
     }
   };
 
-  const handleUnequipBanner = async () => {
-    setCosmeticBusyId('banner');
+  const handleUnequipSlot = async (slot: string, label: string) => {
+    setCosmeticBusyId(slot);
     try {
-      await unequipCosmeticSlot('banner');
-      toast({ title: 'Banner unequipped' });
+      await unequipCosmeticSlot(slot);
+      toast({ title: `${label} unequipped` });
       reloadCosmetics();
     } finally {
       setCosmeticBusyId(null);
@@ -146,8 +151,13 @@ export default function ProfileView({ userId }: { userId: string }) {
   const savePublicProfile = async () => {
     setSaving(true);
     try {
-      const updated = await updateProfileSettings({ bio, countryCode });
+      const updated = await updateProfileSettings({
+        bio,
+        countryCode,
+        statusMessage,
+      });
       setUser(updated);
+      setStatusMessage(updated.statusMessage ?? '');
       toast({ title: 'Profile saved' });
     } catch {
       toast({ title: 'Save failed', variant: 'destructive' });
@@ -189,15 +199,12 @@ export default function ProfileView({ userId }: { userId: string }) {
 
       <div className="px-4 sm:px-8">
         <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 -mt-12 sm:-mt-16 mb-6">
-          <div className="relative shrink-0">
-            <Avatar className="h-24 w-24 sm:h-32 sm:w-32 border-4 border-slate-900 shadow-2xl">
-              <AvatarImage
-                src={user?.avatarUrl}
-                alt={user?.username ?? 'Player avatar'}
-              />
-              <AvatarFallback>{user?.username?.charAt(0) ?? '?'}</AvatarFallback>
-            </Avatar>
-          </div>
+          <AvatarWithFrame
+            src={user?.avatarUrl}
+            alt={user?.username ?? 'Player avatar'}
+            fallback={user?.username?.charAt(0) ?? '?'}
+            frameConfig={user?.equippedFrameConfig}
+          />
           <div className="min-w-0 flex-1 pb-1">
             <h1
               className={`text-3xl sm:text-5xl font-black truncate flex items-center gap-3 ${getRoleTextColorClass(
@@ -205,7 +212,11 @@ export default function ProfileView({ userId }: { userId: string }) {
                 user?.isVip
               )}`}
             >
-              {user?.username ?? 'Loading...'}
+              <NicknameEffectText
+                name={user?.username ?? 'Loading...'}
+                effect={user?.equippedNicknameConfig}
+                className="truncate"
+              />
               {countryCode && (
                 <Image
                   src={flagUrl(countryCode, 40)}
@@ -217,6 +228,11 @@ export default function ProfileView({ userId }: { userId: string }) {
                 />
               )}
             </h1>
+            {statusMessage ? (
+              <p className="text-sm sm:text-base text-slate-300 mt-1 line-clamp-2">
+                {statusMessage}
+              </p>
+            ) : null}
             <p className="text-base sm:text-xl text-slate-400">
               {user?.createdAt
                 ? `Joined ${formatDistanceToNow(new Date(user.createdAt))} ago`
@@ -286,12 +302,66 @@ export default function ProfileView({ userId }: { userId: string }) {
             </Card>
           </div>
 
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+              <CardContent className="pt-5 text-center">
+                <p className="text-xs text-slate-400 mb-1">Rank</p>
+                <p className="text-xl font-black text-yellow-400">
+                  {user?.currentRank || 'Unranked'}
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+              <CardContent className="pt-5 text-center space-y-1">
+                <p className="text-xs text-slate-400">Email</p>
+                {user?.emailVerified ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Verified
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-300">
+                    Not verified
+                  </span>
+                )}
+              </CardContent>
+            </Card>
+            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30 sm:col-span-1">
+              <CardContent className="pt-5 space-y-1 text-sm">
+                <p className="text-xs text-slate-400">Equipped cosmetics</p>
+                <p className="text-slate-300 truncate">
+                  Banner: {user?.equippedBannerItemName || 'None'}
+                </p>
+                <p className="text-slate-300 truncate">
+                  Frame: {user?.equippedFrameItemName || 'None'}
+                </p>
+                <p className="text-slate-300 truncate">
+                  Nickname: {user?.equippedNicknameItemName || 'None'}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>
               <CardTitle>Public Profile</CardTitle>
               <CardDescription>This is how other players see you.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="statusMessage">Status message</Label>
+                <Input
+                  id="statusMessage"
+                  value={statusMessage}
+                  maxLength={80}
+                  onChange={(e) => setStatusMessage(e.target.value.slice(0, 80))}
+                  placeholder="A short line under your name…"
+                  className="bg-slate-900/50 border-slate-700"
+                />
+                <p className="text-xs text-slate-500">
+                  {statusMessage.length}/80 characters
+                </p>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="bio">Bio</Label>
                 <Textarea
@@ -524,7 +594,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                     variant="outline"
                     size="sm"
                     disabled={cosmeticBusyId === 'banner'}
-                    onClick={handleUnequipBanner}
+                    onClick={() => handleUnequipSlot('banner', 'Banner')}
                   >
                     Unequip
                   </Button>
@@ -562,7 +632,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                               size="sm"
                               className="h-6 w-full text-[11px]"
                               disabled={cosmeticBusyId === item.id}
-                              onClick={() => handleEquipBanner(item)}
+                              onClick={() => handleEquipCosmetic(item)}
                             >
                               Equip
                             </Button>
@@ -571,6 +641,148 @@ export default function ProfileView({ userId }: { userId: string }) {
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" /> Avatar frames
+              </CardTitle>
+              <CardDescription>
+                Equip a frame around your profile avatar.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm text-slate-400">
+                  {user?.equippedFrameItemName
+                    ? `Equipped: ${user.equippedFrameItemName}`
+                    : 'No frame equipped'}
+                </p>
+                {user?.equippedFrameItemName && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={cosmeticBusyId === 'frame'}
+                    onClick={() => handleUnequipSlot('frame', 'Frame')}
+                  >
+                    Unequip
+                  </Button>
+                )}
+              </div>
+              {frames.length === 0 ? (
+                <p className="text-sm text-slate-400 py-4 text-center">
+                  You don&apos;t own any frames yet.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {frames.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`rounded-lg border p-3 bg-slate-900/40 space-y-2 ${
+                        item.isEquipped
+                          ? 'border-primary ring-2 ring-primary'
+                          : 'border-slate-700/50'
+                      }`}
+                    >
+                      <AvatarWithFrame
+                        src={user?.avatarUrl}
+                        alt={user?.username ?? 'Player'}
+                        fallback={user?.username?.charAt(0) ?? '?'}
+                        frameConfig={item.cosmeticConfig}
+                        sizeClass="h-16 w-16"
+                      />
+                      <p className="text-xs font-semibold truncate flex items-center gap-1">
+                        {item.itemName}
+                        {item.isEquipped && (
+                          <Badge className="bg-primary text-[9px] h-4">On</Badge>
+                        )}
+                      </p>
+                      {!item.isEquipped && (
+                        <Button
+                          size="sm"
+                          className="h-6 w-full text-[11px]"
+                          disabled={cosmeticBusyId === item.id}
+                          onClick={() => handleEquipCosmetic(item)}
+                        >
+                          Equip
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" /> Nickname effects
+              </CardTitle>
+              <CardDescription>
+                Equip a visual effect for your display name.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm text-slate-400">
+                  {user?.equippedNicknameItemName
+                    ? `Equipped: ${user.equippedNicknameItemName}`
+                    : 'No nickname effect equipped'}
+                </p>
+                {user?.equippedNicknameItemName && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={cosmeticBusyId === 'nickname'}
+                    onClick={() => handleUnequipSlot('nickname', 'Nickname')}
+                  >
+                    Unequip
+                  </Button>
+                )}
+              </div>
+              {nicknames.length === 0 ? (
+                <p className="text-sm text-slate-400 py-4 text-center">
+                  You don&apos;t own any nickname effects yet.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {nicknames.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`rounded-lg border p-3 bg-slate-900/40 space-y-2 ${
+                        item.isEquipped
+                          ? 'border-primary ring-2 ring-primary'
+                          : 'border-slate-700/50'
+                      }`}
+                    >
+                      <NicknameEffectText
+                        name={user?.username ?? 'Player'}
+                        effect={item.cosmeticConfig}
+                        className="text-sm font-bold truncate block"
+                      />
+                      <p className="text-xs font-semibold truncate flex items-center gap-1">
+                        {item.itemName}
+                        {item.isEquipped && (
+                          <Badge className="bg-primary text-[9px] h-4">On</Badge>
+                        )}
+                      </p>
+                      {!item.isEquipped && (
+                        <Button
+                          size="sm"
+                          className="h-6 w-full text-[11px]"
+                          disabled={cosmeticBusyId === item.id}
+                          onClick={() => handleEquipCosmetic(item)}
+                        >
+                          Equip
+                        </Button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>

@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { getSiteSettings } from '@/lib/progression-actions';
+import { resolveGameDisabled } from '@/lib/branding';
 
 export type KilrunMode = 'deathrun' | 'horde' | 'competitive';
 
@@ -68,7 +69,12 @@ export default function PlayView({ onPlay }: PlayViewProps) {
 
   useEffect(() => {
     getSiteSettings().then((s) => {
-      setGameDisabled(s.gameDisabled);
+      setGameDisabled(
+        resolveGameDisabled({
+          gameDisabled: s.gameDisabled,
+          gameDisabledUntil: s.gameDisabledUntil,
+        })
+      );
       setDisabledMsg(s.gameDisabledMsg);
     });
   }, []);

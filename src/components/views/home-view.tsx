@@ -38,6 +38,11 @@ import { InteractiveWordmark } from '@/components/interactive-wordmark';
 import { usePointerParallax } from '@/hooks/use-pointer-parallax';
 import { resolveHeaderLogo, resolveHomeHeroImage } from '@/lib/branding';
 import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
+import {
+  DEFAULT_HEADER_LOGO_STYLE,
+  normalizeHeaderLogoStyle,
+  type HeaderLogoStyle,
+} from '@/lib/logo-style';
 
 const PANEL =
   'bg-slate-900/60 backdrop-blur-md border border-slate-700/30';
@@ -51,6 +56,7 @@ interface HomeViewProps {
   userId: string;
   vpCurrency?: number;
   headerLogoUrl?: string;
+  headerLogoStyle?: string | HeaderLogoStyle;
   homeHeroImage?: string;
 }
 
@@ -60,6 +66,7 @@ export default function HomeView({
   userId,
   vpCurrency = 0,
   headerLogoUrl: headerLogoUrlProp,
+  headerLogoStyle: headerLogoStyleProp,
   homeHeroImage,
 }: HomeViewProps) {
   const [missions, setMissions] = useState<ActiveMission[]>([]);
@@ -73,6 +80,9 @@ export default function HomeView({
   /** Admin SiteSettings win over any prop/default. */
   const [wordmarkSrc, setWordmarkSrc] = useState(
     resolveHeaderLogo(headerLogoUrlProp)
+  );
+  const [logoStyle, setLogoStyle] = useState<HeaderLogoStyle>(() =>
+    normalizeHeaderLogoStyle(headerLogoStyleProp ?? DEFAULT_HEADER_LOGO_STYLE)
   );
   const [heroSrc, setHeroSrc] = useState(resolveHomeHeroImage(homeHeroImage));
   const heroParallax = usePointerParallax(22);
@@ -102,6 +112,13 @@ export default function HomeView({
       setWordmarkSrc(
         resolveHeaderLogo(settings.headerLogoUrl || headerLogoUrlProp)
       );
+      setLogoStyle(
+        normalizeHeaderLogoStyle(
+          (settings as { headerLogoStyle?: string }).headerLogoStyle ||
+            headerLogoStyleProp ||
+            DEFAULT_HEADER_LOGO_STYLE
+        )
+      );
       setHeroSrc(
         resolveHomeHeroImage(settings.homeHeroImage || homeHeroImage)
       );
@@ -110,12 +127,15 @@ export default function HomeView({
     return () => {
       isMounted = false;
     };
-  }, [userId, homeHeroImage, headerLogoUrlProp]);
+  }, [userId, homeHeroImage, headerLogoUrlProp, headerLogoStyleProp]);
 
   useEffect(() => {
     return onSiteSettingsUpdated((s) => {
       if (s.headerLogoUrl !== undefined) {
         setWordmarkSrc(resolveHeaderLogo(s.headerLogoUrl));
+      }
+      if (s.headerLogoStyle !== undefined) {
+        setLogoStyle(normalizeHeaderLogoStyle(s.headerLogoStyle));
       }
       if (s.homeHeroImage !== undefined) {
         setHeroSrc(resolveHomeHeroImage(s.homeHeroImage));
@@ -174,11 +194,9 @@ export default function HomeView({
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-transparent to-transparent pointer-events-none" />
         <div className="relative h-full px-4 sm:px-8 flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-300 mb-2">
-              Live Arena
-            </p>
             <InteractiveWordmark
               src={wordmarkSrc}
+              logoStyle={logoStyle}
               className="h-12 sm:h-16 md:h-20 w-auto max-w-[min(100%,22rem)]"
             />
           </div>

@@ -50,7 +50,7 @@ export function EmailVerificationForm({
       setStep('code');
       toast({
         title: 'Code sent',
-        description: `Check ${email.trim()} for your 6-digit key.`,
+        description: `Check ${email.trim()} for your 6-digit Kilrun verification code.`,
       });
     } catch (err: unknown) {
       const message =
@@ -89,9 +89,30 @@ export function EmailVerificationForm({
     }
   };
 
+  const BrandHeader = () => (
+    <div className="flex items-center gap-3 mb-1">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/K2.png"
+        alt="Kilrun"
+        className="h-10 w-10 rounded-lg object-contain bg-slate-950/80 border border-slate-700/60 p-1"
+        onError={(e) => {
+          (e.currentTarget as HTMLImageElement).src = '/api/site-favicon';
+        }}
+      />
+      <div>
+        <p className="font-black text-lg tracking-tight text-white">Kilrun</p>
+        <p className="text-[11px] text-slate-500 leading-snug max-w-[16rem]">
+          Kilrun sends a branded code email (Resend + Clerk webhook).
+        </p>
+      </div>
+    </div>
+  );
+
   if (step === 'success') {
     return (
       <div className="text-center space-y-3 py-2">
+        <BrandHeader />
         <div className="w-14 h-14 mx-auto rounded-full bg-emerald-500/20 border border-emerald-400/50 flex items-center justify-center">
           <ShieldCheck className="w-7 h-7 text-emerald-400" />
         </div>
@@ -111,8 +132,9 @@ export function EmailVerificationForm({
   if (step === 'code') {
     return (
       <form onSubmit={handleVerifyCode} className="space-y-4">
+        <BrandHeader />
         <p className={`text-sm text-slate-400 ${compact ? '' : ''}`}>
-          Enter the 6-digit code sent to{' '}
+          Enter the 6-digit Kilrun verification code sent to{' '}
           <span className="text-white font-medium">{email}</span>
         </p>
         <Input
@@ -150,13 +172,14 @@ export function EmailVerificationForm({
 
   return (
     <form onSubmit={handleSendCode} className="space-y-4">
-      {!compact && (
-        <p className="text-sm text-slate-400">
-          Type your email, then we&apos;ll send a 6-digit Arcade Verification Key.
-          First-time verify unlocks{' '}
-          <span className="text-primary font-semibold">+100 VP</span>.
-        </p>
-      )}
+      <BrandHeader />
+      <p className="text-sm text-slate-400">
+        {compact
+          ? 'We will email a 6-digit Kilrun verification code.'
+          : 'Type your email, then we will send a 6-digit Kilrun verification code.'}{' '}
+        First-time verify unlocks{' '}
+        <span className="text-primary font-semibold">+100 VP</span>.
+      </p>
       <div className="space-y-2">
         <Label htmlFor="kilrun-email">Email address</Label>
         <div className="relative">
