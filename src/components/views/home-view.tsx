@@ -39,6 +39,8 @@ import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { UserHoverCard } from '@/components/user-hover-card';
 import { InteractiveWordmark } from '@/components/interactive-wordmark';
+import { NewsArticleDialog, type NewsArticle } from '@/components/news-article-dialog';
+import { resolveNewsThumbnail } from '@/lib/news-thumbnail';
 import { usePointerParallax } from '@/hooks/use-pointer-parallax';
 import { resolveHeaderLogo, resolveHomeHeroImage } from '@/lib/branding';
 import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
@@ -76,7 +78,9 @@ export default function HomeView({
   const [dailyMissions, setDailyMissions] = useState<ActiveMission[]>([]);
   const [mainMissions, setMainMissions] = useState<ActiveMission[]>([]);
   const [summary, setSummary] = useState<StatsSummary | null>(null);
-  const [news, setNews] = useState<any[]>([]);
+  const [news, setNews] = useState<NewsArticle[]>([]);
+  const [readingNewsId, setReadingNewsId] = useState<string | null>(null);
+  const [readingNews, setReadingNews] = useState<NewsArticle | null>(null);
   const [forumTopics, setForumTopics] = useState<any[]>([]);
   const [chat, setChat] = useState<any[]>([]);
   const [chatEnabled, setChatEnabled] = useState(true);
@@ -236,64 +240,65 @@ export default function HomeView({
         </div>
       </div>
 
-      <div className="px-4 sm:px-8 py-6 space-y-6 flex-1">
-        <div className="rounded-xl border border-slate-700/40 bg-slate-900/55 backdrop-blur-md overflow-hidden">
-          <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-slate-700/50">
-            <button
-              type="button"
-              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
-              onClick={() => onNavigate?.('store')}
-            >
-              <Gem className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-yellow-400 transition group-hover:scale-110" />
-              <div className="text-2xl sm:text-3xl font-black tracking-tight">
-                <AnimatedCounter end={vpCurrency} />
-              </div>
-              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
-                VP Balance
-              </p>
-            </button>
-            <button
-              type="button"
-              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
-              onClick={() => onNavigate?.('leaderboard')}
-            >
-              <Trophy className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
-              <div className="text-2xl sm:text-3xl font-black tracking-tight">
-                {summary?.bestScore ?? 0}
-              </div>
-              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
-                Best Score
-              </p>
-            </button>
-            <button
-              type="button"
-              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
-              onClick={() => onNavigate?.('stats')}
-            >
-              <Gauge className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
-              <div className="text-2xl sm:text-3xl font-black tracking-tight">
-                {summary?.bestDistance ?? 0}m
-              </div>
-              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
-                Best Distance
-              </p>
-            </button>
-            <button
-              type="button"
-              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
-              onClick={() => onNavigate?.('stats')}
-            >
-              <Clock className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
-              <div className="text-2xl sm:text-3xl font-black tracking-tight">
-                {summary?.totalRuns ?? 0}
-              </div>
-              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
-                Total Runs
-              </p>
-            </button>
-          </div>
+      {/* Stats — flush under hero, full width matching header */}
+      <div className="w-full border-y border-slate-700/40 bg-slate-900/70 backdrop-blur-md">
+        <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-slate-700/50">
+          <button
+            type="button"
+            className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+            onClick={() => onNavigate?.('store')}
+          >
+            <Gem className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-yellow-400 transition group-hover:scale-110" />
+            <div className="text-2xl sm:text-3xl font-black tracking-tight">
+              <AnimatedCounter end={vpCurrency} />
+            </div>
+            <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+              VP Balance
+            </p>
+          </button>
+          <button
+            type="button"
+            className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+            onClick={() => onNavigate?.('leaderboard')}
+          >
+            <Trophy className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
+            <div className="text-2xl sm:text-3xl font-black tracking-tight">
+              {summary?.bestScore ?? 0}
+            </div>
+            <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+              Best Score
+            </p>
+          </button>
+          <button
+            type="button"
+            className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+            onClick={() => onNavigate?.('stats')}
+          >
+            <Gauge className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
+            <div className="text-2xl sm:text-3xl font-black tracking-tight">
+              {summary?.bestDistance ?? 0}m
+            </div>
+            <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+              Best Distance
+            </p>
+          </button>
+          <button
+            type="button"
+            className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+            onClick={() => onNavigate?.('stats')}
+          >
+            <Clock className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
+            <div className="text-2xl sm:text-3xl font-black tracking-tight">
+              {summary?.totalRuns ?? 0}
+            </div>
+            <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+              Total Runs
+            </p>
+          </button>
         </div>
+      </div>
 
+      <div className="px-4 sm:px-8 py-6 space-y-6 flex-1">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card className={PANEL}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -571,20 +576,53 @@ export default function HomeView({
                 <Newspaper className="w-5 h-5" /> Latest News
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {news.map((n) => (
-                <div
-                  key={n.id}
-                  className="border-b border-slate-700/40 pb-3 last:border-0"
-                >
-                  <p className="font-semibold">{n.title}</p>
-                  <p className="text-sm text-slate-400">{n.summary}</p>
-                </div>
-              ))}
+            <CardContent className="space-y-2">
+              {news.map((n) => {
+                const thumb = resolveNewsThumbnail(n.headerImageUrl, n.body);
+                return (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => {
+                      setReadingNews(n);
+                      setReadingNewsId(n.id);
+                    }}
+                    className="group flex w-full items-stretch gap-3 rounded-lg border border-transparent p-2 text-left transition hover:border-slate-600/60 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  >
+                    {thumb ? (
+                      <div className="relative h-16 w-24 sm:h-[4.5rem] sm:w-28 shrink-0 overflow-hidden rounded-md border border-slate-700/50 bg-slate-900/80">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={thumb}
+                          alt=""
+                          className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                        />
+                      </div>
+                    ) : null}
+                    <div className="min-w-0 flex-1 flex flex-col justify-center py-0.5">
+                      <p className="font-semibold truncate">{n.title}</p>
+                      <p className="text-sm text-slate-400 line-clamp-2">{n.summary}</p>
+                      <p className="text-xs text-primary mt-1">Read article →</p>
+                    </div>
+                  </button>
+                );
+              })}
             </CardContent>
           </Card>
         )}
       </div>
+
+      <NewsArticleDialog
+        open={!!readingNewsId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReadingNewsId(null);
+            setReadingNews(null);
+          }
+        }}
+        postId={readingNewsId}
+        initialPost={readingNews}
+      />
     </div>
   );
 }

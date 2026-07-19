@@ -34,7 +34,6 @@ import {
 import { getPublicProfile, type PublicProfile } from '@/lib/public-profile-actions';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
 import { getRoleTextColorClass } from '@/lib/role-colors';
-import { ShowcaseChips } from '@/components/showcase-chips';
 import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 import { flagUrl, getCountryName } from '@/lib/countries';
@@ -182,11 +181,25 @@ export default function PublicProfileView({
           }`}
           style={banner ? bannerStyle(banner) : undefined}
         >
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-black/35" />
+          <p
+            className={`absolute top-3 left-3 sm:top-4 sm:left-4 z-10 text-xs sm:text-sm font-semibold capitalize drop-shadow-md ${getRoleTextColorClass(
+              profile.role,
+              profile.isVip
+            )}`}
+          >
+            <span className="rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm border border-white/10">
+              {profile.role}
+              {profile.countryCode && getCountryName(profile.countryCode)
+                ? ` · ${getCountryName(profile.countryCode)}`
+                : ''}{' '}
+              · Joined {formatDistanceToNow(new Date(profile.createdAt))} ago
+            </span>
+          </p>
         </div>
 
-        <CardContent className="pt-0 pb-6">
-          <div className="-mt-12 sm:-mt-14 flex flex-col sm:flex-row sm:items-end gap-4">
+        <CardContent className="pt-0 pb-0">
+          <div className="-mt-12 sm:-mt-14 flex flex-col sm:flex-row sm:items-end gap-4 pb-5">
             <AvatarWithFrame
               src={profile.avatarUrl}
               alt={profile.username}
@@ -227,18 +240,6 @@ export default function PublicProfileView({
                   {profile.statusMessage}
                 </p>
               ) : null}
-              <p className="text-sm text-slate-400 capitalize">
-                {profile.role}
-                {profile.countryCode && getCountryName(profile.countryCode)
-                  ? ` · ${getCountryName(profile.countryCode)}`
-                  : ''}{' '}
-                · Joined {formatDistanceToNow(new Date(profile.createdAt))} ago
-              </p>
-              {profile.showcase.length > 0 && (
-                <div className="mt-2">
-                  <ShowcaseChips items={profile.showcase} />
-                </div>
-              )}
             </div>
 
             {profile.friendStatus !== 'self' && (
@@ -365,44 +366,44 @@ export default function PublicProfileView({
           </div>
 
           {profile.bio && (
-            <p className="mt-4 text-slate-300 whitespace-pre-wrap text-sm sm:text-base">
+            <p className="mt-4 mb-4 text-slate-300 whitespace-pre-wrap text-sm sm:text-base">
               {profile.bio}
             </p>
           )}
         </CardContent>
+
+        <div className="border-t border-slate-700/50 grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-slate-700/50">
+          <div className="px-3 py-4 text-center">
+            <p className="text-2xl sm:text-3xl font-black text-primary">{profile.stats.totalRuns}</p>
+            <p className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+              Total Runs
+            </p>
+          </div>
+          <div className="px-3 py-4 text-center">
+            <p className="text-2xl sm:text-3xl font-black text-primary">{profile.stats.bestScore}</p>
+            <p className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+              Best Score
+            </p>
+          </div>
+          <div className="px-3 py-4 text-center">
+            <p className="text-2xl sm:text-3xl font-black text-primary">
+              {profile.stats.bestDistance}m
+            </p>
+            <p className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+              Best Distance
+            </p>
+          </div>
+          <div className="px-3 py-4 text-center">
+            <p className="text-2xl sm:text-3xl font-black text-primary">{profile.stats.winRate}%</p>
+            <p className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+              Win Rate
+            </p>
+          </div>
+        </div>
       </Card>
 
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_260px]">
         <div className="space-y-4">
-          <Card className={PANEL}>
-            <CardContent className="pt-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-              <div>
-                <p className="text-2xl sm:text-3xl font-black text-primary">
-                  {profile.stats.totalRuns}
-                </p>
-                <p className="text-xs text-slate-400">Total Runs</p>
-              </div>
-              <div>
-                <p className="text-2xl sm:text-3xl font-black text-primary">
-                  {profile.stats.bestScore}
-                </p>
-                <p className="text-xs text-slate-400">Best Score</p>
-              </div>
-              <div>
-                <p className="text-2xl sm:text-3xl font-black text-primary">
-                  {profile.stats.bestDistance}m
-                </p>
-                <p className="text-xs text-slate-400">Best Distance</p>
-              </div>
-              <div>
-                <p className="text-2xl sm:text-3xl font-black text-primary">
-                  {profile.stats.winRate}%
-                </p>
-                <p className="text-xs text-slate-400">Win Rate</p>
-              </div>
-            </CardContent>
-          </Card>
-
           <Card className={PANEL}>
             <CardContent className="pt-6">
               <Tabs defaultValue="badges">

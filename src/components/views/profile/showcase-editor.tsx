@@ -1,7 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Award, Crown, Lock, Loader2, Package, Plus, Sparkles, ThumbsUp, Trophy, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  Award,
+  Crown,
+  Lock,
+  Loader2,
+  Package,
+  Plus,
+  Sparkles,
+  ThumbsUp,
+  Trophy,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
@@ -12,15 +26,24 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { MiniProfileCard } from '@/components/user-hover-card';
 import {
   getMyShowcaseEditor,
+  setShowcaseLayout,
   setShowcaseSlot,
   type ShowcaseOption,
 } from '@/lib/showcase-actions';
-import { SHOWCASE_UNLOCK_LEVELS, type ShowcaseItemType } from '@/lib/showcase';
+import {
+  SHOWCASE_UNLOCK_LEVELS,
+  type ShowcaseAlign,
+  type ShowcaseItemType,
+  type ShowcaseLayout,
+  type ShowcasePosition,
+} from '@/lib/showcase';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 
-type Editor = Awaited<ReturnType<typeof getMyShowcaseEditor>>;
+type Editor = NonNullable<Awaited<ReturnType<typeof getMyShowcaseEditor>>>;
 
 const TYPE_ICONS: Record<ShowcaseItemType, typeof Crown> = {
   rank: Crown,
@@ -43,11 +66,16 @@ export function ShowcaseEditor() {
   const [loading, setLoading] = useState(true);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
   const [busySlot, setBusySlot] = useState<number | null>(null);
+  const [layoutBusy, setLayoutBusy] = useState(false);
+  const [draftLayout, setDraftLayout] = useState<ShowcaseLayout | null>(null);
   const { toast } = useToast();
 
   const reload = () => {
     getMyShowcaseEditor()
-      .then(setData)
+      .then((next) => {
+        setData(next);
+        setDraftLayout(next.layout);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -55,7 +83,16 @@ export function ShowcaseEditor() {
     reload();
   }, []);
 
-  if (loading || !data) {
+  const previewSummary = useMemo(() => {
+    if (!data) return null;
+    return {
+      ...data.preview,
+      showcase: data.resolved,
+      showcaseLayout: draftLayout ?? data.layout,
+    };
+  }, [data, draftLayout]);
+
+  if (loading || !data || !draftLayout || !previewSummary) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-400">
         <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading showcase...
@@ -92,99 +129,192 @@ export function ShowcaseEditor() {
     }
   };
 
+  const applyLayout = async (partial: Partial<ShowcaseLayout>) => {
+    const next = { ...draftLayout, ...partial };
+    setDraftLayout(next);
+    setLayoutBusy(true);
+    try {
+      const res = await setShowcaseLayout(partial);
+      setDraftLayout(res.layout);
+      setData((prev) => (prev ? { ...prev, layout: res.layout } : prev));
+    } catch (e: any) {
+      toast({ title: e?.message ?? 'Could not save layout', variant: 'destructive' });
+      setDraftLayout(data.layout);
+    } finally {
+      setLayoutBusy(false);
+    }
+  };
+
   const grouped = (Object.keys(TYPE_LABELS) as ShowcaseItemType[]).map((type) => ({
     type,
     options: data.options.filter((o) => o.itemType === type),
   }));
 
   return (
-    <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-primary" /> Profile Showcase
-        </CardTitle>
-        <CardDescription>
-          Pick a few highlights to show off on your mini hover card and public profile. More
-          slots unlock as you level up — {data.unlockedSlots}/{data.maxSlots} unlocked at level{' '}
-          {data.level}.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          {Array.from({ length: data.maxSlots }, (_, slot) => {
-            const unlocked = slot < data.unlockedSlots;
-            const entry = entryForSlot(slot);
-            const option = entry ? optionFor(entry.itemType, entry.refId) : undefined;
-            const Icon = entry ? TYPE_ICONS[entry.itemType] : Plus;
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-primary" /> Profile Showcase
+          </CardTitle>
+          <CardDescription>
+            Pick highlights for your mini hover card. Matching categories stack in separate rows
+            (max 3 visible per category). More slots unlock as you level —{' '}
+            {data.unlockedSlots}/{data.maxSlots} unlocked at level {data.level}.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {Array.from({ length: data.maxSlots }, (_, slot) => {
+              const unlocked = slot < data.unlockedSlots;
+              const entry = entryForSlot(slot);
+              const option = entry ? optionFor(entry.itemType, entry.refId) : undefined;
+              const Icon = entry ? TYPE_ICONS[entry.itemType] : Plus;
 
-            if (!unlocked) {
-              const unlockLevel = SHOWCASE_UNLOCK_LEVELS[slot];
-              return (
-                <div
-                  key={slot}
-                  className="aspect-square rounded-lg border border-slate-700/40 bg-slate-900/30 flex flex-col items-center justify-center text-slate-500 gap-1"
-                >
-                  <Lock className="h-4 w-4" />
-                  <span className="text-[10px] text-center px-1">Lv {unlockLevel}</span>
-                </div>
-              );
-            }
-
-            if (entry && option) {
-              return (
-                <div
-                  key={slot}
-                  className="relative aspect-square rounded-lg border border-primary/40 bg-slate-900/50 flex flex-col items-center justify-center gap-1 p-2 group"
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleClear(slot)}
-                    disabled={busySlot === slot}
-                    className="absolute -right-1.5 -top-1.5 rounded-full bg-slate-800 border border-slate-600 p-0.5 text-slate-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Remove"
+              if (!unlocked) {
+                const unlockLevel = SHOWCASE_UNLOCK_LEVELS[slot];
+                return (
+                  <div
+                    key={slot}
+                    className="aspect-square rounded-lg border border-slate-700/40 bg-slate-900/30 flex flex-col items-center justify-center text-slate-500 gap-1"
                   >
-                    <X className="h-3 w-3" />
-                  </button>
-                  {busySlot === slot ? (
-                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                  ) : option.iconImageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={option.iconImageUrl} alt="" className="h-8 w-8 rounded object-cover" />
-                  ) : (
-                    <Icon className="h-6 w-6 text-primary" />
-                  )}
-                  <span className="text-[10px] text-center truncate w-full px-1">
-                    {option.title}
-                  </span>
-                </div>
-              );
-            }
+                    <Lock className="h-4 w-4" />
+                    <span className="text-[10px] text-center px-1">Lv {unlockLevel}</span>
+                  </div>
+                );
+              }
 
-            return (
-              <button
-                key={slot}
-                type="button"
-                disabled={busySlot === slot}
-                onClick={() => setPickerSlot(slot)}
-                className="aspect-square rounded-lg border border-dashed border-slate-600 bg-slate-900/20 flex flex-col items-center justify-center text-slate-500 hover:border-primary/60 hover:text-primary transition-colors"
-              >
-                {busySlot === slot ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <Plus className="h-5 w-5" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </CardContent>
+              if (entry && option) {
+                return (
+                  <div
+                    key={slot}
+                    className="relative aspect-square rounded-lg border border-primary/40 bg-slate-900/50 flex flex-col items-center justify-center gap-1 p-2 group"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleClear(slot)}
+                      disabled={busySlot === slot}
+                      className="absolute -right-1.5 -top-1.5 rounded-full bg-slate-800 border border-slate-600 p-0.5 text-slate-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Remove"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                    {busySlot === slot ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    ) : option.iconImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={option.iconImageUrl}
+                        alt=""
+                        className="h-8 w-8 rounded object-cover"
+                      />
+                    ) : (
+                      <Icon className="h-6 w-6 text-primary" />
+                    )}
+                    <span className="text-[10px] text-center truncate w-full px-1">
+                      {option.title}
+                    </span>
+                    <span className="text-[9px] uppercase text-slate-500">
+                      {TYPE_LABELS[entry.itemType]}
+                    </span>
+                  </div>
+                );
+              }
+
+              return (
+                <button
+                  key={slot}
+                  type="button"
+                  disabled={busySlot === slot}
+                  onClick={() => setPickerSlot(slot)}
+                  className="aspect-square rounded-lg border border-dashed border-slate-600 bg-slate-900/20 flex flex-col items-center justify-center text-slate-500 hover:border-primary/60 hover:text-primary transition-colors"
+                >
+                  {busySlot === slot ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Plus className="h-5 w-5" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="rounded-lg border border-slate-700/40 bg-slate-900/30 p-4 space-y-3">
+            <p className="text-sm font-semibold text-slate-200">Mini-card layout</p>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  { id: 'after_level' as ShowcasePosition, label: 'Under level bar' },
+                  { id: 'bottom' as ShowcasePosition, label: 'Bottom of card' },
+                ] as const
+              ).map((opt) => (
+                <Button
+                  key={opt.id}
+                  type="button"
+                  size="sm"
+                  variant={draftLayout.position === opt.id ? 'default' : 'outline'}
+                  disabled={layoutBusy}
+                  onClick={() => applyLayout({ position: opt.id })}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-slate-400 mr-1">Align</span>
+              {(
+                [
+                  { id: 'start' as ShowcaseAlign, icon: AlignLeft, label: 'Left' },
+                  { id: 'center' as ShowcaseAlign, icon: AlignCenter, label: 'Center' },
+                  { id: 'end' as ShowcaseAlign, icon: AlignRight, label: 'Right' },
+                ] as const
+              ).map((opt) => {
+                const Icon = opt.icon;
+                return (
+                  <Button
+                    key={opt.id}
+                    type="button"
+                    size="sm"
+                    variant={draftLayout.align === opt.id ? 'default' : 'outline'}
+                    disabled={layoutBusy}
+                    onClick={() => applyLayout({ align: opt.id })}
+                    title={opt.label}
+                    className="px-2"
+                  >
+                    <Icon className="h-4 w-4" />
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30 h-fit lg:sticky lg:top-4">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Hover card preview</CardTitle>
+          <CardDescription>Updates live as you edit slots and layout.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div
+            className={cn(
+              'mx-auto w-72 overflow-hidden rounded-xl border border-slate-700 bg-slate-900/95 shadow-xl'
+            )}
+          >
+            <MiniProfileCard
+              summary={previewSummary}
+              layoutOverride={draftLayout}
+            />
+          </div>
+        </CardContent>
+      </Card>
 
       <Dialog open={pickerSlot !== null} onOpenChange={(open) => !open && setPickerSlot(null)}>
         <DialogContent className="bg-slate-900/95 border-slate-700 text-white max-w-lg mx-4 max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Choose what to showcase</DialogTitle>
             <DialogDescription className="text-slate-400">
-              Only things you&apos;ve unlocked or own can be showcased.
+              Same-category picks share a row on the mini card (max 3 visible at a time).
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -241,6 +371,6 @@ export function ShowcaseEditor() {
           </div>
         </DialogContent>
       </Dialog>
-    </Card>
+    </div>
   );
 }

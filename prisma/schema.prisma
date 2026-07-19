@@ -68,10 +68,9 @@ model User {
   /// Optional display status line shown on public profile.
   statusMessage String @default("")
 
-  /// Profile "showcase" slots (badge/achievement/inventory/rank picks shown
-  /// on the mini hover-card and public profile). Slot count unlocks
-  /// progressively by level — see SHOWCASE_UNLOCK_LEVELS. Stored as JSON
-  /// array of { slot, itemType, refId } to avoid a join for every render.
+  /// Profile "showcase" slots + layout for the mini hover-card. Stored as
+  /// either a legacy JSON array of { slot, itemType, refId }, or
+  /// { entries: [...], layout: { position, align } }.
   showcaseItems Json?
 
   matchStats         MatchStat[]

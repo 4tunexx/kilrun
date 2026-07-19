@@ -6,7 +6,11 @@ import { getLevelProgress, getRankForLevel } from '@/lib/progression';
 import { getPlayerAchievements, getPlayerBadges } from '@/lib/progression-actions';
 import { getMyReputationVote } from '@/lib/social-actions';
 import { normalizeBannerConfig, type BannerConfig } from '@/lib/banner';
-import { parseShowcaseEntries, type ShowcaseDisplayItem } from '@/lib/showcase';
+import {
+  parseShowcaseStorage,
+  type ShowcaseDisplayItem,
+  type ShowcaseLayout,
+} from '@/lib/showcase';
 import { resolveShowcaseEntries } from '@/lib/showcase-actions';
 
 async function getViewer() {
@@ -41,6 +45,7 @@ export type PublicProfile = {
   equippedFrameConfig: unknown | null;
   equippedNicknameConfig: unknown | null;
   showcase: ShowcaseDisplayItem[];
+  showcaseLayout: ShowcaseLayout;
   leaderboardPosition: number;
   totalPlayers: number;
   friendStatus: FriendStatus;
@@ -130,7 +135,8 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     myReputationVote = await getMyReputationVote(target.id);
   }
 
-  const showcase = await resolveShowcaseEntries(target.id, parseShowcaseEntries(target.showcaseItems));
+  const stored = parseShowcaseStorage(target.showcaseItems);
+  const showcase = await resolveShowcaseEntries(target.id, stored.entries);
 
   return {
     id: target.id,
@@ -157,6 +163,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     equippedFrameConfig: target.equippedFrameConfig ?? null,
     equippedNicknameConfig: target.equippedNicknameConfig ?? null,
     showcase,
+    showcaseLayout: stored.layout,
     leaderboardPosition: higherRanked + 1,
     totalPlayers,
     friendStatus,
@@ -173,8 +180,9 @@ export async function getPublicProfileSummary(userId: string) {
   const target = await prisma.user.findUnique({ where: { id: userId } });
   if (!target || target.isBanned) return null;
   const progress = getLevelProgress(target.xpProgress);
+  const stored = parseShowcaseStorage(target.showcaseItems);
   const [showcase, repVotes] = await Promise.all([
-    resolveShowcaseEntries(target.id, parseShowcaseEntries(target.showcaseItems)),
+    resolveShowcaseEntries(target.id, stored.entries),
     prisma.reputationVote.findMany({
       where: { targetId: userId },
       select: { value: true },
@@ -201,5 +209,6 @@ export async function getPublicProfileSummary(userId: string) {
     equippedFrameConfig: target.equippedFrameConfig ?? null,
     equippedNicknameConfig: target.equippedNicknameConfig ?? null,
     showcase,
+    showcaseLayout: stored.layout,
   };
 }

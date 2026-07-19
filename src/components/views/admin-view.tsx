@@ -48,6 +48,7 @@ import { LogoStyleEditor } from '@/components/views/admin/logo-style-editor';
 import { AdminDashboardPanel } from '@/components/views/admin/admin-dashboard-panel';
 import { AdminMapEditorPanel } from '@/components/views/admin/admin-map-editor-panel';
 import { AdminSiteLayoutPanel } from '@/components/views/admin/admin-site-layout-panel';
+import { AdminNewsPanel } from '@/components/views/admin/admin-news-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -59,7 +60,6 @@ import {
   adminBroadcastAnnouncement,
   adminClearFireSale,
   adminCreateGuide,
-  adminCreateNews,
   adminDeleteStoreItem,
   adminListTickets,
   adminListUsers,
@@ -71,7 +71,6 @@ import {
   adminUpsertStoreItem,
 } from '@/lib/social-actions';
 import { AdminUserDetailSheet } from '@/components/views/admin/admin-user-detail-sheet';
-import { RichPostEditor } from '@/components/ui/rich-post-editor';
 import { getStoreItems } from '@/lib/actions';
 import { broadcastSiteSettings } from '@/lib/site-branding-events';
 import {
@@ -182,12 +181,6 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
   const [fireSaleForm, setFireSaleForm] = useState({
     percent: 25,
     durationHours: 24,
-  });
-  const [newsForm, setNewsForm] = useState({
-    title: '',
-    summary: '',
-    body: '',
-    headerImageUrl: '',
   });
   const [announceForm, setAnnounceForm] = useState({
     title: '',
@@ -2227,60 +2220,10 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
         )}
 
         {isAdmin && (
-          <TabsContent value="content" className="mt-4 grid gap-4 lg:grid-cols-2">
-            <Card className="bg-slate-800/40 border-slate-700/30">
-              <CardHeader>
-                <CardTitle>Publish news</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Input
-                  placeholder="Title"
-                  value={newsForm.title}
-                  onChange={(e) => setNewsForm((f) => ({ ...f, title: e.target.value }))}
-                  className="bg-slate-900/50 border-slate-700"
-                />
-                <Input
-                  placeholder="Summary"
-                  value={newsForm.summary}
-                  onChange={(e) =>
-                    setNewsForm((f) => ({ ...f, summary: e.target.value }))
-                  }
-                  className="bg-slate-900/50 border-slate-700"
-                />
-                <RichPostEditor
-                  body={newsForm.body}
-                  onBodyChange={(body) => setNewsForm((f) => ({ ...f, body }))}
-                  headerImageUrl={newsForm.headerImageUrl}
-                  onHeaderImageChange={(headerImageUrl) =>
-                    setNewsForm((f) => ({ ...f, headerImageUrl }))
-                  }
-                  placeholder="Write the news article…"
-                />
-                <Button
-                  disabled={busyKey === 'publish-news'}
-                  onClick={() =>
-                    runAction('publish-news', async () => {
-                      await adminCreateNews({
-                        ...newsForm,
-                        headerImageUrl: newsForm.headerImageUrl || undefined,
-                      });
-                      setNewsForm({
-                        title: '',
-                        summary: '',
-                        body: '',
-                        headerImageUrl: '',
-                      });
-                      toast({ title: 'News published' });
-                    })
-                  }
-                >
-                  {busyKey === 'publish-news' && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                  Publish news
-                </Button>
-              </CardContent>
-            </Card>
+          <TabsContent value="content" className="mt-4 space-y-6">
+            <AdminNewsPanel />
 
-            <Card className="bg-slate-800/40 border-slate-700/30">
+            <Card className="bg-slate-800/40 border-slate-700/30 max-w-xl">
               <CardHeader>
                 <CardTitle>Publish guide</CardTitle>
               </CardHeader>

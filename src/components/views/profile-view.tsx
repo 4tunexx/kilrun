@@ -198,7 +198,21 @@ export default function ProfileView({ userId }: { userId: string }) {
         }`}
         style={equippedBanner ? bannerStyle(equippedBanner) : undefined}
       >
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-transparent to-black/30" />
+        <p
+          className={`absolute top-3 left-3 sm:top-4 sm:left-4 z-10 text-xs sm:text-sm font-semibold capitalize drop-shadow-md ${getRoleTextColorClass(
+            user?.role,
+            user?.isVip
+          )}`}
+        >
+          <span className="rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm border border-white/10">
+            {user?.role ?? 'player'}
+            {user?.isVip ? ' · VIP' : ''}
+            {user?.createdAt
+              ? ` · Joined ${formatDistanceToNow(new Date(user.createdAt))} ago`
+              : ''}
+          </span>
+        </p>
       </div>
 
       <div className="px-4 sm:px-8">
@@ -237,15 +251,6 @@ export default function ProfileView({ userId }: { userId: string }) {
                 {statusMessage}
               </p>
             ) : null}
-            <p className="text-base sm:text-xl text-slate-400">
-              {user?.createdAt
-                ? `Joined ${formatDistanceToNow(new Date(user.createdAt))} ago`
-                : ''}
-            </p>
-            <p className="text-sm text-slate-400 capitalize mt-1">
-              Role: {user?.role ?? 'player'}
-              {user?.isVip ? ' · VIP' : ''}
-            </p>
           </div>
         </div>
 

@@ -11,10 +11,33 @@ import { useHoverCapable } from '@/hooks/use-hover-capable';
 import { useProfileNavigation } from '@/components/providers/profile-navigation-context';
 import { getPublicProfileSummary } from '@/lib/public-profile-actions';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import {
+  DEFAULT_SHOWCASE_LAYOUT,
+  type ShowcaseAlign,
+  type ShowcaseDisplayItem,
+  type ShowcaseLayout,
+  type ShowcasePosition,
+} from '@/lib/showcase';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import { cn } from '@/lib/utils';
 
 type Summary = Awaited<ReturnType<typeof getPublicProfileSummary>>;
+
+export type MiniProfileSummary = {
+  username: string;
+  avatarUrl: string;
+  role: string;
+  isVip: boolean;
+  currentRank: string;
+  level: number;
+  xpIntoLevel: number;
+  xpForNextLevel: number;
+  levelProgressPercent: number;
+  reputation: number;
+  equippedBannerConfig: unknown | null;
+  showcase: ShowcaseDisplayItem[];
+  showcaseLayout?: ShowcaseLayout;
+};
 
 /**
  * Wraps a username anywhere in the hub (forum, chat, leaderboard, friends,
@@ -57,8 +80,8 @@ export function UserHoverCard({
   const cancelClose = () => {
     if (closeTimer.current) {
       clearTimeout(closeTimer.current);
-      closeTimer.current = null;
     }
+    closeTimer.current = null;
   };
   const scheduleClose = () => {
     cancelClose();
@@ -122,19 +145,38 @@ export function UserHoverCard({
   );
 }
 
-function MiniProfileCard({
+/** Standalone mini profile used by hover cards and the showcase live preview. */
+export function MiniProfileCard({
   summary,
   onViewProfile,
+  layoutOverride,
+  className,
 }: {
-  summary: NonNullable<Summary>;
-  onViewProfile: () => void;
+  summary: MiniProfileSummary;
+  onViewProfile?: () => void;
+  layoutOverride?: Partial<ShowcaseLayout>;
+  className?: string;
 }) {
   const banner = summary.equippedBannerConfig
     ? normalizeBannerConfig(summary.equippedBannerConfig)
     : null;
+  const layout = {
+    ...DEFAULT_SHOWCASE_LAYOUT,
+    ...(summary.showcaseLayout ?? {}),
+    ...(layoutOverride ?? {}),
+  };
+  const position: ShowcasePosition = layout.position;
+  const align: ShowcaseAlign = layout.align;
 
-  return (
-    <button type="button" onClick={onViewProfile} className="block w-full text-left group">
+  const showcaseBlock =
+    summary.showcase.length > 0 ? (
+      <div className="mt-3">
+        <ShowcaseChips items={summary.showcase} compact align={align} />
+      </div>
+    ) : null;
+
+  const body = (
+    <>
       <div
         className={cn(
           'h-16 w-full',
@@ -171,11 +213,7 @@ function MiniProfileCard({
             percent={summary.levelProgressPercent}
           />
         </div>
-        {summary.showcase.length > 0 && (
-          <div className="mt-3">
-            <ShowcaseChips items={summary.showcase} compact />
-          </div>
-        )}
+        {position === 'after_level' ? showcaseBlock : null}
         <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
           <span
             className={`flex items-center gap-1 font-semibold ${
@@ -190,9 +228,28 @@ function MiniProfileCard({
             {summary.reputation > 0 ? '+' : ''}
             {summary.reputation} REP
           </span>
-          <span className="text-primary group-hover:underline">View profile →</span>
+          {onViewProfile ? (
+            <span className="text-primary group-hover:underline">View profile →</span>
+          ) : (
+            <span className="text-slate-500">Live preview</span>
+          )}
         </div>
+        {position === 'bottom' ? showcaseBlock : null}
       </div>
-    </button>
+    </>
   );
+
+  if (onViewProfile) {
+    return (
+      <button
+        type="button"
+        onClick={onViewProfile}
+        className={cn('block w-full text-left group', className)}
+      >
+        {body}
+      </button>
+    );
+  }
+
+  return <div className={cn('block w-full text-left', className)}>{body}</div>;
 }

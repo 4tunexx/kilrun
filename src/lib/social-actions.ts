@@ -810,6 +810,108 @@ export async function getNewsPosts() {
   });
 }
 
+/** Single published article for dashboard / community readers. */
+export async function getNewsPost(id: string) {
+  if (!id) return null;
+  return prisma.newsPost.findFirst({
+    where: { id, published: true },
+  });
+}
+
+/** Staff: all news including drafts. */
+export async function adminListNewsPosts() {
+  await requireStaff();
+  return prisma.newsPost.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+}
+
+export async function adminGetNewsPost(id: string) {
+  await requireStaff();
+  if (!id) return null;
+  return prisma.newsPost.findUnique({ where: { id } });
+}
+
+export async function adminCreateNews(input: {
+  title: string;
+  summary: string;
+  body: string;
+  headerImageUrl?: string;
+  published?: boolean;
+}) {
+  const staff = await requireStaff();
+  const post = await prisma.newsPost.create({
+    data: {
+      title: input.title.trim().slice(0, 160),
+      summary: input.summary.trim().slice(0, 400),
+      body: input.body.trim().slice(0, 20000),
+      headerImageUrl: input.headerImageUrl?.trim() || null,
+      published: input.published !== false,
+    },
+  });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'create_news',
+    detail: `${post.published ? 'Published' : 'Draft'}: ${post.title}`,
+  });
+  return post;
+}
+
+export async function adminUpdateNews(
+  id: string,
+  input: {
+    title: string;
+    summary: string;
+    body: string;
+    headerImageUrl?: string | null;
+    published?: boolean;
+  }
+) {
+  const staff = await requireStaff();
+  const existing = await prisma.newsPost.findUnique({ where: { id } });
+  if (!existing) throw new Error('News post not found');
+
+  const post = await prisma.newsPost.update({
+    where: { id },
+    data: {
+      title: input.title.trim().slice(0, 160),
+      summary: input.summary.trim().slice(0, 400),
+      body: input.body.trim().slice(0, 20000),
+      headerImageUrl:
+        input.headerImageUrl === undefined
+          ? undefined
+          : input.headerImageUrl?.trim() || null,
+      published: typeof input.published === 'boolean' ? input.published : undefined,
+    },
+  });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'update_news',
+    detail: post.title,
+  });
+  return post;
+}
+
+export async function adminDeleteNews(id: string) {
+  const staff = await requireStaff();
+  const existing = await prisma.newsPost.findUnique({ where: { id } });
+  if (!existing) throw new Error('News post not found');
+  await prisma.newsPost.delete({ where: { id } });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'delete_news',
+    detail: existing.title,
+  });
+  return { ok: true as const };
+}
+
 export async function getGuides() {
   return prisma.guide.findMany({
     where: { published: true },
@@ -1643,32 +1745,6 @@ export async function adminDeleteStoreItem(id: string) {
   await requireStaff();
   await prisma.storeItem.delete({ where: { id } });
   return { ok: true };
-}
-
-export async function adminCreateNews(input: {
-  title: string;
-  summary: string;
-  body: string;
-  headerImageUrl?: string;
-}) {
-  const staff = await requireStaff();
-  const post = await prisma.newsPost.create({
-    data: {
-      title: input.title.trim().slice(0, 160),
-      summary: input.summary.trim().slice(0, 400),
-      body: input.body.trim().slice(0, 20000),
-      headerImageUrl: input.headerImageUrl?.trim() || null,
-      published: true,
-    },
-  });
-  const { writeAuditLog } = await import('@/lib/audit');
-  await writeAuditLog({
-    actorId: staff.id,
-    actorUsername: staff.username,
-    action: 'create_news',
-    detail: post.title,
-  });
-  return post;
 }
 
 export async function adminCreateGuide(input: {
