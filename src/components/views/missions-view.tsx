@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle, Gift, Loader2, Target } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -8,6 +8,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { bootstrapMyMissions, getActiveMissions } from '@/lib/actions';
 import type { ActiveMission } from '@/generated/prisma';
+
+function isDailyMission(m: ActiveMission) {
+  return (
+    (m as { category?: string }).category === 'daily' ||
+    m.templateKey.startsWith('daily_')
+  );
+}
+
+function isWebMission(m: ActiveMission) {
+  if (isDailyMission(m)) return false;
+  return (
+    (m as { category?: string }).category === 'website' ||
+    m.templateKey.startsWith('web_')
+  );
+}
 
 export default function MissionsView({ userId }: { userId: string }) {
   const [missions, setMissions] = useState<ActiveMission[]>([]);
@@ -27,8 +42,14 @@ export default function MissionsView({ userId }: { userId: string }) {
     };
   }, [userId]);
 
-  const game = missions.filter((m) => !m.templateKey.startsWith('web_'));
-  const web = missions.filter((m) => m.templateKey.startsWith('web_'));
+  const daily = useMemo(() => missions.filter(isDailyMission), [missions]);
+  const game = useMemo(
+    () => missions.filter((m) => !isDailyMission(m) && !isWebMission(m)),
+    [missions]
+  );
+  const web = useMemo(() => missions.filter(isWebMission), [missions]);
+
+  const dailyDone = daily.filter((m) => m.isCompleted).length;
 
   return (
     <div className="px-4 sm:px-8 py-6">
@@ -37,8 +58,11 @@ export default function MissionsView({ userId }: { userId: string }) {
           <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading missions...
         </div>
       ) : (
-        <Tabs defaultValue="game">
-          <TabsList className="bg-slate-800/60">
+        <Tabs defaultValue="daily">
+          <TabsList className="bg-slate-800/60 flex flex-wrap h-auto gap-1">
+            <TabsTrigger value="daily">
+              Daily ({dailyDone}/{daily.length || 5})
+            </TabsTrigger>
             <TabsTrigger value="game">
               In-Game ({game.filter((m) => m.isCompleted).length}/{game.length})
             </TabsTrigger>
@@ -46,8 +70,34 @@ export default function MissionsView({ userId }: { userId: string }) {
               Website ({web.filter((m) => m.isCompleted).length}/{web.length})
             </TabsTrigger>
           </TabsList>
+          <TabsContent value="daily" className="mt-4 space-y-3">
+            <div className="flex items-center gap-3 px-1">
+              <Progress
+                value={
+                  daily.length
+                    ? Math.round((dailyDone / daily.length) * 100)
+                    : 0
+                }
+                tone="green"
+                className="h-2.5 flex-1"
+              />
+              <span className="text-sm font-semibold text-emerald-400 tabular-nums">
+                {dailyDone}/{daily.length || 5}
+              </span>
+            </div>
+            <MissionList
+              missions={daily}
+              empty="No daily missions yet. They unlock automatically on hub load."
+              tone="green"
+              title="Daily Missions"
+              description="Resets every day at midnight (local time). Complete all five for full daily progress."
+            />
+          </TabsContent>
           <TabsContent value="game" className="mt-4">
-            <MissionList missions={game} empty="No in-game missions yet. Seed the database or check back soon." />
+            <MissionList
+              missions={game}
+              empty="No in-game missions yet. Seed the database or check back soon."
+            />
           </TabsContent>
           <TabsContent value="web" className="mt-4">
             <MissionList missions={web} empty="No website missions yet." />
@@ -61,9 +111,15 @@ export default function MissionsView({ userId }: { userId: string }) {
 function MissionList({
   missions,
   empty,
+  tone = 'primary',
+  title = 'Mission Board',
+  description = 'Progress updates live from matches and hub activity.',
 }: {
   missions: ActiveMission[];
   empty: string;
+  tone?: 'primary' | 'green';
+  title?: string;
+  description?: string;
 }) {
   if (missions.length === 0) {
     return <p className="text-slate-400 text-center py-12">{empty}</p>;
@@ -73,11 +129,9 @@ function MissionList({
     <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Target className="w-5 h-5" /> Mission Board
+          <Target className="w-5 h-5" /> {title}
         </CardTitle>
-        <CardDescription>
-          Progress updates live from matches and hub activity.
-        </CardDescription>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {missions.map((mission) => {
@@ -92,6 +146,10 @@ function MissionList({
               key={mission.id}
               className={`p-4 rounded-lg bg-slate-900/50 border border-slate-700/50 ${
                 mission.isCompleted ? 'opacity-70' : ''
+              } ${
+                tone === 'green' && !mission.isCompleted
+                  ? 'border-emerald-700/40'
+                  : ''
               }`}
             >
               <div className="flex justify-between items-start mb-2 gap-4">
@@ -130,14 +188,12 @@ function MissionList({
                   <Gift size={16} /> {mission.rewardXp.toLocaleString()} XP
                 </p>
               </div>
-              {!mission.isCompleted && (
-                <div className="pl-11">
-                  <Progress value={progress} className="h-3" />
-                  <p className="text-xs text-slate-500 mt-1">
-                    {mission.currentCount} / {mission.targetCount}
-                  </p>
-                </div>
-              )}
+              <div className="pl-11">
+                <Progress value={progress} tone={tone} className="h-3" />
+                <p className="text-xs text-slate-500 mt-1">
+                  {mission.currentCount} / {mission.targetCount}
+                </p>
+              </div>
             </div>
           );
         })}

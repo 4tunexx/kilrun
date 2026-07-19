@@ -2,8 +2,39 @@
 
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import {
+  DAILY_MISSION_SEEDS,
+  isDailyMissionCategory,
+  isSameLocalDay,
+  missionPeriodKey,
+  startOfLocalDay,
+} from '@/lib/daily-missions';
 import { getLevelFromXp, getLevelProgress, getRankForLevel } from '@/lib/progression';
 import { canAccessAdmin } from '@/lib/roles';
+
+export type WebsiteActionMetric =
+  | 'friends'
+  | 'messages'
+  | 'forum'
+  | 'forum_replies'
+  | 'purchases'
+  | 'email'
+  | 'chat'
+  | 'vip'
+  | 'logins'
+  | 'support_tickets'
+  | 'daily_login'
+  | 'daily_chat'
+  | 'daily_forum'
+  | 'daily_runs'
+  | 'daily_leaderboard'
+  | 'cosmetics_equipped'
+  | 'cosmetics_deleted'
+  | 'cosmetics_resold'
+  | 'cosmetic_owned'
+  | 'banner_owned'
+  | 'frame_owned'
+  | 'nickname_owned';
 
 async function requireUser() {
   const session = await auth();
@@ -68,33 +99,109 @@ export async function grantXp(userId: string, amount: number, reason?: string) {
   return { xpProgress: updated.xpProgress, level: nextLevel, prevLevel };
 }
 
-/** Assign active missions from templates the player doesn't already have. */
+/** Ensure the 5 built-in daily templates exist (won't overwrite admin edits). */
+export async function ensureDailyMissionTemplates() {
+  for (const m of DAILY_MISSION_SEEDS) {
+    const existing = await prisma.missionTemplate.findUnique({
+      where: { key: m.key },
+    });
+    if (!existing) {
+      await prisma.missionTemplate.create({
+        data: { ...m, isActive: true },
+      });
+    }
+  }
+}
+
+function templateCategory(t: { category: string; key: string }): string {
+  if (isDailyMissionCategory(t.category) || t.key.startsWith('daily_')) {
+    return 'daily';
+  }
+  if (t.category === 'website' || t.key.startsWith('web_')) return 'website';
+  return t.category === 'game' ? 'game' : t.category || 'game';
+}
+
+/** Assign / refresh active missions. Daily board resets each calendar day. */
 export async function ensurePlayerMissions(userId: string) {
+  await ensureDailyMissionTemplates();
+  const today = missionPeriodKey();
   const templates = await prisma.missionTemplate.findMany({
     where: { isActive: true },
   });
-  const existing = await prisma.activeMission.findMany({
-    where: { userId },
-    select: { templateKey: true },
-  });
-  const have = new Set(existing.map((e) => e.templateKey).filter(Boolean));
+  const existing = await prisma.activeMission.findMany({ where: { userId } });
+  const byKey = new Map(existing.map((e) => [e.templateKey, e]));
 
   for (const t of templates) {
-    if (have.has(t.key)) continue;
-    await prisma.activeMission.create({
-      data: {
-        userId,
-        templateKey: t.key,
-        title: t.title,
-        description: t.description,
-        rewardXp: t.rewardXp,
-        targetCount: t.targetCount,
-        metric: t.metric,
-        currentCount: 0,
-        isCompleted: false,
-        iconImageUrl: t.iconImageUrl,
-      },
-    });
+    const category = templateCategory(t);
+    const isDaily = category === 'daily';
+    const current = byKey.get(t.key);
+
+    if (isDaily) {
+      if (!current) {
+        await prisma.activeMission.create({
+          data: {
+            userId,
+            templateKey: t.key,
+            title: t.title,
+            description: t.description,
+            rewardXp: t.rewardXp,
+            targetCount: t.targetCount,
+            metric: t.metric,
+            category: 'daily',
+            periodKey: today,
+            currentCount: 0,
+            isCompleted: false,
+            iconImageUrl: t.iconImageUrl,
+          },
+        });
+      } else if (current.periodKey !== today) {
+        await prisma.activeMission.update({
+          where: { id: current.id },
+          data: {
+            title: t.title,
+            description: t.description,
+            rewardXp: t.rewardXp,
+            targetCount: t.targetCount,
+            metric: t.metric,
+            category: 'daily',
+            periodKey: today,
+            currentCount: 0,
+            isCompleted: false,
+            iconImageUrl: t.iconImageUrl,
+          },
+        });
+      } else if (current.category !== 'daily') {
+        await prisma.activeMission.update({
+          where: { id: current.id },
+          data: { category: 'daily', periodKey: today },
+        });
+      }
+      continue;
+    }
+
+    if (!current) {
+      await prisma.activeMission.create({
+        data: {
+          userId,
+          templateKey: t.key,
+          title: t.title,
+          description: t.description,
+          rewardXp: t.rewardXp,
+          targetCount: t.targetCount,
+          metric: t.metric,
+          category,
+          periodKey: '',
+          currentCount: 0,
+          isCompleted: false,
+          iconImageUrl: t.iconImageUrl,
+        },
+      });
+    } else if (current.category !== category) {
+      await prisma.activeMission.update({
+        where: { id: current.id },
+        data: { category, periodKey: '' },
+      });
+    }
   }
 }
 
@@ -210,6 +317,62 @@ async function metricCount(userId: string, metric: string): Promise<number> {
       return prisma.userAchievement.count({ where: { userId } });
     case 'support_tickets':
       return prisma.supportTicket.count({ where: { userId } });
+    case 'cosmetic_owned':
+      return prisma.inventoryItem.count({
+        where: { userId, cosmeticSlot: { not: null } },
+      });
+    case 'banner_owned':
+      return prisma.inventoryItem.count({
+        where: { userId, cosmeticSlot: 'banner' },
+      });
+    case 'frame_owned':
+      return prisma.inventoryItem.count({
+        where: { userId, cosmeticSlot: 'frame' },
+      });
+    case 'nickname_owned':
+      return prisma.inventoryItem.count({
+        where: { userId, cosmeticSlot: 'nickname' },
+      });
+    case 'cosmetics_equipped': {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      return u?.cosmeticEquipCount ?? 0;
+    }
+    case 'cosmetics_deleted': {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      return u?.cosmeticDeleteCount ?? 0;
+    }
+    case 'cosmetics_resold': {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      return u?.cosmeticResellCount ?? 0;
+    }
+    case 'daily_login': {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      return isSameLocalDay(u?.lastLoginAt) ? 1 : 0;
+    }
+    case 'daily_chat':
+      return prisma.globalChatMessage.count({
+        where: { userId, createdAt: { gte: startOfLocalDay() } },
+      });
+    case 'daily_forum': {
+      const since = startOfLocalDay();
+      const [posts, replies] = await Promise.all([
+        prisma.forumPost.count({
+          where: { authorId: userId, createdAt: { gte: since } },
+        }),
+        prisma.forumReply.count({
+          where: { authorId: userId, createdAt: { gte: since } },
+        }),
+      ]);
+      return posts + replies;
+    }
+    case 'daily_runs':
+      return prisma.matchResult.count({
+        where: { userId, playedAt: { gte: startOfLocalDay() } },
+      });
+    case 'daily_leaderboard': {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      return isSameLocalDay(u?.lastLeaderboardAt) ? 1 : 0;
+    }
     default:
       return 0;
   }
@@ -332,6 +495,7 @@ export async function processMatchProgression(input: {
 }) {
   await ensurePlayerMissions(input.userId);
   await progressMissions(input.userId, 'runs', 1);
+  await processWebsiteAction(input.userId, 'daily_runs');
   if (input.outcome === 'win' || input.outcome === 'survived') {
     await progressMissions(input.userId, 'wins', 1);
   }
@@ -390,45 +554,57 @@ export async function processMatchProgression(input: {
   await tryUnlockBadge(input.userId, 'runner_survives');
 }
 
+const SYNC_FROM_TOTAL_METRICS = new Set<WebsiteActionMetric>([
+  'email',
+  'vip',
+  'friends',
+  'cosmetic_owned',
+  'banner_owned',
+  'frame_owned',
+  'nickname_owned',
+  'cosmetics_equipped',
+  'cosmetics_deleted',
+  'cosmetics_resold',
+  'daily_login',
+  'daily_chat',
+  'daily_forum',
+  'daily_runs',
+  'daily_leaderboard',
+]);
+
+async function syncMissionProgressFromCount(userId: string, metric: string) {
+  const count = await metricCount(userId, metric);
+  const missions = await prisma.activeMission.findMany({
+    where: { userId, metric, isCompleted: false },
+  });
+  for (const m of missions) {
+    const next = Math.min(m.targetCount, count);
+    const completed = next >= m.targetCount;
+    await prisma.activeMission.update({
+      where: { id: m.id },
+      data: { currentCount: next, isCompleted: completed },
+    });
+    if (completed && !m.isCompleted) {
+      await grantXp(userId, m.rewardXp, `Mission: ${m.title}`);
+      await notify(
+        userId,
+        'Mission complete',
+        `${m.title} — +${m.rewardXp} XP`,
+        'mission'
+      );
+      await tryUnlockAchievement(userId, 'missions_completed', 1);
+      await tryUnlockBadge(userId, 'missions_completed', 1);
+    }
+  }
+}
+
 export async function processWebsiteAction(
   userId: string,
-  metric:
-    | 'friends'
-    | 'messages'
-    | 'forum'
-    | 'forum_replies'
-    | 'purchases'
-    | 'email'
-    | 'chat'
-    | 'vip'
-    | 'logins'
-    | 'support_tickets'
+  metric: WebsiteActionMetric
 ) {
   await ensurePlayerMissions(userId);
-  // For threshold-style metrics (email/vip/friends count), sync from DB totals
-  // by setting mission progress to metricCount rather than blindly +1.
-  if (metric === 'email' || metric === 'vip' || metric === 'friends') {
-    const count = await metricCount(userId, metric);
-    const missions = await prisma.activeMission.findMany({
-      where: { userId, metric, isCompleted: false },
-    });
-    for (const m of missions) {
-      const next = Math.min(m.targetCount, count);
-      const completed = next >= m.targetCount;
-      await prisma.activeMission.update({
-        where: { id: m.id },
-        data: { currentCount: next, isCompleted: completed },
-      });
-      if (completed && !m.isCompleted) {
-        await grantXp(userId, m.rewardXp, `Mission: ${m.title}`);
-        await notify(
-          userId,
-          'Mission complete',
-          `${m.title} — +${m.rewardXp} XP`,
-          'mission'
-        );
-      }
-    }
+  if (SYNC_FROM_TOTAL_METRICS.has(metric)) {
+    await syncMissionProgressFromCount(userId, metric);
   } else {
     await progressMissions(userId, metric, 1);
   }
@@ -440,12 +616,28 @@ export async function processWebsiteAction(
   }
 }
 
+/** Record a leaderboard page visit for the daily mission. */
+export async function recordLeaderboardVisit() {
+  const user = await requireUser();
+  await ensurePlayerMissions(user.id);
+  if (!isSameLocalDay(user.lastLeaderboardAt)) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLeaderboardAt: new Date() },
+    });
+  }
+  await processWebsiteAction(user.id, 'daily_leaderboard');
+  return { ok: true as const };
+}
+
 /** Called when hub loads: missions + login progression + live unlocks. */
 export async function bootstrapHubProgression() {
   const user = await requireUser();
   await ensurePlayerMissions(user.id);
   await processWebsiteAction(user.id, 'logins');
   await updateLoginStreak(user.id);
+  // Daily login uses lastLoginAt (updated by streak) — sync after streak write.
+  await processWebsiteAction(user.id, 'daily_login');
   if (user.emailVerified) {
     await processWebsiteAction(user.id, 'email');
   }
@@ -465,6 +657,27 @@ export async function getLivePlayerState(userId?: string) {
     where: { userId: user.id, isRead: false },
   });
   const progress = getLevelProgress(user.xpProgress);
+  const today = missionPeriodKey();
+  const dailyMissions = await prisma.activeMission.findMany({
+    where: {
+      userId: user.id,
+      OR: [{ category: 'daily' }, { templateKey: { startsWith: 'daily_' } }],
+      periodKey: today,
+    },
+  });
+  // Fallback: if periodKey not yet backfilled, count any daily-category rows.
+  const dailyBoard =
+    dailyMissions.length > 0
+      ? dailyMissions
+      : await prisma.activeMission.findMany({
+          where: {
+            userId: user.id,
+            OR: [{ category: 'daily' }, { templateKey: { startsWith: 'daily_' } }],
+          },
+        });
+  const dailyCompleted = dailyBoard.filter((m) => m.isCompleted).length;
+  const dailyTotal = Math.max(dailyBoard.length, 5);
+
   return {
     id: user.id,
     xpProgress: user.xpProgress,
@@ -480,6 +693,8 @@ export async function getLivePlayerState(userId?: string) {
     xpForNextLevel: progress.xpForNextLevel,
     levelProgressPercent: progress.percent,
     unreadNotifications: unread,
+    dailyMissionsCompleted: dailyCompleted,
+    dailyMissionsTotal: dailyTotal,
   };
 }
 
@@ -765,6 +980,7 @@ export async function sendGlobalChat(body: string) {
     data: { userId: user.id, body: text },
   });
   await processWebsiteAction(user.id, 'chat');
+  await processWebsiteAction(user.id, 'daily_chat');
   return msg;
 }
 
@@ -789,10 +1005,33 @@ export async function getUnreadNotificationCount() {
   });
 }
 
+async function staffAwardMessage(
+  staffId: string,
+  staffName: string,
+  userId: string,
+  body: string
+) {
+  if (staffId === userId) return;
+  await prisma.message.create({
+    data: { senderId: staffId, receiverId: userId, body },
+  });
+}
+
 export async function adminAwardXp(userId: string, amount: number) {
   const staff = await requireStaff();
   await grantXp(userId, amount, 'Admin award');
-  await notify(userId, 'Admin award', `Staff granted you +${amount} XP.`, 'admin');
+  await notify(
+    userId,
+    'Admin award',
+    `${staff.username} granted you +${amount} XP.`,
+    'admin'
+  );
+  await staffAwardMessage(
+    staff.id,
+    staff.username,
+    userId,
+    `🎁 ${staff.username} awarded you +${amount} XP from the admin panel.`
+  );
   const target = await prisma.user.findUnique({ where: { id: userId } });
   const { writeAuditLog } = await import('@/lib/audit');
   await writeAuditLog({
@@ -812,7 +1051,18 @@ export async function adminAwardVp(userId: string, amount: number) {
     where: { id: userId },
     data: { vpCurrency: { increment: amount } },
   });
-  await notify(userId, 'Admin award', `Staff granted you +${amount} VP.`, 'admin');
+  await notify(
+    userId,
+    'Admin award',
+    `${staff.username} granted you +${amount} VP.`,
+    'admin'
+  );
+  await staffAwardMessage(
+    staff.id,
+    staff.username,
+    userId,
+    `🎁 ${staff.username} awarded you +${amount} VP from the admin panel.`
+  );
   const target = await prisma.user.findUnique({ where: { id: userId } });
   const { writeAuditLog } = await import('@/lib/audit');
   await writeAuditLog({
@@ -835,7 +1085,18 @@ export async function adminAwardBadge(userId: string, badgeKey: string) {
   });
   if (existing) return { ok: true, already: true };
   await prisma.userBadge.create({ data: { userId, badgeId: badge.id } });
-  await notify(userId, 'Badge awarded', `Staff awarded you: ${badge.title}`, 'badge');
+  await notify(
+    userId,
+    'Badge awarded',
+    `${staff.username} awarded you the badge: ${badge.title}`,
+    'badge'
+  );
+  await staffAwardMessage(
+    staff.id,
+    staff.username,
+    userId,
+    `🏅 ${staff.username} awarded you the badge “${badge.title}”.`
+  );
   const target = await prisma.user.findUnique({ where: { id: userId } });
   const { writeAuditLog } = await import('@/lib/audit');
   await writeAuditLog({

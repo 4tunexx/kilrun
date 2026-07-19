@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { getLeaderboard, sendFriendRequest } from '@/lib/social-actions';
+import { recordLeaderboardVisit } from '@/lib/progression-actions';
 import { getLevelFromXp } from '@/lib/progression';
 import { UserHoverCard } from '@/components/user-hover-card';
 import { useProfileNavigation } from '@/components/providers/profile-navigation-context';
@@ -19,6 +20,7 @@ export default function LeaderboardView() {
   const { openProfile } = useProfileNavigation();
 
   useEffect(() => {
+    void recordLeaderboardVisit().catch(() => {});
     getLeaderboard()
       .then(setRows)
       .finally(() => setLoading(false));

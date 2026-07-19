@@ -26,6 +26,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   getFriendRequests,
   getFriends,
+  getOutgoingFriendRequests,
   removeFriend,
   respondFriendRequest,
   searchPlayers,
@@ -65,15 +66,21 @@ export const FriendsList = ({
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [addingId, setAddingId] = useState<string | null>(null);
+  const [pendingOutIds, setPendingOutIds] = useState<Set<string>>(new Set());
   const { toast } = useToast();
   const { openProfile } = useProfileNavigation();
 
   const friendIds = useMemo(() => new Set(friends.map((f) => f.id)), [friends]);
 
   const reload = async () => {
-    const [f, r] = await Promise.all([getFriends(), getFriendRequests()]);
+    const [f, r, out] = await Promise.all([
+      getFriends(),
+      getFriendRequests(),
+      getOutgoingFriendRequests(),
+    ]);
     setFriends(f);
     setRequests(r);
+    setPendingOutIds(new Set(out.map((o) => o.userBId)));
     setLoading(false);
   };
 
@@ -201,6 +208,7 @@ export const FriendsList = ({
               searchResults.map((player) => {
                 const level = getLevelFromXp(player.xpProgress ?? 0);
                 const alreadyFriend = friendIds.has(player.id);
+                const pending = pendingOutIds.has(player.id);
                 return (
                   <div
                     key={player.id}
@@ -229,6 +237,10 @@ export const FriendsList = ({
                       <Button size="sm" variant="outline" disabled className="shrink-0">
                         Friends
                       </Button>
+                    ) : pending ? (
+                      <Button size="sm" variant="outline" disabled className="shrink-0">
+                        Pending
+                      </Button>
                     ) : (
                       <Button
                         size="sm"
@@ -237,8 +249,14 @@ export const FriendsList = ({
                         onClick={async () => {
                           setAddingId(player.id);
                           try {
-                            await sendFriendRequest(player.id);
-                            toast({ title: 'Friend request sent' });
+                            const result = await sendFriendRequest(player.id);
+                            if (result.status === 'pending') {
+                              setPendingOutIds((prev) => new Set(prev).add(player.id));
+                              toast({ title: 'Friend request sent' });
+                            } else if (result.status === 'accepted') {
+                              toast({ title: 'Already friends' });
+                              await reload();
+                            }
                           } catch {
                             toast({
                               title: 'Could not send request',

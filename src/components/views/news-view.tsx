@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, Newspaper } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { getNewsPosts } from '@/lib/social-actions';
+import { RichContent } from '@/components/ui/rich-content';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function NewsView() {
@@ -39,7 +40,15 @@ export default function NewsView() {
         <Newspaper className="w-5 h-5" /> Latest news
       </h2>
       {posts.map((post) => (
-        <Card key={post.id} className="bg-slate-800/40 border-slate-700/30">
+        <Card key={post.id} className="bg-slate-800/40 border-slate-700/30 overflow-hidden">
+          {post.headerImageUrl && expandedId !== post.id ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={post.headerImageUrl}
+              alt=""
+              className="w-full h-36 object-cover"
+            />
+          ) : null}
           <CardHeader className="pb-2">
             <CardTitle className="text-lg sm:text-xl">{post.title}</CardTitle>
             <CardDescription>
@@ -48,7 +57,12 @@ export default function NewsView() {
           </CardHeader>
           <CardContent>
             {expandedId === post.id ? (
-              <p className="text-slate-300 whitespace-pre-wrap mb-3">{post.body}</p>
+              <div className="mb-3">
+                <RichContent
+                  body={post.body}
+                  headerImageUrl={post.headerImageUrl}
+                />
+              </div>
             ) : null}
             <button
               className="text-sm text-primary hover:underline"

@@ -44,6 +44,7 @@ import {
   type LandingTopPlayer,
 } from '@/lib/actions';
 import { getLevelProgressPercent, getLevelFromXp } from '@/lib/progression';
+import { StoreItemPreview } from '@/components/store-item-preview';
 import {
   resolveHeaderLogo,
   resolveHubBackground,
@@ -396,21 +397,7 @@ export default function LandingPage() {
                         <Card className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 hover:border-primary/50 transition-all duration-300 hover:-translate-y-2 group shadow-lg flex flex-col items-center justify-start h-full">
                           <CardContent className="p-0 w-full">
                             <div className="relative aspect-square w-full overflow-hidden rounded-t-lg bg-slate-900/80">
-                              {item.imageUrl ? (
-                                <Image
-                                  src={item.imageUrl}
-                                  alt={item.itemName}
-                                  fill
-                                  className="object-cover group-hover:scale-110 transition-transform duration-300"
-                                  unoptimized={item.imageUrl.includes('placehold.co')}
-                                />
-                              ) : (
-                                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950">
-                                  <span className="text-4xl font-black uppercase tracking-wider text-slate-600">
-                                    {item.itemCategory.slice(0, 1)}
-                                  </span>
-                                </div>
-                              )}
+                              <StoreItemPreview item={item} />
                             </div>
                             <div className="p-4 w-full">
                               <p className="text-xs text-slate-400 uppercase">

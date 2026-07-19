@@ -6,9 +6,13 @@ import {
   Award,
   ClipboardList,
   FileText,
+  Flame,
   LayoutDashboard,
   Loader2,
   Medal,
+  Megaphone,
+  Minus,
+  Plus,
   ScrollText,
   Settings2,
   Shield,
@@ -35,6 +39,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ImageUploadField } from '@/components/ui/image-upload-field';
 import { RequirementTypeSelect } from '@/components/views/admin/requirement-type-select';
 import { CosmeticsStudio } from '@/components/views/admin/cosmetics-studio';
@@ -47,17 +52,23 @@ import {
   type HeaderLogoStyle,
 } from '@/lib/logo-style';
 import {
+  adminAdjustVp,
+  adminBroadcastAnnouncement,
+  adminClearFireSale,
   adminCreateGuide,
   adminCreateNews,
   adminDeleteStoreItem,
   adminListTickets,
   adminListUsers,
   adminSetBanned,
+  adminSetFireSale,
   adminSetMuted,
   adminSetUserRole,
   adminUpdateTicketStatus,
   adminUpsertStoreItem,
 } from '@/lib/social-actions';
+import { AdminUserDetailSheet } from '@/components/views/admin/admin-user-detail-sheet';
+import { RichPostEditor } from '@/components/ui/rich-post-editor';
 import { getStoreItems } from '@/lib/actions';
 import { broadcastSiteSettings } from '@/lib/site-branding-events';
 import {
@@ -80,7 +91,21 @@ import { normalizeLandingSlides, type LandingHeroSlide } from '@/lib/cosmetics';
 import { ACCOUNT_ROLES } from '@/lib/roles';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
 import { getRoleTextColorClass } from '@/lib/role-colors';
+import {
+  formatFireSaleCountdown,
+  getEffectiveVpPrice,
+  isFireSaleActive,
+} from '@/lib/shop-catalog';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
+
+const STORE_CATEGORIES = [
+  'Skins',
+  'Perks',
+  'Boosts',
+  'Emotes',
+  'Other',
+] as const;
 
 const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   dashboard: { label: 'Dashboard', icon: <LayoutDashboard className="h-3.5 w-3.5" /> },
@@ -143,12 +168,28 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
 
   const [itemForm, setItemForm] = useState({
     itemName: '',
-    itemCategory: 'Cosmetic',
+    itemCategory: 'Skins',
     itemSku: '',
     vpPrice: 100,
     imageUrl: '',
   });
-  const [newsForm, setNewsForm] = useState({ title: '', summary: '', body: '' });
+  const [fireSaleSelected, setFireSaleSelected] = useState<string[]>([]);
+  const [fireSaleForm, setFireSaleForm] = useState({
+    percent: 25,
+    durationHours: 24,
+  });
+  const [newsForm, setNewsForm] = useState({
+    title: '',
+    summary: '',
+    body: '',
+    headerImageUrl: '',
+  });
+  const [announceForm, setAnnounceForm] = useState({
+    title: '',
+    body: '',
+    alsoDm: true,
+  });
+  const [detailUserId, setDetailUserId] = useState<string | null>(null);
   const [guideForm, setGuideForm] = useState({
     title: '',
     summary: '',
@@ -178,17 +219,22 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
     vp: 100,
     badgeKey: '',
   });
-  const [missionForm, setMissionForm] = useState({
+  const emptyMissionForm = {
+    id: '' as string,
     key: '',
     title: '',
     description: '',
     rewardXp: 50,
     targetCount: 1,
     metric: 'runs',
+    missionKind: 'main' as 'main' | 'daily',
     category: 'game',
     iconImageUrl: '',
-  });
-  const [achForm, setAchForm] = useState({
+    isActive: true,
+  };
+  const [missionForm, setMissionForm] = useState(emptyMissionForm);
+  const emptyAchForm = {
+    id: '' as string,
     key: '',
     title: '',
     description: '',
@@ -198,8 +244,11 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
     xpReward: 50,
     icon: 'trophy',
     iconImageUrl: '',
-  });
-  const [badgeForm, setBadgeForm] = useState({
+    isActive: true,
+  };
+  const [achForm, setAchForm] = useState(emptyAchForm);
+  const emptyBadgeForm = {
+    id: '' as string,
     key: '',
     title: '',
     description: '',
@@ -208,7 +257,9 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
     metric: 'manual',
     targetCount: 1,
     iconImageUrl: '',
-  });
+    isActive: true,
+  };
+  const [badgeForm, setBadgeForm] = useState(emptyBadgeForm);
 
   const reload = async () => {
     const ticketStatus =
@@ -675,7 +726,8 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
               className="bg-slate-900/50 border-slate-700 max-w-md"
             />
             <p className="text-xs text-slate-500">
-              {users.length} player{users.length === 1 ? '' : 's'}
+              {users.length} player{users.length === 1 ? '' : 's'} · click a
+              player for inventory & purchases
             </p>
           </div>
           {users
@@ -691,7 +743,11 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
             .map((u) => (
             <Card key={u.id} className="bg-slate-800/40 border-slate-700/30">
               <CardContent className="py-3 flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
+                <button
+                  type="button"
+                  className="flex items-center gap-3 min-w-0 flex-1 text-left rounded-md hover:bg-slate-900/40 -m-1 p-1 transition"
+                  onClick={() => setDetailUserId(u.id)}
+                >
                   <Avatar>
                     <AvatarImage src={u.avatarUrl} />
                     <AvatarFallback>{u.username.charAt(0)}</AvatarFallback>
@@ -713,31 +769,85 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                       {u.isBanned ? ' · BANNED' : ''}
                     </p>
                   </div>
-                </div>
+                </button>
                 <div className="flex flex-wrap gap-2">
                   {isAdmin && (
-                    <Select
-                      value={u.role}
-                      disabled={busyKey === `role-${u.id}`}
-                      onValueChange={(role) =>
-                        runAction(`role-${u.id}`, async () => {
-                          await adminSetUserRole(u.id, role);
-                          toast({ title: `Set ${u.username} to ${role}` });
-                          await reload();
-                        })
-                      }
-                    >
-                      <SelectTrigger className="w-[140px] bg-slate-900/50 border-slate-700">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ACCOUNT_ROLES.map((role) => (
-                          <SelectItem key={role} value={role}>
-                            {role}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8 text-emerald-400 border-emerald-700/50"
+                        title="Give VP"
+                        disabled={busyKey === `vp-plus-${u.id}`}
+                        onClick={() => {
+                          const raw = window.prompt(
+                            `Give VP to ${u.username}`,
+                            '100'
+                          );
+                          const amount = Number(raw);
+                          if (!raw || !Number.isFinite(amount) || amount <= 0) return;
+                          void runAction(`vp-plus-${u.id}`, async () => {
+                            await adminAdjustVp(u.id, Math.floor(amount));
+                            toast({ title: `Gave +${Math.floor(amount)} VP` });
+                            await reload();
+                          });
+                        }}
+                      >
+                        {busyKey === `vp-plus-${u.id}` ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Plus className="w-4 h-4" />
+                        )}
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8 text-red-400 border-red-700/50"
+                        title="Take VP"
+                        disabled={busyKey === `vp-minus-${u.id}`}
+                        onClick={() => {
+                          const raw = window.prompt(
+                            `Remove VP from ${u.username}`,
+                            '100'
+                          );
+                          const amount = Number(raw);
+                          if (!raw || !Number.isFinite(amount) || amount <= 0) return;
+                          void runAction(`vp-minus-${u.id}`, async () => {
+                            await adminAdjustVp(u.id, -Math.floor(amount));
+                            toast({ title: `Removed ${Math.floor(amount)} VP` });
+                            await reload();
+                          });
+                        }}
+                      >
+                        {busyKey === `vp-minus-${u.id}` ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Minus className="w-4 h-4" />
+                        )}
+                      </Button>
+                      <Select
+                        value={u.role}
+                        disabled={busyKey === `role-${u.id}`}
+                        onValueChange={(role) =>
+                          runAction(`role-${u.id}`, async () => {
+                            await adminSetUserRole(u.id, role);
+                            toast({ title: `Set ${u.username} to ${role}` });
+                            await reload();
+                          })
+                        }
+                      >
+                        <SelectTrigger className="w-[140px] bg-slate-900/50 border-slate-700">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ACCOUNT_ROLES.map((role) => (
+                            <SelectItem key={role} value={role}>
+                              {role}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </>
                   )}
                   <Button
                     variant={u.isMuted ? 'default' : 'outline'}
@@ -789,6 +899,13 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
               </CardContent>
             </Card>
           ))}
+          <AdminUserDetailSheet
+            userId={detailUserId}
+            open={!!detailUserId}
+            onOpenChange={(o) => {
+              if (!o) setDetailUserId(null);
+            }}
+          />
         </TabsContent>
 
         <TabsContent value="moderation" className="mt-4 space-y-4">
@@ -911,7 +1028,65 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
         </TabsContent>
 
         {isAdmin && (
-          <TabsContent value="awards" className="mt-4">
+          <TabsContent value="awards" className="mt-4 space-y-4">
+            <Card className="bg-slate-800/40 border-slate-700/30">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Megaphone className="h-5 w-5 text-primary" />
+                  Site announcement
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-slate-400">
+                  Push a notification to every player. Optionally also send it as a
+                  direct message from your account.
+                </p>
+                <Input
+                  placeholder="Announcement title"
+                  value={announceForm.title}
+                  onChange={(e) =>
+                    setAnnounceForm((f) => ({ ...f, title: e.target.value }))
+                  }
+                  className="bg-slate-900/50 border-slate-700"
+                />
+                <Textarea
+                  placeholder="Message body…"
+                  value={announceForm.body}
+                  onChange={(e) =>
+                    setAnnounceForm((f) => ({ ...f, body: e.target.value }))
+                  }
+                  className="bg-slate-900/50 border-slate-700 min-h-[100px]"
+                />
+                <label className="flex items-center gap-2 text-sm text-slate-300">
+                  <Checkbox
+                    checked={announceForm.alsoDm}
+                    onCheckedChange={(v) =>
+                      setAnnounceForm((f) => ({ ...f, alsoDm: !!v }))
+                    }
+                  />
+                  Also send as direct message
+                </label>
+                <Button
+                  disabled={busyKey === 'broadcast'}
+                  onClick={() =>
+                    runAction('broadcast', async () => {
+                      const r = await adminBroadcastAnnouncement(announceForm);
+                      setAnnounceForm({ title: '', body: '', alsoDm: true });
+                      toast({
+                        title: 'Announcement sent',
+                        description: `${r.count} players notified`,
+                      });
+                    })
+                  }
+                >
+                  {busyKey === 'broadcast' && (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  )}
+                  Broadcast to all
+                </Button>
+              </CardContent>
+            </Card>
+
             <Card className="bg-slate-800/40 border-slate-700/30">
               <CardHeader>
                 <CardTitle>Award players</CardTitle>
@@ -1070,7 +1245,9 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
           <TabsContent value="missions" className="mt-4 space-y-4">
             <Card className="bg-slate-800/40 border-slate-700/30">
               <CardHeader>
-                <CardTitle>Add mission template</CardTitle>
+                <CardTitle>
+                  {missionForm.id ? 'Edit mission template' : 'Add mission template'}
+                </CardTitle>
               </CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-2">
                 {(['key', 'title', 'description'] as const).map((field) => (
@@ -1086,20 +1263,50 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   </div>
                 ))}
                 <div className="space-y-1">
-                  <Label>Category</Label>
+                  <Label>Mission type</Label>
                   <Select
-                    value={missionForm.category}
-                    onValueChange={(v) => setMissionForm((f) => ({ ...f, category: v }))}
+                    value={missionForm.missionKind}
+                    onValueChange={(v) =>
+                      setMissionForm((f) => ({
+                        ...f,
+                        missionKind: v as 'main' | 'daily',
+                        category: v === 'daily' ? 'daily' : f.category === 'daily' ? 'game' : f.category,
+                        metric: v === 'daily' ? 'daily_login' : f.metric,
+                      }))
+                    }
                   >
                     <SelectTrigger className="bg-slate-900/50 border-slate-700">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="game">In-Game</SelectItem>
-                      <SelectItem value="website">Website</SelectItem>
+                      <SelectItem value="main">Main mission</SelectItem>
+                      <SelectItem value="daily">Daily mission</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                {missionForm.missionKind === 'main' && (
+                  <div className="space-y-1">
+                    <Label>Board</Label>
+                    <Select
+                      value={
+                        missionForm.category === 'daily'
+                          ? 'game'
+                          : missionForm.category
+                      }
+                      onValueChange={(v) =>
+                        setMissionForm((f) => ({ ...f, category: v }))
+                      }
+                    >
+                      <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="game">In-Game</SelectItem>
+                        <SelectItem value="website">Website</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-1 sm:col-span-2">
                   <Label>Requirement type</Label>
                   <RequirementTypeSelect
@@ -1141,48 +1348,98 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   onChange={(v) => setMissionForm((f) => ({ ...f, iconImageUrl: v }))}
                   className="space-y-1 sm:col-span-2"
                 />
-                <Button
-                  className="sm:col-span-2"
-                  disabled={busyKey === 'create-mission'}
-                  onClick={() =>
-                    runAction('create-mission', async () => {
-                      await adminUpsertMissionTemplate(missionForm);
-                      toast({ title: 'Mission saved' });
-                      await reload();
-                    })
-                  }
-                >
-                  {busyKey === 'create-mission' && (
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                <div className="sm:col-span-2 flex flex-wrap gap-2">
+                  <Button
+                    disabled={busyKey === 'create-mission'}
+                    onClick={() =>
+                      runAction('create-mission', async () => {
+                        const category =
+                          missionForm.missionKind === 'daily'
+                            ? 'daily'
+                            : missionForm.category;
+                        await adminUpsertMissionTemplate({
+                          id: missionForm.id || undefined,
+                          key: missionForm.key,
+                          title: missionForm.title,
+                          description: missionForm.description,
+                          rewardXp: missionForm.rewardXp,
+                          targetCount: missionForm.targetCount,
+                          metric: missionForm.metric,
+                          category,
+                          isActive: missionForm.isActive,
+                          iconImageUrl: missionForm.iconImageUrl || undefined,
+                        });
+                        setMissionForm(emptyMissionForm);
+                        toast({
+                          title: missionForm.id ? 'Mission updated' : 'Mission created',
+                        });
+                        await reload();
+                      })
+                    }
+                  >
+                    {busyKey === 'create-mission' && (
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    )}
+                    {missionForm.id ? 'Save changes' : 'Create mission'}
+                  </Button>
+                  {missionForm.id && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setMissionForm(emptyMissionForm)}
+                    >
+                      Cancel edit
+                    </Button>
                   )}
-                  Create mission
-                </Button>
+                </div>
               </CardContent>
             </Card>
             <div className="space-y-2">
               {missions.map((m) => (
                 <Card key={m.id} className="bg-slate-800/40 border-slate-700/30">
                   <CardContent className="py-3 flex justify-between gap-2 flex-wrap items-center">
-                    {m.iconImageUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={m.iconImageUrl}
-                        alt=""
-                        className="w-8 h-8 rounded object-cover shrink-0"
-                      />
-                    )}
-                    <div>
-                      <p className="font-semibold">
-                        {m.title}{' '}
-                        <Badge variant="outline" className="ml-1">
-                          {m.category}
-                        </Badge>
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        {m.key} · {m.metric} · target {m.targetCount} · +{m.rewardXp}{' '}
-                        XP · {m.isActive ? 'active' : 'off'}
-                      </p>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {m.iconImageUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.iconImageUrl}
+                          alt=""
+                          className="w-8 h-8 rounded object-cover shrink-0"
+                        />
+                      )}
+                      <div>
+                        <p className="font-semibold">
+                          {m.title}{' '}
+                          <Badge variant="outline" className="ml-1">
+                            {m.category}
+                          </Badge>
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {m.key} · {m.metric} · target {m.targetCount} · +{m.rewardXp}{' '}
+                          XP · {m.isActive ? 'active' : 'off'}
+                        </p>
+                      </div>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setMissionForm({
+                          id: m.id,
+                          key: m.key,
+                          title: m.title,
+                          description: m.description,
+                          rewardXp: m.rewardXp,
+                          targetCount: m.targetCount,
+                          metric: m.metric,
+                          missionKind: m.category === 'daily' ? 'daily' : 'main',
+                          category: m.category === 'daily' ? 'game' : m.category,
+                          iconImageUrl: m.iconImageUrl || '',
+                          isActive: m.isActive,
+                        })
+                      }
+                    >
+                      Edit
+                    </Button>
                   </CardContent>
                 </Card>
               ))}
@@ -1194,7 +1451,9 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
           <TabsContent value="achievements" className="mt-4 space-y-4">
             <Card className="bg-slate-800/40 border-slate-700/30">
               <CardHeader>
-                <CardTitle>Add achievement</CardTitle>
+                <CardTitle>
+                  {achForm.id ? 'Edit achievement' : 'Add achievement'}
+                </CardTitle>
               </CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-2">
                 {(['key', 'title', 'description', 'icon'] as const).map((field) => (
@@ -1221,6 +1480,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                     <SelectContent>
                       <SelectItem value="game">In-Game</SelectItem>
                       <SelectItem value="website">Website</SelectItem>
+                      <SelectItem value="cosmetics">Cosmetics</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1265,45 +1525,86 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   onChange={(v) => setAchForm((f) => ({ ...f, iconImageUrl: v }))}
                   className="space-y-1 sm:col-span-2"
                 />
-                <Button
-                  className="sm:col-span-2"
-                  disabled={busyKey === 'create-achievement'}
-                  onClick={() =>
-                    runAction('create-achievement', async () => {
-                      await adminUpsertAchievement(achForm);
-                      toast({ title: 'Achievement saved' });
-                      await reload();
-                    })
-                  }
-                >
-                  {busyKey === 'create-achievement' && (
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                <div className="sm:col-span-2 flex flex-wrap gap-2">
+                  <Button
+                    disabled={busyKey === 'create-achievement'}
+                    onClick={() =>
+                      runAction('create-achievement', async () => {
+                        await adminUpsertAchievement({
+                          ...achForm,
+                          id: achForm.id || undefined,
+                          iconImageUrl: achForm.iconImageUrl || undefined,
+                        });
+                        setAchForm(emptyAchForm);
+                        toast({
+                          title: achForm.id
+                            ? 'Achievement updated'
+                            : 'Achievement created',
+                        });
+                        await reload();
+                      })
+                    }
+                  >
+                    {busyKey === 'create-achievement' && (
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    )}
+                    {achForm.id ? 'Save changes' : 'Create achievement'}
+                  </Button>
+                  {achForm.id && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setAchForm(emptyAchForm)}
+                    >
+                      Cancel edit
+                    </Button>
                   )}
-                  Create achievement
-                </Button>
+                </div>
               </CardContent>
             </Card>
             <div className="space-y-2">
               {achievements.map((a) => (
                 <Card key={a.id} className="bg-slate-800/40 border-slate-700/30">
-                  <CardContent className="py-3 flex items-center gap-3">
-                    {a.iconImageUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={a.iconImageUrl}
-                        alt=""
-                        className="w-8 h-8 rounded object-cover shrink-0"
-                      />
-                    )}
-                    <div>
-                      <p className="font-semibold">
-                        {a.title}{' '}
-                        <Badge variant="outline">{a.category}</Badge>
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        {a.key} · {a.metric} ≥ {a.targetCount} · +{a.xpReward} XP
-                      </p>
+                  <CardContent className="py-3 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {a.iconImageUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={a.iconImageUrl}
+                          alt=""
+                          className="w-8 h-8 rounded object-cover shrink-0"
+                        />
+                      )}
+                      <div>
+                        <p className="font-semibold">
+                          {a.title}{' '}
+                          <Badge variant="outline">{a.category}</Badge>
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {a.key} · {a.metric} ≥ {a.targetCount} · +{a.xpReward} XP
+                        </p>
+                      </div>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setAchForm({
+                          id: a.id,
+                          key: a.key,
+                          title: a.title,
+                          description: a.description,
+                          category: a.category,
+                          metric: a.metric,
+                          targetCount: a.targetCount,
+                          xpReward: a.xpReward,
+                          icon: a.icon || 'trophy',
+                          iconImageUrl: a.iconImageUrl || '',
+                          isActive: a.isActive,
+                        })
+                      }
+                    >
+                      Edit
+                    </Button>
                   </CardContent>
                 </Card>
               ))}
@@ -1315,7 +1616,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
           <TabsContent value="badges" className="mt-4 space-y-4">
             <Card className="bg-slate-800/40 border-slate-700/30">
               <CardHeader>
-                <CardTitle>Add badge</CardTitle>
+                <CardTitle>{badgeForm.id ? 'Edit badge' : 'Add badge'}</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-2">
                 {(['key', 'title', 'description', 'icon'] as const).map((field) => (
@@ -1355,8 +1656,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                     onValueChange={(v) => setBadgeForm((f) => ({ ...f, metric: v }))}
                   />
                   <p className="text-xs text-slate-500">
-                    Use &quot;manual&quot; (type it directly) for staff-only awards with no
-                    automatic unlock.
+                    Use &quot;manual&quot; for staff-only awards with no automatic unlock.
                   </p>
                 </div>
                 <div className="space-y-1">
@@ -1379,43 +1679,83 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   onChange={(v) => setBadgeForm((f) => ({ ...f, iconImageUrl: v }))}
                   className="space-y-1 sm:col-span-2"
                 />
-                <Button
-                  className="sm:col-span-2"
-                  disabled={busyKey === 'create-badge'}
-                  onClick={() =>
-                    runAction('create-badge', async () => {
-                      await adminUpsertBadge(badgeForm);
-                      toast({ title: 'Badge saved' });
-                      await reload();
-                    })
-                  }
-                >
-                  {busyKey === 'create-badge' && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                  Create badge
-                </Button>
+                <div className="sm:col-span-2 flex flex-wrap gap-2">
+                  <Button
+                    disabled={busyKey === 'create-badge'}
+                    onClick={() =>
+                      runAction('create-badge', async () => {
+                        await adminUpsertBadge({
+                          ...badgeForm,
+                          id: badgeForm.id || undefined,
+                          iconImageUrl: badgeForm.iconImageUrl || undefined,
+                        });
+                        setBadgeForm(emptyBadgeForm);
+                        toast({
+                          title: badgeForm.id ? 'Badge updated' : 'Badge created',
+                        });
+                        await reload();
+                      })
+                    }
+                  >
+                    {busyKey === 'create-badge' && (
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    )}
+                    {badgeForm.id ? 'Save changes' : 'Create badge'}
+                  </Button>
+                  {badgeForm.id && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setBadgeForm(emptyBadgeForm)}
+                    >
+                      Cancel edit
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
             <div className="space-y-2">
               {badges.map((b) => (
                 <Card key={b.id} className="bg-slate-800/40 border-slate-700/30">
-                  <CardContent className="py-3 flex items-center gap-3">
-                    {b.iconImageUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={b.iconImageUrl}
-                        alt=""
-                        className="w-8 h-8 rounded object-cover shrink-0"
-                      />
-                    )}
-                    <div>
-                      <p className="font-semibold">
-                        {b.title}{' '}
-                        <Badge variant="outline">{b.rarity}</Badge>
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        {b.key} · {b.metric} ≥ {b.targetCount}
-                      </p>
+                  <CardContent className="py-3 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {b.iconImageUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={b.iconImageUrl}
+                          alt=""
+                          className="w-8 h-8 rounded object-cover shrink-0"
+                        />
+                      )}
+                      <div>
+                        <p className="font-semibold">
+                          {b.title}{' '}
+                          <Badge variant="outline">{b.rarity}</Badge>
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {b.key} · {b.metric} ≥ {b.targetCount}
+                        </p>
+                      </div>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setBadgeForm({
+                          id: b.id,
+                          key: b.key,
+                          title: b.title,
+                          description: b.description,
+                          rarity: b.rarity,
+                          icon: b.icon || 'award',
+                          metric: b.metric,
+                          targetCount: b.targetCount,
+                          iconImageUrl: b.iconImageUrl || '',
+                          isActive: b.isActive,
+                        })
+                      }
+                    >
+                      Edit
+                    </Button>
                   </CardContent>
                 </Card>
               ))}
@@ -1514,6 +1854,136 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
 
             <Card className="bg-slate-800/40 border-slate-700/30">
               <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Flame className="h-5 w-5 text-orange-400" />
+                  Fire Sale
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-slate-400">
+                  Select catalog items below, set a discount and duration. Shop cards get a
+                  fire badge, orange outline, and live countdown.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label>Discount %</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={90}
+                      value={fireSaleForm.percent}
+                      onChange={(e) =>
+                        setFireSaleForm((f) => ({
+                          ...f,
+                          percent: Number(e.target.value) || 0,
+                        }))
+                      }
+                      className="bg-slate-900/50 border-slate-700"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Duration (hours)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={720}
+                      value={fireSaleForm.durationHours}
+                      onChange={(e) =>
+                        setFireSaleForm((f) => ({
+                          ...f,
+                          durationHours: Number(e.target.value) || 0,
+                        }))
+                      }
+                      className="bg-slate-900/50 border-slate-700"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Selected</Label>
+                    <p className="h-10 flex items-center text-sm text-slate-300">
+                      {fireSaleSelected.length} item
+                      {fireSaleSelected.length === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={
+                      busyKey === 'fire-sale' || fireSaleSelected.length === 0
+                    }
+                    className="bg-orange-600 hover:bg-orange-500"
+                    onClick={() =>
+                      runAction('fire-sale', async () => {
+                        const r = await adminSetFireSale({
+                          itemIds: fireSaleSelected,
+                          percent: fireSaleForm.percent,
+                          durationHours: fireSaleForm.durationHours,
+                        });
+                        toast({
+                          title: 'Fire sale live',
+                          description: `${r.count} items · −${r.percent}%`,
+                        });
+                        setFireSaleSelected([]);
+                        await reload();
+                      })
+                    }
+                  >
+                    {busyKey === 'fire-sale' && (
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    )}
+                    Start fire sale
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={
+                      busyKey === 'clear-fire-selected' ||
+                      fireSaleSelected.length === 0
+                    }
+                    onClick={() =>
+                      runAction('clear-fire-selected', async () => {
+                        const r = await adminClearFireSale(fireSaleSelected);
+                        toast({ title: `Cleared sale on ${r.count} items` });
+                        setFireSaleSelected([]);
+                        await reload();
+                      })
+                    }
+                  >
+                    Clear selected
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={busyKey === 'clear-fire-all'}
+                    onClick={() =>
+                      runAction('clear-fire-all', async () => {
+                        const r = await adminClearFireSale();
+                        toast({ title: `Cleared ${r.count} fire sales` });
+                        setFireSaleSelected([]);
+                        await reload();
+                      })
+                    }
+                  >
+                    Clear all fire sales
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setFireSaleSelected(
+                        fireSaleSelected.length === items.length
+                          ? []
+                          : items.map((i) => i.id)
+                      )
+                    }
+                  >
+                    {fireSaleSelected.length === items.length
+                      ? 'Deselect all'
+                      : 'Select all'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-slate-800/40 border-slate-700/30">
+              <CardHeader>
                 <CardTitle>Add store item</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-2">
@@ -1539,13 +2009,27 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                 </div>
                 <div className="space-y-1">
                   <Label>Category</Label>
-                  <Input
+                  <Select
                     value={itemForm.itemCategory}
-                    onChange={(e) =>
-                      setItemForm((f) => ({ ...f, itemCategory: e.target.value }))
+                    onValueChange={(v) =>
+                      setItemForm((f) => ({ ...f, itemCategory: v }))
                     }
-                    className="bg-slate-900/50 border-slate-700"
-                  />
+                  >
+                    <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STORE_CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-slate-500">
+                    Banners, frames, and nickname effects are created in Cosmetics Studio
+                    above.
+                  </p>
                 </div>
                 <div className="space-y-1">
                   <Label>VP price</Label>
@@ -1578,7 +2062,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                       });
                       setItemForm({
                         itemName: '',
-                        itemCategory: 'Cosmetic',
+                        itemCategory: 'Skins',
                         itemSku: '',
                         vpPrice: 100,
                         imageUrl: '',
@@ -1596,11 +2080,34 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
 
             <div className="space-y-2">
               {items.map((item) => {
-                const banner = item.bannerConfig ? normalizeBannerConfig(item.bannerConfig) : null;
+                const banner = item.bannerConfig
+                  ? normalizeBannerConfig(item.bannerConfig)
+                  : null;
+                const onFire = isFireSaleActive(item);
+                const salePrice = getEffectiveVpPrice(item);
+                const checked = fireSaleSelected.includes(item.id);
                 return (
-                  <Card key={item.id} className="bg-slate-800/40 border-slate-700/30">
+                  <Card
+                    key={item.id}
+                    className={cn(
+                      'bg-slate-800/40 border-slate-700/30',
+                      onFire &&
+                        'border-orange-500/60 shadow-[0_0_0_1px_rgba(249,115,22,0.25)]'
+                    )}
+                  >
                     <CardContent className="py-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-3 min-w-0">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(v) => {
+                            setFireSaleSelected((prev) =>
+                              v
+                                ? [...prev, item.id]
+                                : prev.filter((id) => id !== item.id)
+                            );
+                          }}
+                          aria-label={`Select ${item.itemName}`}
+                        />
                         {banner ? (
                           <div
                             className={`w-12 h-8 rounded shrink-0 ${bannerAnimationClass(banner)}`}
@@ -1615,16 +2122,43 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                           />
                         ) : null}
                         <div className="min-w-0">
-                          <p className="font-semibold truncate">
-                            {item.itemName}{' '}
+                          <p className="font-semibold truncate flex items-center gap-1.5 flex-wrap">
+                            {item.itemName}
                             {item.cosmeticSlot && (
-                              <Badge variant="outline" className="ml-1 capitalize text-[10px]">
+                              <Badge
+                                variant="outline"
+                                className="capitalize text-[10px]"
+                              >
                                 {item.cosmeticSlot}
+                              </Badge>
+                            )}
+                            {onFire && (
+                              <Badge className="bg-orange-600 text-[10px] gap-1">
+                                <Flame className="h-3 w-3" />
+                                −{item.fireSalePercent}%
                               </Badge>
                             )}
                           </p>
                           <p className="text-xs text-slate-400 truncate">
-                            {item.itemSku} · {item.vpPrice} VP · {item.itemCategory}
+                            {item.itemSku} ·{' '}
+                            {onFire ? (
+                              <>
+                                <span className="text-orange-400 font-semibold">
+                                  {salePrice} VP
+                                </span>{' '}
+                                <span className="line-through">{item.vpPrice}</span>
+                              </>
+                            ) : (
+                              <>{item.vpPrice} VP</>
+                            )}{' '}
+                            · {item.itemCategory}
+                            {onFire && item.fireSaleEndsAt ? (
+                              <>
+                                {' '}
+                                · ends in{' '}
+                                {formatFireSaleCountdown(item.fireSaleEndsAt)}
+                              </>
+                            ) : null}
                           </p>
                         </div>
                       </div>
@@ -1635,6 +2169,9 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                         onClick={() =>
                           runAction(`delete-item-${item.id}`, async () => {
                             await adminDeleteStoreItem(item.id);
+                            setFireSaleSelected((prev) =>
+                              prev.filter((id) => id !== item.id)
+                            );
                             toast({ title: `Deleted ${item.itemName}` });
                             await reload();
                           })
@@ -1674,18 +2211,29 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   }
                   className="bg-slate-900/50 border-slate-700"
                 />
-                <Textarea
-                  placeholder="Body"
-                  value={newsForm.body}
-                  onChange={(e) => setNewsForm((f) => ({ ...f, body: e.target.value }))}
-                  className="bg-slate-900/50 border-slate-700"
+                <RichPostEditor
+                  body={newsForm.body}
+                  onBodyChange={(body) => setNewsForm((f) => ({ ...f, body }))}
+                  headerImageUrl={newsForm.headerImageUrl}
+                  onHeaderImageChange={(headerImageUrl) =>
+                    setNewsForm((f) => ({ ...f, headerImageUrl }))
+                  }
+                  placeholder="Write the news article…"
                 />
                 <Button
                   disabled={busyKey === 'publish-news'}
                   onClick={() =>
                     runAction('publish-news', async () => {
-                      await adminCreateNews(newsForm);
-                      setNewsForm({ title: '', summary: '', body: '' });
+                      await adminCreateNews({
+                        ...newsForm,
+                        headerImageUrl: newsForm.headerImageUrl || undefined,
+                      });
+                      setNewsForm({
+                        title: '',
+                        summary: '',
+                        body: '',
+                        headerImageUrl: '',
+                      });
                       toast({ title: 'News published' });
                     })
                   }

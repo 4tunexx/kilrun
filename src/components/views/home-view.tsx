@@ -11,6 +11,10 @@ import {
   Newspaper,
   MessageCircle,
   Send,
+  ChevronDown,
+  ChevronUp,
+  MessagesSquare,
+  Target,
 } from 'lucide-react';
 import AnimatedCounter from '@/components/ui/animated-counter';
 import { Progress } from '@/components/ui/progress';
@@ -29,7 +33,7 @@ import {
   sendGlobalChat,
   getSiteSettings,
 } from '@/lib/progression-actions';
-import { getNewsPosts } from '@/lib/social-actions';
+import { getForumPosts, getNewsPosts } from '@/lib/social-actions';
 import type { ActiveMission } from '@/generated/prisma';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -43,6 +47,9 @@ import {
   normalizeHeaderLogoStyle,
   type HeaderLogoStyle,
 } from '@/lib/logo-style';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
+
+const CHAT_COLLAPSE_KEY = 'kilrun.chatCollapsed';
 
 const PANEL =
   'bg-slate-900/60 backdrop-blur-md border border-slate-700/30';
@@ -69,11 +76,14 @@ export default function HomeView({
   headerLogoStyle: headerLogoStyleProp,
   homeHeroImage,
 }: HomeViewProps) {
-  const [missions, setMissions] = useState<ActiveMission[]>([]);
+  const [dailyMissions, setDailyMissions] = useState<ActiveMission[]>([]);
+  const [mainMissions, setMainMissions] = useState<ActiveMission[]>([]);
   const [summary, setSummary] = useState<StatsSummary | null>(null);
   const [news, setNews] = useState<any[]>([]);
+  const [forumTopics, setForumTopics] = useState<any[]>([]);
   const [chat, setChat] = useState<any[]>([]);
   const [chatEnabled, setChatEnabled] = useState(true);
+  const [chatCollapsed, setChatCollapsed] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -94,6 +104,17 @@ export default function HomeView({
   }, []);
 
   useEffect(() => {
+    try {
+      setChatCollapsed(
+        typeof window !== 'undefined' &&
+          localStorage.getItem(CHAT_COLLAPSE_KEY) === '1'
+      );
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
     let isMounted = true;
     Promise.all([
       getActiveMissions(userId),
@@ -101,11 +122,19 @@ export default function HomeView({
       getNewsPosts(),
       getGlobalChat(40),
       getSiteSettings(),
-    ]).then(([m, s, n, c, settings]) => {
+      getForumPosts(5),
+    ]).then(([m, s, n, c, settings, forum]) => {
       if (!isMounted) return;
-      setMissions(m.slice(0, 4));
+      const isDaily = (mission: ActiveMission) =>
+        (mission as { category?: string }).category === 'daily' ||
+        mission.templateKey.startsWith('daily_');
+      const daily = m.filter(isDaily);
+      const main = m.filter((mission) => !isDaily(mission));
+      setDailyMissions(daily.slice(0, 5));
+      setMainMissions(main);
       setSummary(s);
       setNews(n.slice(0, 3));
+      setForumTopics(forum.slice(0, 5));
       setChat([...c].reverse());
       setChatEnabled(settings.chatEnabled);
       // SiteSettings first — prop is only a fallback while settings load.
@@ -252,14 +281,44 @@ export default function HomeView({
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card className={PANEL}>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="flex items-center gap-2">
                 <MessageCircle className="w-5 h-5 text-primary" /> Live Chat
               </CardTitle>
+              {chatEnabled && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-xs text-slate-400"
+                  onClick={() => {
+                    const next = !chatCollapsed;
+                    setChatCollapsed(next);
+                    try {
+                      localStorage.setItem(CHAT_COLLAPSE_KEY, next ? '1' : '0');
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                >
+                  {chatCollapsed ? (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5 mr-1" /> Show
+                    </>
+                  ) : (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5 mr-1" /> Hide
+                    </>
+                  )}
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-3">
               {!chatEnabled ? (
                 <p className="text-slate-400 text-sm">Chat is disabled by staff.</p>
+              ) : chatCollapsed ? (
+                <p className="text-slate-500 text-sm py-2">
+                  Live chat hidden — click Show to reopen.
+                </p>
               ) : (
                 <>
                   <div className="h-56 overflow-y-auto space-y-2 rounded-lg bg-slate-900/40 p-3 border border-slate-700/40">
@@ -270,12 +329,13 @@ export default function HomeView({
                     ) : (
                       chat.map((msg) => (
                         <div key={msg.id} className="flex gap-2 items-start">
-                          <Avatar className="h-7 w-7">
-                            <AvatarImage src={msg.user.avatarUrl} />
-                            <AvatarFallback>
-                              {msg.user.username.charAt(0)}
-                            </AvatarFallback>
-                          </Avatar>
+                          <PlayerAvatar
+                            src={msg.user.avatarUrl}
+                            name={msg.user.username}
+                            isVip={msg.user.isVip}
+                            className="h-7 w-7"
+                            crownClassName="h-3.5 w-3.5 -top-0.5 -right-0.5"
+                          />
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
                               <UserHoverCard
@@ -287,7 +347,7 @@ export default function HomeView({
                                 {msg.user.username}
                               </UserHoverCard>
                               {msg.user.isVip && (
-                                <Badge className="h-4 text-[10px] bg-yellow-500 text-black">
+                                <Badge className="h-4 text-[10px] bg-orange-500 text-black">
                                   VIP
                                 </Badge>
                               )}
@@ -330,18 +390,37 @@ export default function HomeView({
           </Card>
 
           <Card className={PANEL}>
-            <CardHeader>
-              <CardTitle>Active Missions</CardTitle>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle>Daily Missions</CardTitle>
+                <span className="text-xs font-semibold text-emerald-400 tabular-nums">
+                  {dailyMissions.filter((m) => m.isCompleted).length}/
+                  {dailyMissions.length || 5}
+                </span>
+              </div>
+              <Progress
+                value={
+                  dailyMissions.length
+                    ? Math.round(
+                        (dailyMissions.filter((m) => m.isCompleted).length /
+                          dailyMissions.length) *
+                          100
+                      )
+                    : 0
+                }
+                tone="green"
+                className="h-2 mt-2"
+              />
             </CardHeader>
             <CardContent className="space-y-4">
               {isLoading ? (
                 <div className="flex items-center justify-center py-8 text-slate-400">
                   <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...
                 </div>
-              ) : missions.length === 0 ? (
-                <p className="text-slate-400 text-sm">No missions yet.</p>
+              ) : dailyMissions.length === 0 ? (
+                <p className="text-slate-400 text-sm">No daily missions yet.</p>
               ) : (
-                missions.map((mission) => {
+                dailyMissions.map((mission) => {
                   const progress = Math.min(
                     Math.round(
                       (mission.currentCount / Math.max(mission.targetCount, 1)) * 100
@@ -360,13 +439,111 @@ export default function HomeView({
                         </span>
                         <span className="text-yellow-400">+{mission.rewardXp} XP</span>
                       </div>
-                      <Progress value={progress} className="h-2" />
+                      <Progress value={progress} tone="green" className="h-2" />
                       <p className="text-xs text-slate-500 mt-1">
                         {mission.currentCount}/{mission.targetCount}
                       </p>
                     </div>
                   );
                 })
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card className={PANEL}>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="w-5 h-5" /> Main Missions
+                </CardTitle>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs"
+                  onClick={() => onNavigate?.('missions')}
+                >
+                  View all
+                </Button>
+              </div>
+              <Progress
+                value={
+                  mainMissions.length
+                    ? Math.round(
+                        (mainMissions.filter((m) => m.isCompleted).length /
+                          mainMissions.length) *
+                          100
+                      )
+                    : 0
+                }
+                className="h-2.5 mt-2"
+              />
+              <p className="text-xs text-slate-500 mt-1 tabular-nums">
+                {mainMissions.filter((m) => m.isCompleted).length}/
+                {mainMissions.length} complete
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {mainMissions.slice(0, 4).map((m) => (
+                <div
+                  key={m.id}
+                  className="flex justify-between text-sm gap-2"
+                >
+                  <span
+                    className={
+                      m.isCompleted
+                        ? 'line-through text-slate-500 truncate'
+                        : 'truncate'
+                    }
+                  >
+                    {m.title}
+                  </span>
+                  <span className="text-xs text-slate-500 shrink-0">
+                    {m.currentCount}/{m.targetCount}
+                  </span>
+                </div>
+              ))}
+              {mainMissions.length === 0 && (
+                <p className="text-sm text-slate-500">No main missions yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className={PANEL}>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="flex items-center gap-2">
+                  <MessagesSquare className="w-5 h-5" /> Latest Forum
+                </CardTitle>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs"
+                  onClick={() => onNavigate?.('community')}
+                >
+                  Forums
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {forumTopics.length === 0 ? (
+                <p className="text-sm text-slate-500">No topics yet.</p>
+              ) : (
+                forumTopics.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => onNavigate?.('community')}
+                    className="w-full text-left rounded-md border border-slate-700/30 bg-slate-900/30 px-3 py-2 hover:border-primary/40 transition"
+                  >
+                    <p className="text-sm font-medium truncate">{t.title}</p>
+                    <p className="text-[11px] text-slate-500 capitalize">
+                      {t.category} · {t.author?.username} ·{' '}
+                      {t._count?.replies ?? 0} replies
+                    </p>
+                  </button>
+                ))
               )}
             </CardContent>
           </Card>

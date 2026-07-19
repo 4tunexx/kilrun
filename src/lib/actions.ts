@@ -26,16 +26,86 @@ export async function getSessionUser() {
   return prisma.user.findUnique({ where: { steamId } });
 }
 
+/** Backfill StoreItem docs created before createdAt / sale fields existed. */
+async function healStoreItemDefaults() {
+  await prisma.$runCommandRaw({
+    update: 'StoreItem',
+    updates: [
+      {
+        q: {},
+        u: [
+          {
+            $set: {
+              createdAt: {
+                $cond: [
+                  { $eq: [{ $type: '$createdAt' }, 'date'] },
+                  '$createdAt',
+                  '$$NOW',
+                ],
+              },
+              purchaseCount: {
+                $cond: [
+                  {
+                    $in: [
+                      { $type: '$purchaseCount' },
+                      ['int', 'long', 'double'],
+                    ],
+                  },
+                  { $toInt: '$purchaseCount' },
+                  0,
+                ],
+              },
+              fireSalePercent: {
+                $cond: [
+                  {
+                    $in: [
+                      { $type: '$fireSalePercent' },
+                      ['int', 'long', 'double'],
+                    ],
+                  },
+                  { $toInt: '$fireSalePercent' },
+                  0,
+                ],
+              },
+            },
+          },
+        ],
+        multi: true,
+      },
+    ],
+  });
+}
+
 /** Live item-shop catalog, replacing the old hardcoded `shopItems` array. */
 export async function getStoreItems() {
-  const items = await prisma.storeItem.findMany({
-    where: { isAvailable: true },
-    orderBy: { vpPrice: 'asc' },
-  });
-  return items.map((item) => ({
-    ...item,
-    imageUrl: resolveShopImageUrl(item.imageUrl),
-  }));
+  try {
+    const items = await prisma.storeItem.findMany({
+      where: { isAvailable: true },
+      orderBy: { vpPrice: 'asc' },
+    });
+    return items.map((item) => ({
+      ...item,
+      imageUrl: resolveShopImageUrl(item.imageUrl),
+    }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (
+      message.includes('createdAt') ||
+      message.includes('purchaseCount') ||
+      message.includes('fireSalePercent')
+    ) {
+      await healStoreItemDefaults();
+      const items = await prisma.storeItem.findMany({
+        where: { isAvailable: true },
+        orderBy: { vpPrice: 'asc' },
+      });
+      return items.map((item) => ({
+        ...item,
+        imageUrl: resolveShopImageUrl(item.imageUrl),
+      }));
+    }
+    throw error;
+  }
 }
 
 export type LandingStats = {
@@ -61,6 +131,9 @@ export type LandingStoreItem = {
   itemCategory: string;
   vpPrice: number;
   imageUrl: string | null;
+  cosmeticSlot: string | null;
+  bannerConfig: unknown;
+  cosmeticConfig: unknown;
 };
 
 /**
@@ -115,7 +188,7 @@ export async function getLandingPageData(): Promise<{
     }),
     prisma.storeItem.findMany({
       where: { isAvailable: true },
-      orderBy: { vpPrice: 'asc' },
+      orderBy: [{ purchaseCount: 'desc' }, { vpPrice: 'asc' }],
       take: 6,
       select: {
         id: true,
@@ -123,14 +196,34 @@ export async function getLandingPageData(): Promise<{
         itemCategory: true,
         vpPrice: true,
         imageUrl: true,
+        cosmeticSlot: true,
+        bannerConfig: true,
+        cosmeticConfig: true,
       },
     }),
   ]);
 
-  let popularItems: LandingStoreItem[] = catalogFallback.map((item) => ({
-    ...item,
+  const toLandingItem = (item: {
+    id: string;
+    itemName: string;
+    itemCategory: string;
+    vpPrice: number;
+    imageUrl: string | null;
+    cosmeticSlot: string | null;
+    bannerConfig: unknown;
+    cosmeticConfig: unknown;
+  }): LandingStoreItem => ({
+    id: item.id,
+    itemName: item.itemName,
+    itemCategory: item.itemCategory,
+    vpPrice: item.vpPrice,
     imageUrl: resolveShopImageUrl(item.imageUrl),
-  }));
+    cosmeticSlot: item.cosmeticSlot,
+    bannerConfig: item.bannerConfig ?? null,
+    cosmeticConfig: item.cosmeticConfig ?? null,
+  });
+
+  let popularItems: LandingStoreItem[] = catalogFallback.map(toLandingItem);
   if (purchaseGroups.length > 0) {
     const skus = purchaseGroups.map((g) => g.itemSku);
     const purchasedItems = await prisma.storeItem.findMany({
@@ -142,19 +235,16 @@ export async function getLandingPageData(): Promise<{
         vpPrice: true,
         imageUrl: true,
         itemSku: true,
+        cosmeticSlot: true,
+        bannerConfig: true,
+        cosmeticConfig: true,
       },
     });
     const bySku = new Map(purchasedItems.map((i) => [i.itemSku, i]));
     const ranked = skus
       .map((sku) => bySku.get(sku))
       .filter((i): i is NonNullable<typeof i> => Boolean(i))
-      .map(({ id, itemName, itemCategory, vpPrice, imageUrl }) => ({
-        id,
-        itemName,
-        itemCategory,
-        vpPrice,
-        imageUrl: resolveShopImageUrl(imageUrl),
-      }));
+      .map(toLandingItem);
     if (ranked.length > 0) popularItems = ranked;
   }
 

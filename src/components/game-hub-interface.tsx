@@ -61,7 +61,9 @@ import { resolveHubBackground, resolveMarkLogo } from '@/lib/branding';
 import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
 
 import { CircularProgress } from '@/components/ui/circular-progress';
+import { Progress } from '@/components/ui/progress';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
 import {
   Tooltip,
   TooltipContent,
@@ -161,6 +163,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [pendingCompetitiveMode, setPendingCompetitiveMode] = useState<KilrunMode | null>(null);
   const [vpBalance, setVpBalance] = useState(user.vpCurrency);
   const [xpProgress, setXpProgress] = useState(user.xpProgress);
+  const [dailyDone, setDailyDone] = useState(0);
+  const [dailyTotal, setDailyTotal] = useState(5);
   const [currentRank, setCurrentRank] = useState(user.currentRank);
   const [emailVerified, setEmailVerified] = useState(user.emailVerified);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -210,6 +214,12 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       setIsVip(live.isVip);
       setEmailVerified(live.emailVerified);
       setUnreadCount(live.unreadNotifications);
+      if (typeof live.dailyMissionsCompleted === 'number') {
+        setDailyDone(live.dailyMissionsCompleted);
+      }
+      if (typeof live.dailyMissionsTotal === 'number') {
+        setDailyTotal(live.dailyMissionsTotal);
+      }
     };
 
     (async () => {
@@ -533,35 +543,59 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                     <p>{isVip ? 'VIP Active' : 'Unlock VIP'}</p>
                   </TooltipContent>
                 </Tooltip>
-                <DialogContent className="bg-slate-900/80 backdrop-blur-md border-slate-700 text-white max-w-md mx-4">
+                <DialogContent className="bg-slate-900/60 backdrop-blur-md border-slate-700/30 text-white max-w-md mx-4">
                   <DialogHeader>
-                    <DialogTitle className="text-2xl font-bold text-primary flex items-center gap-2">
-                      <Crown className="w-6 h-6" />
+                    <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+                      <Crown className="w-6 h-6 text-primary" />
                       {isVip ? 'VIP Active' : 'Unlock VIP Access'}
                     </DialogTitle>
-                    <DialogDescription className="text-slate-300">
+                    <DialogDescription className="text-slate-400">
                       {isVip
-                        ? 'You already have VIP perks on this account.'
-                        : `Spend ${VIP_UNLOCK_VP_COST} VP (balance: ${vpBalance}) for exclusive perks.`}
+                        ? 'Your VIP perks are active across the hub.'
+                        : `Spend ${VIP_UNLOCK_VP_COST} VP (balance: ${vpBalance}) for exclusive hub + future in-game perks.`}
                     </DialogDescription>
                   </DialogHeader>
-                  {!isVip && (
-                    <div className="py-4 space-y-4">
-                      <div className="flex items-center gap-4">
-                        <div className="p-3 bg-slate-700/50 rounded-lg">
-                          <Star className="w-6 h-6 text-primary" />
+                  <div className="py-2 space-y-2 text-sm">
+                    {[
+                      {
+                        title: 'VIP name color',
+                        body: 'Recognized everywhere — chat, forums, leaderboard.',
+                      },
+                      {
+                        title: 'Crown on your avatar',
+                        body: 'A crown badge on your profile picture.',
+                      },
+                      {
+                        title: 'Exclusive cosmetics',
+                        body: 'VIP banner, avatar frame, and nickname effect auto-equipped.',
+                      },
+                      {
+                        title: 'In-game VIP (coming soon)',
+                        body: 'Priority queue and lobby flair planned for Deathrun.',
+                      },
+                    ].map((perk) => (
+                      <div
+                        key={perk.title}
+                        className="flex items-start gap-3 rounded-lg border border-slate-700/30 bg-slate-900/40 px-3 py-2.5"
+                      >
+                        <div className="p-2 rounded-lg bg-primary/10 border border-primary/20 shrink-0">
+                          <Star className="w-4 h-4 text-primary" />
                         </div>
                         <div>
-                          <h4 className="font-bold">Exclusive VIP Badge</h4>
-                          <p className="text-sm text-slate-400">
-                            Show off your status next to your name.
-                          </p>
+                          <h4 className="font-bold text-white">{perk.title}</h4>
+                          <p className="text-xs text-slate-400">{perk.body}</p>
                         </div>
                       </div>
-                      <Button size="lg" className="w-full text-lg" onClick={handleUnlockVip}>
-                        Unlock for {VIP_UNLOCK_VP_COST} VP
-                      </Button>
-                    </div>
+                    ))}
+                  </div>
+                  {!isVip && (
+                    <Button
+                      size="lg"
+                      className="w-full text-lg"
+                      onClick={handleUnlockVip}
+                    >
+                      Unlock for {VIP_UNLOCK_VP_COST} VP
+                    </Button>
                   )}
                 </DialogContent>
               </Dialog>
@@ -687,10 +721,15 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                           progress={levelProgressPercent}
                           level={level}
                         >
-                          <Avatar className="h-28 w-28 border-4 border-slate-800">
-                            <AvatarImage src={user.avatarUrl} alt={user.username} />
-                            <AvatarFallback>{user.username.charAt(0)}</AvatarFallback>
-                          </Avatar>
+                          <div className="h-28 w-28 rounded-full border-4 border-slate-800 overflow-visible">
+                            <PlayerAvatar
+                              src={user.avatarUrl}
+                              name={user.username}
+                              isVip={isVip}
+                              className="h-full w-full"
+                              crownClassName="h-7 w-7 -top-1 -right-1"
+                            />
+                          </div>
                         </CircularProgress>
                       </div>
                       <h3
@@ -699,7 +738,14 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                           isVip
                         )}`}
                       >
-                        <span className="truncate max-w-[10rem]">{user.username}</span>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentPage('profile')}
+                          className="truncate max-w-[10rem] hover:underline underline-offset-2 decoration-primary/60"
+                          title="Open your profile"
+                        >
+                          {user.username}
+                        </button>
                         {isVip && (
                           <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px]">
                             VIP
@@ -730,6 +776,25 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                         {user.role} · Lv {level} · {xpIntoLevel.toLocaleString()}/
                         {xpForNextLevel.toLocaleString()} XP
                       </p>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage('missions')}
+                        className="mt-2 w-full flex items-center gap-2 group text-left"
+                        title="Daily missions"
+                      >
+                        <Progress
+                          value={
+                            dailyTotal > 0
+                              ? Math.round((dailyDone / dailyTotal) * 100)
+                              : 0
+                          }
+                          tone="green"
+                          className="h-2 flex-1"
+                        />
+                        <span className="text-[11px] font-semibold tabular-nums text-emerald-400 shrink-0 group-hover:text-emerald-300">
+                          {dailyDone}/{dailyTotal}
+                        </span>
+                      </button>
                       <div className="mt-4 bg-slate-800/50 px-4 py-2 rounded-lg text-center w-full">
                         <div className="text-xs text-slate-400">Rank</div>
                         <div className="text-lg font-bold text-yellow-400">

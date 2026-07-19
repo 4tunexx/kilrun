@@ -13,6 +13,7 @@ import {
   isAccountRole,
 } from '@/lib/roles';
 import { processWebsiteAction } from '@/lib/progression-actions';
+import { normalizeForumCategory } from '@/lib/forum-categories';
 
 async function requireSessionUser() {
   const session = await auth();
@@ -77,6 +78,56 @@ export async function updateProfileSettings(input: {
   });
 }
 
+/**
+ * Admin-only: clear email verification on the current account so the same
+ * address (e.g. testing Gmail) can be verified again. Best-effort deletes the
+ * linked Clerk user so signUp.create() does not hit "email already exists".
+ */
+export async function deactivateOwnEmail() {
+  const user = await requireSessionUser();
+  if (user.role !== 'admin') {
+    throw new Error('Only admins can deactivate email');
+  }
+
+  const previousEmail = user.email;
+  const previousClerkId = user.clerkId;
+
+  if (previousClerkId && process.env.CLERK_SECRET_KEY) {
+    try {
+      const { createClerkClient } = await import('@clerk/backend');
+      const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
+      await clerk.users.deleteUser(previousClerkId);
+    } catch (err) {
+      console.warn('[deactivateOwnEmail] Clerk user delete failed (continuing):', err);
+    }
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      email: null,
+      emailVerified: false,
+      clerkId: null,
+    },
+  });
+
+  try {
+    const { writeAuditLog } = await import('@/lib/audit');
+    await writeAuditLog({
+      actorId: user.id,
+      actorUsername: user.username,
+      action: 'deactivate_email',
+      targetUserId: user.id,
+      targetUsername: user.username,
+      detail: previousEmail ? `Cleared ${previousEmail}` : 'Cleared email verification',
+    });
+  } catch {
+    // audit is best-effort
+  }
+
+  return updated;
+}
+
 /** Purchase history + forum posts + lifetime totals for the profile page. */
 export async function getMyProfileActivity() {
   const user = await requireSessionUser();
@@ -118,6 +169,132 @@ export async function getMyProfileActivity() {
   };
 }
 
+/** Grant / equip VIP cosmetic perks (frame + banner + nickname). */
+async function grantVipCosmetics(userId: string) {
+  const vipFrame = {
+    itemSku: 'vip-crown-frame',
+    itemName: 'VIP Crown Frame',
+    itemCategory: 'Avatar Frame',
+    cosmeticSlot: 'frame',
+    cosmeticConfig: {
+      style: 'flame',
+      color: '#f59e0b',
+      secondaryColor: '#ea580c',
+      thickness: 4,
+      glow: true,
+      animated: true,
+    },
+    vpValue: 0,
+  };
+  const vipBanner = {
+    itemSku: 'vip-banner',
+    itemName: 'VIP Banner',
+    itemCategory: 'Profile Banner',
+    cosmeticSlot: 'banner',
+    bannerConfig: {
+      colors: ['#78350f', '#f59e0b', '#ea580c'],
+      angle: 135,
+      animationStyle: 'shimmer',
+      animated: true,
+    },
+    vpValue: 0,
+  };
+  const vipNick = {
+    itemSku: 'vip-nickname',
+    itemName: 'VIP Nickname',
+    itemCategory: 'Nickname Effect',
+    cosmeticSlot: 'nickname',
+    cosmeticConfig: {
+      effect: 'shimmer',
+      color: '#f59e0b',
+      intensity: 0.9,
+    },
+    vpValue: 0,
+  };
+
+  for (const item of [vipFrame, vipBanner, vipNick]) {
+    const owned = await prisma.inventoryItem.findFirst({
+      where: { userId, itemSku: item.itemSku },
+    });
+    if (!owned) {
+      await prisma.inventoryItem.create({
+        data: {
+          userId,
+          itemSku: item.itemSku,
+          itemName: item.itemName,
+          itemCategory: item.itemCategory,
+          cosmeticSlot: item.cosmeticSlot,
+          bannerConfig:
+            'bannerConfig' in item
+              ? (item.bannerConfig as unknown as Prisma.InputJsonValue)
+              : undefined,
+          cosmeticConfig:
+            'cosmeticConfig' in item
+              ? (item.cosmeticConfig as unknown as Prisma.InputJsonValue)
+              : undefined,
+          vpValue: item.vpValue,
+        },
+      });
+    }
+  }
+
+  const frame = await prisma.inventoryItem.findFirst({
+    where: { userId, itemSku: 'vip-crown-frame' },
+  });
+  const banner = await prisma.inventoryItem.findFirst({
+    where: { userId, itemSku: 'vip-banner' },
+  });
+  const nick = await prisma.inventoryItem.findFirst({
+    where: { userId, itemSku: 'vip-nickname' },
+  });
+
+  if (frame) {
+    await prisma.inventoryItem.updateMany({
+      where: { userId, cosmeticSlot: 'frame', isEquipped: true },
+      data: { isEquipped: false },
+    });
+    await prisma.inventoryItem.update({
+      where: { id: frame.id },
+      data: { isEquipped: true },
+    });
+  }
+  if (banner) {
+    await prisma.inventoryItem.updateMany({
+      where: { userId, cosmeticSlot: 'banner', isEquipped: true },
+      data: { isEquipped: false },
+    });
+    await prisma.inventoryItem.update({
+      where: { id: banner.id },
+      data: { isEquipped: true },
+    });
+  }
+  if (nick) {
+    await prisma.inventoryItem.updateMany({
+      where: { userId, cosmeticSlot: 'nickname', isEquipped: true },
+      data: { isEquipped: false },
+    });
+    await prisma.inventoryItem.update({
+      where: { id: nick.id },
+      data: { isEquipped: true },
+    });
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      equippedFrameItemName: frame?.itemName ?? 'VIP Crown Frame',
+      equippedFrameConfig: (frame?.cosmeticConfig ??
+        vipFrame.cosmeticConfig) as unknown as Prisma.InputJsonValue,
+      equippedBannerItemName: banner?.itemName ?? 'VIP Banner',
+      equippedBannerConfig: (banner?.bannerConfig ??
+        vipBanner.bannerConfig) as unknown as Prisma.InputJsonValue,
+      equippedNicknameItemName: nick?.itemName ?? 'VIP Nickname',
+      equippedNicknameConfig: (nick?.cosmeticConfig ??
+        vipNick.cosmeticConfig) as unknown as Prisma.InputJsonValue,
+    },
+  });
+}
+
 export async function unlockVipWithVp() {
   const user = await requireSessionUser();
   if (user.isVip || user.role === 'vip') {
@@ -134,11 +311,16 @@ export async function unlockVipWithVp() {
       role: user.role === 'player' ? 'vip' : user.role,
     },
   });
+  try {
+    await grantVipCosmetics(user.id);
+  } catch {
+    // Cosmetics are best-effort — VIP flag already applied.
+  }
   await prisma.notification.create({
     data: {
       userId: user.id,
       title: 'VIP unlocked',
-      body: `You spent ${VIP_UNLOCK_VP_COST} VP to unlock VIP perks.`,
+      body: `Welcome to VIP! Orange name color, crown badge, exclusive banner, frame, and nickname effect are yours. More in-game VIP perks coming soon.`,
       type: 'vip',
     },
   });
@@ -236,6 +418,15 @@ export async function getFriendRequests() {
       userA: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
     },
     orderBy: { createdAt: 'desc' },
+  });
+}
+
+/** Outgoing pending friend requests (for UI “Pending” state). */
+export async function getOutgoingFriendRequests() {
+  const user = await requireSessionUser();
+  return prisma.friendship.findMany({
+    where: { userAId: user.id, status: 'pending' },
+    select: { id: true, userBId: true },
   });
 }
 
@@ -402,11 +593,12 @@ export async function createForumPost(input: {
     data: {
       authorId: user.id,
       title,
-      body,
-      category: (input.category || 'general').slice(0, 40),
+      body: body.slice(0, 12000),
+      category: normalizeForumCategory(input.category),
     },
   });
   await processWebsiteAction(user.id, 'forum');
+  await processWebsiteAction(user.id, 'daily_forum');
   return post;
 }
 
@@ -442,6 +634,7 @@ export async function createForumReply(postId: string, body: string) {
     });
   }
   await processWebsiteAction(user.id, 'forum_replies');
+  await processWebsiteAction(user.id, 'daily_forum');
   return reply;
 }
 
@@ -517,18 +710,21 @@ export async function purchaseStoreItem(itemId: string) {
   const user = await requireSessionUser();
   const item = await prisma.storeItem.findUnique({ where: { id: itemId } });
   if (!item || !item.isAvailable) throw new Error('Item unavailable');
-  if (user.vpCurrency < item.vpPrice) return { ok: false as const, error: 'Not enough VP' };
+
+  const { getEffectiveVpPrice } = await import('@/lib/shop-catalog');
+  const price = getEffectiveVpPrice(item);
+  if (user.vpCurrency < price) return { ok: false as const, error: 'Not enough VP' };
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { vpCurrency: { decrement: item.vpPrice } },
+    data: { vpCurrency: { decrement: price } },
   });
   await prisma.purchase.create({
     data: {
       userId: user.id,
       itemSku: item.itemSku,
       itemName: item.itemName,
-      vpSpent: item.vpPrice,
+      vpSpent: price,
     },
   });
   // Snapshot cosmetic data onto a personal inventory copy so later admin
@@ -543,19 +739,77 @@ export async function purchaseStoreItem(itemId: string) {
       bannerConfig: item.bannerConfig ?? undefined,
       cosmeticConfig: item.cosmeticConfig ?? undefined,
       imageUrl: item.imageUrl ?? null,
-      vpValue: item.vpPrice,
+      vpValue: price,
     },
+  });
+  await prisma.storeItem.update({
+    where: { id: item.id },
+    data: { purchaseCount: { increment: 1 } },
   });
   await prisma.notification.create({
     data: {
       userId: user.id,
       title: 'Purchase complete',
-      body: `Bought ${item.itemName} for ${item.vpPrice} VP.`,
+      body: `Bought ${item.itemName} for ${price} VP.`,
       type: 'store',
     },
   });
   await processWebsiteAction(user.id, 'purchases');
-  return { ok: true as const };
+  if (item.cosmeticSlot) {
+    await processWebsiteAction(user.id, 'cosmetic_owned');
+    if (item.cosmeticSlot === 'banner') {
+      await processWebsiteAction(user.id, 'banner_owned');
+    } else if (item.cosmeticSlot === 'frame') {
+      await processWebsiteAction(user.id, 'frame_owned');
+    } else if (item.cosmeticSlot === 'nickname') {
+      await processWebsiteAction(user.id, 'nickname_owned');
+    }
+  }
+  return { ok: true as const, price };
+}
+
+/** Put selected catalog items on a timed fire sale. */
+export async function adminSetFireSale(input: {
+  itemIds: string[];
+  percent: number;
+  durationHours: number;
+}) {
+  const staff = await requireStaff();
+  const percent = Math.min(90, Math.max(1, Math.round(input.percent)));
+  const hours = Math.min(24 * 30, Math.max(1, Math.round(input.durationHours)));
+  const ids = [...new Set(input.itemIds.filter(Boolean))];
+  if (ids.length === 0) throw new Error('Select at least one item');
+
+  const ends = new Date(Date.now() + hours * 60 * 60 * 1000);
+  await prisma.storeItem.updateMany({
+    where: { id: { in: ids } },
+    data: { fireSalePercent: percent, fireSaleEndsAt: ends },
+  });
+
+  try {
+    const { writeAuditLog } = await import('@/lib/audit');
+    await writeAuditLog({
+      actorId: staff.id,
+      actorUsername: staff.username,
+      action: 'fire_sale',
+      detail: `${ids.length} items · -${percent}% · ${hours}h`,
+    });
+  } catch {
+    // ignore
+  }
+
+  return { ok: true as const, endsAt: ends, percent, count: ids.length };
+}
+
+export async function adminClearFireSale(itemIds?: string[]) {
+  await requireStaff();
+  const where =
+    itemIds && itemIds.length > 0 ? { id: { in: itemIds } } : { fireSalePercent: { gt: 0 } };
+  const result = await prisma.storeItem.updateMany({
+    where,
+    data: { fireSalePercent: 0, fireSaleEndsAt: null },
+  });
+  return { ok: true as const, count: result.count };
 }
 
 // --- Inventory (owned cosmetics / items) ---
@@ -568,7 +822,7 @@ export async function getMyInventory() {
   });
 }
 
-/** Equips a cosmetic (currently only "banner"), unequipping any other item in that slot. */
+/** Equips a cosmetic (banner / frame / nickname), unequipping any other item in that slot. */
 export async function equipInventoryItem(inventoryItemId: string) {
   const user = await requireSessionUser();
   const item = await prisma.inventoryItem.findUnique({ where: { id: inventoryItemId } });
@@ -591,6 +845,7 @@ export async function equipInventoryItem(inventoryItemId: string) {
         equippedBannerItemName: item.itemName,
         equippedBannerImageUrl: item.imageUrl ?? null,
         equippedBannerConfig: item.bannerConfig ?? undefined,
+        cosmeticEquipCount: { increment: 1 },
       },
     });
   } else if (item.cosmeticSlot === 'frame') {
@@ -599,6 +854,7 @@ export async function equipInventoryItem(inventoryItemId: string) {
       data: {
         equippedFrameItemName: item.itemName,
         equippedFrameConfig: item.cosmeticConfig ?? undefined,
+        cosmeticEquipCount: { increment: 1 },
       },
     });
   } else if (item.cosmeticSlot === 'nickname') {
@@ -607,9 +863,16 @@ export async function equipInventoryItem(inventoryItemId: string) {
       data: {
         equippedNicknameItemName: item.itemName,
         equippedNicknameConfig: item.cosmeticConfig ?? undefined,
+        cosmeticEquipCount: { increment: 1 },
       },
     });
+  } else {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { cosmeticEquipCount: { increment: 1 } },
+    });
   }
+  await processWebsiteAction(user.id, 'cosmetics_equipped');
   return { ok: true as const };
 }
 
@@ -685,12 +948,21 @@ export async function resellInventoryItem(inventoryItemId: string) {
     prisma.inventoryItem.delete({ where: { id: item.id } }),
     prisma.user.update({
       where: { id: user.id },
-      data: { vpCurrency: { increment: refund } },
+      data: {
+        vpCurrency: { increment: refund },
+        ...(item.cosmeticSlot
+          ? { cosmeticResellCount: { increment: 1 } }
+          : {}),
+      },
     }),
   ]);
 
   if (item.isEquipped) {
     await clearEquippedSnapshot(user.id, item.cosmeticSlot);
+  }
+  if (item.cosmeticSlot) {
+    await processWebsiteAction(user.id, 'cosmetics_resold');
+    await processWebsiteAction(user.id, 'cosmetic_owned');
   }
   return { ok: true as const, refund };
 }
@@ -705,6 +977,14 @@ export async function deleteInventoryItem(inventoryItemId: string) {
 
   if (item.isEquipped) {
     await clearEquippedSnapshot(user.id, item.cosmeticSlot);
+  }
+  if (item.cosmeticSlot) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { cosmeticDeleteCount: { increment: 1 } },
+    });
+    await processWebsiteAction(user.id, 'cosmetics_deleted');
+    await processWebsiteAction(user.id, 'cosmetic_owned');
   }
   return { ok: true as const };
 }
@@ -782,6 +1062,157 @@ export async function adminListUsers(take = 50) {
       createdAt: true,
     },
   });
+}
+
+/** Adjust VP (+ give / − take). Floor at 0. */
+export async function adminAdjustVp(userId: string, delta: number) {
+  const staff = await requireStaff();
+  const amount = Math.trunc(delta);
+  if (!amount) throw new Error('Amount required');
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  if (!target) throw new Error('User not found');
+  const next = Math.max(0, target.vpCurrency + amount);
+  await prisma.user.update({
+    where: { id: userId },
+    data: { vpCurrency: next },
+  });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: amount > 0 ? 'award_vp' : 'remove_vp',
+    targetUserId: userId,
+    targetUsername: target.username,
+    detail: `${amount > 0 ? '+' : ''}${amount} VP → ${next}`,
+  });
+  await prisma.notification.create({
+    data: {
+      userId,
+      title: amount > 0 ? 'VP received' : 'VP adjusted',
+      body:
+        amount > 0
+          ? `${staff.username} granted you +${amount} VP.`
+          : `${staff.username} removed ${Math.abs(amount)} VP from your balance.`,
+      type: 'admin',
+    },
+  });
+  if (amount > 0) {
+    await prisma.message.create({
+      data: {
+        senderId: staff.id,
+        receiverId: userId,
+        body: `🎁 ${staff.username} awarded you +${amount} VP from the admin panel.`,
+      },
+    });
+  }
+  return { ok: true as const, vpCurrency: next };
+}
+
+/** Full admin view of a player: inventory, purchases, badges, missions. */
+export async function adminGetUserDetail(userId: string) {
+  await requireStaff();
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      steamId: true,
+      username: true,
+      avatarUrl: true,
+      role: true,
+      isVip: true,
+      isBanned: true,
+      isMuted: true,
+      vpCurrency: true,
+      xpProgress: true,
+      currentRank: true,
+      email: true,
+      createdAt: true,
+      loginStreak: true,
+      reputation: true,
+    },
+  });
+  if (!user) throw new Error('User not found');
+  const [inventory, purchases, badges, achievements, missions] =
+    await Promise.all([
+      prisma.inventoryItem.findMany({
+        where: { userId },
+        orderBy: { acquiredAt: 'desc' },
+        take: 80,
+      }),
+      prisma.purchase.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 40,
+      }),
+      prisma.userBadge.findMany({
+        where: { userId },
+        include: { badge: true },
+        orderBy: { earnedAt: 'desc' },
+      }),
+      prisma.userAchievement.findMany({
+        where: { userId },
+        include: { achievement: true },
+        orderBy: { unlockedAt: 'desc' },
+        take: 40,
+      }),
+      prisma.activeMission.findMany({
+        where: { userId },
+        orderBy: [{ isCompleted: 'asc' }, { rewardXp: 'desc' }],
+        take: 40,
+      }),
+    ]);
+  return { user, inventory, purchases, badges, achievements, missions };
+}
+
+/** Site-wide announcement: notification for every player (+ optional DM from staff). */
+export async function adminBroadcastAnnouncement(input: {
+  title: string;
+  body: string;
+  alsoDm?: boolean;
+}) {
+  const staff = await requireStaff();
+  const title = input.title.trim().slice(0, 120);
+  const body = input.body.trim().slice(0, 2000);
+  if (!title || !body) throw new Error('Title and body required');
+
+  const users = await prisma.user.findMany({
+    where: { NOT: { isBanned: true } },
+    select: { id: true },
+  });
+
+  const chunk = 50;
+  for (let i = 0; i < users.length; i += chunk) {
+    const slice = users.slice(i, i + chunk);
+    await prisma.notification.createMany({
+      data: slice.map((u) => ({
+        userId: u.id,
+        title: `📢 ${title}`,
+        body: `${body}\n— ${staff.username}`,
+        type: 'announcement',
+      })),
+    });
+    if (input.alsoDm) {
+      await prisma.message.createMany({
+        data: slice
+          .filter((u) => u.id !== staff.id)
+          .map((u) => ({
+            senderId: staff.id,
+            receiverId: u.id,
+            body: `📢 ${title}\n\n${body}`,
+          })),
+      });
+    }
+  }
+
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'broadcast',
+    detail: `${title} → ${users.length} players`,
+  });
+
+  return { ok: true as const, count: users.length };
 }
 
 export async function adminSetUserRole(userId: string, role: string) {
@@ -994,9 +1425,18 @@ export async function adminCreateNews(input: {
   title: string;
   summary: string;
   body: string;
+  headerImageUrl?: string;
 }) {
   await requireStaff();
-  return prisma.newsPost.create({ data: input });
+  return prisma.newsPost.create({
+    data: {
+      title: input.title.trim().slice(0, 160),
+      summary: input.summary.trim().slice(0, 400),
+      body: input.body.trim().slice(0, 20000),
+      headerImageUrl: input.headerImageUrl?.trim() || null,
+      published: true,
+    },
+  });
 }
 
 export async function adminCreateGuide(input: {

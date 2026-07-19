@@ -40,6 +40,13 @@ model User {
   /// Consecutive-day login streak, used for "daily login" style requirements.
   loginStreak  Int       @default(0)
   lastLoginAt  DateTime?
+  /// Last time the player opened the hub leaderboard (daily mission).
+  lastLeaderboardAt DateTime?
+
+  /// Lifetime cosmetics actions for achievement / mission metrics.
+  cosmeticEquipCount  Int @default(0)
+  cosmeticDeleteCount Int @default(0)
+  cosmeticResellCount Int @default(0)
 
   /// Denormalized snapshot of the equipped profile banner cosmetic, copied
   /// from the owned InventoryItem at equip time so rendering the profile
@@ -129,6 +136,14 @@ model StoreItem {
   bannerConfig Json?
   /// Frame / nickname effect config JSON (see src/lib/cosmetics.ts).
   cosmeticConfig Json?
+
+  /// Times purchased — used for "Popular" sort.
+  purchaseCount Int @default(0)
+  /// Fire sale discount 0–90. 0 = not on sale.
+  fireSalePercent Int @default(0)
+  /// When the fire sale ends (UTC). Ignored if percent is 0.
+  fireSaleEndsAt  DateTime?
+  createdAt DateTime @default(now())
 }
 
 model MissionTemplate {
@@ -138,9 +153,9 @@ model MissionTemplate {
   description String
   rewardXp    Int
   targetCount Int
-  /// runs | distance | score | wins | logins | friends | messages | forum | purchases | email
+  /// Progression metric key (see requirement-types.ts).
   metric      String
-  /// game | website
+  /// game | website | daily
   category    String  @default("game")
   isActive    Boolean @default(true)
   /// Optional custom icon image uploaded/set in the admin panel.
@@ -157,6 +172,10 @@ model ActiveMission {
   targetCount  Int
   currentCount Int     @default(0)
   metric       String  @default("runs")
+  /// Copied from MissionTemplate: game | website | daily
+  category     String  @default("game")
+  /// YYYY-MM-DD for daily missions (resets each calendar day). Empty for main.
+  periodKey    String  @default("")
   isCompleted  Boolean @default(false)
   iconImageUrl String?
 
@@ -164,6 +183,7 @@ model ActiveMission {
 
   @@index([userId])
   @@index([userId, metric])
+  @@index([userId, category, periodKey])
 }
 
 model AchievementDefinition {
@@ -352,12 +372,14 @@ model Notification {
 }
 
 model NewsPost {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  title     String
-  summary   String
-  body      String
-  published Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  title          String
+  summary        String
+  body           String
+  /// Optional hero / header image for the news article.
+  headerImageUrl String?
+  published      Boolean  @default(true)
+  createdAt      DateTime @default(now())
 }
 
 model Guide {

@@ -5,7 +5,13 @@
  * must be paired with a case there.
  */
 
-export type RequirementCategory = 'game' | 'progression' | 'website' | 'social';
+export type RequirementCategory =
+  | 'game'
+  | 'progression'
+  | 'website'
+  | 'social'
+  | 'cosmetics'
+  | 'daily';
 
 export interface RequirementType {
   value: string;
@@ -17,8 +23,10 @@ export interface RequirementType {
 export const REQUIREMENT_CATEGORY_LABELS: Record<RequirementCategory, string> = {
   game: 'In-Game',
   progression: 'Progression / Leveling',
-  website: 'Website / Daily',
+  website: 'Website',
   social: 'Community',
+  cosmetics: 'Profile Cosmetics',
+  daily: 'Daily Missions',
 };
 
 export const REQUIREMENT_TYPES: RequirementType[] = [
@@ -179,6 +187,82 @@ export const REQUIREMENT_TYPES: RequirementType[] = [
     description: 'Net +rep received from other players.',
     category: 'social',
   },
+
+  // Profile cosmetics
+  {
+    value: 'cosmetic_owned',
+    label: 'Cosmetics owned',
+    description: 'Owned inventory items with a cosmetic slot (banner / frame / nickname).',
+    category: 'cosmetics',
+  },
+  {
+    value: 'banner_owned',
+    label: 'Banners owned',
+    description: 'Profile banners currently in inventory.',
+    category: 'cosmetics',
+  },
+  {
+    value: 'frame_owned',
+    label: 'Avatar frames owned',
+    description: 'Avatar frames currently in inventory.',
+    category: 'cosmetics',
+  },
+  {
+    value: 'nickname_owned',
+    label: 'Nickname effects owned',
+    description: 'Nickname effects currently in inventory.',
+    category: 'cosmetics',
+  },
+  {
+    value: 'cosmetics_equipped',
+    label: 'Cosmetics equipped',
+    description: 'Lifetime times a cosmetic was equipped.',
+    category: 'cosmetics',
+  },
+  {
+    value: 'cosmetics_deleted',
+    label: 'Cosmetics discarded',
+    description: 'Lifetime times a cosmetic was discarded from inventory.',
+    category: 'cosmetics',
+  },
+  {
+    value: 'cosmetics_resold',
+    label: 'Cosmetics resold',
+    description: 'Lifetime times a cosmetic was sold back for VP.',
+    category: 'cosmetics',
+  },
+
+  // Daily mission metrics (reset with the daily board)
+  {
+    value: 'daily_login',
+    label: 'Daily hub login',
+    description: 'Log into the hub once today.',
+    category: 'daily',
+  },
+  {
+    value: 'daily_chat',
+    label: 'Daily live chat',
+    description: 'Send a global chat message today.',
+    category: 'daily',
+  },
+  {
+    value: 'daily_forum',
+    label: 'Daily forum post',
+    description: 'Create a forum thread or reply today.',
+    category: 'daily',
+  },
+  {
+    value: 'daily_runs',
+    label: 'Daily Deathrun match',
+    description: 'Play a Deathrun match today.',
+    category: 'daily',
+  },
+  {
+    value: 'daily_leaderboard',
+    label: 'Daily leaderboard visit',
+    description: 'Open the leaderboard page today.',
+    category: 'daily',
+  },
 ];
 
 export function getRequirementType(value: string): RequirementType | undefined {
@@ -191,6 +275,8 @@ export function groupRequirementTypes(): Record<RequirementCategory, Requirement
     progression: [],
     website: [],
     social: [],
+    cosmetics: [],
+    daily: [],
   };
   for (const type of REQUIREMENT_TYPES) {
     groups[type.category].push(type);

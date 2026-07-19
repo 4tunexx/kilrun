@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Gem,
   Zap,
+  MailX,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -47,6 +48,7 @@ import { AvatarWithFrame } from '@/components/avatar-with-frame';
 import { NicknameEffectText } from '@/components/nickname-effect';
 import { getMatchStats, getSessionUser, getStatsSummary, type StatsSummary } from '@/lib/actions';
 import {
+  deactivateOwnEmail,
   equipInventoryItem,
   getMyInventory,
   getMyProfileActivity,
@@ -80,7 +82,9 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [cosmeticBusyId, setCosmeticBusyId] = useState<string | null>(null);
+  const [deactivatingEmail, setDeactivatingEmail] = useState(false);
   const { toast } = useToast();
+  const isAdmin = user?.role === 'admin';
 
   const reloadCosmetics = () => {
     Promise.all([getSessionUser(), getMyInventory()]).then(([u, inv]) => {
@@ -883,13 +887,65 @@ export default function ProfileView({ userId }: { userId: string }) {
                       readOnly
                       className="bg-slate-900/50 border-emerald-500/40 text-emerald-100"
                     />
-                    <Button
-                      variant="outline"
-                      className="w-full sm:w-auto"
-                      onClick={() => setShowEmailForm(true)}
-                    >
-                      <Mail className="mr-2 h-4 w-4" /> Change email
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        className="w-full sm:w-auto"
+                        onClick={() => setShowEmailForm(true)}
+                      >
+                        <Mail className="mr-2 h-4 w-4" /> Change email
+                      </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="destructive"
+                          className="w-full sm:w-auto"
+                          disabled={deactivatingEmail}
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                'Deactivate email on this account? You can verify the same address again (admin testing).'
+                              )
+                            ) {
+                              return;
+                            }
+                            setDeactivatingEmail(true);
+                            void deactivateOwnEmail()
+                              .then((u) => {
+                                setUser(u);
+                                setShowEmailForm(true);
+                                toast({
+                                  title: 'Email deactivated',
+                                  description:
+                                    'Verification cleared. Send a new code to reuse the address.',
+                                });
+                              })
+                              .catch((e: unknown) => {
+                                toast({
+                                  title:
+                                    e instanceof Error
+                                      ? e.message
+                                      : 'Could not deactivate email',
+                                  variant: 'destructive',
+                                });
+                              })
+                              .finally(() => setDeactivatingEmail(false));
+                          }}
+                        >
+                          {deactivatingEmail ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <MailX className="mr-2 h-4 w-4" />
+                          )}
+                          Deactivate email
+                        </Button>
+                      )}
+                    </div>
+                    {isAdmin && (
+                      <p className="text-xs text-slate-500">
+                        Admin only — clears verification so you can reuse an address
+                        (e.g. for Resend testing).
+                      </p>
+                    )}
                   </>
                 ) : (
                   <div className="space-y-3">

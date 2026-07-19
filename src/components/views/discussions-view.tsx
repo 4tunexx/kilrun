@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -15,12 +15,23 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   createForumPost,
   createForumReply,
   getForumPosts,
   getForumReplies,
 } from '@/lib/social-actions';
+import { FORUM_CATEGORIES } from '@/lib/forum-categories';
 import { UserHoverCard } from '@/components/user-hover-card';
+import { RichPostEditor } from '@/components/ui/rich-post-editor';
+import { RichContent } from '@/components/ui/rich-content';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -29,13 +40,15 @@ export default function DiscussionsView() {
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [category, setCategory] = useState('general');
+  const [filter, setFilter] = useState<string>('all');
   const [openComposer, setOpenComposer] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [expandedPostId, setExpandedPostId] = useState<string | null>(null);
   const { toast } = useToast();
 
   const reload = async () => {
-    const data = await getForumPosts();
+    const data = await getForumPosts(60);
     setPosts(data);
     setLoading(false);
   };
@@ -44,17 +57,24 @@ export default function DiscussionsView() {
     reload().catch(() => setLoading(false));
   }, []);
 
+  const filtered = useMemo(() => {
+    if (filter === 'all') return posts;
+    return posts.filter((p) => p.category === filter);
+  }, [posts, filter]);
+
   const submit = async () => {
     setSubmitting(true);
     try {
-      await createForumPost({ title, body });
+      await createForumPost({ title, body, category });
       setTitle('');
       setBody('');
+      setCategory('general');
       setOpenComposer(false);
       toast({ title: 'Discussion posted' });
       await reload();
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Could not post', variant: 'destructive' });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Could not post';
+      toast({ title: message, variant: 'destructive' });
     } finally {
       setSubmitting(false);
     }
@@ -70,6 +90,26 @@ export default function DiscussionsView() {
         </Button>
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant={filter === 'all' ? 'default' : 'outline'}
+          onClick={() => setFilter('all')}
+        >
+          All
+        </Button>
+        {FORUM_CATEGORIES.map((c) => (
+          <Button
+            key={c.id}
+            size="sm"
+            variant={filter === c.id ? 'default' : 'outline'}
+            onClick={() => setFilter(c.id)}
+          >
+            {c.label}
+          </Button>
+        ))}
+      </div>
+
       {openComposer && (
         <Card className="bg-slate-800/40 border-slate-700/30">
           <CardContent className="pt-6 space-y-3">
@@ -79,11 +119,22 @@ export default function DiscussionsView() {
               onChange={(e) => setTitle(e.target.value)}
               className="bg-slate-900/50 border-slate-700"
             />
-            <Textarea
-              placeholder="Write your post..."
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              className="bg-slate-900/50 border-slate-700 min-h-[120px]"
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                {FORUM_CATEGORIES.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <RichPostEditor
+              body={body}
+              onBodyChange={setBody}
+              placeholder="Write your post — add images, video, headings…"
             />
             <Button onClick={submit} disabled={submitting}>
               {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
@@ -97,11 +148,11 @@ export default function DiscussionsView() {
         <div className="text-slate-400 flex items-center gap-2 py-12 justify-center">
           <Loader2 className="w-5 h-5 animate-spin" /> Loading discussions...
         </div>
-      ) : posts.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <p className="text-slate-400 text-center py-12">No posts yet. Be the first.</p>
       ) : (
         <div className="space-y-3">
-          {posts.map((post) => (
+          {filtered.map((post) => (
             <Card key={post.id} className="bg-slate-800/40 border-slate-700/30">
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-3">
@@ -112,12 +163,15 @@ export default function DiscussionsView() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <p className="text-slate-300 whitespace-pre-wrap">{post.body}</p>
+                <RichContent body={post.body} />
                 <div className="flex items-center gap-2 text-sm text-slate-400">
-                  <Avatar className="h-6 w-6">
-                    <AvatarImage src={post.author.avatarUrl} />
-                    <AvatarFallback>{post.author.username.charAt(0)}</AvatarFallback>
-                  </Avatar>
+                  <PlayerAvatar
+                    src={post.author.avatarUrl}
+                    name={post.author.username}
+                    isVip={post.author.isVip}
+                    className="h-6 w-6"
+                    crownClassName="h-3.5 w-3.5 -top-0.5 -right-0.5"
+                  />
                   <UserHoverCard
                     userId={post.author.id}
                     role={post.author.role}
@@ -126,36 +180,34 @@ export default function DiscussionsView() {
                     {post.author.username}
                   </UserHoverCard>
                   <span>·</span>
-                  <span>{formatDistanceToNow(new Date(post.createdAt))} ago</span>
+                  <span>
+                    {formatDistanceToNow(new Date(post.createdAt), {
+                      addSuffix: true,
+                    })}
+                  </span>
                   <span>·</span>
-                  <button
-                    type="button"
-                    className="flex items-center gap-1 hover:text-primary transition-colors"
-                    onClick={() =>
-                      setExpandedPostId((cur) => (cur === post.id ? null : post.id))
-                    }
-                  >
-                    {post._count.replies} replies
-                    {expandedPostId === post.id ? (
-                      <ChevronUp className="w-3.5 h-3.5" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    )}
-                  </button>
+                  <span>{post._count?.replies ?? 0} replies</span>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-slate-400"
+                  onClick={() =>
+                    setExpandedPostId((id) => (id === post.id ? null : post.id))
+                  }
+                >
+                  {expandedPostId === post.id ? (
+                    <>
+                      <ChevronUp className="w-4 h-4 mr-1" /> Hide replies
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-4 h-4 mr-1" /> Replies
+                    </>
+                  )}
+                </Button>
                 {expandedPostId === post.id && (
-                  <RepliesSection
-                    postId={post.id}
-                    onReplyPosted={() =>
-                      setPosts((ps) =>
-                        ps.map((p) =>
-                          p.id === post.id
-                            ? { ...p, _count: { replies: p._count.replies + 1 } }
-                            : p
-                        )
-                      )
-                    }
-                  />
+                  <ThreadReplies postId={post.id} onPosted={reload} />
                 )}
               </CardContent>
             </Card>
@@ -166,99 +218,83 @@ export default function DiscussionsView() {
   );
 }
 
-function RepliesSection({
+function ThreadReplies({
   postId,
-  onReplyPosted,
+  onPosted,
 }: {
   postId: string;
-  onReplyPosted: () => void;
+  onPosted: () => Promise<void>;
 }) {
   const [replies, setReplies] = useState<any[]>([]);
+  const [body, setBody] = useState('');
   const [loading, setLoading] = useState(true);
-  const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
-    let mounted = true;
     getForumReplies(postId)
-      .then((data) => {
-        if (mounted) setReplies(data);
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
-    return () => {
-      mounted = false;
-    };
+      .then(setReplies)
+      .finally(() => setLoading(false));
   }, [postId]);
 
-  const handleReply = async () => {
-    if (!draft.trim()) return;
+  const send = async () => {
     setSending(true);
     try {
-      await createForumReply(postId, draft);
-      setDraft('');
-      onReplyPosted();
-      const fresh = await getForumReplies(postId);
-      setReplies(fresh);
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Could not reply', variant: 'destructive' });
+      await createForumReply(postId, body);
+      setBody('');
+      const next = await getForumReplies(postId);
+      setReplies(next);
+      await onPosted();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Reply failed';
+      toast({ title: message, variant: 'destructive' });
     } finally {
       setSending(false);
     }
   };
 
+  if (loading) {
+    return (
+      <div className="text-slate-500 text-sm flex items-center gap-2 py-2">
+        <Loader2 className="w-4 h-4 animate-spin" /> Loading replies…
+      </div>
+    );
+  }
+
   return (
-    <div className="border-t border-slate-700/40 pt-3 space-y-3">
-      {loading ? (
-        <div className="text-slate-400 flex items-center gap-2 text-sm py-2">
-          <Loader2 className="w-4 h-4 animate-spin" /> Loading replies...
+    <div className="space-y-3 border-t border-slate-700/40 pt-3">
+      {replies.map((r) => (
+        <div key={r.id} className="flex gap-2">
+          <Avatar className="h-7 w-7">
+            <AvatarImage src={r.author.avatarUrl} />
+            <AvatarFallback>{r.author.username.charAt(0)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <UserHoverCard
+              userId={r.author.id}
+              role={r.author.role}
+              isVip={r.author.isVip}
+              className="text-sm font-medium"
+            >
+              {r.author.username}
+            </UserHoverCard>
+            <p className="text-sm text-slate-300 whitespace-pre-wrap">{r.body}</p>
+          </div>
         </div>
-      ) : replies.length === 0 ? (
-        <p className="text-sm text-slate-500">No replies yet.</p>
-      ) : (
-        <div className="space-y-2">
-          {replies.map((reply) => (
-            <div key={reply.id} className="flex items-start gap-2 text-sm">
-              <Avatar className="h-6 w-6 shrink-0">
-                <AvatarImage src={reply.author?.avatarUrl} />
-                <AvatarFallback>{reply.author?.username?.charAt(0) ?? '?'}</AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {reply.author && (
-                    <UserHoverCard
-                      userId={reply.author.id}
-                      role={reply.author.role}
-                      isVip={reply.author.isVip}
-                      className="text-xs"
-                    >
-                      {reply.author.username}
-                    </UserHoverCard>
-                  )}
-                  <span className="text-[10px] text-slate-500">
-                    {formatDistanceToNow(new Date(reply.createdAt), { addSuffix: true })}
-                  </span>
-                </div>
-                <p className="text-slate-300 break-words">{reply.body}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      ))}
       <div className="flex gap-2">
-        <Input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Write a reply..."
-          className="bg-slate-900/50 border-slate-700 h-9"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleReply();
-          }}
+        <Textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Write a reply…"
+          className="bg-slate-900/50 border-slate-700 min-h-[60px]"
         />
-        <Button size="icon" className="h-9 w-9 shrink-0" onClick={handleReply} disabled={sending}>
-          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        <Button onClick={send} disabled={sending || !body.trim()} className="shrink-0">
+          {sending ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Send className="w-4 h-4" />
+          )}
         </Button>
       </div>
     </div>
