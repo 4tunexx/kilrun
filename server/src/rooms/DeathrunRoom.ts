@@ -1,10 +1,12 @@
 import { Client, Room } from 'colyseus';
 import { PlayerState, RoomState } from '../schema/RoomState.js';
 import { createDeathrunObstacles } from '../sim/deathrun-map.js';
+import { createDeathrunPlatforms, createFromBlueprints, type PlatformBlueprint } from '../sim/platforms.js';
 import {
   FINISH_X,
   LOBBY_COUNTDOWN_MS,
   MATCH_DURATION_MS,
+  MAX_ENERGY,
   MIN_PLAYERS_TO_START,
   OBSTACLE_DAMAGE,
   OBSTACLE_HIT_COOLDOWN_MS,
@@ -12,10 +14,17 @@ import {
   HITSCAN_RANGE,
   SHOOT_COOLDOWN_MS,
   SPAWN_X,
+  SPAWN_Z,
   TICK_DT_MS,
   WORLD_HEIGHT,
 } from '../sim/constants.js';
-import { applyMovement, defaultInput, PlayerInput } from '../sim/movement.js';
+import {
+  applyMovement,
+  createSimScratch,
+  defaultInput,
+  type PlayerInput,
+  type PlayerSimScratch,
+} from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 
 interface JoinOptions {
@@ -27,17 +36,14 @@ interface JoinOptions {
 const RESULTS_DISPLAY_MS = 8000;
 
 /**
- * One Deathrun match: a lobby of players waits for `MIN_PLAYERS_TO_START`,
- * then a random Trapper is chosen and everyone else becomes a Runner.
- * Automatic hazards toggle on their own timers independent of the Trapper;
- * the Trapper can additionally eliminate Runners directly (hitscan). This
- * room owns 100% of the authoritative simulation -- clients only ever send
- * intent (`input` messages), never state.
+ * Deathrun match room — authoritative platformer sim shared by all modes.
+ * Clients send intent only (`input`); never trusted position.
  */
 export class DeathrunRoom extends Room<RoomState> {
   maxClients = 8;
 
   private latestInputs = new Map<string, PlayerInput>();
+  private simScratch = new Map<string, PlayerSimScratch>();
   private obstacleTimers: number[] = [];
   private lastObstacleHitAt = new Map<string, number>();
   private lastShotAt = new Map<string, number>();
@@ -45,6 +51,7 @@ export class DeathrunRoom extends Room<RoomState> {
 
   onCreate() {
     this.setState(new RoomState());
+    this.state.platforms.push(...createDeathrunPlatforms());
     this.state.obstacles.push(...createDeathrunObstacles());
     this.obstacleTimers = this.state.obstacles.map(() => 0);
 
@@ -58,6 +65,39 @@ export class DeathrunRoom extends Room<RoomState> {
       });
     });
 
+    this.onMessage(
+      'loadCustomMap',
+      (
+        client,
+        data: {
+          platforms?: PlatformBlueprint[];
+          spawn?: { x: number; y: number; z: number };
+        }
+      ) => {
+        if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
+        const platforms = data?.platforms;
+        if (!Array.isArray(platforms) || platforms.length === 0) return;
+
+        // Replace course
+        while (this.state.platforms.length > 0) this.state.platforms.pop();
+        this.state.platforms.push(...createFromBlueprints(platforms));
+
+        // Reposition everyone to custom runner spawn if provided
+        if (data.spawn) {
+          this.state.players.forEach((player) => {
+            player.x = data.spawn!.x;
+            player.y = data.spawn!.y;
+            player.z = data.spawn!.z;
+            player.vz = 0;
+          });
+        }
+
+        console.log(
+          `[DeathrunRoom] Custom map loaded by ${client.sessionId}: ${platforms.length} platforms`
+        );
+      }
+    );
+
     this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
   }
 
@@ -69,19 +109,22 @@ export class DeathrunRoom extends Room<RoomState> {
     player.avatarUrl = options.avatarUrl ?? '';
     player.x = SPAWN_X;
     player.y = this.nextSpawnY();
+    player.z = SPAWN_Z;
+    player.energy = MAX_ENERGY;
     player.role = 'runner';
 
     this.state.players.set(client.sessionId, player);
     this.latestInputs.set(client.sessionId, defaultInput());
+    this.simScratch.set(client.sessionId, createSimScratch());
   }
 
   onLeave(client: Client) {
     this.state.players.delete(client.sessionId);
     this.latestInputs.delete(client.sessionId);
+    this.simScratch.delete(client.sessionId);
     this.lastObstacleHitAt.delete(client.sessionId);
     this.lastShotAt.delete(client.sessionId);
 
-    // If the Trapper disconnects mid-round, end it early so Runners aren't stuck waiting forever.
     if (this.state.phase === 'playing' && client.sessionId === this.state.trapperSessionId) {
       this.endRound('runner');
     }
@@ -124,20 +167,29 @@ export class DeathrunRoom extends Room<RoomState> {
     }
   }
 
+  private resetPlayerOnSpawn(player: PlayerState, laneIndex: number) {
+    player.health = 100;
+    player.energy = MAX_ENERGY;
+    player.isAlive = true;
+    player.hasFinished = false;
+    player.x = SPAWN_X;
+    player.y = (((laneIndex % 5) + 1) / 6) * WORLD_HEIGHT;
+    player.z = SPAWN_Z;
+    player.vz = 0;
+    player.isGrounded = true;
+    player.isSprinting = false;
+    player.isCrouching = false;
+  }
+
   private startRound() {
     const sessionIds = Array.from(this.state.players.keys());
 
-    // Solo / test lobby: one player runs the course alone (no Trapper).
-    // With 2+ players, pick a random Trapper as usual.
     if (sessionIds.length === 1) {
       const only = sessionIds[0];
       const player = this.state.players.get(only)!;
       player.role = 'runner';
-      player.health = 100;
-      player.isAlive = true;
-      player.hasFinished = false;
-      player.x = SPAWN_X;
-      player.y = (1 / 6) * WORLD_HEIGHT;
+      this.resetPlayerOnSpawn(player, 0);
+      this.simScratch.set(only, createSimScratch());
       this.state.trapperSessionId = '';
     } else {
       const trapperIndex = Math.floor(Math.random() * sessionIds.length);
@@ -147,11 +199,8 @@ export class DeathrunRoom extends Room<RoomState> {
       sessionIds.forEach((sessionId, i) => {
         const player = this.state.players.get(sessionId)!;
         player.role = sessionId === trapperSessionId ? 'trapper' : 'runner';
-        player.health = 100;
-        player.isAlive = true;
-        player.hasFinished = false;
-        player.x = SPAWN_X;
-        player.y = (((i % 5) + 1) / 6) * WORLD_HEIGHT;
+        this.resetPlayerOnSpawn(player, i);
+        this.simScratch.set(sessionId, createSimScratch());
       });
     }
 
@@ -205,7 +254,13 @@ export class DeathrunRoom extends Room<RoomState> {
 
     this.state.players.forEach((player, sessionId) => {
       const input = this.latestInputs.get(sessionId) ?? defaultInput();
-      applyMovement(player, input, dtSeconds);
+      let scratch = this.simScratch.get(sessionId);
+      if (!scratch) {
+        scratch = createSimScratch();
+        this.simScratch.set(sessionId, scratch);
+      }
+
+      applyMovement(player, input, dtSeconds, this.state.platforms, scratch);
 
       if (player.role === 'runner' && player.isAlive && !player.hasFinished) {
         for (const obstacle of this.state.obstacles) {
@@ -216,7 +271,7 @@ export class DeathrunRoom extends Room<RoomState> {
           this.damagePlayer(player, OBSTACLE_DAMAGE);
         }
 
-        if (player.x >= FINISH_X) {
+        if (player.x >= FINISH_X && player.isGrounded) {
           player.hasFinished = true;
         }
       }
@@ -236,7 +291,7 @@ export class DeathrunRoom extends Room<RoomState> {
       if (target.role !== 'runner' || !target.isAlive || target.hasFinished) continue;
       if (isHitByShot(trapper.x, trapper.y, trapper.aimAngle, target.x, target.y, HITSCAN_RANGE)) {
         this.damagePlayer(target, HITSCAN_DAMAGE);
-        break; // one target per shot
+        break;
       }
     }
   }
@@ -264,8 +319,11 @@ export class DeathrunRoom extends Room<RoomState> {
       this.state.players.forEach((player) => {
         player.role = 'runner';
         player.health = 100;
+        player.energy = MAX_ENERGY;
         player.isAlive = true;
         player.hasFinished = false;
+        player.z = SPAWN_Z;
+        player.vz = 0;
       });
     }
   }

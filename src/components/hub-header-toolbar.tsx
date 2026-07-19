@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/tooltip';
 import {
   getConversations,
+  getMyFriendshipMap,
   getNotifications,
   searchPlayers,
   sendFriendRequest,
@@ -106,6 +107,8 @@ function SlidePanel({
 
 export function HubHeaderToolbar({
   unreadCount,
+  unreadMessages = 0,
+  currentUserId,
   onOpenFriends,
   onOpenNotifications,
   onOpenMessages,
@@ -113,6 +116,8 @@ export function HubHeaderToolbar({
   onOpenProfile,
 }: {
   unreadCount: number;
+  unreadMessages?: number;
+  currentUserId?: string;
   onOpenFriends: () => void;
   onOpenNotifications: () => void;
   onOpenMessages: () => void;
@@ -124,6 +129,9 @@ export function HubHeaderToolbar({
   const [searching, setSearching] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [addingId, setAddingId] = useState<string | null>(null);
+  const [friendMap, setFriendMap] = useState<
+    Record<string, 'friends' | 'pending_out' | 'pending_in'>
+  >({});
 
   const [notifOpen, setNotifOpen] = useState(false);
   const [msgOpen, setMsgOpen] = useState(false);
@@ -140,6 +148,12 @@ export function HubHeaderToolbar({
   const { toast } = useToast();
 
   useEffect(() => {
+    getMyFriendshipMap()
+      .then(setFriendMap)
+      .catch(() => setFriendMap({}));
+  }, []);
+
+  useEffect(() => {
     const q = query.trim();
     if (q.length < 1) {
       setResults([]);
@@ -149,9 +163,12 @@ export function HubHeaderToolbar({
     let cancelled = false;
     setSearching(true);
     const t = setTimeout(() => {
-      searchPlayers(q)
-        .then((rows) => {
-          if (!cancelled) setResults(rows);
+      Promise.all([searchPlayers(q), getMyFriendshipMap()])
+        .then(([rows, map]) => {
+          if (!cancelled) {
+            setResults(rows);
+            setFriendMap(map);
+          }
         })
         .catch(() => {
           if (!cancelled) setResults([]);
@@ -238,6 +255,8 @@ export function HubHeaderToolbar({
               <ul className="max-h-64 overflow-y-auto overscroll-contain py-1">
                 {results.map((player) => {
                   const level = getLevelFromXp(player.xpProgress ?? 0);
+                  const isSelf = !!currentUserId && player.id === currentUserId;
+                  const status = friendMap[player.id];
                   return (
                     <li
                       key={player.id}
@@ -263,33 +282,50 @@ export function HubHeaderToolbar({
                           </p>
                         </div>
                       </button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 shrink-0"
-                        disabled={addingId === player.id}
-                        title="Add friend"
-                        onClick={async () => {
-                          setAddingId(player.id);
-                          try {
-                            await sendFriendRequest(player.id);
-                            toast({ title: 'Friend request sent' });
-                          } catch {
-                            toast({
-                              title: 'Could not send request',
-                              variant: 'destructive',
-                            });
-                          } finally {
-                            setAddingId(null);
-                          }
-                        }}
-                      >
-                        {addingId === player.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <UserPlus className="w-4 h-4" />
-                        )}
-                      </Button>
+                      {isSelf ? (
+                        <span className="text-[10px] text-primary shrink-0 px-1">You</span>
+                      ) : status === 'friends' ? (
+                        <span className="text-[10px] text-slate-400 shrink-0 px-1">Friends</span>
+                      ) : status === 'pending_out' || status === 'pending_in' ? (
+                        <span className="text-[10px] text-slate-400 shrink-0 px-1">Pending</span>
+                      ) : (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 shrink-0"
+                          disabled={addingId === player.id}
+                          title="Add friend"
+                          onClick={async () => {
+                            setAddingId(player.id);
+                            try {
+                              const result = await sendFriendRequest(player.id);
+                              if (result.status === 'accepted') {
+                                setFriendMap((prev) => ({ ...prev, [player.id]: 'friends' }));
+                                toast({ title: 'Already friends' });
+                              } else {
+                                setFriendMap((prev) => ({
+                                  ...prev,
+                                  [player.id]: 'pending_out',
+                                }));
+                                toast({ title: 'Friend request sent' });
+                              }
+                            } catch {
+                              toast({
+                                title: 'Could not send request',
+                                variant: 'destructive',
+                              });
+                            } finally {
+                              setAddingId(null);
+                            }
+                          }}
+                        >
+                          {addingId === player.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <UserPlus className="w-4 h-4" />
+                          )}
+                        </Button>
+                      )}
                     </li>
                   );
                 })}
@@ -392,6 +428,11 @@ export function HubHeaderToolbar({
           aria-expanded={msgOpen}
         >
           <Mail className="w-5 h-5" />
+          {unreadMessages > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-primary text-[10px] font-bold flex items-center justify-center">
+              {unreadMessages > 9 ? '9+' : unreadMessages}
+            </span>
+          )}
         </Button>
         <SlidePanel open={msgOpen} anchorRef={msgBtnRef}>
           <div className="px-3 py-2.5 border-b border-slate-700/40 flex items-center justify-between">

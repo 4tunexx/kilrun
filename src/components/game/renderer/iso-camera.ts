@@ -1,22 +1,22 @@
 import type { Vector2 } from '../types';
 
 /**
- * Projects the authoritative 2D world (x = distance down the track, y =
- * lateral lane position) into the angled "2.5D" screen space -- a runner
- * camera looking down the corridor from slightly above and behind the
- * local player, similar to Subway Surfers/Crossy Road rather than a true
- * top-down or a diamond-grid isometric projection (which doesn't suit a
- * linear corridor track).
+ * Projects the authoritative 3-axis world (x = forward, y = lateral, z = height)
+ * into an angled runner camera. Camera yaw lets the player orbit look left/right.
  */
 
-const BASE_SCALE = 34; // pixels per world unit at the camera's focus depth
-const DEPTH_TILT = 0.55; // vertical screen displacement per unit of depth-from-camera -- this is what creates the "angled" look
-const PERSPECTIVE_STRENGTH = 0.015; // objects further ahead shrink slightly, approximating perspective without true 3D
-const HORIZON_Y_RATIO = 0.62; // where the camera's focus point sits vertically on screen
+const BASE_SCALE = 36;
+const DEPTH_TILT = 0.55;
+const HEIGHT_LIFT = 0.92;
+const PERSPECTIVE_STRENGTH = 0.015;
+const HORIZON_Y_RATIO = 0.64;
 
 export interface IsoCamera {
   focusX: number;
   focusY: number;
+  focusZ: number;
+  /** Radians — rotates view around the vertical axis. */
+  yaw: number;
 }
 
 export interface ScreenPoint {
@@ -26,31 +26,45 @@ export interface ScreenPoint {
   depth: number;
 }
 
+function toCameraSpace(worldX: number, worldY: number, camera: IsoCamera) {
+  const dx = worldX - camera.focusX;
+  const dy = worldY - camera.focusY;
+  const cos = Math.cos(camera.yaw);
+  const sin = Math.sin(camera.yaw);
+  // Rotate so +localDepth is "ahead" of the camera.
+  const localDepth = dx * cos + dy * sin;
+  const localSide = -dx * sin + dy * cos;
+  return { localDepth, localSide };
+}
+
 export function worldToScreen(
   worldX: number,
   worldY: number,
   camera: IsoCamera,
   screenWidth: number,
-  screenHeight: number
+  screenHeight: number,
+  worldZ = 0
 ): ScreenPoint {
-  const depth = worldX - camera.focusX;
-  const scale = BASE_SCALE / (1 + Math.max(0, depth) * PERSPECTIVE_STRENGTH);
-  const x = screenWidth / 2 + (worldY - camera.focusY) * scale;
-  const y = screenHeight * HORIZON_Y_RATIO - depth * scale * DEPTH_TILT;
-  return { x, y, scale, depth };
+  const { localDepth, localSide } = toCameraSpace(worldX, worldY, camera);
+  const height = worldZ - (camera.focusZ || 0);
+  const scale = BASE_SCALE / (1 + Math.max(0, localDepth) * PERSPECTIVE_STRENGTH);
+  const x = screenWidth / 2 + localSide * scale;
+  const y =
+    screenHeight * HORIZON_Y_RATIO -
+    localDepth * scale * DEPTH_TILT -
+    height * scale * HEIGHT_LIFT;
+  return { x, y, scale, depth: localDepth };
 }
 
-/** Draw order: farthest-ahead entities first (lower zIndex), nearest last (higher zIndex) so near objects occlude far ones. */
-export function depthZIndex(worldX: number): number {
-  return -worldX;
+export function depthZIndex(worldX: number, worldZ = 0): number {
+  return -worldX * 10 - worldZ;
 }
 
 export interface ScreenExtent extends ScreenPoint {
-  halfWidth: number; // screen-space half-extent along the lateral (worldY) axis
-  halfHeight: number; // screen-space half-extent along the depth (worldX) axis
+  halfWidth: number;
+  halfHeight: number;
 }
 
-/** Like `worldToScreen`, but also converts a world-space bounding box half-size into screen-space, for drawing rectangular obstacles. */
 export function worldExtentToScreen(
   worldX: number,
   worldY: number,
@@ -58,9 +72,10 @@ export function worldExtentToScreen(
   halfExtentY: number,
   camera: IsoCamera,
   screenWidth: number,
-  screenHeight: number
+  screenHeight: number,
+  worldZ = 0
 ): ScreenExtent {
-  const point = worldToScreen(worldX, worldY, camera, screenWidth, screenHeight);
+  const point = worldToScreen(worldX, worldY, camera, screenWidth, screenHeight, worldZ);
   return {
     ...point,
     halfWidth: halfExtentY * point.scale,
@@ -68,15 +83,22 @@ export function worldExtentToScreen(
   };
 }
 
-/** Converts a screen-space direction (e.g. from a joystick/cursor) back into world-space movement intent for this camera. */
-export function screenDirectionToWorld(screenDir: Vector2): Vector2 {
-  // Screen-right maps to +worldY (lane position); screen-up maps to +worldX (forward, toward the finish).
-  return { x: -screenDir.y, y: screenDir.x };
+/** Screen stick/WASD → world intent, then rotate by camera yaw. */
+export function screenDirectionToWorld(screenDir: Vector2, cameraYaw = 0): Vector2 {
+  // Screen-right → +lateral side; screen-up → +forward
+  const forward = -screenDir.y;
+  const side = screenDir.x;
+  const cos = Math.cos(cameraYaw);
+  const sin = Math.sin(cameraYaw);
+  return {
+    x: forward * cos - side * sin,
+    y: forward * sin + side * cos,
+  };
 }
 
-/** Inverse of `screenDirectionToWorld`, for drawing a world-space aim angle (radians) as a screen-space angle. */
-export function worldAngleToScreenAngle(worldAngleRadians: number): number {
-  const worldDir = { x: Math.cos(worldAngleRadians), y: Math.sin(worldAngleRadians) };
+export function worldAngleToScreenAngle(worldAngleRadians: number, cameraYaw = 0): number {
+  const adjusted = worldAngleRadians - cameraYaw;
+  const worldDir = { x: Math.cos(adjusted), y: Math.sin(adjusted) };
   const screenDir = { x: worldDir.y, y: -worldDir.x };
   return Math.atan2(screenDir.y, screenDir.x);
 }

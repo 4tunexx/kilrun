@@ -1,241 +1,377 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRoomState } from './net/use-room-state';
 import type { JoinOptions } from './net/connection';
-import type { NetObstacleState, PlayerInputMessage } from './net/types';
-import { createPixiApp, type PixiBootstrap } from './renderer/pixi-app';
-import { TrackView } from './renderer/track-view';
-import { PlayerView } from './entities/player-view';
-import { ObstacleView } from './entities/obstacle-view';
+import type { NetObstacleState, NetPlatformState, PlayerInputMessage } from './net/types';
 import { InputManager } from './input/input-manager';
 import type { DualJoystick } from './input/dual-joystick';
-import { screenDirectionToWorld, worldToScreen, type IsoCamera } from './renderer/iso-camera';
+import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
+import { ThreeCharacter } from './entities/three-character';
+import { ThreeMap } from './entities/three-map';
+import { CustomMapOverlay } from './entities/custom-map-overlay';
+import { toThree } from './renderer/coords';
 import {
   detectTouchDevice,
-  CAMERA_FOLLOW_LERP,
+  CAMERA_YAW_KEY_SPEED,
+  CAMERA_YAW_MOUSE_SENS,
+  CAMERA_YAW_STICK_SENS,
   NETWORK_SEND_INTERVAL_MS,
   SPAWN_X,
   WORLD_HEIGHT,
-  WORLD_WIDTH,
-  FINISH_X,
-  MOBILE_LOOK_OFFSET_MAX,
-  MOBILE_LOOK_SENSITIVITY,
-  MOBILE_CROSSHAIR_REACH,
 } from './utils/constants';
 import { HUD } from './ui/hud';
-import { Crosshair } from './ui/crosshair';
+import { PauseMenu, useGameFullscreen } from './ui/pause-menu';
 import { LobbyOverlay } from './modes/deathrun/lobby-overlay';
 import { CountdownOverlay } from './modes/deathrun/countdown-overlay';
 import { ResultsScreen } from './modes/deathrun/results-screen';
 import { MobilePlayGate } from './ui/mobile-play-gate';
 import { JoystickOverlay } from './ui/joystick-overlay';
+import { MobileActionButtons } from './ui/mobile-action-buttons';
+import dynamic from 'next/dynamic';
+import { getActivePlayMapId, mapDocSpawnPoints, mapDocToSimPlatforms } from './editor/prefab-storage';
+import { loadMap } from './editor/map-storage';
+import type { MapDocument } from './editor/map-document';
+
+const MapEditor = dynamic(() => import('./editor/map-editor'), { ssr: false });
+
+const PITCH_SENS = 0.0028;
+const ZOOM = 9.5;
 
 interface KilrunEngineProps {
   joinOptions: JoinOptions;
   onExit: () => void;
+  xpProgress?: number;
+  isAdmin?: boolean;
 }
 
-/**
- * Root client component for a Deathrun match. Owns the Colyseus connection
- * (via `useRoomState`), the PixiJS scene, the input manager, and the fixed
- * send-rate network loop; renders phase-aware React overlays (lobby wait,
- * countdown, HUD, results) on top of the canvas.
- */
-export default function KilrunEngine({ joinOptions, onExit }: KilrunEngineProps) {
+export default function KilrunEngine({
+  joinOptions,
+  onExit,
+  xpProgress = 0,
+  isAdmin = false,
+}: KilrunEngineProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
-  const { connectionRef, playersRef, obstaclesRef, rendererCallbacksRef, room, localPlayer, playerCount, connectionError } =
-    useRoomState(joinOptions);
+  const pausedRef = useRef(false);
+  const {
+    connectionRef,
+    playersRef,
+    obstaclesRef,
+    platformsRef,
+    rendererCallbacksRef,
+    room,
+    localPlayer,
+    playerCount,
+    connectionError,
+  } = useRoomState(joinOptions);
 
   const isMobile = detectTouchDevice();
-  const [isAiming, setIsAiming] = useState(!isMobile);
-  const [crosshairOffset, setCrosshairOffset] = useState({ x: 0, y: 0 });
+  const [assetsReady, setAssetsReady] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const { toggle: toggleFullscreen } = useGameFullscreen(rootRef, true);
+  const customDocRef = useRef<MapDocument | null>(null);
+  const customLoadedRef = useRef(false);
+
+  // Push active editor map to server when lobby is ready
+  useEffect(() => {
+    if (room.phase !== 'lobby' && room.phase !== 'countdown') return;
+    if (customLoadedRef.current) return;
+    if (!connectionRef.current?.sessionId) return;
+
+    const mapId = getActivePlayMapId();
+    if (!mapId) return;
+    const doc = loadMap(mapId);
+    if (!doc) return;
+
+    const platforms = mapDocToSimPlatforms(doc);
+    if (!platforms.length) return;
+
+    const spawns = mapDocSpawnPoints(doc);
+    customDocRef.current = doc;
+    customLoadedRef.current = true;
+    connectionRef.current.sendLoadCustomMap({
+      platforms,
+      spawn: spawns.runner ?? undefined,
+    });
+  }, [room.phase, connectionRef, playerCount, connectionError]);
+
+  useEffect(() => {
+    pausedRef.current = paused || editorOpen;
+    if (paused || editorOpen) {
+      if (document.pointerLockElement) document.exitPointerLock?.();
+    }
+  }, [paused, editorOpen]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      if (editorOpen) return; // editor handles its own Esc
+      setPaused((p) => !p);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editorOpen]);
 
   useEffect(() => {
     const hostElement = hostRef.current;
     if (!hostElement) return;
 
-    let pixi: PixiBootstrap | null = null;
     let disposed = false;
-    let removeTicker: (() => void) | null = null;
-
+    let raf = 0;
+    const world = createThreeWorld(hostElement);
+    const map = new ThreeMap(world.scene);
+    const overlay = new CustomMapOverlay(world.scene);
+    const characters = new Map<string, ThreeCharacter>();
     const inputManager = new InputManager(hostElement, isMobile);
     joystickRef.current = inputManager.joystick;
-    const camera: IsoCamera = { focusX: SPAWN_X, focusY: WORLD_HEIGHT / 2 };
-    const lookOffset = { x: 0, y: 0 };
-    const playerViews = new Map<string, PlayerView>();
-    const obstacleViews = new Map<number, ObstacleView>();
-    let track: TrackView | null = null;
+
+    let cameraYaw = 0;
+    let cameraPitch = 0.22;
     let sendAccumulatorMs = 0;
-    let uiAccumulatorMs = 0;
     let shootHeld = false;
+    let interactPulse = false;
+    const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
+    const overlayPlayerPos = new THREE.Vector3();
 
-    createPixiApp(hostElement).then((bootstrap) => {
-      if (disposed) {
-        bootstrap.destroy();
-        return;
+    const activeId = getActivePlayMapId();
+    if (activeId) {
+      const doc = loadMap(activeId);
+      if (doc) {
+        customDocRef.current = doc;
+        void overlay.load(doc);
       }
-      pixi = bootstrap;
-      track = new TrackView(WORLD_WIDTH, WORLD_HEIGHT, FINISH_X);
-      bootstrap.worldLayer.addChild(track.container);
+    }
 
-      const spawnPlayerView = (sessionId: string, username: string) => {
-        const view = new PlayerView(username, sessionId === connectionRef.current?.sessionId);
-        playerViews.set(sessionId, view);
-        bootstrap.worldLayer.addChild(view.container);
-      };
-      const spawnObstacleView = (index: number, kind: NetObstacleState['kind']) => {
-        const view = new ObstacleView(kind);
-        obstacleViews.set(index, view);
-        bootstrap.worldLayer.addChild(view.container);
-      };
+    const spawnCharacter = (sessionId: string, username: string) => {
+      if (characters.has(sessionId)) return;
+      const view = new ThreeCharacter(username, sessionId === connectionRef.current?.sessionId);
+      characters.set(sessionId, view);
+      world.scene.add(view.root);
+    };
 
-      rendererCallbacksRef.current = {
-        onPlayerAdd: (player, sessionId) => spawnPlayerView(sessionId, player.username),
-        onPlayerRemove: (sessionId) => {
-          playerViews.get(sessionId)?.destroy();
-          playerViews.delete(sessionId);
-        },
-        onObstacleAdd: (obstacle, index) => spawnObstacleView(index, obstacle.kind),
-      };
+    rendererCallbacksRef.current = {
+      onPlayerAdd: (player, sessionId) => spawnCharacter(sessionId, player.username),
+      onPlayerRemove: (sessionId) => {
+        characters.get(sessionId)?.destroy();
+        characters.delete(sessionId);
+      },
+      onObstacleAdd: (obstacle, index) => {
+        void map.upsertObstacle(index, obstacle);
+      },
+      onObstacleChange: (obstacle, index) => {
+        void map.upsertObstacle(index, obstacle);
+      },
+      onPlatformAdd: (platform, index) => {
+        void map.upsertPlatform(index, platform);
+      },
+      onPlatformChange: (platform, index) => {
+        void map.upsertPlatform(index, platform);
+      },
+      onPlatformRemove: (index) => {
+        map.removePlatform(index);
+      },
+    };
 
-      playersRef.current.forEach((player, sessionId) => {
-        if (!playerViews.has(sessionId)) spawnPlayerView(sessionId, player.username);
+    playersRef.current.forEach((p, id) => spawnCharacter(id, p.username));
+    platformsRef.current.forEach((p, i) => void map.upsertPlatform(i, p as NetPlatformState));
+    obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o as NetObstacleState));
+
+    const syncTimer = window.setInterval(() => {
+      platformsRef.current.forEach((p, i) => void map.upsertPlatform(i, p));
+      obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o));
+      const live = new Set(playersRef.current.keys());
+      characters.forEach((view, id) => {
+        if (!live.has(id)) {
+          view.destroy();
+          characters.delete(id);
+        }
       });
-      obstaclesRef.current.forEach((obstacle, index) => {
-        if (!obstacleViews.has(index)) spawnObstacleView(index, obstacle.kind);
-      });
+      playersRef.current.forEach((p, id) => spawnCharacter(id, p.username));
+      setAssetsReady(true);
+    }, 400);
 
-      const onTick = (ticker: { deltaMS: number }) => {
-        const dtSeconds = ticker.deltaMS / 1000;
-        const screenWidth = bootstrap.app.screen.width;
-        const screenHeight = bootstrap.app.screen.height;
+    const tick = () => {
+      if (disposed) return;
+      raf = requestAnimationFrame(tick);
+      const dt = Math.min(world.clock.getDelta(), 0.05);
+      const dtMs = dt * 1000;
+      const frozen = pausedRef.current;
 
-        const localSessionId = connectionRef.current?.sessionId;
-        const localState = localSessionId ? playersRef.current.get(localSessionId) : undefined;
-
-        if (isMobile) {
+      if (!frozen) {
+        // Mouse right → look right; A → strafe left (signs verified)
+        cameraYaw += inputManager.getCameraTurnIntent() * CAMERA_YAW_KEY_SPEED * dt;
+        cameraYaw -= inputManager.consumeMouseLookDeltaX() * CAMERA_YAW_MOUSE_SENS;
+        cameraPitch -= inputManager.consumeMouseLookDeltaY() * PITCH_SENS;
+        if (isMobile && inputManager.isAiming()) {
           const aim = inputManager.joystick.getAimVector();
-          if (inputManager.isAiming()) {
-            lookOffset.x += aim.x * MOBILE_LOOK_SENSITIVITY;
-            lookOffset.y += aim.y * MOBILE_LOOK_SENSITIVITY;
-            const mag = Math.hypot(lookOffset.x, lookOffset.y);
-            if (mag > MOBILE_LOOK_OFFSET_MAX) {
-              lookOffset.x = (lookOffset.x / mag) * MOBILE_LOOK_OFFSET_MAX;
-              lookOffset.y = (lookOffset.y / mag) * MOBILE_LOOK_OFFSET_MAX;
-            }
-          } else {
-            lookOffset.x *= 0.9;
-            lookOffset.y *= 0.9;
-          }
+          cameraYaw -= aim.x * CAMERA_YAW_STICK_SENS * dt;
+          cameraPitch -= aim.y * 0.9 * dt;
         }
+      } else {
+        // Drain deltas so resume doesn't snap
+        inputManager.consumeMouseLookDeltaX();
+        inputManager.consumeMouseLookDeltaY();
+      }
+      cameraPitch = THREE.MathUtils.clamp(cameraPitch, -0.45, 0.5);
 
-        if (localState) {
-          const targetX = localState.x + (isMobile ? lookOffset.x : 0);
-          const targetY = localState.y + (isMobile ? lookOffset.y : 0);
-          camera.focusX += (targetX - camera.focusX) * CAMERA_FOLLOW_LERP;
-          camera.focusY += (targetY - camera.focusY) * CAMERA_FOLLOW_LERP;
+      const localSessionId = connectionRef.current?.sessionId;
+      const localState = localSessionId ? playersRef.current.get(localSessionId) : undefined;
+
+      characters.forEach((view, sessionId) => {
+        const player = playersRef.current.get(sessionId);
+        if (!player) return;
+        view.update(player, dt, sessionId === localSessionId ? cameraYaw : player.cameraYaw);
+      });
+      map.update(dt);
+
+      if (!frozen && inputManager.isInteractPressed()) interactPulse = true;
+
+      if (localState) {
+        const [tx, ty, tz] = toThree(localState.x, localState.y, localState.z ?? 0);
+        targetPos.set(tx, ty, tz);
+        overlayPlayerPos.set(tx, ty, tz);
+        const doc = customDocRef.current;
+        if (doc) {
+          overlay.update(dt, overlayPlayerPos, interactPulse, doc.entities);
+        } else {
+          overlay.update(dt, null, false, []);
         }
+        interactPulse = false;
+      } else {
+        overlay.update(dt, null, false, []);
+      }
+      updateFollowCamera(world.camera, targetPos, cameraYaw, cameraPitch, dt, ZOOM);
 
-        track?.update(camera, screenWidth, screenHeight);
-        playerViews.forEach((view, sessionId) => {
-          const player = playersRef.current.get(sessionId);
-          if (player) view.update(player, camera, screenWidth, screenHeight);
-        });
-        obstacleViews.forEach((view, index) => {
-          const obstacle = obstaclesRef.current.get(index);
-          if (obstacle) view.update(obstacle, camera, screenWidth, screenHeight, dtSeconds);
-        });
-
+      if (!frozen) {
         shootHeld = shootHeld || inputManager.isShootPressed();
-
-        uiAccumulatorMs += ticker.deltaMS;
-        if (uiAccumulatorMs >= 50) {
-          uiAccumulatorMs = 0;
-          const aiming = inputManager.isAiming();
-          setIsAiming(aiming);
-          if (isMobile && aiming) {
-            const aim = inputManager.joystick.getAimVector();
-            setCrosshairOffset({
-              x: aim.x * MOBILE_CROSSHAIR_REACH,
-              y: aim.y * MOBILE_CROSSHAIR_REACH,
-            });
-          } else {
-            setCrosshairOffset({ x: 0, y: 0 });
-          }
-        }
-
-        sendAccumulatorMs += ticker.deltaMS;
+        sendAccumulatorMs += dtMs;
         if (sendAccumulatorMs >= NETWORK_SEND_INTERVAL_MS && localState) {
           sendAccumulatorMs = 0;
-          const moveScreenVector = inputManager.getMoveVector();
-          const moveWorldVector = screenDirectionToWorld(moveScreenVector);
-          const localScreenPoint = worldToScreen(
-            localState.x,
-            localState.y,
-            camera,
-            screenWidth,
-            screenHeight
-          );
-          const aimAngle = inputManager.getAimAngle(localScreenPoint);
+          const stick = inputManager.getMoveVector();
+          const wishX = -stick.x;
+          const wishZ = -stick.y;
+          const cos = Math.cos(cameraYaw);
+          const sin = Math.sin(cameraYaw);
+          const threeMoveX = wishX * cos + wishZ * sin;
+          const threeMoveZ = -wishX * sin + wishZ * cos;
+          const moveX = threeMoveZ;
+          const moveY = threeMoveX;
 
           const message: PlayerInputMessage = {
-            moveX: moveWorldVector.x,
-            moveY: moveWorldVector.y,
-            aimAngle,
+            moveX,
+            moveY,
+            aimAngle: cameraYaw,
+            cameraYaw,
             crouch: inputManager.isCrouchPressed(),
+            sprint: inputManager.isSprintPressed(),
+            jumpPressed: inputManager.isJumpPressed(),
             shootPressed: shootHeld,
             interactPressed: inputManager.isInteractPressed(),
           };
           connectionRef.current?.sendInput(message);
           shootHeld = false;
         }
-      };
+      }
 
-      bootstrap.app.ticker.add(onTick);
-      removeTicker = () => bootstrap.app.ticker.remove(onTick);
-    });
+      world.render();
+    };
+
+    raf = requestAnimationFrame(tick);
 
     return () => {
       disposed = true;
-      removeTicker?.();
-      playerViews.forEach((view) => view.destroy());
-      obstacleViews.forEach((view) => view.destroy());
-      track?.destroy();
-      pixi?.destroy();
+      cancelAnimationFrame(raf);
+      window.clearInterval(syncTimer);
+      if (document.pointerLockElement) document.exitPointerLock?.();
+      characters.forEach((c) => c.destroy());
+      overlay.destroy();
+      map.destroy();
+      world.destroy();
       joystickRef.current = null;
       inputManager.joystick.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const runnersLeft = useMemo(() => {
+    let n = 0;
+    playersRef.current.forEach((p) => {
+      if (p.role === 'runner' && p.isAlive) n += 1;
+    });
+    if (n === 0 && localPlayer?.role === 'runner' && localPlayer.isAlive) return 1;
+    return n;
+  }, [localPlayer, playerCount, room.phase, playersRef]);
+
+  const resume = () => {
+    setPaused(false);
+    hostRef.current?.requestPointerLock?.().catch(() => {});
+  };
+
   return (
     <div
       ref={rootRef}
-      className="fixed inset-0 z-[100] bg-slate-950 overflow-hidden touch-none select-none"
+      className={`fixed inset-0 z-[200] bg-[#0a1220] overflow-hidden touch-none select-none ${
+        paused || editorOpen ? 'cursor-default' : 'cursor-none'
+      }`}
     >
       <MobilePlayGate containerRef={rootRef}>
         <div ref={hostRef} className="absolute inset-0 w-full h-full" />
 
-        {room.phase === 'playing' && (
-          <Crosshair
-            visible={isAiming}
-            offsetX={crosshairOffset.x}
-            offsetY={crosshairOffset.y}
+        {!assetsReady && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 z-[105] pointer-events-none">
+            <p className="text-white font-bold tracking-wide animate-pulse">Loading map & character…</p>
+          </div>
+        )}
+
+        {room.phase === 'playing' && localPlayer && !editorOpen && (
+          <HUD
+            player={localPlayer}
+            room={room}
+            xpProgress={xpProgress}
+            runnersLeft={runnersLeft}
+            coins={Math.floor(xpProgress / 10)}
           />
         )}
-        {room.phase === 'playing' && localPlayer && <HUD player={localPlayer} room={room} />}
         {room.phase === 'lobby' && <LobbyOverlay playerCount={playerCount} />}
         {room.phase === 'countdown' && <CountdownOverlay countdownMs={room.countdownMs} />}
         {room.phase === 'results' && localPlayer && (
           <ResultsScreen room={room} player={localPlayer} onContinue={onExit} />
         )}
 
-        <JoystickOverlay joystickRef={joystickRef} enabled={isMobile} />
+        <JoystickOverlay joystickRef={joystickRef} enabled={isMobile && !paused} />
+        <MobileActionButtons
+          joystickRef={joystickRef}
+          enabled={isMobile && room.phase === 'playing' && !paused}
+        />
+
+        <PauseMenu
+          open={paused && !editorOpen}
+          isAdmin={isAdmin}
+          onResume={resume}
+          onOpenEditor={() => {
+            setPaused(false);
+            setEditorOpen(true);
+          }}
+          onToggleFullscreen={toggleFullscreen}
+          onExit={onExit}
+        />
+
+        {editorOpen && (
+          <MapEditor
+            isAdmin={isAdmin}
+            onClose={() => {
+              setEditorOpen(false);
+              setPaused(true);
+            }}
+          />
+        )}
 
         {connectionError && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-950/90 z-[300]">
@@ -249,16 +385,19 @@ export default function KilrunEngine({ joinOptions, onExit }: KilrunEngineProps)
           </div>
         )}
 
-        <div className="absolute top-4 right-4 sm:top-6 sm:right-6 pointer-events-auto z-[200]">
-          <Button
-            variant="destructive"
-            size="icon"
-            className="w-12 h-12 rounded-xl shadow-lg"
-            onClick={onExit}
-          >
-            <X className="w-6 h-6" />
-          </Button>
-        </div>
+        {!paused && !editorOpen && (
+          <div className="absolute top-3 right-3 pointer-events-auto z-[200]">
+            <Button
+              variant="destructive"
+              size="icon"
+              className="w-11 h-11 rounded-xl shadow-lg cursor-pointer"
+              onClick={() => setPaused(true)}
+              aria-label="Pause"
+            >
+              <X className="w-5 h-5" />
+            </Button>
+          </div>
+        )}
       </MobilePlayGate>
     </div>
   );

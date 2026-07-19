@@ -20,7 +20,8 @@ export class InputManager {
 
   constructor(element: HTMLElement, private isMobile: boolean) {
     this.keyboard = new KeyboardHandler();
-    this.mouse = new MouseHandler(window);
+    // Bind mouse to the canvas host so free-look + pointer-lock work without RMB
+    this.mouse = new MouseHandler(isMobile ? window : element);
     this.joystick = new DualJoystick(element);
   }
 
@@ -57,11 +58,36 @@ export class InputManager {
   }
 
   public isJumpPressed(): boolean {
-    return this.keyboard.isPressed(' ');
+    return this.keyboard.isPressed(' ') || this.joystick.isJumpHeld();
   }
 
-  /** Crosshair visibility: always on desktop, only while the aim stick is actively held on mobile. */
+  public isSprintPressed(): boolean {
+    return this.keyboard.isPressed('shift') || this.joystick.isSprintHeld();
+  }
+
+  /** Camera yaw turn from Q/E keys (desktop) — mouse orbit is RMB-only. */
+  public getCameraTurnIntent(): number {
+    let turn = 0;
+    if (this.keyboard.isPressed('q')) turn -= 1;
+    if (this.keyboard.isPressed('e')) turn += 1;
+    return turn;
+  }
+
+  public consumeMouseLookDeltaX(): number {
+    return this.mouse.consumeLookDeltaX();
+  }
+
+  public consumeMouseLookDeltaY(): number {
+    return this.mouse.consumeLookDeltaY();
+  }
+
+  public isCameraLookHeld(): boolean {
+    // Free look is always on for platformer
+    return true;
+  }
+
+  /** No FPS crosshair in free 3rd-person. */
   public isAiming(): boolean {
-    return this.isMobile ? this.joystick.isAiming() : true;
+    return this.isMobile ? this.joystick.isAiming() : false;
   }
 }

@@ -9,6 +9,7 @@ import {
   Flame,
   LayoutDashboard,
   Loader2,
+  Map as MapIcon,
   Medal,
   Megaphone,
   Minus,
@@ -45,6 +46,7 @@ import { RequirementTypeSelect } from '@/components/views/admin/requirement-type
 import { CosmeticsStudio } from '@/components/views/admin/cosmetics-studio';
 import { LogoStyleEditor } from '@/components/views/admin/logo-style-editor';
 import { AdminDashboardPanel } from '@/components/views/admin/admin-dashboard-panel';
+import { AdminMapEditorPanel } from '@/components/views/admin/admin-map-editor-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -119,6 +121,7 @@ const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   badges: { label: 'Badges', icon: <Medal className="h-3.5 w-3.5" /> },
   support: { label: 'Support', icon: <Ticket className="h-3.5 w-3.5" /> },
   shop: { label: 'Shop', icon: <ShoppingBag className="h-3.5 w-3.5" /> },
+  maps: { label: 'Map Editor', icon: <MapIcon className="h-3.5 w-3.5" /> },
   content: { label: 'Content', icon: <FileText className="h-3.5 w-3.5" /> },
 };
 
@@ -135,6 +138,7 @@ const ADMIN_TABS = [
   'badges',
   'support',
   'shop',
+  'maps',
   'content',
 ] as const;
 
@@ -187,7 +191,6 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
   const [announceForm, setAnnounceForm] = useState({
     title: '',
     body: '',
-    alsoDm: true,
   });
   const [detailUserId, setDetailUserId] = useState<string | null>(null);
   const [guideForm, setGuideForm] = useState({
@@ -1057,24 +1060,18 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   }
                   className="bg-slate-900/50 border-slate-700 min-h-[100px]"
                 />
-                <label className="flex items-center gap-2 text-sm text-slate-300">
-                  <Checkbox
-                    checked={announceForm.alsoDm}
-                    onCheckedChange={(v) =>
-                      setAnnounceForm((f) => ({ ...f, alsoDm: !!v }))
-                    }
-                  />
-                  Also send as direct message
-                </label>
+                <p className="text-xs text-slate-400">
+                  Sent to every player&apos;s Messages inbox (mail icon), not the bell.
+                </p>
                 <Button
                   disabled={busyKey === 'broadcast'}
                   onClick={() =>
                     runAction('broadcast', async () => {
                       const r = await adminBroadcastAnnouncement(announceForm);
-                      setAnnounceForm({ title: '', body: '', alsoDm: true });
+                      setAnnounceForm({ title: '', body: '' });
                       toast({
-                        title: 'Announcement sent',
-                        description: `${r.count} players notified`,
+                        title: 'Mass message sent',
+                        description: `${r.count} players received it in Messages`,
                       });
                     })
                   }
@@ -2187,6 +2184,12 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                 );
               })}
             </div>
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="maps" className="mt-4">
+            <AdminMapEditorPanel />
           </TabsContent>
         )}
 

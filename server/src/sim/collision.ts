@@ -1,7 +1,7 @@
 import { ObstacleState, PlayerState } from '../schema/RoomState.js';
-import { PLAYER_RADIUS } from './constants.js';
+import { PLAYER_HEIGHT, PLAYER_RADIUS } from './constants.js';
 
-/** Circle (player) vs axis-aligned rect (obstacle), only meaningful while the obstacle is toggled active. */
+/** Circle (player XY) vs AABB hazard, only while active and overlapping in height. */
 export function isPlayerHitByObstacle(player: PlayerState, obstacle: ObstacleState): boolean {
   if (!obstacle.active) return false;
 
@@ -12,10 +12,17 @@ export function isPlayerHitByObstacle(player: PlayerState, obstacle: ObstacleSta
 
   const dx = player.x - closestX;
   const dy = player.y - closestY;
-  return dx * dx + dy * dy < PLAYER_RADIUS * PLAYER_RADIUS;
+  if (dx * dx + dy * dy >= PLAYER_RADIUS * PLAYER_RADIUS) return false;
+
+  // Vertical overlap: player capsule [z, z+PLAYER_HEIGHT] vs hazard band around obstacle.z
+  const playerBottom = player.z;
+  const playerTop = player.z + PLAYER_HEIGHT;
+  const hazBottom = obstacle.z - 0.2;
+  const hazTop = obstacle.z + Math.max(obstacle.height, 1.2);
+  return playerTop >= hazBottom && playerBottom <= hazTop;
 }
 
-/** Simple 2D hitscan: is `target` within `range` and roughly along `shooter`'s aim direction (a forgiving cone, not a pixel-perfect ray). */
+/** Simple 2D hitscan cone in XY (trapper). */
 export function isHitByShot(
   shooterX: number,
   shooterY: number,

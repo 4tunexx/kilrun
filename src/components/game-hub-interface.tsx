@@ -138,6 +138,7 @@ const VIEWS_NEEDING_USER_ID = new Set([
   'home',
   'profile',
   'stats',
+  'leaderboard',
   'missions',
   'messages',
   'notifications',
@@ -168,6 +169,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [currentRank, setCurrentRank] = useState(user.currentRank);
   const [emailVerified, setEmailVerified] = useState(user.emailVerified);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const [bgUrl, setBgUrl] = useState(resolveHubBackground());
   /** Raw SiteSettings values — resolve*() only at render so admin always wins. */
   const [logoUrl, setLogoUrl] = useState('');
@@ -214,6 +216,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       setIsVip(live.isVip);
       setEmailVerified(live.emailVerified);
       setUnreadCount(live.unreadNotifications);
+      if (typeof live.unreadMessages === 'number') {
+        setUnreadMessages(live.unreadMessages);
+      }
       if (typeof live.dailyMissionsCompleted === 'number') {
         setDailyDone(live.dailyMissionsCompleted);
       }
@@ -409,6 +414,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           userId: user.id,
           username: user.username,
           avatarUrl: user.avatarUrl,
+          xpProgress,
         };
       } else if (currentPage === 'messages') {
         props.userId = user.id;
@@ -483,6 +489,23 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       </TooltipContent>
     </Tooltip>
   );
+
+  // Fullscreen match: no hub rails / collapsible menus behind the game.
+  if (currentPage === 'lobby' && lobbyMode) {
+    return (
+      <ProfileNavigationProvider value={{ openProfile: handleViewProfile }}>
+        <LobbyView
+          mode={lobbyMode}
+          onCancel={handleCancelLobby}
+          userId={user.id}
+          username={user.username}
+          avatarUrl={user.avatarUrl}
+          xpProgress={xpProgress}
+          isAdmin={user.role === 'admin'}
+        />
+      </ProfileNavigationProvider>
+    );
+  }
 
   return (
     <ProfileNavigationProvider value={{ openProfile: handleViewProfile }}>
@@ -655,6 +678,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                 toolbar={
                   <HubHeaderToolbar
                     unreadCount={unreadCount}
+                    unreadMessages={unreadMessages}
+                    currentUserId={user.id}
                     onOpenFriends={() => setIsFriendsSheetOpen(true)}
                     onOpenNotifications={() => navigate('notifications')}
                     onOpenMessages={() => navigate('messages')}

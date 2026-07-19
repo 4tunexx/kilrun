@@ -1,21 +1,51 @@
 /** Shared tuning values for the authoritative simulation. Keep every magic number here. */
 
-export const TICK_RATE_HZ = 20;
+export const TICK_RATE_HZ = 30;
 export const TICK_DT_MS = 1000 / TICK_RATE_HZ;
 
 export const MIN_PLAYERS_TO_START = 1;
 export const LOBBY_COUNTDOWN_MS = 5000;
-export const MATCH_DURATION_MS = 120_000;
+export const MATCH_DURATION_MS = 180_000;
 
-export const WORLD_WIDTH = 40;
-export const WORLD_HEIGHT = 12;
+/** Track length (forward / depth axis). */
+export const WORLD_WIDTH = 48;
+/** Track width (lateral axis). */
+export const WORLD_HEIGHT = 10;
 export const FINISH_X = WORLD_WIDTH - 2;
 export const SPAWN_X = 2;
+export const SPAWN_Z = 0;
 
-export const PLAYER_RADIUS = 0.45;
-export const RUNNER_MOVE_SPEED = 4.2; // world units / second
-export const TRAPPER_MOVE_SPEED = 3.6;
-export const CROUCH_SPEED_MULTIPLIER = 0.5;
+export const PLAYER_RADIUS = 0.4;
+export const PLAYER_HEIGHT = 1.0;
+
+/** Quake / Deathrun-inspired horizontal movement (world units / second). */
+export const MAX_GROUND_SPEED = 6.2;
+export const SPRINT_MULTIPLIER = 1.35;
+export const GROUND_ACCEL = 28;
+export const GROUND_FRICTION = 14;
+export const AIR_ACCEL = 10;
+export const AIR_CONTROL = 0.65;
+export const MAX_AIR_SPEED_MULT = 1.05;
+export const CROUCH_SPEED_MULTIPLIER = 0.55;
+
+/** Vertical platformer feel. */
+export const GRAVITY = 28;
+export const JUMP_VELOCITY = 9.4;
+export const COYOTE_TIME_MS = 90;
+export const JUMP_BUFFER_MS = 110;
+export const MAX_FALL_SPEED = 22;
+/** Below this height the runner falls into the void and is eliminated. */
+export const VOID_Z = -4;
+
+export const MAX_ENERGY = 100;
+export const ENERGY_DRAIN_RATE = 28;
+export const ENERGY_REGEN_RATE = 18;
+export const ENERGY_EXHAUSTED_THRESHOLD = 50;
+export const ENERGY_EXHAUSTED_SPEED_MULT = 0.72;
+export const JUMP_ENERGY_COST = 6;
+
+export const RUNNER_MOVE_SPEED = MAX_GROUND_SPEED;
+export const TRAPPER_MOVE_SPEED = MAX_GROUND_SPEED * 0.92;
 
 export const OBSTACLE_DAMAGE = 40;
 export const OBSTACLE_HIT_COOLDOWN_MS = 600;

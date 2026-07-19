@@ -45,6 +45,8 @@ type FriendRow = {
   isVip?: boolean;
   xpProgress?: number;
   currentRank?: string;
+  isOnline?: boolean;
+  lastSeenAt?: Date | null;
 };
 
 export const FriendsList = ({
@@ -86,6 +88,11 @@ export const FriendsList = ({
 
   useEffect(() => {
     reload().catch(() => setLoading(false));
+    // Refresh presence dots while the friends sheet is open.
+    const id = setInterval(() => {
+      reload().catch(() => {});
+    }, 30000);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -250,7 +257,9 @@ export const FriendsList = ({
                           setAddingId(player.id);
                           try {
                             const result = await sendFriendRequest(player.id);
-                            if (result.status === 'pending') {
+                            if (result.status === 'self') {
+                              toast({ title: 'That is you' });
+                            } else if (result.status === 'pending') {
                               setPendingOutIds((prev) => new Set(prev).add(player.id));
                               toast({ title: 'Friend request sent' });
                             } else if (result.status === 'accepted') {
@@ -296,27 +305,45 @@ export const FriendsList = ({
           ) : (
             filteredFriends.map((friend) => {
               const level = getLevelFromXp(friend.xpProgress ?? 0);
+              const online = !!friend.isOnline;
               return (
                 <div
                   key={friend.id}
                   className="flex items-center justify-between p-3 rounded-lg bg-slate-900/60 backdrop-blur-md border border-slate-700/30 hover:border-primary/40 transition-colors"
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <Avatar>
-                      <AvatarImage src={friend.avatarUrl} alt={friend.username} />
-                      <AvatarFallback>{friend.username.charAt(0)}</AvatarFallback>
-                    </Avatar>
+                    <div className="relative shrink-0">
+                      <Avatar>
+                        <AvatarImage src={friend.avatarUrl} alt={friend.username} />
+                        <AvatarFallback>{friend.username.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <span
+                        className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-slate-900 ${
+                          online ? 'bg-emerald-400' : 'bg-slate-500'
+                        }`}
+                        title={online ? 'Online' : 'Offline'}
+                      />
+                    </div>
                     <div className="min-w-0">
-                      <UserHoverCard
-                        userId={friend.id}
-                        role={friend.role}
-                        isVip={friend.isVip}
-                        className="truncate block"
-                      >
-                        {friend.username}
-                      </UserHoverCard>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className={`h-2 w-2 rounded-full shrink-0 ${
+                            online ? 'bg-emerald-400' : 'bg-slate-500'
+                          }`}
+                          title={online ? 'Online' : 'Offline'}
+                        />
+                        <UserHoverCard
+                          userId={friend.id}
+                          role={friend.role}
+                          isVip={friend.isVip}
+                          className="truncate"
+                        >
+                          {friend.username}
+                        </UserHoverCard>
+                      </div>
                       <p className="text-xs text-slate-400">
-                        {friend.currentRank ?? 'Unranked'} · Lv {level}
+                        {online ? 'Online' : 'Offline'} · {friend.currentRank ?? 'Unranked'} · Lv{' '}
+                        {level}
                       </p>
                     </div>
                   </div>

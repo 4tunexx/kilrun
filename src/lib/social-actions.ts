@@ -375,6 +375,15 @@ export async function getUserBrief(userId: string) {
   });
 }
 
+/** Presence window: hub polls every 30s — treat as online if seen within 2 minutes. */
+const ONLINE_MS = 2 * 60 * 1000;
+
+function withPresence<T extends { lastSeenAt?: Date | null }>(row: T) {
+  const lastSeenAt = row.lastSeenAt ?? null;
+  const isOnline = !!lastSeenAt && Date.now() - lastSeenAt.getTime() < ONLINE_MS;
+  return { ...row, lastSeenAt, isOnline };
+}
+
 export async function getFriends() {
   const user = await requireSessionUser();
   const rows = await prisma.friendship.findMany({
@@ -392,6 +401,7 @@ export async function getFriends() {
           isVip: true,
           xpProgress: true,
           currentRank: true,
+          lastSeenAt: true,
         },
       },
       userB: {
@@ -403,11 +413,31 @@ export async function getFriends() {
           isVip: true,
           xpProgress: true,
           currentRank: true,
+          lastSeenAt: true,
         },
       },
     },
   });
-  return rows.map((f) => (f.userAId === user.id ? f.userB : f.userA));
+  return rows.map((f) => withPresence(f.userAId === user.id ? f.userB : f.userA));
+}
+
+/** Map of otherUserId → friendship UI status for the current user. */
+export async function getMyFriendshipMap() {
+  const user = await requireSessionUser();
+  const rows = await prisma.friendship.findMany({
+    where: {
+      OR: [{ userAId: user.id }, { userBId: user.id }],
+    },
+    select: { userAId: true, userBId: true, status: true },
+  });
+  const map: Record<string, 'friends' | 'pending_out' | 'pending_in'> = {};
+  for (const r of rows) {
+    const otherId = r.userAId === user.id ? r.userBId : r.userAId;
+    if (r.status === 'accepted') map[otherId] = 'friends';
+    else if (r.userAId === user.id) map[otherId] = 'pending_out';
+    else map[otherId] = 'pending_in';
+  }
+  return map;
 }
 
 export async function getFriendRequests() {
@@ -432,7 +462,9 @@ export async function getOutgoingFriendRequests() {
 
 export async function sendFriendRequest(targetUserId: string) {
   const user = await requireSessionUser();
-  if (user.id === targetUserId) throw new Error('Cannot friend yourself');
+  if (user.id === targetUserId) {
+    return { id: '', userAId: user.id, userBId: user.id, status: 'self' as const };
+  }
   const existing = await prisma.friendship.findFirst({
     where: {
       OR: [
@@ -467,6 +499,14 @@ export async function respondFriendRequest(friendshipId: string, accept: boolean
   const updated = await prisma.friendship.update({
     where: { id: friendshipId },
     data: { status: 'accepted' },
+  });
+  // Inbox (mail), not bell — requester learns via private message.
+  await prisma.message.create({
+    data: {
+      senderId: user.id,
+      receiverId: friendship.userAId,
+      body: `${user.username} accepted your friend request.`,
+    },
   });
   await processWebsiteAction(user.id, 'friends');
   await processWebsiteAction(friendship.userAId, 'friends');
@@ -553,19 +593,45 @@ export async function sendDirectMessage(receiverId: string, body: string) {
   const user = await requireSessionUser();
   const text = body.trim().slice(0, 2000);
   if (!text) throw new Error('Empty message');
+  if (receiverId === user.id) throw new Error('Cannot message yourself');
   const message = await prisma.message.create({
     data: { senderId: user.id, receiverId, body: text },
   });
-  await prisma.notification.create({
-    data: {
-      userId: receiverId,
-      title: 'New message',
-      body: `${user.username}: ${text.slice(0, 80)}`,
-      type: 'message',
-    },
-  });
+  // Private messages stay in the mail inbox only — not the bell.
   await processWebsiteAction(user.id, 'messages');
   return message;
+}
+
+export async function getUnreadMessageCount() {
+  const user = await requireSessionUser();
+  return prisma.message.count({
+    where: { receiverId: user.id, readAt: null },
+  });
+}
+
+/** Delete a single DM the current user sent or received. */
+export async function deleteMessage(messageId: string) {
+  const user = await requireSessionUser();
+  const msg = await prisma.message.findUnique({ where: { id: messageId } });
+  if (!msg || (msg.senderId !== user.id && msg.receiverId !== user.id)) {
+    throw new Error('Message not found');
+  }
+  await prisma.message.delete({ where: { id: messageId } });
+  return { ok: true as const };
+}
+
+/** Delete the whole conversation with a peer. */
+export async function deleteConversation(peerId: string) {
+  const user = await requireSessionUser();
+  await prisma.message.deleteMany({
+    where: {
+      OR: [
+        { senderId: user.id, receiverId: peerId },
+        { senderId: peerId, receiverId: user.id },
+      ],
+    },
+  });
+  return { ok: true as const };
 }
 
 export async function getForumPosts(take = 30) {
@@ -688,10 +754,16 @@ export async function getMySupportTickets() {
   });
 }
 
+/** Bell inbox — system alerts only (not DMs / mass mail / admin awards). */
+const BELL_EXCLUDED_TYPES = ['message', 'announcement'] as const;
+
 export async function getNotifications() {
   const user = await requireSessionUser();
   return prisma.notification.findMany({
-    where: { userId: user.id },
+    where: {
+      userId: user.id,
+      NOT: { type: { in: [...BELL_EXCLUDED_TYPES] } },
+    },
     orderBy: { createdAt: 'desc' },
     take: 50,
   });
@@ -700,10 +772,42 @@ export async function getNotifications() {
 export async function markAllNotificationsRead() {
   const user = await requireSessionUser();
   await prisma.notification.updateMany({
-    where: { userId: user.id, isRead: false },
+    where: {
+      userId: user.id,
+      isRead: false,
+      NOT: { type: { in: [...BELL_EXCLUDED_TYPES] } },
+    },
     data: { isRead: true },
   });
   return { ok: true };
+}
+
+export async function markNotificationRead(notificationId: string) {
+  const user = await requireSessionUser();
+  await prisma.notification.updateMany({
+    where: { id: notificationId, userId: user.id },
+    data: { isRead: true },
+  });
+  return { ok: true as const };
+}
+
+export async function deleteNotification(notificationId: string) {
+  const user = await requireSessionUser();
+  await prisma.notification.deleteMany({
+    where: { id: notificationId, userId: user.id },
+  });
+  return { ok: true as const };
+}
+
+export async function deleteAllNotifications() {
+  const user = await requireSessionUser();
+  await prisma.notification.deleteMany({
+    where: {
+      userId: user.id,
+      NOT: { type: { in: [...BELL_EXCLUDED_TYPES] } },
+    },
+  });
+  return { ok: true as const };
 }
 
 export async function purchaseStoreItem(itemId: string) {
@@ -1085,23 +1189,23 @@ export async function adminAdjustVp(userId: string, delta: number) {
     targetUsername: target.username,
     detail: `${amount > 0 ? '+' : ''}${amount} VP → ${next}`,
   });
-  await prisma.notification.create({
-    data: {
-      userId,
-      title: amount > 0 ? 'VP received' : 'VP adjusted',
-      body:
-        amount > 0
-          ? `${staff.username} granted you +${amount} VP.`
-          : `${staff.username} removed ${Math.abs(amount)} VP from your balance.`,
-      type: 'admin',
-    },
-  });
   if (amount > 0) {
+    // Awards go to the mail inbox only.
     await prisma.message.create({
       data: {
         senderId: staff.id,
         receiverId: userId,
         body: `🎁 ${staff.username} awarded you +${amount} VP from the admin panel.`,
+      },
+    });
+  } else {
+    // Deductions are system alerts (bell).
+    await prisma.notification.create({
+      data: {
+        userId,
+        title: 'VP adjusted',
+        body: `${staff.username} removed ${Math.abs(amount)} VP from your balance.`,
+        type: 'admin',
       },
     });
   }
@@ -1164,10 +1268,11 @@ export async function adminGetUserDetail(userId: string) {
   return { user, inventory, purchases, badges, achievements, missions };
 }
 
-/** Site-wide announcement: notification for every player (+ optional DM from staff). */
+/** Site-wide mass message — lands in the mail inbox (not the bell). */
 export async function adminBroadcastAnnouncement(input: {
   title: string;
   body: string;
+  /** @deprecated Mass mail always goes to Messages; kept for call-site compat. */
   alsoDm?: boolean;
 }) {
   const staff = await requireStaff();
@@ -1183,25 +1288,15 @@ export async function adminBroadcastAnnouncement(input: {
   const chunk = 50;
   for (let i = 0; i < users.length; i += chunk) {
     const slice = users.slice(i, i + chunk);
-    await prisma.notification.createMany({
-      data: slice.map((u) => ({
-        userId: u.id,
-        title: `📢 ${title}`,
-        body: `${body}\n— ${staff.username}`,
-        type: 'announcement',
-      })),
+    await prisma.message.createMany({
+      data: slice
+        .filter((u) => u.id !== staff.id)
+        .map((u) => ({
+          senderId: staff.id,
+          receiverId: u.id,
+          body: `📢 ${title}\n\n${body}`,
+        })),
     });
-    if (input.alsoDm) {
-      await prisma.message.createMany({
-        data: slice
-          .filter((u) => u.id !== staff.id)
-          .map((u) => ({
-            senderId: staff.id,
-            receiverId: u.id,
-            body: `📢 ${title}\n\n${body}`,
-          })),
-      });
-    }
   }
 
   const { writeAuditLog } = await import('@/lib/audit');
@@ -1209,7 +1304,7 @@ export async function adminBroadcastAnnouncement(input: {
     actorId: staff.id,
     actorUsername: staff.username,
     action: 'broadcast',
-    detail: `${title} → ${users.length} players`,
+    detail: `${title} → ${users.length} players (inbox)`,
   });
 
   return { ok: true as const, count: users.length };

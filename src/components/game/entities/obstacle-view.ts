@@ -22,6 +22,7 @@ export class ObstacleView {
   }
 
   public update(obstacle: NetObstacleState, camera: IsoCamera, screenWidth: number, screenHeight: number, dtSeconds: number): void {
+    const z = obstacle.z ?? 0;
     const extent = worldExtentToScreen(
       obstacle.x,
       obstacle.y,
@@ -29,11 +30,12 @@ export class ObstacleView {
       obstacle.height / 2,
       camera,
       screenWidth,
-      screenHeight
+      screenHeight,
+      z
     );
     this.container.x = extent.x;
     this.container.y = extent.y;
-    this.container.zIndex = depthZIndex(obstacle.x) - 0.5; // hazards render just behind players standing on them
+    this.container.zIndex = depthZIndex(obstacle.x, z) - 0.5;
 
     const colors = KIND_COLORS[this.kind];
     const color = obstacle.active ? colors.active : colors.idle;

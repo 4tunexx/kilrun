@@ -40,6 +40,8 @@ model User {
   /// Consecutive-day login streak, used for "daily login" style requirements.
   loginStreak  Int       @default(0)
   lastLoginAt  DateTime?
+  /// Last hub presence heartbeat (online = seen within ~2 minutes).
+  lastSeenAt   DateTime?
   /// Last time the player opened the hub leaderboard (daily mission).
   lastLeaderboardAt DateTime?
 

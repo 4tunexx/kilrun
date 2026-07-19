@@ -27,6 +27,8 @@ export class DualJoystick {
   public aimStick: StickState = freshStick();
 
   private shootPulse = false;
+  private jumpHeld = false;
+  private sprintHeld = false;
   private lastLeftTapAt = 0;
   private lastLeftTapPos: Vector2 = { x: 0, y: 0 };
 
@@ -120,10 +122,27 @@ export class DualJoystick {
     return pulse;
   }
 
+  /** Driven by on-screen Jump / Sprint buttons (mobile). */
+  public setJumpHeld(held: boolean) {
+    this.jumpHeld = held;
+  }
+
+  public setSprintHeld(held: boolean) {
+    this.sprintHeld = held;
+  }
+
+  public isJumpHeld(): boolean {
+    return this.jumpHeld;
+  }
+
+  public isSprintHeld(): boolean {
+    return this.sprintHeld;
+  }
+
   public destroy() {
-    // Listeners are tied to the host element lifetime; no extra cleanup needed
-    // beyond releasing stick state when the engine unmounts.
     this.aimStick = freshStick();
     this.moveStick = freshStick();
+    this.jumpHeld = false;
+    this.sprintHeld = false;
   }
 }

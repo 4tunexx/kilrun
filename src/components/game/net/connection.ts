@@ -1,5 +1,11 @@
 import { Client, Room, getStateCallbacks } from 'colyseus.js';
-import type { NetObstacleState, NetPlayerState, NetRoomState, PlayerInputMessage } from './types';
+import type {
+  NetObstacleState,
+  NetPlatformState,
+  NetPlayerState,
+  NetRoomState,
+  PlayerInputMessage,
+} from './types';
 
 export interface JoinOptions {
   userId: string;
@@ -13,6 +19,9 @@ export interface RoomCallbacks {
   onPlayerRemove?: (sessionId: string) => void;
   onObstacleAdd?: (obstacle: NetObstacleState, index: number) => void;
   onObstacleChange?: (obstacle: NetObstacleState, index: number) => void;
+  onPlatformAdd?: (platform: NetPlatformState, index: number) => void;
+  onPlatformChange?: (platform: NetPlatformState, index: number) => void;
+  onPlatformRemove?: (index: number) => void;
   onRoomChange?: (room: NetRoomState) => void;
 }
 
@@ -26,12 +35,6 @@ function resolveGameServerUrl(): string {
   return 'ws://localhost:2567';
 }
 
-/**
- * Thin wrapper around a single Colyseus room connection for a Deathrun
- * match. Owns the raw `colyseus.js` room + its schema callback proxy so
- * both the imperative PixiJS renderer and the React HUD can subscribe to
- * the same authoritative state without duplicating connection logic.
- */
 export class GameConnection {
   private client: Client;
   private room: Room | null = null;
@@ -56,6 +59,10 @@ export class GameConnection {
       obstacles: {
         onAdd: (cb: (obstacle: NetObstacleState, index: number) => void) => void;
       };
+      platforms: {
+        onAdd: (cb: (platform: NetPlatformState, index: number) => void) => void;
+        onRemove: (cb: (platform: NetPlatformState, index: number) => void) => void;
+      };
       listen: (prop: string, cb: (value: unknown) => void) => void;
     };
 
@@ -71,6 +78,14 @@ export class GameConnection {
       callbacks.onObstacleAdd?.(obstacle, index);
       const obstacleProxy = $(obstacle as never) as unknown as { onChange: (cb: () => void) => void };
       obstacleProxy.onChange(() => callbacks.onObstacleChange?.(obstacle, index));
+    });
+    proxy.platforms?.onAdd?.((platform, index) => {
+      callbacks.onPlatformAdd?.(platform, index);
+      const platformProxy = $(platform as never) as unknown as { onChange: (cb: () => void) => void };
+      platformProxy.onChange(() => callbacks.onPlatformChange?.(platform, index));
+    });
+    proxy.platforms?.onRemove?.((_platform, index) => {
+      callbacks.onPlatformRemove?.(index);
     });
 
     const emitRoomChange = () => {
@@ -91,6 +106,20 @@ export class GameConnection {
 
   public sendInput(input: PlayerInputMessage): void {
     this.room?.send('input', input);
+  }
+
+  public sendLoadCustomMap(payload: {
+    platforms: {
+      x: number;
+      y: number;
+      z: number;
+      width: number;
+      depth: number;
+      kind?: 'solid' | 'checkpoint';
+    }[];
+    spawn?: { x: number; y: number; z: number };
+  }): void {
+    this.room?.send('loadCustomMap', payload);
   }
 
   public disconnect(): void {

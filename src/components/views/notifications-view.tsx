@@ -1,16 +1,24 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Bell, CheckCheck, Loader2 } from 'lucide-react';
+import { Check, CheckCheck, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { getNotifications, markAllNotificationsRead } from '@/lib/social-actions';
+import {
+  deleteAllNotifications,
+  deleteNotification,
+  getNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from '@/lib/social-actions';
 import { formatDistanceToNow } from 'date-fns';
+import { useToast } from '@/hooks/use-toast';
 
 export default function NotificationsView() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [markingRead, setMarkingRead] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const { toast } = useToast();
 
   const reload = async () => {
     const data = await getNotifications();
@@ -26,26 +34,50 @@ export default function NotificationsView() {
 
   return (
     <div className="px-4 sm:px-8 py-6 space-y-4">
-      <div className="flex flex-wrap items-center justify-end gap-3">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           variant="outline"
-          disabled={markingRead || !hasUnread}
+          size="sm"
+          disabled={!!busy || !hasUnread}
           onClick={async () => {
-            setMarkingRead(true);
+            setBusy('read-all');
             try {
               await markAllNotificationsRead();
               await reload();
             } finally {
-              setMarkingRead(false);
+              setBusy(null);
             }
           }}
         >
-          {markingRead ? (
+          {busy === 'read-all' ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
             <CheckCheck className="mr-2 h-4 w-4" />
           )}
           Mark all read
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-red-400 hover:text-red-300"
+          disabled={!!busy || items.length === 0}
+          onClick={async () => {
+            setBusy('delete-all');
+            try {
+              await deleteAllNotifications();
+              await reload();
+              toast({ title: 'Notifications cleared' });
+            } finally {
+              setBusy(null);
+            }
+          }}
+        >
+          {busy === 'delete-all' ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Trash2 className="mr-2 h-4 w-4" />
+          )}
+          Delete all
         </Button>
       </div>
 
@@ -64,14 +96,55 @@ export default function NotificationsView() {
                 n.isRead ? 'bg-slate-800/20' : 'bg-slate-800/50'
               }`}
             >
-              <CardContent className="py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div>
+              <CardContent className="py-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div className="min-w-0 flex-1">
                   <p className="font-semibold">{n.title}</p>
-                  <p className="text-sm text-slate-300">{n.body}</p>
+                  <p className="text-sm text-slate-300 whitespace-pre-wrap">{n.body}</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {formatDistanceToNow(new Date(n.createdAt))} ago
+                  </p>
                 </div>
-                <p className="text-xs text-slate-500 shrink-0">
-                  {formatDistanceToNow(new Date(n.createdAt))} ago
-                </p>
+                <div className="flex gap-1 shrink-0">
+                  {!n.isRead && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy === n.id}
+                      title="Mark read"
+                      onClick={async () => {
+                        setBusy(n.id);
+                        try {
+                          await markNotificationRead(n.id);
+                          setItems((prev) =>
+                            prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x))
+                          );
+                        } finally {
+                          setBusy(null);
+                        }
+                      }}
+                    >
+                      <Check className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-400 hover:text-red-300"
+                    disabled={busy === n.id}
+                    title="Delete"
+                    onClick={async () => {
+                      setBusy(n.id);
+                      try {
+                        await deleteNotification(n.id);
+                        setItems((prev) => prev.filter((x) => x.id !== n.id));
+                      } finally {
+                        setBusy(null);
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}

@@ -369,7 +369,7 @@ export default function HomeView({
                     <Input
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
-                      placeholder="Message the hub..."
+                      placeholder="Message the hub… tag a friend with @nickname"
                       maxLength={300}
                       className="bg-slate-900/50 border-slate-700"
                       onKeyDown={(e) => {

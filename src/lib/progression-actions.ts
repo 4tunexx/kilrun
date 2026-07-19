@@ -52,6 +52,9 @@ async function requireStaff() {
   return user;
 }
 
+/** Bell badge / list — DMs & mass mail belong in Messages, not here. */
+const BELL_EXCLUDED_TYPES = ['message', 'announcement'] as const;
+
 async function notify(
   userId: string,
   title: string,
@@ -649,13 +652,40 @@ export async function bootstrapHubProgression() {
 
 /** Polling payload for right-rail XP/VP/rank. */
 export async function getLivePlayerState(userId?: string) {
+  let sessionUser: Awaited<ReturnType<typeof requireUser>> | null = null;
+  try {
+    sessionUser = await requireUser();
+  } catch {
+    sessionUser = null;
+  }
+
   const user = userId
     ? await prisma.user.findUnique({ where: { id: userId } })
-    : await requireUser();
+    : sessionUser;
   if (!user) throw new Error('User not found');
-  const unread = await prisma.notification.count({
-    where: { userId: user.id, isRead: false },
-  });
+
+  // Heartbeat presence when the authenticated player is polling their own state.
+  if (sessionUser && sessionUser.id === user.id) {
+    await prisma.user
+      .update({
+        where: { id: user.id },
+        data: { lastSeenAt: new Date() },
+      })
+      .catch(() => {});
+  }
+
+  const [unread, unreadMessages] = await Promise.all([
+    prisma.notification.count({
+      where: {
+        userId: user.id,
+        isRead: false,
+        NOT: { type: { in: [...BELL_EXCLUDED_TYPES] } },
+      },
+    }),
+    prisma.message.count({
+      where: { receiverId: user.id, readAt: null },
+    }),
+  ]);
   const progress = getLevelProgress(user.xpProgress);
   const today = missionPeriodKey();
   const dailyMissions = await prisma.activeMission.findMany({
@@ -693,6 +723,7 @@ export async function getLivePlayerState(userId?: string) {
     xpForNextLevel: progress.xpForNextLevel,
     levelProgressPercent: progress.percent,
     unreadNotifications: unread,
+    unreadMessages,
     dailyMissionsCompleted: dailyCompleted,
     dailyMissionsTotal: dailyTotal,
   };
@@ -979,6 +1010,44 @@ export async function sendGlobalChat(body: string) {
   const msg = await prisma.globalChatMessage.create({
     data: { userId: user.id, body: text },
   });
+
+  // @friend tags → private message to that friend only (friends only).
+  if (text.includes('@')) {
+    const friendships = await prisma.friendship.findMany({
+      where: {
+        status: 'accepted',
+        OR: [{ userAId: user.id }, { userBId: user.id }],
+      },
+      include: {
+        userA: { select: { id: true, username: true } },
+        userB: { select: { id: true, username: true } },
+      },
+    });
+    const friends = friendships.map((f) =>
+      f.userAId === user.id ? f.userB : f.userA
+    );
+    const lower = text.toLowerCase();
+    const tagged = friends.filter((f) => {
+      const name = f.username.toLowerCase();
+      const compact = name.replace(/\s+/g, '');
+      return lower.includes(`@${name}`) || (compact.length > 0 && lower.includes(`@${compact}`));
+    });
+    if (tagged.length > 0) {
+      const snippet = text.length > 120 ? `${text.slice(0, 117)}…` : text;
+      await Promise.all(
+        tagged.map((friend) =>
+          prisma.message.create({
+            data: {
+              senderId: user.id,
+              receiverId: friend.id,
+              body: `${user.username} tagged you in chat: “${snippet}”`,
+            },
+          })
+        )
+      );
+    }
+  }
+
   await processWebsiteAction(user.id, 'chat');
   await processWebsiteAction(user.id, 'daily_chat');
   return msg;
@@ -1001,7 +1070,11 @@ export async function adminClearGlobalChat() {
 export async function getUnreadNotificationCount() {
   const user = await requireUser();
   return prisma.notification.count({
-    where: { userId: user.id, isRead: false },
+    where: {
+      userId: user.id,
+      isRead: false,
+      NOT: { type: { in: [...BELL_EXCLUDED_TYPES] } },
+    },
   });
 }
 
@@ -1020,12 +1093,7 @@ async function staffAwardMessage(
 export async function adminAwardXp(userId: string, amount: number) {
   const staff = await requireStaff();
   await grantXp(userId, amount, 'Admin award');
-  await notify(
-    userId,
-    'Admin award',
-    `${staff.username} granted you +${amount} XP.`,
-    'admin'
-  );
+  // Awards land in the mail inbox only (not the bell).
   await staffAwardMessage(
     staff.id,
     staff.username,
@@ -1051,12 +1119,6 @@ export async function adminAwardVp(userId: string, amount: number) {
     where: { id: userId },
     data: { vpCurrency: { increment: amount } },
   });
-  await notify(
-    userId,
-    'Admin award',
-    `${staff.username} granted you +${amount} VP.`,
-    'admin'
-  );
   await staffAwardMessage(
     staff.id,
     staff.username,
@@ -1085,12 +1147,6 @@ export async function adminAwardBadge(userId: string, badgeKey: string) {
   });
   if (existing) return { ok: true, already: true };
   await prisma.userBadge.create({ data: { userId, badgeId: badge.id } });
-  await notify(
-    userId,
-    'Badge awarded',
-    `${staff.username} awarded you the badge: ${badge.title}`,
-    'badge'
-  );
   await staffAwardMessage(
     staff.id,
     staff.username,

@@ -32,7 +32,7 @@ const modes: ModeDefinition[] = [
     icon: Skull,
     title: 'Deathrun',
     description:
-      'One random player becomes the Trapper. Everyone else Runs the gauntlet of automatic hazards to reach the finish -- or gets hunted down first.',
+      'Platformer Deathrun: jump floating pads, dodge traps, manage Energy. One player may become the Trapper — runners race the course to the finish.',
     players: 'Up to 8',
     accent: 'from-orange-500/20 to-cyan-500/20 border-orange-500/40',
     isLive: true,

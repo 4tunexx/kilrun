@@ -13,6 +13,8 @@ interface LobbyViewProps {
   userId: string;
   username: string;
   avatarUrl?: string;
+  xpProgress?: number;
+  isAdmin?: boolean;
 }
 
 const MODE_LABELS: Record<KilrunMode, string> = {
@@ -21,7 +23,15 @@ const MODE_LABELS: Record<KilrunMode, string> = {
   competitive: 'Competitive 4v4',
 };
 
-const LobbyView: React.FC<LobbyViewProps> = ({ mode, onCancel, userId, username, avatarUrl }) => {
+const LobbyView: React.FC<LobbyViewProps> = ({
+  mode,
+  onCancel,
+  userId,
+  username,
+  avatarUrl,
+  xpProgress = 0,
+  isAdmin = false,
+}) => {
   const joinOptions = useMemo(() => ({ userId, username, avatarUrl }), [userId, username, avatarUrl]);
 
   if (mode !== 'deathrun') {
@@ -49,7 +59,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({ mode, onCancel, userId, username,
   // Deathrun owns the full-screen game engine for its entire lifecycle
   // (lobby wait -> countdown -> playing -> results), so it renders itself
   // instead of sitting inside the hub's page chrome.
-  return <KilrunEngine joinOptions={joinOptions} onExit={onCancel} />;
+  return <KilrunEngine joinOptions={joinOptions} onExit={onCancel} xpProgress={xpProgress} isAdmin={isAdmin} />;
 };
 
 export default LobbyView;
