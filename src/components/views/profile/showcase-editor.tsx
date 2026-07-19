@@ -6,6 +6,8 @@ import {
   AlignLeft,
   AlignRight,
   Award,
+  Check,
+  Copy,
   Crown,
   Lock,
   Loader2,
@@ -26,6 +28,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { MiniProfileCard } from '@/components/user-hover-card';
 import {
   getMyShowcaseEditor,
@@ -68,6 +71,7 @@ export function ShowcaseEditor() {
   const [busySlot, setBusySlot] = useState<number | null>(null);
   const [layoutBusy, setLayoutBusy] = useState(false);
   const [draftLayout, setDraftLayout] = useState<ShowcaseLayout | null>(null);
+  const [copied, setCopied] = useState<'link' | 'iframe' | null>(null);
   const { toast } = useToast();
 
   const reload = () => {
@@ -82,6 +86,26 @@ export function ShowcaseEditor() {
   useEffect(() => {
     reload();
   }, []);
+
+  const embedOrigin =
+    typeof window !== 'undefined' ? window.location.origin : 'https://kilrun.com';
+  const embedUrl = data?.preview?.id
+    ? `${embedOrigin}/embed/profile/${data.preview.id}`
+    : '';
+  const iframeSnippet = embedUrl
+    ? `<iframe src="${embedUrl}" width="288" height="340" style="border:0;border-radius:12px;overflow:hidden;background:transparent" loading="lazy" title="Kilrun profile"></iframe>`
+    : '';
+
+  const copyText = async (kind: 'link' | 'iframe', text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(kind);
+      toast({ title: kind === 'link' ? 'Embed link copied' : 'Iframe HTML copied' });
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      toast({ title: 'Could not copy', variant: 'destructive' });
+    }
+  };
 
   const previewSummary = useMemo(() => {
     if (!data) return null;
@@ -293,18 +317,64 @@ export function ShowcaseEditor() {
       <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30 h-fit lg:sticky lg:top-4">
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Hover card preview</CardTitle>
-          <CardDescription>Updates live as you edit slots and layout.</CardDescription>
+          <CardDescription>
+            Live preview — share this card on forums, Twitch panels, or any site via iframe.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div
             className={cn(
               'mx-auto w-72 overflow-hidden rounded-xl border border-slate-700 bg-slate-900/95 shadow-xl'
             )}
           >
-            <MiniProfileCard
-              summary={previewSummary}
-              layoutOverride={draftLayout}
-            />
+            <MiniProfileCard summary={previewSummary} layoutOverride={draftLayout} />
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-slate-700/40 bg-slate-900/40 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Share / embed
+            </p>
+            <p className="text-[11px] text-slate-500">
+              Stats refresh live for visitors (~45s). Paste the iframe on forums, Facebook notes,
+              Twitch panels, etc.
+            </p>
+            <div className="flex gap-2">
+              <Input
+                readOnly
+                value={embedUrl}
+                className="bg-slate-950/60 border-slate-700 text-[11px] h-8"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => copyText('link', embedUrl)}
+              >
+                {copied === 'link' ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="w-full"
+              onClick={() => copyText('iframe', iframeSnippet)}
+            >
+              {copied === 'iframe' ? (
+                <>
+                  <Check className="h-3.5 w-3.5 mr-1.5" /> Copied iframe HTML
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5 mr-1.5" /> Copy iframe embed
+                </>
+              )}
+            </Button>
           </div>
         </CardContent>
       </Card>

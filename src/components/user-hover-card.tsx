@@ -18,6 +18,7 @@ import {
   type ShowcaseLayout,
   type ShowcasePosition,
 } from '@/lib/showcase';
+import { DEFAULT_MARK_LOGO, resolveMarkLogo } from '@/lib/branding';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import { cn } from '@/lib/utils';
 
@@ -151,11 +152,14 @@ export function MiniProfileCard({
   onViewProfile,
   layoutOverride,
   className,
+  markLogoUrl,
 }: {
   summary: MiniProfileSummary;
   onViewProfile?: () => void;
   layoutOverride?: Partial<ShowcaseLayout>;
   className?: string;
+  /** Optional site mark; defaults to Kilrun K. */
+  markLogoUrl?: string | null;
 }) {
   const banner = summary.equippedBannerConfig
     ? normalizeBannerConfig(summary.equippedBannerConfig)
@@ -167,10 +171,11 @@ export function MiniProfileCard({
   };
   const position: ShowcasePosition = layout.position;
   const align: ShowcaseAlign = layout.align;
+  const markSrc = resolveMarkLogo(markLogoUrl) || DEFAULT_MARK_LOGO;
 
   const showcaseBlock =
     summary.showcase.length > 0 ? (
-      <div className="mt-3">
+      <div className="mt-3 min-w-0 overflow-hidden">
         <ShowcaseChips items={summary.showcase} compact align={align} />
       </div>
     ) : null;
@@ -179,17 +184,25 @@ export function MiniProfileCard({
     <>
       <div
         className={cn(
-          'h-16 w-full',
+          'relative h-16 w-full',
           banner ? bannerAnimationClass(banner) : 'bg-gradient-to-r from-slate-800 to-slate-700'
         )}
         style={banner ? bannerStyle(banner) : undefined}
-      />
-      <div className="-mt-8 p-4 pt-0">
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={markSrc}
+          alt="Kilrun"
+          className="absolute top-1.5 right-1.5 z-10 h-6 w-6 object-contain drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)] pointer-events-none select-none"
+          draggable={false}
+        />
+      </div>
+      <div className="-mt-8 p-4 pt-0 min-w-0">
         <Avatar className="h-16 w-16 border-4 border-slate-900 shadow-lg">
           <AvatarImage src={summary.avatarUrl} alt={summary.username} />
           <AvatarFallback>{summary.username.charAt(0)}</AvatarFallback>
         </Avatar>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2 min-w-0">
           <p
             className={cn(
               'truncate font-bold text-lg transition-colors',
@@ -244,12 +257,12 @@ export function MiniProfileCard({
       <button
         type="button"
         onClick={onViewProfile}
-        className={cn('block w-full text-left group', className)}
+        className={cn('block w-full text-left group overflow-hidden', className)}
       >
         {body}
       </button>
     );
   }
 
-  return <div className={cn('block w-full text-left', className)}>{body}</div>;
+  return <div className={cn('block w-full text-left overflow-hidden', className)}>{body}</div>;
 }

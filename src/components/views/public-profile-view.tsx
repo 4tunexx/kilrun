@@ -181,9 +181,9 @@ export default function PublicProfileView({
           }`}
           style={banner ? bannerStyle(banner) : undefined}
         >
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-black/35" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-black/35 pointer-events-none" />
           <p
-            className={`absolute top-3 left-3 sm:top-4 sm:left-4 z-10 text-xs sm:text-sm font-semibold capitalize drop-shadow-md ${getRoleTextColorClass(
+            className={`absolute top-3 left-3 sm:top-4 sm:left-4 z-20 text-xs sm:text-sm font-semibold capitalize drop-shadow-md ${getRoleTextColorClass(
               profile.role,
               profile.isVip
             )}`}
@@ -196,9 +196,39 @@ export default function PublicProfileView({
               · Joined {formatDistanceToNow(new Date(profile.createdAt))} ago
             </span>
           </p>
+          <div className="absolute bottom-3 left-[6.25rem] sm:left-[7.5rem] right-3 z-20 flex items-center gap-2 min-w-0 pointer-events-none">
+            <h2
+              className={`text-xl sm:text-3xl font-black truncate flex items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)] ${getRoleTextColorClass(
+                profile.role,
+                profile.isVip
+              )}`}
+            >
+              <NicknameEffectText
+                name={profile.username}
+                effect={profile.equippedNicknameConfig}
+                className="truncate"
+              />
+              {profile.countryCode && (
+                <Image
+                  src={flagUrl(profile.countryCode, 40)}
+                  alt={getCountryName(profile.countryCode) ?? profile.countryCode}
+                  width={26}
+                  height={20}
+                  className="rounded-sm shadow-md shrink-0"
+                  title={getCountryName(profile.countryCode) ?? undefined}
+                  unoptimized
+                />
+              )}
+              {profile.isVip && (
+                <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px] pointer-events-auto">
+                  VIP
+                </Badge>
+              )}
+            </h2>
+          </div>
         </div>
 
-        <CardContent className="pt-0 pb-0">
+        <CardContent className="pt-0 pb-0 relative z-20">
           <div className="-mt-12 sm:-mt-14 flex flex-col sm:flex-row sm:items-end gap-4 pb-5">
             <AvatarWithFrame
               src={profile.avatarUrl}
@@ -208,38 +238,12 @@ export default function PublicProfileView({
               sizeClass="h-24 w-24 sm:h-28 sm:w-28"
             />
 
-            <div className="min-w-0 flex-1 pb-1">
-              <h2
-                className={`text-2xl sm:text-3xl font-black truncate flex items-center gap-2 flex-wrap ${getRoleTextColorClass(
-                  profile.role,
-                  profile.isVip
-                )}`}
-              >
-                <NicknameEffectText
-                  name={profile.username}
-                  effect={profile.equippedNicknameConfig}
-                  className="truncate"
-                />
-                {profile.countryCode && (
-                  <Image
-                    src={flagUrl(profile.countryCode, 40)}
-                    alt={getCountryName(profile.countryCode) ?? profile.countryCode}
-                    width={26}
-                    height={20}
-                    className="rounded-sm shadow-md shrink-0"
-                    title={getCountryName(profile.countryCode) ?? undefined}
-                    unoptimized
-                  />
-                )}
-                {profile.isVip && (
-                  <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px]">VIP</Badge>
-                )}
-              </h2>
+            <div className="min-w-0 flex-1 pb-1 sm:pt-10">
               {profile.statusMessage ? (
-                <p className="text-sm text-slate-300 mt-0.5 line-clamp-2">
-                  {profile.statusMessage}
-                </p>
-              ) : null}
+                <p className="text-sm text-slate-300 line-clamp-2">{profile.statusMessage}</p>
+              ) : (
+                <div className="hidden sm:block h-5" aria-hidden />
+              )}
             </div>
 
             {profile.friendStatus !== 'self' && (

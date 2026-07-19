@@ -77,6 +77,17 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async headers() {
+    return [
+      {
+        source: '/embed/:path*',
+        headers: [
+          // Allow forums / Twitch / Discord-style embeds to iframe this card.
+          { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

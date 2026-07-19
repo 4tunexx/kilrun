@@ -181,7 +181,7 @@ function CategoryRow({
           </button>
         )}
 
-        <div className={cn('flex flex-wrap gap-1.5 min-w-0', ALIGN_CLASS[align])}>
+        <div className={cn('flex flex-nowrap gap-1 min-w-0 flex-1', ALIGN_CLASS[align])}>
           {slice.map((item, i) => {
             const Icon = TYPE_ICONS[item.itemType] ?? Award;
             return (
@@ -194,11 +194,11 @@ function CategoryRow({
                   onPreview(item);
                 }}
                 className={cn(
-                  'group/chip flex items-center gap-1 rounded-lg border border-slate-700/80 bg-slate-800/70 font-normal text-slate-200 transition',
-                  'hover:scale-105 hover:border-cyan-400/50 hover:bg-slate-800',
+                  'group/chip flex min-w-0 items-center gap-1 rounded-md border border-slate-700/80 bg-slate-800/70 font-normal text-slate-200 transition',
+                  'hover:scale-[1.03] hover:border-cyan-400/50 hover:bg-slate-800',
                   compact
-                    ? 'text-[10px] px-1.5 py-1 max-w-[5.5rem]'
-                    : 'text-xs px-2 py-1.5 max-w-[7.5rem]'
+                    ? 'flex-1 basis-0 justify-center text-[9px] px-1 py-1'
+                    : 'flex-1 basis-0 text-[11px] px-1.5 py-1.5'
                 )}
               >
                 {item.iconImageUrl ? (
@@ -207,20 +207,20 @@ function CategoryRow({
                     src={item.iconImageUrl}
                     alt=""
                     className={cn(
-                      'rounded object-cover shrink-0 transition group-hover/chip:scale-125',
-                      compact ? 'h-4 w-4' : 'h-5 w-5'
+                      'rounded object-cover shrink-0 transition group-hover/chip:scale-110',
+                      compact ? 'h-3.5 w-3.5' : 'h-4 w-4'
                     )}
                   />
                 ) : (
                   <Icon
                     className={cn(
-                      'shrink-0 transition group-hover/chip:scale-125',
-                      compact ? 'h-3.5 w-3.5' : 'h-4 w-4',
+                      'shrink-0 transition group-hover/chip:scale-110',
+                      compact ? 'h-3 w-3' : 'h-3.5 w-3.5',
                       TYPE_COLORS[item.itemType]
                     )}
                   />
                 )}
-                <span className="truncate">{item.title}</span>
+                <span className="truncate min-w-0">{item.title}</span>
               </button>
             );
           })}
