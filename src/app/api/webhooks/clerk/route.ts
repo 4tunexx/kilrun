@@ -4,7 +4,12 @@ import { Webhook } from 'svix';
 import { prisma } from '@/lib/prisma';
 import { buildKilrunVerificationEmailHtml } from '@/lib/email/kilrun-verification-email';
 import { sendWithResend } from '@/lib/email/send-resend';
-import { resolveMarkLogo } from '@/lib/branding';
+import {
+  resolveGameDisabled,
+  resolveHeaderLogo,
+  resolveMarkLogo,
+} from '@/lib/branding';
+import { getLandingPageData } from '@/lib/actions';
 
 interface ClerkEmailAddress {
   id: string;
@@ -108,27 +113,60 @@ async function handleEmailCreated(data: ClerkEmailCreatedData) {
   }
 
   try {
-    let logoUrl: string | undefined;
-    try {
-      const settings = await prisma.siteSettings.findUnique({
-        where: { singletonKey: 'default' },
-      });
-      const mark = resolveMarkLogo(settings?.logoUrl);
-      if (mark.startsWith('http')) logoUrl = mark;
-      else {
-        const site = (
-          process.env.NEXT_PUBLIC_SITE_URL || 'https://kilrun.vercel.app'
-        ).replace(/\/$/, '');
-        logoUrl = `${site}${mark.startsWith('/') ? mark : `/${mark}`}`;
+    const site = (
+      process.env.NEXT_PUBLIC_SITE_URL || 'https://kilrun.vercel.app'
+    ).replace(/\/$/, '');
+
+    const toAbsolute = (pathOrUrl: string, fallbackPath: string) => {
+      const v = pathOrUrl?.trim() || fallbackPath;
+      // Data URLs / blob paths are unreliable in email clients — use public asset.
+      if (v.startsWith('data:') || v.startsWith('blob:')) {
+        return `${site}${fallbackPath}`;
       }
+      if (v.startsWith('http://') || v.startsWith('https://')) return v;
+      return `${site}${v.startsWith('/') ? v : `/${v}`}`;
+    };
+
+    let wordmarkUrl = `${site}/kilrun.png`;
+    let markUrl = `${site}/K2.png`;
+    let stats: {
+      registeredPlayers: number;
+      matchesPlayed: number;
+      matchesPlayedToday: number;
+      vpEarned: number;
+      gameOnline: boolean;
+    } | null = null;
+
+    try {
+      const [settings, landing] = await Promise.all([
+        prisma.siteSettings.findUnique({ where: { singletonKey: 'default' } }),
+        getLandingPageData(),
+      ]);
+      wordmarkUrl = toAbsolute(
+        resolveHeaderLogo(settings?.headerLogoUrl),
+        '/kilrun.png'
+      );
+      markUrl = toAbsolute(resolveMarkLogo(settings?.logoUrl), '/K2.png');
+      stats = {
+        registeredPlayers: landing.stats.registeredPlayers,
+        matchesPlayed: landing.stats.matchesPlayed,
+        matchesPlayedToday: landing.stats.matchesPlayedToday,
+        vpEarned: landing.stats.vpEarned,
+        gameOnline: !resolveGameDisabled({
+          gameDisabled: settings?.gameDisabled,
+          gameDisabledUntil: settings?.gameDisabledUntil,
+        }),
+      };
     } catch {
-      // logo optional
+      // branding/stats optional — email still sends with defaults
     }
 
     const mail = buildKilrunVerificationEmailHtml({
       code: otp,
       toEmail: to,
-      logoUrl,
+      wordmarkUrl,
+      markUrl,
+      stats,
     });
     await sendWithResend({ to, ...mail });
     console.info('[clerk email.created] Kilrun verification email sent to', to);
