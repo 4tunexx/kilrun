@@ -28,6 +28,7 @@ import {
   importJson,
   listMaps,
   loadMap,
+  loadMapPlayable,
   saveMap,
   type MapListItem,
 } from '@/components/game/editor/map-storage';
@@ -50,6 +51,8 @@ export function AdminMapEditorPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
+    // Backfill floors on old maps, then refresh list
+    for (const m of listMaps()) loadMapPlayable(m.id);
     setMaps(listMaps());
     setActiveId(getActivePlayMapId());
   }, []);
@@ -64,16 +67,14 @@ export function AdminMapEditorPanel() {
 
   if (editorMapId) {
     return (
-      <div className="fixed inset-0 z-[400] bg-slate-950">
-        <MapEditor
-          isAdmin
-          initialMapId={editorMapId}
-          onClose={() => {
-            setEditorMapId(null);
-            refresh();
-          }}
-        />
-      </div>
+      <MapEditor
+        isAdmin
+        initialMapId={editorMapId}
+        onClose={() => {
+          setEditorMapId(null);
+          refresh();
+        }}
+      />
     );
   }
 

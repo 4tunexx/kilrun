@@ -177,8 +177,18 @@ function MiniProfileCard({
           </div>
         )}
         <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
-          <span className="flex items-center gap-1">
-            <ThumbsUp className="h-3 w-3" /> {summary.reputation} reputation
+          <span
+            className={`flex items-center gap-1 font-semibold ${
+              summary.reputation > 0
+                ? 'text-emerald-400'
+                : summary.reputation < 0
+                  ? 'text-rose-400'
+                  : ''
+            }`}
+          >
+            <ThumbsUp className="h-3 w-3" />
+            {summary.reputation > 0 ? '+' : ''}
+            {summary.reputation} REP
           </span>
           <span className="text-primary group-hover:underline">View profile →</span>
         </div>

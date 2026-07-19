@@ -44,6 +44,7 @@ export interface EditorViewportApi {
   updateSelected: (patch: Partial<EditorEntity>) => void;
   previewAnim: (which: 'default' | 'active') => void;
   captureThumbnail: () => string | null;
+  setTouchAxes: (axes: { moveX: number; moveY: number; lookX: number; lookY: number; sprint?: boolean }) => void;
   destroy: () => void;
 }
 
@@ -81,6 +82,7 @@ export function createEditorViewport(
   let measureMode = false;
   let measureA: THREE.Vector3 | null = null;
   const keys = new Set<string>();
+  let touchAxes = { moveX: 0, moveY: 0, lookX: 0, lookY: 0, sprint: false };
   const director = new AnimationDirector();
   const entityClips = new Map<string, THREE.AnimationClip[]>();
 
@@ -103,7 +105,7 @@ export function createEditorViewport(
   const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 400);
   camera.position.set(12, 14, 18);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   host.appendChild(renderer.domElement);
   Object.assign(renderer.domElement.style, {
@@ -794,24 +796,56 @@ export function createEditorViewport(
     const dt = Math.min(clock.getDelta(), 0.05);
 
     if (freeFly) {
-      const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 28 : 12) * dt;
-      const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      // Look stick (mobile) — apply before building direction
+      if (touchAxes.lookX || touchAxes.lookY) {
+        yaw -= touchAxes.lookX * 2.2 * dt;
+        pitch -= touchAxes.lookY * 1.8 * dt;
+        pitch = THREE.MathUtils.clamp(pitch, -1.45, 1.45);
+      }
+
+      const sprint =
+        keys.has('ShiftLeft') || keys.has('ShiftRight') || touchAxes.sprint;
+      const speed = (sprint ? 28 : 12) * dt;
+      // Fly toward where the camera points (pitch included) so looking down flies down
+      const forward = new THREE.Vector3(
+        Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        Math.cos(yaw) * Math.cos(pitch)
+      );
       const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+
       if (keys.has('KeyW')) camera.position.addScaledVector(forward, speed);
       if (keys.has('KeyS')) camera.position.addScaledVector(forward, -speed);
-      // `right` here is built as (cos,0,-sin); A/D signs keep A = visual left
       if (keys.has('KeyA')) camera.position.addScaledVector(right, speed);
       if (keys.has('KeyD')) camera.position.addScaledVector(right, -speed);
       if (keys.has('Space')) camera.position.y += speed;
       if (keys.has('KeyC') || keys.has('KeyZ')) camera.position.y -= speed;
 
+      // Right stick: Y = forward/back along look, X = strafe
+      if (touchAxes.moveY) camera.position.addScaledVector(forward, -touchAxes.moveY * speed * 1.35);
+      if (touchAxes.moveX) camera.position.addScaledVector(right, -touchAxes.moveX * speed * 1.35);
+
       const look = new THREE.Vector3(
-        camera.position.x + Math.sin(yaw) * Math.cos(pitch),
-        camera.position.y + Math.sin(pitch),
-        camera.position.z + Math.cos(yaw) * Math.cos(pitch)
+        camera.position.x + forward.x,
+        camera.position.y + forward.y,
+        camera.position.z + forward.z
       );
       camera.lookAt(look);
     } else {
+      // Orbit look via left stick when not free-flying
+      if (touchAxes.lookX || touchAxes.lookY) {
+        const offset = new THREE.Vector3().subVectors(camera.position, orbit.target);
+        const sph = new THREE.Spherical().setFromVector3(offset);
+        sph.theta -= touchAxes.lookX * 2.0 * dt;
+        sph.phi = THREE.MathUtils.clamp(
+          sph.phi + touchAxes.lookY * 1.6 * dt,
+          0.15,
+          Math.PI - 0.15
+        );
+        offset.setFromSpherical(sph);
+        camera.position.copy(orbit.target).add(offset);
+        camera.lookAt(orbit.target);
+      }
       orbit.update();
     }
     director.update(dt);
@@ -1008,10 +1042,19 @@ export function createEditorViewport(
     captureThumbnail: () => {
       try {
         renderer.render(scene, camera);
-        return renderer.domElement.toDataURL('image/jpeg', 0.55);
+        return renderer.domElement.toDataURL('image/jpeg', 0.62);
       } catch {
         return null;
       }
+    },
+    setTouchAxes: (axes) => {
+      touchAxes = {
+        moveX: axes.moveX || 0,
+        moveY: axes.moveY || 0,
+        lookX: axes.lookX || 0,
+        lookY: axes.lookY || 0,
+        sprint: !!axes.sprint,
+      };
     },
     destroy: () => {
       cancelAnimationFrame(raf);

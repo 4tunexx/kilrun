@@ -8,6 +8,9 @@ import type { MapDocument } from './map-document';
 import { ensureEnvironment, ensureHazard } from './map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
 import { AnimationDirector } from './animation-director';
+import { DualJoystick } from '../input/dual-joystick';
+import { JoystickOverlay } from '../ui/joystick-overlay';
+import { detectTouchDevice } from '../utils/constants';
 
 /**
  * Compiles the editor map into a freelook preview with animation triggers.
@@ -15,7 +18,9 @@ import { AnimationDirector } from './animation-director';
  */
 export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const joystickRef = useRef<DualJoystick | null>(null);
   const [hp, setHp] = useState(100);
+  const isTouch = typeof window !== 'undefined' && detectTouchDevice();
 
   useEffect(() => {
     const host = hostRef.current;
@@ -162,6 +167,12 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('mousemove', onMove);
 
+    let joy: DualJoystick | null = null;
+    if (detectTouchDevice()) {
+      joy = new DualJoystick(host);
+      joystickRef.current = joy;
+    }
+
     const clock = new THREE.Clock();
     const playerPos = new THREE.Vector3();
     const tick = () => {
@@ -169,9 +180,24 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       raf = requestAnimationFrame(tick);
       const dt = Math.min(clock.getDelta(), 0.05);
       const now = performance.now();
-      const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
+
+      const moveStick = joy?.getMoveVector() ?? { x: 0, y: 0 };
+      const lookStick = joy?.getAimVector() ?? { x: 0, y: 0 };
+      if (lookStick.x || lookStick.y) {
+        yaw -= lookStick.x * 2.2 * dt;
+        pitch -= lookStick.y * 1.8 * dt;
+        pitch = THREE.MathUtils.clamp(pitch, -1.4, 1.4);
+      }
+
+      const sprint =
+        keys.has('ShiftLeft') || keys.has('ShiftRight') || !!joy?.isSprintHeld();
       const speed = (sprint ? 14 : 8) * dt;
-      const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      // Fly/walk toward look direction (pitch included) so aiming down moves downward on mobile free camera
+      const forward = new THREE.Vector3(
+        Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        Math.cos(yaw) * Math.cos(pitch)
+      );
       const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
       let moveX = 0;
@@ -192,9 +218,15 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         camera.position.addScaledVector(right, -speed);
         moveX += 1;
       }
+      if (moveStick.y || moveStick.x) {
+        camera.position.addScaledVector(forward, -moveStick.y * speed * 1.35);
+        camera.position.addScaledVector(right, -moveStick.x * speed * 1.35);
+        moveZ += -moveStick.y;
+        moveX += moveStick.x;
+      }
 
       // Simple jump for player anim testing
-      if (keys.has('Space') && grounded) {
+      if ((keys.has('Space') || joy?.isJumpHeld()) && grounded) {
         vy = 6;
         grounded = false;
       }
@@ -273,6 +305,8 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('mousemove', onMove);
+      joy?.destroy();
+      joystickRef.current = null;
       if (document.pointerLockElement) document.exitPointerLock?.();
       director.clear();
       renderer.dispose();
@@ -281,11 +315,13 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
   }, [doc, onClose]);
 
   return (
-    <div className="fixed inset-0 z-[500] bg-black flex flex-col">
-      <div className="h-11 flex items-center gap-3 px-4 bg-black/80 border-b border-white/10">
+    <div className="fixed inset-0 z-[9999] bg-black flex flex-col">
+      <div className="h-11 flex items-center gap-3 px-4 bg-black/80 border-b border-white/10 relative z-[60]">
         <span className="text-sm font-bold text-emerald-300 tracking-wide uppercase">Play Test</span>
         <span className="text-xs text-white/50">
-          WASD · Mouse · Space jump · E interact · Esc exit
+          {isTouch
+            ? 'Left look · Right move · Jump/Sprint · Esc exit'
+            : 'WASD · Mouse · Space jump · E interact · Esc exit'}
         </span>
         <div className="ml-4 flex items-center gap-2 text-xs">
           <span className="text-white/50">HP</span>
@@ -302,7 +338,46 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
           <X className="w-4 h-4 mr-1" /> Exit Test
         </Button>
       </div>
-      <div ref={hostRef} className="flex-1 min-h-0" />
+      <div className="flex-1 relative min-h-0">
+        <div ref={hostRef} className="absolute inset-0 touch-none" />
+        {isTouch && (
+          <>
+            <JoystickOverlay joystickRef={joystickRef} enabled />
+            <div className="absolute bottom-20 right-3 z-[120] flex flex-col gap-2 pointer-events-auto">
+              <button
+                type="button"
+                className="w-14 h-14 rounded-full border-2 border-emerald-400/70 bg-emerald-500/35 text-white font-black text-[10px] uppercase tracking-wider active:scale-95"
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  joystickRef.current?.setJumpHeld(true);
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  joystickRef.current?.setJumpHeld(false);
+                }}
+                onTouchCancel={() => joystickRef.current?.setJumpHeld(false)}
+              >
+                Jump
+              </button>
+              <button
+                type="button"
+                className="w-14 h-14 rounded-full border-2 border-sky-400/70 bg-sky-500/35 text-white font-black text-[10px] uppercase tracking-wider active:scale-95"
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  joystickRef.current?.setSprintHeld(true);
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  joystickRef.current?.setSprintHeld(false);
+                }}
+                onTouchCancel={() => joystickRef.current?.setSprintHeld(false)}
+              >
+                Sprint
+              </button>
+            </div>
+          </>
+        )}
+      </div>
       {hp <= 0 && (
         <div className="absolute inset-0 top-11 flex items-center justify-center bg-black/50 pointer-events-none">
           <p className="text-2xl font-black text-red-400 tracking-wide">YOU DIED — exit & retry</p>

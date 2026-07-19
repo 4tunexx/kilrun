@@ -11,6 +11,9 @@ export type SiteBrandingDetail = {
   landingHeroSlides?: string | null;
   headerTitle?: string | null;
   headerSubtitle?: string | null;
+  hubPagesJson?: string | null;
+  hubNavJson?: string | null;
+  hubChromeJson?: string | null;
 };
 
 export function broadcastSiteSettings(settings: SiteBrandingDetail) {

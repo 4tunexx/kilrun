@@ -53,6 +53,7 @@ import {
 } from '@/lib/branding';
 import { normalizeLandingSlides } from '@/lib/cosmetics';
 import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
+import { parseHubChrome } from '@/lib/hub-layout';
 import { InteractiveWordmark } from '@/components/interactive-wordmark';
 import { usePointerParallax } from '@/hooks/use-pointer-parallax';
 import {
@@ -108,6 +109,7 @@ export default function LandingPage() {
   const [heroSlides, setHeroSlides] = useState<{ src: string; alt: string }[]>(
     []
   );
+  const [showLandingSlider, setShowLandingSlider] = useState(true);
   const [markLogoUrl, setMarkLogoUrl] = useState('');
   const [headerLogoUrl, setHeaderLogoUrl] = useState('');
   const [headerLogoStyle, setHeaderLogoStyle] = useState<HeaderLogoStyle>(
@@ -128,12 +130,15 @@ export default function LandingPage() {
     logoUrl?: string | null;
     headerLogoUrl?: string | null;
     headerLogoStyle?: string | null;
+    hubChromeJson?: string | null;
   }) => {
     if (s.headerTitle) setHeaderTitle(s.headerTitle);
     if (s.headerSubtitle) setHeaderSubtitle(s.headerSubtitle);
     if (s.backgroundUrl !== undefined && s.backgroundUrl !== null) {
       setBgUrl(resolveHubBackground(s.backgroundUrl));
     }
+    const chrome = parseHubChrome(s.hubChromeJson);
+    setShowLandingSlider(chrome.showLandingSlider);
     if (
       s.landingHeroSlides !== undefined ||
       s.landingHeroImage !== undefined
@@ -247,33 +252,39 @@ export default function LandingPage() {
                     className="absolute inset-[-8%] h-[116%] w-[116%]"
                     style={heroParallax.mediaStyle}
                   >
-                    <Carousel
-                      opts={{ loop: true }}
-                      plugins={[autoplayPlugin.current]}
-                      className="w-full h-full"
-                      onMouseEnter={autoplayPlugin.current.stop}
-                      onMouseLeave={autoplayPlugin.current.reset}
-                    >
-                      <CarouselContent className="-ml-0 h-full">
-                        {heroSlides.map((image, index) => (
-                          <CarouselItem key={index} className="pl-0 h-full">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={image.src}
-                              alt={image.alt}
-                              className="w-full h-56 sm:h-72 md:h-[32rem] object-cover pointer-events-none select-none"
-                              draggable={false}
-                            />
-                          </CarouselItem>
-                        ))}
-                      </CarouselContent>
-                      {heroSlides.length > 1 && (
-                        <>
-                          <CarouselPrevious className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2 z-10" />
-                          <CarouselNext className="absolute right-4 md:right-6 top-1/2 -translate-y-1/2 z-10" />
-                        </>
-                      )}
-                    </Carousel>
+                    {showLandingSlider && heroSlides.length > 1 ? (
+                      <Carousel
+                        opts={{ loop: true }}
+                        plugins={[autoplayPlugin.current]}
+                        className="w-full h-full"
+                        onMouseEnter={autoplayPlugin.current.stop}
+                        onMouseLeave={autoplayPlugin.current.reset}
+                      >
+                        <CarouselContent className="-ml-0 h-full">
+                          {heroSlides.map((image, index) => (
+                            <CarouselItem key={index} className="pl-0 h-full">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={image.src}
+                                alt={image.alt}
+                                className="w-full h-56 sm:h-72 md:h-[32rem] object-cover pointer-events-none select-none"
+                                draggable={false}
+                              />
+                            </CarouselItem>
+                          ))}
+                        </CarouselContent>
+                        <CarouselPrevious className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2 z-10" />
+                        <CarouselNext className="absolute right-4 md:right-6 top-1/2 -translate-y-1/2 z-10" />
+                      </Carousel>
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={heroSlides[0].src}
+                        alt={heroSlides[0].alt}
+                        className="w-full h-56 sm:h-72 md:h-[32rem] object-cover pointer-events-none select-none"
+                        draggable={false}
+                      />
+                    )}
                   </div>
                 ) : (
                   <div

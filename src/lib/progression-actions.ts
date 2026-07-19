@@ -34,7 +34,8 @@ export type WebsiteActionMetric =
   | 'cosmetic_owned'
   | 'banner_owned'
   | 'frame_owned'
-  | 'nickname_owned';
+  | 'nickname_owned'
+  | 'reputation';
 
 async function requireUser() {
   const session = await auth();
@@ -573,6 +574,7 @@ const SYNC_FROM_TOTAL_METRICS = new Set<WebsiteActionMetric>([
   'daily_forum',
   'daily_runs',
   'daily_leaderboard',
+  'reputation',
 ]);
 
 async function syncMissionProgressFromCount(userId: string, metric: string) {
@@ -827,6 +829,19 @@ export async function getSiteSettings() {
           null,
         gameDisabled: Boolean(doc.gameDisabled ?? settings.gameDisabled),
         chatEnabled: Boolean(doc.chatEnabled ?? settings.chatEnabled),
+        hubPagesJson: String(
+          doc.hubPagesJson ??
+            (settings as { hubPagesJson?: string }).hubPagesJson ??
+            '{}'
+        ),
+        hubNavJson: String(
+          doc.hubNavJson ?? (settings as { hubNavJson?: string }).hubNavJson ?? '{}'
+        ),
+        hubChromeJson: String(
+          doc.hubChromeJson ??
+            (settings as { hubChromeJson?: string }).hubChromeJson ??
+            '{}'
+        ),
       };
     }
   } catch {
@@ -843,6 +858,13 @@ export async function getSiteSettings() {
     ),
     gameDisabledUntil:
       (settings as { gameDisabledUntil?: Date | null }).gameDisabledUntil ?? null,
+    hubPagesJson: String(
+      (settings as { hubPagesJson?: string }).hubPagesJson ?? '{}'
+    ),
+    hubNavJson: String((settings as { hubNavJson?: string }).hubNavJson ?? '{}'),
+    hubChromeJson: String(
+      (settings as { hubChromeJson?: string }).hubChromeJson ?? '{}'
+    ),
   };
 }
 
@@ -860,8 +882,11 @@ export async function updateSiteSettings(data: {
   gameDisabledMsg?: string;
   gameDisabledUntil?: string | null;
   chatEnabled?: boolean;
+  hubPagesJson?: string;
+  hubNavJson?: string;
+  hubChromeJson?: string;
 }) {
-  await requireStaff();
+  const staff = await requireStaff();
   await getSiteSettings();
 
   // Drop a cached PrismaClient that may predate schema fields (headerLogoUrl, etc.).
@@ -873,6 +898,11 @@ export async function updateSiteSettings(data: {
     '@/lib/logo-style'
   );
   const { normalizeLandingSlides } = await import('@/lib/cosmetics');
+  const {
+    parseHubPages,
+    parseHubNav,
+    parseHubChrome,
+  } = await import('@/lib/hub-layout');
   const payload: Record<string, string | boolean | Date | null> = {};
 
   if (typeof data.logoUrl === 'string') {
@@ -933,9 +963,19 @@ export async function updateSiteSettings(data: {
     payload.gameDisabledUntil = Number.isNaN(d.getTime()) ? null : d;
   }
   if (typeof data.chatEnabled === 'boolean') payload.chatEnabled = data.chatEnabled;
+  if (typeof data.hubPagesJson === 'string') {
+    payload.hubPagesJson = JSON.stringify(parseHubPages(data.hubPagesJson));
+  }
+  if (typeof data.hubNavJson === 'string') {
+    payload.hubNavJson = JSON.stringify(parseHubNav(data.hubNavJson));
+  }
+  if (typeof data.hubChromeJson === 'string') {
+    payload.hubChromeJson = JSON.stringify(parseHubChrome(data.hubChromeJson));
+  }
 
+  let saved;
   try {
-    return await withPrismaRetry((client) =>
+    saved = await withPrismaRetry((client) =>
       client.siteSettings.update({
         where: { singletonKey: 'default' },
         // Cast: payload is built field-by-field from known SiteSettings keys.
@@ -964,8 +1004,22 @@ export async function updateSiteSettings(data: {
     );
     // Fresh client after raw write so subsequent reads see new fields.
     await resetPrismaClient();
-    return getSiteSettings();
+    saved = await getSiteSettings();
   }
+
+  try {
+    const { writeAuditLog } = await import('@/lib/audit');
+    await writeAuditLog({
+      actorId: staff.id,
+      actorUsername: staff.username,
+      action: 'site_settings',
+      detail: `Updated: ${Object.keys(payload).join(', ') || 'settings'}`,
+    });
+  } catch {
+    /* non-fatal */
+  }
+
+  return saved;
 }
 
 /** Strip a solid plate behind the stored site logo (safe to call on hub boot). */

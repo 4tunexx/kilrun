@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Box,
   Layers,
@@ -71,8 +72,15 @@ import {
   type PrefabStamp,
 } from './prefab-storage';
 import { formatValidationSummary, validateMapForPublish } from './map-validate';
+import { DualJoystick } from '../input/dual-joystick';
+import { JoystickOverlay } from '../ui/joystick-overlay';
+import { detectTouchDevice } from '../utils/constants';
 
 type SidebarTab = 'assets' | 'layers' | 'outliner' | 'world' | 'textures' | 'prefabs' | 'help';
+
+function snapshotMapDoc(d: MapDocument) {
+  return JSON.stringify(d);
+}
 
 export function MapEditor({
   onClose,
@@ -120,11 +128,20 @@ export function MapEditor({
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
   const [measureMode, setMeasureMode] = useState(false);
   const [measureDist, setMeasureDist] = useState<number | null>(null);
+  const isTouch = typeof window !== 'undefined' && detectTouchDevice();
+  const joystickRef = useRef<DualJoystick | null>(null);
+  const touchLayerRef = useRef<HTMLDivElement>(null);
 
   const docRef = useRef(doc);
   const undoStack = useRef<MapDocument[]>([]);
   const redoStack = useRef<MapDocument[]>([]);
   const skipHistory = useRef(false);
+  const lastSavedRef = useRef(
+    snapshotMapDoc({
+      ...starter.doc,
+      environment: ensureEnvironment(starter.doc),
+    })
+  );
   docRef.current = doc;
 
   const selected = doc.entities.find((e) => e.id === selectedId) ?? null;
@@ -201,12 +218,45 @@ export function MapEditor({
     apiRef.current = api;
     api.setBrush(brush);
     api.setActiveLayerId(activeLayerId);
+    if (detectTouchDevice()) {
+      // Mobile defaults to free-fly so joysticks control look + move immediately
+      api.setFreeFly(true);
+    }
     return () => {
       api.destroy();
       apiRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Touch joysticks → editor camera
+  useEffect(() => {
+    if (!isTouch) return;
+    const layer = touchLayerRef.current;
+    if (!layer) return;
+    const joy = new DualJoystick(layer);
+    joystickRef.current = joy;
+    let raf = 0;
+    const tick = () => {
+      const move = joy.getMoveVector();
+      const look = joy.getAimVector();
+      apiRef.current?.setTouchAxes({
+        moveX: move.x,
+        moveY: move.y,
+        lookX: look.x,
+        lookY: look.y,
+        sprint: joy.isSprintHeld(),
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      joy.destroy();
+      joystickRef.current = null;
+      apiRef.current?.setTouchAxes({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 });
+    };
+  }, [isTouch]);
 
   const onTutorialStep = (step: TutorialStep) => {
     if (step.tab) setTab(step.tab);
@@ -230,17 +280,61 @@ export function MapEditor({
     setActivePlayMapId(mapId);
     setActivePlayId(mapId);
     alert(
-      `“${doc.name}” is now the Active Match Map.\nRejoin Deathrun so the server loads your floors.`
+      `“${doc.name}” is now the MAIN Deathrun map.\nPress Play → Deathrun and the match will load this map.`
     );
   };
 
-  const persist = () => {
-    const latest = apiRef.current?.getDoc() ?? doc;
-    const thumb = apiRef.current?.captureThumbnail() ?? null;
-    const next = { ...latest, name: doc.name, environment: ensureEnvironment(latest) };
-    saveMap(mapId, next, { thumbnailDataUrl: thumb });
-    setDoc(next);
+  const workingDoc = () => {
+    const latest = apiRef.current?.getDoc() ?? docRef.current;
+    return {
+      ...latest,
+      name: docRef.current.name,
+      environment: ensureEnvironment(latest),
+    };
   };
+
+  const isDirty = () => snapshotMapDoc(workingDoc()) !== lastSavedRef.current;
+
+  const markClean = (next: MapDocument) => {
+    lastSavedRef.current = snapshotMapDoc(next);
+  };
+
+  const persist = () => {
+    const next = workingDoc();
+    const liveThumb = apiRef.current?.captureThumbnail() ?? null;
+    saveMap(mapId, next, { thumbnailDataUrl: liveThumb });
+    setDoc(next);
+    docRef.current = next;
+    markClean(next);
+    // Prefer a framed overview thumb for the library card
+    void import('./map-thumbnail').then(({ ensureMapThumbnail }) =>
+      ensureMapThumbnail(mapId, { force: true })
+    );
+  };
+
+  const requestClose = () => {
+    if (!isDirty()) {
+      onClose();
+      return;
+    }
+    // Browser confirm only has 2 buttons — approximate Save / Don't save / Cancel.
+    if (confirm('You have unsaved changes.\n\nOK = Save and exit\nCancel = don’t save yet')) {
+      persist();
+      onClose();
+      return;
+    }
+    if (confirm('Discard unsaved changes and exit the Map Editor?')) {
+      onClose();
+    }
+  };
+
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, []);
 
   useEffect(() => {
     apiRef.current?.setBrush(brush);
@@ -297,22 +391,24 @@ export function MapEditor({
         apiRef.current?.duplicateSelected(axis);
       }
       if (e.key === 'Escape') {
+        e.preventDefault();
         if (freeFly) {
           apiRef.current?.setFreeFly(false);
           return;
         }
-        if (selectedId) {
+        if (selectedId || selectedIds.length > 0) {
           apiRef.current?.setSelectedId(null);
           setSelectedId(null);
-        } else {
-          onClose();
+          setSelectedIds([]);
+          return;
         }
+        requestClose();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onClose, selectedId, freeFly, playTest]);
+  }, [onClose, selectedId, selectedIds, freeFly, playTest, mapId]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -370,18 +466,60 @@ export function MapEditor({
   };
 
   if (playTest) {
-    return (
+    return createPortal(
       <MapPlayPreview
         doc={apiRef.current?.getDoc() ?? doc}
         onClose={() => setPlayTest(false)}
-      />
+      />,
+      document.body
     );
   }
 
-  return (
-    <div className="fixed inset-0 z-[400] bg-[#0d121a] text-white flex flex-col">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] bg-[#0d121a] text-white flex flex-col">
+      {isTouch && (
+        <>
+          <div
+            ref={touchLayerRef}
+            className="fixed inset-0 z-[50] touch-none"
+            style={{ pointerEvents: freeFly ? 'auto' : 'none' }}
+          />
+          <div className="fixed inset-0 z-[51] pointer-events-none">
+            <JoystickOverlay joystickRef={joystickRef} enabled={freeFly} />
+          </div>
+          <div className="fixed bottom-20 right-3 z-[120] flex flex-col gap-2 pointer-events-auto">
+            <button
+              type="button"
+              className="w-14 h-14 rounded-full border-2 border-sky-400/70 bg-sky-500/35 text-white font-black text-[10px] uppercase tracking-wider active:scale-95"
+              onTouchStart={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                joystickRef.current?.setSprintHeld(true);
+              }}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                joystickRef.current?.setSprintHeld(false);
+              }}
+              onTouchCancel={() => joystickRef.current?.setSprintHeld(false)}
+            >
+              Sprint
+            </button>
+            <button
+              type="button"
+              className={`w-14 h-14 rounded-full border-2 text-white font-black text-[10px] uppercase tracking-wider active:scale-95 ${
+                freeFly
+                  ? 'border-amber-400/80 bg-amber-500/40'
+                  : 'border-emerald-400/70 bg-emerald-500/35'
+              }`}
+              onClick={() => apiRef.current?.setFreeFly(!freeFly)}
+            >
+              {freeFly ? 'Edit' : 'Fly'}
+            </button>
+          </div>
+        </>
+      )}
       {/* Top bar */}
-      <div className="h-12 border-b border-white/10 flex items-center gap-2 px-3 bg-[#121a24]">
+      <div className="h-12 border-b border-white/10 flex items-center gap-2 px-3 bg-[#121a24] relative z-[60]">
         <span className="text-xs font-bold tracking-widest text-cyan-300/90 uppercase">Map Editor</span>
         <input
           className="ml-2 bg-black/40 border border-white/10 rounded px-2 py-1 text-sm w-56"
@@ -398,6 +536,8 @@ export function MapEditor({
             const withEnv = { ...loaded, environment: ensureEnvironment(loaded) };
             setMapId(id);
             setDoc(withEnv);
+            docRef.current = withEnv;
+            markClean(withEnv);
             apiRef.current?.setDoc(withEnv);
           }}
         >
@@ -422,7 +562,7 @@ export function MapEditor({
           onClick={publishToMatch}
           title="Use this map in Deathrun matches"
         >
-          {activePlayId === mapId ? 'Active Match Map ✓' : 'Set Active Match Map'}
+          {activePlayId === mapId ? 'MAIN map ✓' : 'Set as MAIN map'}
         </Button>
 
         <Button
@@ -470,6 +610,8 @@ export function MapEditor({
               saveMap(id, withEnv);
               setMapId(id);
               setDoc(withEnv);
+              docRef.current = withEnv;
+              markClean(withEnv);
               apiRef.current?.setDoc(withEnv);
             } catch (err) {
               console.error(err);
@@ -477,7 +619,7 @@ export function MapEditor({
             }
           }}
         />
-        <Button size="sm" variant="destructive" onClick={onClose}>
+        <Button size="sm" variant="destructive" onClick={requestClose} title="Exit (Esc)">
           <X className="w-4 h-4" />
         </Button>
       </div>
@@ -902,22 +1044,32 @@ export function MapEditor({
           <div ref={hostRef} className="absolute inset-0" />
 
           {freeFly && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-amber-600/90 text-white text-xs font-bold px-3 py-1.5 rounded-full tracking-wide pointer-events-none">
-              FREE FLY · WASD · Mouse · Space/C · Ctrl to exit · placement off
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-amber-600/90 text-white text-xs font-bold px-3 py-1.5 rounded-full tracking-wide pointer-events-none text-center max-w-[90vw] z-[40]">
+              {isTouch
+                ? 'FREE FLY · Left look · Right move · Fly toward look · Edit to place'
+                : 'FREE FLY · WASD toward look · Mouse · Space/C · Ctrl exit · placement off'}
             </div>
           )}
 
           {showHelp && !freeFly && (
-            <div className="absolute top-3 left-3 max-w-xs bg-black/75 border border-white/15 rounded-xl p-3 text-[11px] text-white/70 space-y-1 pointer-events-none">
+            <div className="absolute top-3 left-3 max-w-xs bg-black/75 border border-white/15 rounded-xl p-3 text-[11px] text-white/70 space-y-1 pointer-events-none z-[40]">
               <p className="text-cyan-300 font-bold tracking-wide">QUICK TIPS</p>
-              <p>· Pick a model, click ground to place (drag = orbit, no place)</p>
-              <p>· <b className="text-white">Ctrl</b> free fly · <b className="text-white">G</b> snap · <b className="text-white">F</b> focus</p>
-              <p>· <b className="text-white">W/E/R</b> move/rotate/scale · <b className="text-white">Ctrl+D</b> duplicate (+X)</p>
-              <p>· <b className="text-white">Ctrl+Shift+D</b> duplicate along Z · <b className="text-white">Ctrl+Z</b> undo</p>
-              <p>· Animated GLB? Properties → Animation → trigger / clips</p>
-              <p>· <b className="text-white">Play Test</b> then E near doors/buttons</p>
-              <p>· Shift+click / <b className="text-white">Alt+drag</b> box-select · Help tab for guide</p>
-              <p>· Measure tool (ruler) · hazard volumes & trap link lines show in view</p>
+              {isTouch ? (
+                <>
+                  <p>· Tap <b className="text-white">Fly</b> for joysticks (left look, right move)</p>
+                  <p>· Look down + push forward to fly downward</p>
+                  <p>· Exit fly with <b className="text-white">Edit</b> to place assets</p>
+                  <p>· Set <b className="text-white">MAIN map</b> so Deathrun loads it</p>
+                </>
+              ) : (
+                <>
+                  <p>· Pick a model, click ground to place (drag = orbit, no place)</p>
+                  <p>· <b className="text-white">Ctrl</b> free fly · look down + W flies down</p>
+                  <p>· <b className="text-white">G</b> snap · <b className="text-white">F</b> focus · <b className="text-white">W/E/R</b> gizmo</p>
+                  <p>· <b className="text-white">Ctrl+D</b> duplicate · <b className="text-white">Ctrl+Z</b> undo</p>
+                  <p>· Set as <b className="text-white">MAIN map</b> for Deathrun Play</p>
+                </>
+              )}
             </div>
           )}
 
@@ -1262,7 +1414,8 @@ export function MapEditor({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

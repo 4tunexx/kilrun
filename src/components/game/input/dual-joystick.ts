@@ -32,21 +32,30 @@ export class DualJoystick {
   private lastLeftTapAt = 0;
   private lastLeftTapPos: Vector2 = { x: 0, y: 0 };
 
+  private readonly onTouchStart: (e: TouchEvent) => void;
+  private readonly onTouchMove: (e: TouchEvent) => void;
+  private readonly onTouchEnd: (e: TouchEvent) => void;
+
   constructor(private element: HTMLElement) {
-    element.addEventListener('touchstart', (e) => this.handleStart(e), { passive: false });
-    element.addEventListener('touchmove', (e) => this.handleMove(e), { passive: false });
-    element.addEventListener('touchend', (e) => this.handleEnd(e), { passive: false });
-    element.addEventListener('touchcancel', (e) => this.handleEnd(e), { passive: false });
+    this.onTouchStart = (e) => this.handleStart(e);
+    this.onTouchMove = (e) => this.handleMove(e);
+    this.onTouchEnd = (e) => this.handleEnd(e);
+    element.addEventListener('touchstart', this.onTouchStart, { passive: false });
+    element.addEventListener('touchmove', this.onTouchMove, { passive: false });
+    element.addEventListener('touchend', this.onTouchEnd, { passive: false });
+    element.addEventListener('touchcancel', this.onTouchEnd, { passive: false });
   }
 
   private handleStart(e: TouchEvent) {
     e.preventDefault();
-    const width = window.innerWidth;
+    const width = this.element.clientWidth || window.innerWidth;
+    const rect = this.element.getBoundingClientRect();
 
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       const pos = { x: touch.clientX, y: touch.clientY };
-      const isLeftHalf = pos.x < width / 2;
+      const localX = touch.clientX - rect.left;
+      const isLeftHalf = localX < width / 2;
 
       if (isLeftHalf && !this.aimStick.active) {
         this.aimStick = { active: true, start: { ...pos }, current: { ...pos }, id: touch.identifier };
@@ -140,6 +149,10 @@ export class DualJoystick {
   }
 
   public destroy() {
+    this.element.removeEventListener('touchstart', this.onTouchStart);
+    this.element.removeEventListener('touchmove', this.onTouchMove);
+    this.element.removeEventListener('touchend', this.onTouchEnd);
+    this.element.removeEventListener('touchcancel', this.onTouchEnd);
     this.aimStick = freshStick();
     this.moveStick = freshStick();
     this.jumpHeld = false;

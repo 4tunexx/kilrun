@@ -54,9 +54,6 @@ const CHAT_COLLAPSE_KEY = 'kilrun.chatCollapsed';
 const PANEL =
   'bg-slate-900/60 backdrop-blur-md border border-slate-700/30';
 
-const STAT_CARD =
-  `${PANEL} transition-all duration-300 cursor-pointer hover:-translate-y-1 hover:border-primary hover:shadow-[0_0_0_1px_hsl(var(--primary)/0.55)] active:scale-[0.98]`;
-
 interface HomeViewProps {
   onLaunchGame?: () => void;
   onNavigate?: (page: string) => void;
@@ -240,43 +237,61 @@ export default function HomeView({
       </div>
 
       <div className="px-4 sm:px-8 py-6 space-y-6 flex-1">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <Card className={STAT_CARD} onClick={() => onNavigate?.('store')}>
-            <CardContent className="pt-6 text-center">
-              <Gem className="w-6 h-6 mx-auto mb-2 text-yellow-400" />
-              <div className="text-2xl sm:text-3xl font-black">
+        <div className="rounded-xl border border-slate-700/40 bg-slate-900/55 backdrop-blur-md overflow-hidden">
+          <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-slate-700/50">
+            <button
+              type="button"
+              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+              onClick={() => onNavigate?.('store')}
+            >
+              <Gem className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-yellow-400 transition group-hover:scale-110" />
+              <div className="text-2xl sm:text-3xl font-black tracking-tight">
                 <AnimatedCounter end={vpCurrency} />
               </div>
-              <p className="text-xs sm:text-sm text-slate-400">VP Balance</p>
-            </CardContent>
-          </Card>
-          <Card className={STAT_CARD} onClick={() => onNavigate?.('leaderboard')}>
-            <CardContent className="pt-6 text-center">
-              <Trophy className="w-6 h-6 mx-auto mb-2 text-primary" />
-              <div className="text-2xl sm:text-3xl font-black">
+              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+                VP Balance
+              </p>
+            </button>
+            <button
+              type="button"
+              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+              onClick={() => onNavigate?.('leaderboard')}
+            >
+              <Trophy className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
+              <div className="text-2xl sm:text-3xl font-black tracking-tight">
                 {summary?.bestScore ?? 0}
               </div>
-              <p className="text-xs sm:text-sm text-slate-400">Best Score</p>
-            </CardContent>
-          </Card>
-          <Card className={STAT_CARD} onClick={() => onNavigate?.('stats')}>
-            <CardContent className="pt-6 text-center">
-              <Gauge className="w-6 h-6 mx-auto mb-2 text-primary" />
-              <div className="text-2xl sm:text-3xl font-black">
+              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+                Best Score
+              </p>
+            </button>
+            <button
+              type="button"
+              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+              onClick={() => onNavigate?.('stats')}
+            >
+              <Gauge className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
+              <div className="text-2xl sm:text-3xl font-black tracking-tight">
                 {summary?.bestDistance ?? 0}m
               </div>
-              <p className="text-xs sm:text-sm text-slate-400">Best Distance</p>
-            </CardContent>
-          </Card>
-          <Card className={STAT_CARD} onClick={() => onNavigate?.('stats')}>
-            <CardContent className="pt-6 text-center">
-              <Clock className="w-6 h-6 mx-auto mb-2 text-primary" />
-              <div className="text-2xl sm:text-3xl font-black">
+              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+                Best Distance
+              </p>
+            </button>
+            <button
+              type="button"
+              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+              onClick={() => onNavigate?.('stats')}
+            >
+              <Clock className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
+              <div className="text-2xl sm:text-3xl font-black tracking-tight">
                 {summary?.totalRuns ?? 0}
               </div>
-              <p className="text-xs sm:text-sm text-slate-400">Total Runs</p>
-            </CardContent>
-          </Card>
+              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+                Total Runs
+              </p>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

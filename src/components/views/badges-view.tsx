@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { getPlayerAchievements, getPlayerBadges } from '@/lib/progression-actions';
+import { cn } from '@/lib/utils';
 
 export default function BadgesView({ userId }: { userId: string }) {
   const [achievements, setAchievements] = useState<any[]>([]);
@@ -40,7 +41,9 @@ export default function BadgesView({ userId }: { userId: string }) {
       ) : (
         <Tabs defaultValue="badges">
           <TabsList className="bg-slate-800/60">
-            <TabsTrigger value="badges">Badges ({badges.filter((b) => b.unlocked).length}/{badges.length})</TabsTrigger>
+            <TabsTrigger value="badges">
+              Badges ({badges.filter((b) => b.unlocked).length}/{badges.length})
+            </TabsTrigger>
             <TabsTrigger value="game">In-Game Achievements</TabsTrigger>
             <TabsTrigger value="web">Website Achievements</TabsTrigger>
           </TabsList>
@@ -50,9 +53,12 @@ export default function BadgesView({ userId }: { userId: string }) {
               {badges.map((badge) => (
                 <Card
                   key={badge.id}
-                  className={`bg-slate-900/60 backdrop-blur-md border border-slate-700/30 ${
-                    badge.unlocked ? 'border-primary/40' : 'opacity-60'
-                  }`}
+                  className={cn(
+                    'bg-slate-900/60 backdrop-blur-md border transition group',
+                    badge.unlocked
+                      ? 'border-emerald-500/55 hover:border-emerald-400/80'
+                      : 'border-slate-700/30 opacity-60'
+                  )}
                 >
                   <CardContent className="pt-5 flex gap-3 items-start">
                     {badge.iconImageUrl ? (
@@ -60,14 +66,15 @@ export default function BadgesView({ userId }: { userId: string }) {
                       <img
                         src={badge.iconImageUrl}
                         alt=""
-                        className={`w-10 h-10 rounded object-cover shrink-0 ${
+                        className={cn(
+                          'w-10 h-10 rounded object-cover shrink-0 transition duration-200 group-hover:scale-125 origin-center',
                           badge.unlocked ? '' : 'opacity-40 grayscale'
-                        }`}
+                        )}
                       />
                     ) : badge.unlocked ? (
-                      <Award className="w-10 h-10 text-primary shrink-0" />
+                      <Award className="w-10 h-10 text-emerald-400 shrink-0 transition duration-200 group-hover:scale-125" />
                     ) : (
-                      <Lock className="w-10 h-10 text-slate-500 shrink-0" />
+                      <Lock className="w-10 h-10 text-slate-500 shrink-0 transition duration-200 group-hover:scale-110" />
                     )}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -80,7 +87,7 @@ export default function BadgesView({ userId }: { userId: string }) {
                       <p className="text-xs mt-1 font-semibold flex items-center gap-1">
                         {badge.unlocked ? (
                           <>
-                            <CheckCircle className="w-3 h-3 text-green-400" /> Earned
+                            <CheckCircle className="w-3 h-3 text-emerald-400" /> Earned
                           </>
                         ) : (
                           <>
@@ -115,9 +122,12 @@ export default function BadgesView({ userId }: { userId: string }) {
 function AchievementRow({ ach }: { ach: any }) {
   return (
     <Card
-      className={`bg-slate-800/40 border-slate-700/30 ${
-        ach.unlocked ? '' : 'opacity-55'
-      }`}
+      className={cn(
+        'bg-slate-800/40 border transition group',
+        ach.unlocked
+          ? 'border-emerald-500/50 hover:border-emerald-400/70'
+          : 'border-slate-700/30 opacity-55'
+      )}
     >
       <CardHeader className="py-3">
         <CardTitle className="text-base flex items-center justify-between gap-2">
@@ -127,23 +137,22 @@ function AchievementRow({ ach }: { ach: any }) {
               <img
                 src={ach.iconImageUrl}
                 alt=""
-                className={`w-5 h-5 rounded object-cover ${ach.unlocked ? '' : 'opacity-40 grayscale'}`}
+                className={cn(
+                  'w-5 h-5 rounded object-cover transition duration-200 group-hover:scale-150',
+                  ach.unlocked ? '' : 'opacity-40 grayscale'
+                )}
               />
             ) : ach.unlocked ? (
-              <Trophy className="w-4 h-4 text-yellow-400" />
+              <Trophy className="w-4 h-4 text-yellow-400 transition duration-200 group-hover:scale-150" />
             ) : (
-              <Lock className="w-4 h-4 text-slate-500" />
+              <Lock className="w-4 h-4 text-slate-500 transition duration-200 group-hover:scale-125" />
             )}
             {ach.title}
           </span>
-          <span className="text-sm font-normal text-yellow-400">
-            +{ach.xpReward} XP
-          </span>
+          <span className="text-sm font-normal text-yellow-400">+{ach.xpReward} XP</span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-0 pb-3 text-sm text-slate-400">
-        {ach.description}
-      </CardContent>
+      <CardContent className="pt-0 pb-3 text-sm text-slate-400">{ach.description}</CardContent>
     </Card>
   );
 }

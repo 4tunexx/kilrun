@@ -48,6 +48,8 @@ export class DeathrunRoom extends Room<RoomState> {
   private lastObstacleHitAt = new Map<string, number>();
   private lastShotAt = new Map<string, number>();
   private resultsElapsedMs = 0;
+  /** Editor MAIN map runner spawn (sim space). Kept across round resets. */
+  private customSpawn: { x: number; y: number; z: number } | null = null;
 
   onCreate() {
     this.setState(new RoomState());
@@ -78,22 +80,24 @@ export class DeathrunRoom extends Room<RoomState> {
         const platforms = data?.platforms;
         if (!Array.isArray(platforms) || platforms.length === 0) return;
 
-        // Replace course
+        // Replace course with MAIN map platforms
         while (this.state.platforms.length > 0) this.state.platforms.pop();
         this.state.platforms.push(...createFromBlueprints(platforms));
 
-        // Reposition everyone to custom runner spawn if provided
+        // Default deathrun obstacles don't match custom geometry — clear them
+        while (this.state.obstacles.length > 0) this.state.obstacles.pop();
+        this.obstacleTimers = [];
+
         if (data.spawn) {
+          this.customSpawn = { x: data.spawn.x, y: data.spawn.y, z: data.spawn.z };
           this.state.players.forEach((player) => {
-            player.x = data.spawn!.x;
-            player.y = data.spawn!.y;
-            player.z = data.spawn!.z;
+            this.applySpawnPosition(player, 0);
             player.vz = 0;
           });
         }
 
         console.log(
-          `[DeathrunRoom] Custom map loaded by ${client.sessionId}: ${platforms.length} platforms`
+          `[DeathrunRoom] MAIN map loaded by ${client.sessionId}: ${platforms.length} platforms`
         );
       }
     );
@@ -107,9 +111,7 @@ export class DeathrunRoom extends Room<RoomState> {
     player.userId = options.userId ?? client.sessionId;
     player.username = options.username ?? `Player${client.sessionId.slice(0, 4)}`;
     player.avatarUrl = options.avatarUrl ?? '';
-    player.x = SPAWN_X;
-    player.y = this.nextSpawnY();
-    player.z = SPAWN_Z;
+    this.applySpawnPosition(player, this.state.players.size);
     player.energy = MAX_ENERGY;
     player.role = 'runner';
 
@@ -130,10 +132,17 @@ export class DeathrunRoom extends Room<RoomState> {
     }
   }
 
-  private nextSpawnY(): number {
-    const count = this.state.players.size;
-    const lane = (count % 5) + 1;
-    return (lane / 6) * WORLD_HEIGHT;
+  private applySpawnPosition(player: PlayerState, laneIndex: number) {
+    if (this.customSpawn) {
+      const laneSpread = ((laneIndex % 5) - 2) * 0.55;
+      player.x = this.customSpawn.x;
+      player.y = this.customSpawn.y + laneSpread;
+      player.z = this.customSpawn.z;
+      return;
+    }
+    player.x = SPAWN_X;
+    player.y = (((laneIndex % 5) + 1) / 6) * WORLD_HEIGHT;
+    player.z = SPAWN_Z;
   }
 
   private update(dtMs: number) {
@@ -172,9 +181,7 @@ export class DeathrunRoom extends Room<RoomState> {
     player.energy = MAX_ENERGY;
     player.isAlive = true;
     player.hasFinished = false;
-    player.x = SPAWN_X;
-    player.y = (((laneIndex % 5) + 1) / 6) * WORLD_HEIGHT;
-    player.z = SPAWN_Z;
+    this.applySpawnPosition(player, laneIndex);
     player.vz = 0;
     player.isGrounded = true;
     player.isSprinting = false;
@@ -322,7 +329,7 @@ export class DeathrunRoom extends Room<RoomState> {
         player.energy = MAX_ENERGY;
         player.isAlive = true;
         player.hasFinished = false;
-        player.z = SPAWN_Z;
+        this.applySpawnPosition(player, 0);
         player.vz = 0;
       });
     }

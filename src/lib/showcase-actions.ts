@@ -45,6 +45,16 @@ export async function getMyShowcaseEditor() {
 
   const options: ShowcaseOption[] = [
     { itemType: 'rank', title: user.currentRank || 'Unranked', icon: 'crown' },
+    ...(user.reputation > 0
+      ? [
+          {
+            itemType: 'reputation' as const,
+            title: `+${user.reputation} Reputation`,
+            icon: 'thumbs-up',
+            rarity: 'epic',
+          },
+        ]
+      : []),
     ...unlockedBadges.map((ub) => ({
       itemType: 'badge' as const,
       refId: ub.badgeId,
@@ -108,6 +118,8 @@ export async function setShowcaseSlot(
         where: { userId: user.id, id: entry.refId },
       });
       if (!owned) throw new Error('Item not owned');
+    } else if (entry.itemType === 'reputation') {
+      if (user.reputation <= 0) throw new Error('Need positive reputation to showcase');
     } else if (entry.itemType !== 'rank') {
       throw new Error('Invalid showcase type');
     }
@@ -140,7 +152,7 @@ export async function resolveShowcaseEntries(
   const inventoryIds = entries
     .filter((e) => e.itemType === 'inventory' && e.refId)
     .map((e) => e.refId!);
-  const needsRank = entries.some((e) => e.itemType === 'rank');
+  const needsRank = entries.some((e) => e.itemType === 'rank' || e.itemType === 'reputation');
 
   const [badges, achievements, inventoryItems, user] = await Promise.all([
     badgeIds.length ? prisma.badgeDefinition.findMany({ where: { id: { in: badgeIds } } }) : [],
@@ -169,6 +181,17 @@ export async function resolveShowcaseEntries(
           icon: 'crown',
           iconImageUrl: null,
           rarity: null,
+        };
+      }
+      if (entry.itemType === 'reputation') {
+        if (!user || user.reputation <= 0) return null;
+        return {
+          itemType: 'reputation',
+          title: `+${user.reputation} REP`,
+          icon: 'thumbs-up',
+          iconImageUrl: null,
+          rarity: 'epic',
+          value: user.reputation,
         };
       }
       if (entry.itemType === 'badge' && entry.refId) {

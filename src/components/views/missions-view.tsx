@@ -144,17 +144,15 @@ function MissionList({
           return (
             <div
               key={mission.id}
-              className={`p-4 rounded-lg bg-slate-900/50 border border-slate-700/50 ${
-                mission.isCompleted ? 'opacity-70' : ''
-              } ${
-                tone === 'green' && !mission.isCompleted
-                  ? 'border-emerald-700/40'
-                  : ''
+              className={`p-4 rounded-lg bg-slate-900/50 border transition group ${
+                mission.isCompleted
+                  ? 'border-emerald-500/55 hover:border-emerald-400/70'
+                  : 'border-slate-700/50'
               }`}
             >
               <div className="flex justify-between items-start mb-2 gap-4">
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-md overflow-hidden bg-slate-800 flex items-center justify-center shrink-0">
+                  <div className="w-8 h-8 rounded-md overflow-hidden bg-slate-800 flex items-center justify-center shrink-0 transition duration-200 group-hover:scale-125 origin-center">
                     {mission.iconImageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -163,7 +161,7 @@ function MissionList({
                         className="w-full h-full object-cover"
                       />
                     ) : mission.isCompleted ? (
-                      <CheckCircle className="w-5 h-5 text-green-400" />
+                      <CheckCircle className="w-5 h-5 text-emerald-400" />
                     ) : (
                       <Target className="w-4 h-4 text-slate-500" />
                     )}

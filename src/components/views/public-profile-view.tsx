@@ -135,6 +135,10 @@ export default function PublicProfileView({
   };
 
   const handleVote = async (value: 1 | -1) => {
+    if (profile.myReputationVote !== 0) {
+      toast({ title: 'You already submitted reputation for this player' });
+      return;
+    }
     setBusyAction(value === 1 ? 'rep-up' : 'rep-down');
     try {
       const result = await voteReputation(profile.id, value);
@@ -143,10 +147,14 @@ export default function PublicProfileView({
           ? {
               ...p,
               reputation: result.reputation,
-              myReputationVote: p.myReputationVote === value ? 0 : value,
+              myReputationVote: result.myVote,
             }
           : p
       );
+      toast({
+        title: result.myVote === 1 ? 'Gave +REP — locked in' : 'Gave −REP — locked in',
+        description: 'Your vote is permanent and cannot be changed.',
+      });
     } catch (e: any) {
       toast({ title: e?.message ?? 'Could not vote', variant: 'destructive' });
     } finally {
@@ -234,33 +242,59 @@ export default function PublicProfileView({
             </div>
 
             {profile.friendStatus !== 'self' && (
-              <div className="flex flex-wrap gap-2 pb-1">
-                <Button
-                  variant={profile.myReputationVote === 1 ? 'default' : 'outline'}
-                  size="sm"
-                  disabled={busyAction !== null}
-                  onClick={() => handleVote(1)}
-                  title="+rep"
-                >
-                  {busyAction === 'rep-up' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ThumbsUp className="h-4 w-4" />
-                  )}
-                </Button>
-                <Button
-                  variant={profile.myReputationVote === -1 ? 'destructive' : 'outline'}
-                  size="sm"
-                  disabled={busyAction !== null}
-                  onClick={() => handleVote(-1)}
-                  title="-rep"
-                >
-                  {busyAction === 'rep-down' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ThumbsDown className="h-4 w-4" />
-                  )}
-                </Button>
+              <div className="flex flex-wrap gap-2 pb-1 items-center">
+                {profile.myReputationVote !== 0 ? (
+                  <div
+                    className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-semibold opacity-60 cursor-not-allowed ${
+                      profile.myReputationVote === 1
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                        : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+                    }`}
+                    title="Your reputation vote is locked"
+                  >
+                    {profile.myReputationVote === 1 ? (
+                      <ThumbsUp className="h-4 w-4" />
+                    ) : (
+                      <ThumbsDown className="h-4 w-4" />
+                    )}
+                    {profile.myReputationVote === 1 ? '+REP submitted' : '−REP submitted'}
+                  </div>
+                ) : (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busyAction !== null}
+                      onClick={() => handleVote(1)}
+                      className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+                      title="Give permanent +REP"
+                    >
+                      {busyAction === 'rep-up' ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                      ) : (
+                        <ThumbsUp className="h-4 w-4 mr-1" />
+                      )}
+                      +REP
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busyAction !== null}
+                      onClick={() => handleVote(-1)}
+                      className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
+                      title="Give permanent −REP"
+                    >
+                      {busyAction === 'rep-down' ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                      ) : (
+                        <ThumbsDown className="h-4 w-4 mr-1" />
+                      )}
+                      −REP
+                    </Button>
+                  </>
+                )}
 
                 {profile.friendStatus === 'friends' && (
                   <>
@@ -389,8 +423,10 @@ export default function PublicProfileView({
                     {profile.badges.map((badge) => (
                       <Card
                         key={badge.id}
-                        className={`${PANEL} ${
-                          badge.unlocked ? 'border-primary/40' : 'opacity-60'
+                        className={`${PANEL} group transition ${
+                          badge.unlocked
+                            ? 'border-emerald-500/55 hover:border-emerald-400/80'
+                            : 'opacity-60'
                         }`}
                       >
                         <CardContent className="pt-5 flex gap-3 items-start">
@@ -399,14 +435,14 @@ export default function PublicProfileView({
                             <img
                               src={badge.iconImageUrl}
                               alt=""
-                              className={`w-10 h-10 rounded object-cover shrink-0 ${
+                              className={`w-10 h-10 rounded object-cover shrink-0 transition duration-200 group-hover:scale-125 ${
                                 badge.unlocked ? '' : 'opacity-40 grayscale'
                               }`}
                             />
                           ) : badge.unlocked ? (
-                            <Award className="w-10 h-10 text-primary shrink-0" />
+                            <Award className="w-10 h-10 text-emerald-400 shrink-0 transition duration-200 group-hover:scale-125" />
                           ) : (
-                            <Lock className="w-10 h-10 text-slate-500 shrink-0" />
+                            <Lock className="w-10 h-10 text-slate-500 shrink-0 transition duration-200 group-hover:scale-110" />
                           )}
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -463,7 +499,18 @@ export default function PublicProfileView({
                 <span className="flex items-center gap-2 text-sm text-slate-300">
                   <Gauge className="h-4 w-4 text-primary" /> Reputation
                 </span>
-                <span className="text-lg font-bold">{profile.reputation}</span>
+                <span
+                  className={`text-lg font-bold tabular-nums ${
+                    profile.reputation > 0
+                      ? 'text-emerald-400'
+                      : profile.reputation < 0
+                        ? 'text-rose-400'
+                        : 'text-white'
+                  }`}
+                >
+                  {profile.reputation > 0 ? '+' : ''}
+                  {profile.reputation}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -475,7 +522,11 @@ export default function PublicProfileView({
 
 function AchievementRow({ ach }: { ach: PublicProfile['achievements'][number] }) {
   return (
-    <Card className={`${PANEL} ${ach.unlocked ? '' : 'opacity-55'}`}>
+    <Card
+      className={`${PANEL} group transition ${
+        ach.unlocked ? 'border-emerald-500/50 hover:border-emerald-400/70' : 'opacity-55'
+      }`}
+    >
       <CardContent className="py-3 flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 font-medium min-w-0">
           {ach.iconImageUrl ? (
@@ -483,12 +534,12 @@ function AchievementRow({ ach }: { ach: PublicProfile['achievements'][number] })
             <img
               src={ach.iconImageUrl}
               alt=""
-              className={`h-5 w-5 rounded object-cover shrink-0 ${
+              className={`h-5 w-5 rounded object-cover shrink-0 transition duration-200 group-hover:scale-150 ${
                 ach.unlocked ? '' : 'opacity-40 grayscale'
               }`}
             />
           ) : ach.unlocked ? (
-            <Trophy className="h-4 w-4 text-yellow-400 shrink-0" />
+            <Trophy className="h-4 w-4 text-yellow-400 shrink-0 transition duration-200 group-hover:scale-150" />
           ) : (
             <Lock className="h-4 w-4 text-slate-500 shrink-0" />
           )}

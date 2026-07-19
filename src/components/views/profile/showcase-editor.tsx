@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Award, Crown, Lock, Loader2, Package, Plus, Sparkles, Trophy, X } from 'lucide-react';
+import { Award, Crown, Lock, Loader2, Package, Plus, Sparkles, ThumbsUp, Trophy, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
@@ -27,6 +27,7 @@ const TYPE_ICONS: Record<ShowcaseItemType, typeof Crown> = {
   badge: Award,
   achievement: Trophy,
   inventory: Package,
+  reputation: ThumbsUp,
 };
 
 const TYPE_LABELS: Record<ShowcaseItemType, string> = {
@@ -34,6 +35,7 @@ const TYPE_LABELS: Record<ShowcaseItemType, string> = {
   badge: 'Badges',
   achievement: 'Achievements',
   inventory: 'Owned Items',
+  reputation: 'Reputation',
 };
 
 export function ShowcaseEditor() {

@@ -331,32 +331,130 @@ export async function unlockVipWithVp() {
 /** Mongo: missing isBanned must still count as not banned (false filter skips unset). */
 const NOT_BANNED = { NOT: { isBanned: true } } as const;
 
-export async function getLeaderboard(take = 20) {
-  const rows = await prisma.user.findMany({
+export type LeaderboardSort = 'xp' | 'vp' | 'stats';
+
+export type LeaderboardRow = {
+  id: string;
+  username: string;
+  avatarUrl: string;
+  xpProgress: number;
+  vpCurrency: number;
+  currentRank: string;
+  isVip: boolean;
+  role: string;
+  reputation: number;
+  wins: number;
+  losses: number;
+  kills: number;
+  kd: number;
+  rank: number;
+};
+
+/**
+ * Podium (top 3) + paginated rest (10/page starting at #4).
+ * sort: xp | vp | stats (wins → kd → kills).
+ */
+export async function getLeaderboard(opts?: {
+  sort?: LeaderboardSort;
+  page?: number;
+  pageSize?: number;
+}) {
+  const sort: LeaderboardSort = opts?.sort ?? 'xp';
+  const page = Math.max(1, opts?.page ?? 1);
+  const pageSize = Math.max(1, Math.min(50, opts?.pageSize ?? 10));
+
+  const users = await prisma.user.findMany({
     where: NOT_BANNED,
-    orderBy: [
-      { xpProgress: 'desc' },
-      { vpCurrency: 'desc' },
-      { createdAt: 'asc' },
-    ],
-    take,
     select: {
       id: true,
       username: true,
       avatarUrl: true,
       xpProgress: true,
+      vpCurrency: true,
       currentRank: true,
       isVip: true,
       role: true,
+      reputation: true,
     },
   });
-  return rows.map((row) => ({
-    ...row,
-    username: row.username || 'Player',
-    avatarUrl: row.avatarUrl || '',
-    xpProgress: row.xpProgress ?? 0,
-    currentRank: row.currentRank || 'Unranked',
-  }));
+
+  const matchResults = await prisma.matchResult.findMany({
+    select: { userId: true, role: true, outcome: true },
+  });
+
+  const statsByUser = new Map<
+    string,
+    { wins: number; losses: number; kills: number }
+  >();
+  for (const r of matchResults) {
+    let s = statsByUser.get(r.userId);
+    if (!s) {
+      s = { wins: 0, losses: 0, kills: 0 };
+      statsByUser.set(r.userId, s);
+    }
+    if (r.outcome === 'win' || r.outcome === 'survived') s.wins += 1;
+    if (r.outcome === 'loss' || r.outcome === 'eliminated') s.losses += 1;
+    // Trapper round wins count as eliminations / "kills" proxy
+    if (r.role === 'trapper' && r.outcome === 'win') s.kills += 1;
+  }
+
+  const rows: LeaderboardRow[] = users.map((u) => {
+    const s = statsByUser.get(u.id) ?? { wins: 0, losses: 0, kills: 0 };
+    const kd = s.losses > 0 ? Math.round((s.kills / s.losses) * 100) / 100 : s.kills;
+    return {
+      id: u.id,
+      username: u.username || 'Player',
+      avatarUrl: u.avatarUrl || '',
+      xpProgress: u.xpProgress ?? 0,
+      vpCurrency: u.vpCurrency ?? 0,
+      currentRank: u.currentRank || 'Unranked',
+      isVip: !!u.isVip,
+      role: u.role,
+      reputation: u.reputation ?? 0,
+      wins: s.wins,
+      losses: s.losses,
+      kills: s.kills,
+      kd,
+      rank: 0,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (sort === 'vp') {
+      if (b.vpCurrency !== a.vpCurrency) return b.vpCurrency - a.vpCurrency;
+      return b.xpProgress - a.xpProgress;
+    }
+    if (sort === 'stats') {
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (b.kd !== a.kd) return b.kd - a.kd;
+      if (b.kills !== a.kills) return b.kills - a.kills;
+      return b.xpProgress - a.xpProgress;
+    }
+    if (b.xpProgress !== a.xpProgress) return b.xpProgress - a.xpProgress;
+    return b.vpCurrency - a.vpCurrency;
+  });
+
+  rows.forEach((r, i) => {
+    r.rank = i + 1;
+  });
+
+  const total = rows.length;
+  const podium = rows.slice(0, 3);
+  // Rest list: page 1 = ranks 4–13, page 2 = 14–23, ...
+  const restStart = 3 + (page - 1) * pageSize;
+  const rest = rows.slice(restStart, restStart + pageSize);
+  const restTotal = Math.max(0, total - 3);
+  const totalPages = Math.max(1, Math.ceil(restTotal / pageSize));
+
+  return {
+    sort,
+    page,
+    pageSize,
+    total,
+    totalPages,
+    podium,
+    rest,
+  };
 }
 
 /** Public profile snippet for messaging / profile deep-links. */
@@ -1095,6 +1193,8 @@ export async function deleteInventoryItem(inventoryItemId: string) {
 
 // --- Reputation (+rep / -rep) ---
 
+// --- Reputation (+rep / -rep) — one permanent vote per player ---
+
 export async function voteReputation(targetUserId: string, value: 1 | -1) {
   const user = await requireSessionUser();
   if (user.id === targetUserId) throw new Error('Cannot rep yourself');
@@ -1103,31 +1203,42 @@ export async function voteReputation(targetUserId: string, value: 1 | -1) {
     where: { voterId_targetId: { voterId: user.id, targetId: targetUserId } },
   });
 
-  let delta: number = value;
   if (existing) {
-    if (existing.value === value) {
-      // Same vote again = retract it.
-      await prisma.reputationVote.delete({ where: { id: existing.id } });
-      delta = -existing.value;
-    } else {
-      await prisma.reputationVote.update({
-        where: { id: existing.id },
-        data: { value },
-      });
-      delta = value - existing.value;
-    }
-  } else {
-    await prisma.reputationVote.create({
-      data: { voterId: user.id, targetId: targetUserId, value },
-    });
+    throw new Error('You already submitted reputation for this player');
   }
 
-  const updated = await prisma.user.update({
-    where: { id: targetUserId },
-    data: { reputation: { increment: delta } },
+  await prisma.reputationVote.create({
+    data: { voterId: user.id, targetId: targetUserId, value },
   });
-  await tryUnlockAchievementIfPositive(targetUserId);
-  return { ok: true as const, reputation: updated.reputation };
+
+  // Recompute from all votes so the visible total never drifts
+  const reputation = await syncUserReputation(targetUserId);
+
+  try {
+    await processWebsiteAction(targetUserId, 'reputation');
+  } catch {
+    await tryUnlockAchievementIfPositive(targetUserId);
+  }
+
+  return {
+    ok: true as const,
+    reputation,
+    myVote: value as 1 | -1,
+  };
+}
+
+/** Sum ReputationVote rows onto User.reputation (source of truth). */
+async function syncUserReputation(targetUserId: string): Promise<number> {
+  const votes = await prisma.reputationVote.findMany({
+    where: { targetId: targetUserId },
+    select: { value: true },
+  });
+  const reputation = votes.reduce((sum, v) => sum + v.value, 0);
+  await prisma.user.update({
+    where: { id: targetUserId },
+    data: { reputation },
+  });
+  return reputation;
 }
 
 async function tryUnlockAchievementIfPositive(userId: string) {
@@ -1314,7 +1425,7 @@ export async function adminSetUserRole(userId: string, role: string) {
   const staff = await requireStaff();
   if (staff.role !== 'admin') throw new Error('Only admins can change roles');
   if (!isAccountRole(role)) throw new Error('Invalid role');
-  return prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: userId },
     data: {
       role: role as AccountRole,
@@ -1322,6 +1433,16 @@ export async function adminSetUserRole(userId: string, role: string) {
       ...(role === 'vip' ? { isVip: true } : role === 'player' ? { isVip: false } : {}),
     },
   });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'set_role',
+    targetUserId: updated.id,
+    targetUsername: updated.username,
+    detail: `Role → ${role}`,
+  });
+  return updated;
 }
 
 /** Find players by username for friend add / discovery (excludes self). */
@@ -1433,7 +1554,7 @@ export async function adminUpdateTicketStatus(
   status: string,
   staffNote?: string
 ) {
-  await requireStaff();
+  const staff = await requireStaff();
   const ticket = await prisma.supportTicket.update({
     where: { id: ticketId },
     data: {
@@ -1448,6 +1569,14 @@ export async function adminUpdateTicketStatus(
       body: `Your ticket is now “${status}”.`,
       type: 'support',
     },
+  });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'ticket_status',
+    targetUserId: ticket.userId,
+    detail: `Ticket ${ticketId} → ${status}`,
   });
   return ticket;
 }
@@ -1522,8 +1651,8 @@ export async function adminCreateNews(input: {
   body: string;
   headerImageUrl?: string;
 }) {
-  await requireStaff();
-  return prisma.newsPost.create({
+  const staff = await requireStaff();
+  const post = await prisma.newsPost.create({
     data: {
       title: input.title.trim().slice(0, 160),
       summary: input.summary.trim().slice(0, 400),
@@ -1532,6 +1661,14 @@ export async function adminCreateNews(input: {
       published: true,
     },
   });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'create_news',
+    detail: post.title,
+  });
+  return post;
 }
 
 export async function adminCreateGuide(input: {
@@ -1540,8 +1677,8 @@ export async function adminCreateGuide(input: {
   body: string;
   category?: string;
 }) {
-  await requireStaff();
-  return prisma.guide.create({
+  const staff = await requireStaff();
+  const guide = await prisma.guide.create({
     data: {
       title: input.title,
       summary: input.summary,
@@ -1549,6 +1686,14 @@ export async function adminCreateGuide(input: {
       category: input.category || 'general',
     },
   });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'create_guide',
+    detail: guide.title,
+  });
+  return guide;
 }
 
 export async function adminDashboardStats() {

@@ -54,7 +54,7 @@ export async function auditStaffAction(input: {
   });
 }
 
-export async function adminListAuditLogs(take = 80) {
+export async function adminListAuditLogs(take = 200) {
   await requireStaffActor();
   return prisma.auditLog.findMany({
     orderBy: { createdAt: 'desc' },

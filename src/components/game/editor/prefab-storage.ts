@@ -94,27 +94,24 @@ export interface SimPlatformBlueprint {
 }
 
 export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
-  const floors = doc.entities.filter(
-    (e) =>
-      e.visible !== false &&
-      (e.model?.startsWith('floor') ||
-        e.model?.includes('floor') ||
-        e.kind === 'checkpoint' ||
-        (e.kind === 'prop' && (e.model?.startsWith('shape-') ?? false) === false && e.model?.startsWith('wall') === false))
-  );
+  const isFloorLike = (e: EditorEntity) =>
+    e.visible !== false &&
+    (e.kind === 'checkpoint' ||
+      !!e.model?.includes('floor') ||
+      !!e.model?.startsWith('platform') ||
+      (e.kind === 'prop' &&
+        !!e.model &&
+        !e.model.startsWith('wall') &&
+        !e.model.startsWith('column') &&
+        !e.model.startsWith('pipe') &&
+        !e.model.startsWith('figurine') &&
+        !e.model.startsWith('door') &&
+        !e.model.startsWith('button')));
 
-  // Prefer explicit floors; if none, use any prop with floor in name or all non-spawn props sized as pads
-  const source =
-    floors.filter((e) => e.model?.includes('floor')).length > 0
-      ? floors.filter((e) => e.model?.includes('floor') || e.kind === 'checkpoint')
-      : doc.entities.filter(
-          (e) =>
-            e.kind === 'prop' &&
-            e.model &&
-            !e.model.startsWith('wall') &&
-            !e.model.startsWith('column') &&
-            !e.model.startsWith('pipe')
-        );
+  const floors = doc.entities.filter(
+    (e) => e.visible !== false && (e.model?.includes('floor') || e.kind === 'checkpoint')
+  );
+  const source = floors.length > 0 ? floors : doc.entities.filter(isFloorLike);
 
   const runner = doc.entities.find((e) => e.kind === 'spawn_runner' || e.kind === 'player');
 
@@ -134,7 +131,7 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
 
   if (pads.length === 0 && runner) {
     const [tx, ty, tz] = runner.position;
-    pads.push({ x: tz, y: tx, z: ty, width: 4, depth: 4, kind: 'solid' });
+    pads.push({ x: tz, y: tx, z: ty, width: 6, depth: 6, kind: 'solid' });
   }
 
   return pads;

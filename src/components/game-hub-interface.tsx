@@ -19,10 +19,12 @@ import {
   Crown,
   Star,
   Mail,
+  Bell,
   ShieldAlert,
   Shield,
   CheckCircle2,
   Package,
+  type LucideIcon,
 } from 'lucide-react';
 import HomeView from '@/components/views/home-view';
 import StoreView from '@/components/views/store-view';
@@ -59,6 +61,20 @@ import { HubHeaderToolbar } from '@/components/hub-header-toolbar';
 import { HubFooter } from '@/components/hub-footer';
 import { resolveHubBackground, resolveMarkLogo } from '@/lib/branding';
 import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
+import {
+  HUB_NAV_CATALOG,
+  defaultHubChrome,
+  defaultHubNav,
+  defaultHubPages,
+  isHubPageEnabled,
+  parseHubChrome,
+  parseHubNav,
+  parseHubPages,
+  type HubChromeConfig,
+  type HubNavLayout,
+  type HubPageId,
+  type HubPagesConfig,
+} from '@/lib/hub-layout';
 
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Progress } from '@/components/ui/progress';
@@ -114,6 +130,22 @@ export interface SessionPlayer {
   email: string | null;
   emailVerified: boolean;
 }
+
+const HUB_PAGE_ICONS: Record<HubPageId, LucideIcon> = {
+  home: Home,
+  play: Play,
+  missions: CheckSquare,
+  leaderboard: Trophy,
+  stats: BarChart3,
+  store: Store,
+  badges: Award,
+  community: Users,
+  guides: BookOpen,
+  support: HelpCircle,
+  profile: User,
+  notifications: Bell,
+  messages: Mail,
+};
 
 const pageComponents: { [key: string]: React.ComponentType<any> } = {
   home: HomeView,
@@ -180,7 +212,29 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [isEmailPromptOpen, setIsEmailPromptOpen] = useState(false);
   const [homeTitle, setHomeTitle] = useState(PAGE_META.home.title);
   const [homeSubtitle, setHomeSubtitle] = useState(PAGE_META.home.subtitle);
+  const [hubPages, setHubPages] = useState<HubPagesConfig>(() => defaultHubPages());
+  const [hubNav, setHubNav] = useState<HubNavLayout>(() => defaultHubNav());
+  const [hubChrome, setHubChrome] = useState<HubChromeConfig>(() => defaultHubChrome());
   const { toast } = useToast();
+
+  const showAdmin = canAccessAdmin(user.role);
+  const isStaff = showAdmin;
+
+  const applyLayoutFromSettings = (settings: {
+    hubPagesJson?: string | null;
+    hubNavJson?: string | null;
+    hubChromeJson?: string | null;
+  }) => {
+    if (settings.hubPagesJson !== undefined && settings.hubPagesJson !== null) {
+      setHubPages(parseHubPages(settings.hubPagesJson));
+    }
+    if (settings.hubNavJson !== undefined && settings.hubNavJson !== null) {
+      setHubNav(parseHubNav(settings.hubNavJson));
+    }
+    if (settings.hubChromeJson !== undefined && settings.hubChromeJson !== null) {
+      setHubChrome(parseHubChrome(settings.hubChromeJson));
+    }
+  };
 
   const { level, xpIntoLevel, xpForNextLevel, percent: levelProgressPercent } =
     getLevelProgress(xpProgress);
@@ -244,6 +298,11 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         setHomeHeroImage(settings.homeHeroImage ?? '');
         if (settings.headerTitle) setHomeTitle(settings.headerTitle);
         if (settings.headerSubtitle) setHomeSubtitle(settings.headerSubtitle);
+        applyLayoutFromSettings(settings as {
+          hubPagesJson?: string;
+          hubNavJson?: string;
+          hubChromeJson?: string;
+        });
       } catch (err) {
         console.error(err);
       }
@@ -286,10 +345,19 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       }
       if (s.headerTitle) setHomeTitle(s.headerTitle);
       if (s.headerSubtitle) setHomeSubtitle(s.headerSubtitle);
+      applyLayoutFromSettings(s);
     });
   }, []);
 
   const navigate = (page: string) => {
+    if (!isHubPageEnabled(hubPages, page, isStaff)) {
+      toast({
+        title: 'Page unavailable',
+        description: 'This section is temporarily disabled.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setCurrentPage(page);
     if (isMobile) {
       setIsMenuOpen(false);
@@ -371,25 +439,36 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     toast({ title: 'VIP unlocked', description: 'Welcome to VIP.' });
   };
 
-  const menuItems = [
-    { icon: Award, label: 'Badges', page: 'badges' },
-    { icon: Users, label: 'Community', page: 'community' },
-    { icon: BookOpen, label: 'Guides', page: 'guides' },
-    { icon: HelpCircle, label: 'Support', page: 'support' },
-    { icon: User, label: 'Profile', page: 'profile' },
-  ];
-
   const handleLogout = () => {
     signOut({ callbackUrl: '/landing' });
   };
 
-  const showAdmin = canAccessAdmin(user.role);
+  const leftNavItems = hubNav.left.filter(
+    (id) => isStaff || hubPages[id] !== false
+  );
+  const rightNavItems = hubNav.right.filter(
+    (id) => isStaff || hubPages[id] !== false
+  );
 
   const renderContent = () => {
     if (currentPage === 'admin' && !showAdmin) {
       return (
         <div className="p-6 text-center text-slate-300">
           Staff access required.
+        </div>
+      );
+    }
+
+    if (!isHubPageEnabled(hubPages, currentPage, isStaff)) {
+      return (
+        <div className="p-10 text-center space-y-2">
+          <p className="text-xl font-bold text-white">Page unavailable</p>
+          <p className="text-slate-400 text-sm">
+            This section is temporarily disabled by an admin.
+          </p>
+          <Button className="mt-4" variant="outline" onClick={() => navigate('home')}>
+            Back to Home
+          </Button>
         </div>
       );
     }
@@ -545,11 +624,16 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
               </div>
 
               <NavButton icon={Home} label="Home" page="home" />
-              <NavButton icon={Play} label="Play" page="play" />
-              <NavButton icon={CheckSquare} label="Missions" page="missions" />
-              <NavButton icon={Trophy} label="Leaderboard" page="leaderboard" />
-              <NavButton icon={BarChart3} label="Stats" page="stats" />
-              <NavButton icon={Store} label="Store" page="store" />
+              {leftNavItems
+                .filter((id) => id !== 'home')
+                .map((id) => {
+                  const meta = HUB_NAV_CATALOG.find((i) => i.id === id);
+                  const Icon = HUB_PAGE_ICONS[id];
+                  if (!meta || !Icon) return null;
+                  return (
+                    <NavButton key={id} icon={Icon} label={meta.label} page={id} />
+                  );
+                })}
 
               <div className="my-2 w-3/4 h-px bg-slate-700/50 shrink-0" />
 
@@ -663,7 +747,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-            {currentPage !== 'lobby' && PAGE_META[currentPage] && (
+            {currentPage !== 'lobby' && hubChrome.showHeader && PAGE_META[currentPage] && (
               <PageBanner
                 title={
                   currentPage === 'home'
@@ -692,7 +776,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
             <ScrollArea className="relative z-0 flex-1 min-w-0">
               {renderContent()}
             </ScrollArea>
-            {currentPage !== 'lobby' && (
+            {currentPage !== 'lobby' && hubChrome.showFooter && (
               <HubFooter markLogoUrl={logoUrl} />
             )}
           </div>
@@ -833,20 +917,25 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
 
                     <h2 className="text-xl font-bold mb-6 tracking-tight">Shortcuts</h2>
                     <div className="space-y-2">
-                      {menuItems.map((item, i) => (
-                        <button
-                          key={i}
-                          onClick={() => item.page && navigate(item.page)}
-                          className="w-full flex items-center justify-start px-4 py-3.5 rounded-lg hover:bg-primary/10 transition-all duration-300 text-left group relative overflow-hidden hover:-translate-y-0.5"
-                        >
-                          <div className="flex items-center space-x-4 relative z-10 transition-transform duration-300 group-hover:translate-x-1">
-                            <item.icon className="w-5 h-5 text-slate-400 group-hover:text-primary transition-colors" />
-                            <span className="font-medium group-hover:text-white transition-colors">
-                              {item.label}
-                            </span>
-                          </div>
-                        </button>
-                      ))}
+                      {rightNavItems.map((id) => {
+                        const meta = HUB_NAV_CATALOG.find((i) => i.id === id);
+                        const Icon = HUB_PAGE_ICONS[id];
+                        if (!meta || !Icon) return null;
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => navigate(id)}
+                            className="w-full flex items-center justify-start px-4 py-3.5 rounded-lg hover:bg-primary/10 transition-all duration-300 text-left group relative overflow-hidden hover:-translate-y-0.5"
+                          >
+                            <div className="flex items-center space-x-4 relative z-10 transition-transform duration-300 group-hover:translate-x-1">
+                              <Icon className="w-5 h-5 text-slate-400 group-hover:text-primary transition-colors" />
+                              <span className="font-medium group-hover:text-white transition-colors">
+                                {meta.label}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

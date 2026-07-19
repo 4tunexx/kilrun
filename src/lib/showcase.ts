@@ -6,7 +6,7 @@
  * (no server/client directive) so both server actions and UI can import it.
  */
 
-export type ShowcaseItemType = 'rank' | 'badge' | 'achievement' | 'inventory';
+export type ShowcaseItemType = 'rank' | 'badge' | 'achievement' | 'inventory' | 'reputation';
 
 export interface ShowcaseEntry {
   slot: number;
@@ -35,6 +35,14 @@ export function getNextShowcaseUnlockLevel(level: number): number | null {
   return null;
 }
 
+const SHOWCASE_TYPES: ShowcaseItemType[] = [
+  'rank',
+  'badge',
+  'achievement',
+  'inventory',
+  'reputation',
+];
+
 export function parseShowcaseEntries(raw: unknown): ShowcaseEntry[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((e): e is ShowcaseEntry => {
@@ -43,7 +51,7 @@ export function parseShowcaseEntries(raw: unknown): ShowcaseEntry[] {
     return (
       typeof candidate.slot === 'number' &&
       typeof candidate.itemType === 'string' &&
-      ['rank', 'badge', 'achievement', 'inventory'].includes(candidate.itemType)
+      SHOWCASE_TYPES.includes(candidate.itemType as ShowcaseItemType)
     );
   });
 }
@@ -54,4 +62,6 @@ export type ShowcaseDisplayItem = {
   icon: string;
   iconImageUrl: string | null;
   rarity: string | null;
+  /** Optional numeric subtitle (e.g. reputation value). */
+  value?: number | null;
 };

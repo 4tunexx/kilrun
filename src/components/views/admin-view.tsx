@@ -47,6 +47,7 @@ import { CosmeticsStudio } from '@/components/views/admin/cosmetics-studio';
 import { LogoStyleEditor } from '@/components/views/admin/logo-style-editor';
 import { AdminDashboardPanel } from '@/components/views/admin/admin-dashboard-panel';
 import { AdminMapEditorPanel } from '@/components/views/admin/admin-map-editor-panel';
+import { AdminSiteLayoutPanel } from '@/components/views/admin/admin-site-layout-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -717,6 +718,8 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                 </Button>
               </CardContent>
             </Card>
+
+            <AdminSiteLayoutPanel />
           </TabsContent>
         )}
 
@@ -997,9 +1000,39 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
           </Card>
         </TabsContent>
 
-        <TabsContent value="audit" className="mt-4 space-y-2">
+        <TabsContent value="audit" className="mt-4 space-y-3">
+          <Card className="bg-slate-800/40 border-slate-700/30">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Staff action trail</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-slate-400 space-y-2">
+              <p>
+                This log records <span className="text-slate-200 font-medium">every staff admin action</span>{' '}
+                across the panel — bans, mutes, awards, broadcasts, role changes, site settings, tickets,
+                news/guides, and more. It is <span className="text-slate-200">not</span> filtered to you;
+                if you only see your name, you’re usually the staff member who performed those actions.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busyKey === 'audit-refresh'}
+                onClick={() =>
+                  runAction('audit-refresh', async () => {
+                    const logs = await adminListAuditLogs();
+                    setAuditLogs(logs);
+                    toast({ title: 'Audit log refreshed' });
+                  })
+                }
+              >
+                {busyKey === 'audit-refresh' ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                Refresh
+              </Button>
+            </CardContent>
+          </Card>
           {auditLogs.length === 0 ? (
-            <p className="text-slate-400">No audit log entries yet.</p>
+            <p className="text-slate-400">No audit log entries yet. Staff actions will appear here.</p>
           ) : (
             auditLogs.map((log) => (
               <Card key={log.id} className="bg-slate-800/40 border-slate-700/30">

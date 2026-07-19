@@ -33,7 +33,7 @@ import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
 import dynamic from 'next/dynamic';
 import { getActivePlayMapId, mapDocSpawnPoints, mapDocToSimPlatforms } from './editor/prefab-storage';
-import { loadMap } from './editor/map-storage';
+import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
 
 const MapEditor = dynamic(() => import('./editor/map-editor'), { ssr: false });
@@ -78,15 +78,19 @@ export default function KilrunEngine({
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
 
-  // Push active editor map to server when lobby is ready
+  // Push MAIN editor map to server when lobby is ready
   useEffect(() => {
+    if (room.phase === 'results') {
+      customLoadedRef.current = false;
+      return;
+    }
     if (room.phase !== 'lobby' && room.phase !== 'countdown') return;
     if (customLoadedRef.current) return;
     if (!connectionRef.current?.sessionId) return;
 
     const mapId = getActivePlayMapId();
     if (!mapId) return;
-    const doc = loadMap(mapId);
+    const doc = loadMapPlayable(mapId);
     if (!doc) return;
 
     const platforms = mapDocToSimPlatforms(doc);
@@ -142,7 +146,7 @@ export default function KilrunEngine({
 
     const activeId = getActivePlayMapId();
     if (activeId) {
-      const doc = loadMap(activeId);
+      const doc = loadMapPlayable(activeId);
       if (doc) {
         customDocRef.current = doc;
         void overlay.load(doc);

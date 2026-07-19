@@ -171,6 +171,49 @@ export function createNewMap(name = 'Untitled Map'): { id: string; doc: MapDocum
   return { id, doc };
 }
 
+/** Ensure older maps without floors get starter pads so Deathrun + thumbs work. */
+export function ensureStarterFloors(doc: MapDocument): MapDocument {
+  const hasFloor = (doc.entities ?? []).some((e) => e.model?.includes('floor'));
+  if (hasFloor) return doc;
+
+  const floorLayer =
+    doc.layers.find((l) => /floor/i.test(l.name))?.id ?? doc.layers[0]?.id ?? 'layer_floor';
+
+  const mkFloor = (name: string, z: number, scale: [number, number, number]) => ({
+    id: `ent_floor_${Math.random().toString(36).slice(2, 9)}`,
+    name,
+    kind: 'prop' as const,
+    model: 'floor-square',
+    layerId: floorLayer,
+    position: [0, 0, z] as [number, number, number],
+    rotation: [0, 0, 0] as [number, number, number],
+    scale,
+    color: '#3d5a80',
+  });
+
+  return {
+    ...doc,
+    entities: [
+      mkFloor('Start Floor', 0, [2, 1, 2]),
+      mkFloor('Course Floor', 8, [1.5, 1, 1.5]),
+      mkFloor('End Floor', 16, [2, 1, 2]),
+      ...(doc.entities ?? []),
+    ],
+  };
+}
+
+/** Load map and backfill floors if needed (persists when mutated). */
+export function loadMapPlayable(id: string): MapDocument | null {
+  const doc = loadMap(id);
+  if (!doc) return null;
+  const next = ensureStarterFloors(doc);
+  if (next !== doc) {
+    saveMap(id, next);
+    return next;
+  }
+  return doc;
+}
+
 export function exportJson(doc: MapDocument): string {
   return JSON.stringify(doc, null, 2);
 }

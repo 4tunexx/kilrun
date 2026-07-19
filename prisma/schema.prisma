@@ -272,6 +272,12 @@ model SiteSettings {
   /// When set and in the future (with gameDisabled), show countdown / auto-enable after.
   gameDisabledUntil  DateTime?
   chatEnabled        Boolean @default(true)
+  /// JSON: which hub pages are enabled for non-staff players.
+  hubPagesJson       String  @default("{}")
+  /// JSON: { left: HubPageId[], right: HubPageId[] } live nav placement.
+  hubNavJson         String  @default("{}")
+  /// JSON: { showHeader, showFooter, showLandingSlider }.
+  hubChromeJson      String  @default("{}")
 }
 
 model GlobalChatMessage {

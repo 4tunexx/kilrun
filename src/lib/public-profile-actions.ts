@@ -67,7 +67,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
 
   const progress = getLevelProgress(target.xpProgress);
 
-  const [higherRanked, totalPlayers, achievements, badges, matchStats, matchResults] =
+  const [higherRanked, totalPlayers, achievements, badges, matchStats, matchResults, repVotes] =
     await Promise.all([
       prisma.user.count({
         where: {
@@ -80,7 +80,19 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
       getPlayerBadges(userId),
       prisma.matchStat.findMany({ where: { userId } }),
       prisma.matchResult.findMany({ where: { userId } }),
+      prisma.reputationVote.findMany({
+        where: { targetId: userId },
+        select: { value: true },
+      }),
     ]);
+
+  const reputation = repVotes.reduce((sum, v) => sum + v.value, 0);
+  if (reputation !== (target.reputation ?? 0)) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { reputation },
+    });
+  }
 
   const totalRuns = matchStats.length;
   const bestScore = totalRuns > 0 ? Math.max(...matchStats.map((s) => s.score)) : 0;
@@ -135,7 +147,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     xpIntoLevel: progress.xpIntoLevel,
     xpForNextLevel: progress.xpForNextLevel,
     levelProgressPercent: progress.percent,
-    reputation: target.reputation,
+    reputation,
     createdAt: target.createdAt,
     equippedBannerConfig: target.equippedBannerConfig
       ? normalizeBannerConfig(target.equippedBannerConfig)
@@ -161,10 +173,14 @@ export async function getPublicProfileSummary(userId: string) {
   const target = await prisma.user.findUnique({ where: { id: userId } });
   if (!target || target.isBanned) return null;
   const progress = getLevelProgress(target.xpProgress);
-  const showcase = await resolveShowcaseEntries(
-    target.id,
-    parseShowcaseEntries(target.showcaseItems)
-  );
+  const [showcase, repVotes] = await Promise.all([
+    resolveShowcaseEntries(target.id, parseShowcaseEntries(target.showcaseItems)),
+    prisma.reputationVote.findMany({
+      where: { targetId: userId },
+      select: { value: true },
+    }),
+  ]);
+  const reputation = repVotes.reduce((sum, v) => sum + v.value, 0);
   return {
     id: target.id,
     username: target.username,
@@ -177,7 +193,7 @@ export async function getPublicProfileSummary(userId: string) {
     xpIntoLevel: progress.xpIntoLevel,
     xpForNextLevel: progress.xpForNextLevel,
     levelProgressPercent: progress.percent,
-    reputation: target.reputation,
+    reputation,
     equippedBannerConfig: target.equippedBannerConfig
       ? normalizeBannerConfig(target.equippedBannerConfig)
       : null,
