@@ -16,6 +16,16 @@ import {
   Image as ImageIcon,
   Eye,
   EyeOff,
+  CirclePlus,
+  CircleMinus,
+  Waves,
+  Undo2,
+  Redo2,
+  FlipHorizontal,
+  Move3d,
+  Paintbrush,
+  RotateCw,
+  Aperture,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { EditorEntity } from './map-document';
@@ -26,20 +36,39 @@ import {
   applySkinAttachments,
   buildSkinPartMesh,
   captureSkinPartThumbnail,
+  tickSkinAttachments,
 } from './skin-attachments';
 import {
+  applySculptStroke,
+  applySculptDataToGeometry,
+  findSculptMesh,
+  readSculptData,
+} from './skin-sculpt';
+import {
+  attachmentKey,
   baseModelKeyFromEntity,
   defaultAttachment,
   DEFAULT_SKIN_MATERIAL,
+  materialForFeel,
   SKIN_ATTACH_SLOTS,
+  SKIN_MATERIAL_FEELS,
   SKIN_PRIMITIVES,
   type PlayerSkinPreset,
   type SkinAttachSlot,
   type SkinAttachment,
   type SkinMaterial,
+  type SkinMaterialFeel,
   type SkinPrimitive,
+  type SkinSculptBrush,
   type SkinShapeParams,
 } from '@/lib/player-skins';
+import {
+  WEAPON_COMBAT_KINDS,
+  defaultCombatForKind,
+  resolveWeaponCombat,
+  type WeaponCombatConfig,
+  type WeaponCombatKind,
+} from '@/lib/weapons';
 import {
   createSkinPreset,
   deleteSkinPreset,
@@ -49,6 +78,8 @@ import {
 } from './skin-library';
 
 type SourceMode = 'sculpt' | 'catalog' | 'upload';
+/** Viewport drag: paint clay vs orbit camera around the part. */
+type ViewDragMode = 'sculpt' | 'turn';
 
 /**
  * Self-contained Model Editor — sculpt primitives, paint materials/textures,
@@ -71,29 +102,55 @@ export function ModelSkinEditor({
   const previewRef = useRef<SkinPreview | null>(null);
   const glbFileRef = useRef<HTMLInputElement>(null);
   const texFileRef = useRef<HTMLInputElement>(null);
+  const activeKeyRef = useRef<string>('hat');
   const [presets, setPresets] = useState<PlayerSkinPreset[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [slot, setSlot] = useState<SkinAttachSlot>('hat');
-  const [attachments, setAttachments] = useState<SkinAttachment[]>([
-    defaultAttachment('hat'),
-  ]);
+  const [attachments, setAttachments] = useState<SkinAttachment[]>(() => {
+    if (entity.playerSkins?.length) {
+      return entity.playerSkins.map((a) => ({
+        ...a,
+        id: a.id || a.slot,
+        position: [...a.position] as [number, number, number],
+        rotation: [...a.rotation] as [number, number, number],
+        scale: [...a.scale] as [number, number, number],
+      }));
+    }
+    return [defaultAttachment('hat')];
+  });
+  const [activeKey, setActiveKey] = useState<string>(() => {
+    const first = entity.playerSkins?.[0];
+    return first ? attachmentKey(first) : 'hat';
+  });
+  activeKeyRef.current = activeKey;
   const [name, setName] = useState('New Hat Skin');
   const [price, setPrice] = useState(250);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showAvatar, setShowAvatar] = useState(true);
+  const [viewDragMode, setViewDragMode] = useState<ViewDragMode>('turn');
+  const [clayView, setClayView] = useState(false);
   const [sourceMode, setSourceMode] = useState<SourceMode>('sculpt');
+  const [blobBrush, setBlobBrush] = useState<SkinSculptBrush | null>('add');
+  const [brushRadius, setBrushRadius] = useState(0.12);
+  const [brushStrength, setBrushStrength] = useState(0.55);
+  const [symmetryX, setSymmetryX] = useState(true);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const baseKey = baseModelKeyFromEntity(entity);
 
   const activeAtt =
-    attachments.find((a) => a.slot === slot) ?? defaultAttachment(slot);
+    attachments.find((a) => attachmentKey(a) === activeKey) ??
+    attachments[0] ??
+    defaultAttachment('hat');
+  const slot = activeAtt.slot;
   const material: SkinMaterial = {
     ...DEFAULT_SKIN_MATERIAL,
     ...activeAtt.material,
     color: activeAtt.material?.color || activeAtt.color || DEFAULT_SKIN_MATERIAL.color,
   };
   const shape: SkinShapeParams = activeAtt.shape ?? {};
+  const slotMeta = SKIN_ATTACH_SLOTS.find((s) => s.id === slot);
 
   useEffect(() => {
     setPresets(listSkinPresets());
@@ -118,10 +175,26 @@ export function ModelSkinEditor({
       try {
         const loaded = await loadPlayerAvatar(entity);
         if (cancelled) return;
-        if (!previewRef.current) previewRef.current = new SkinPreview(host);
+        if (!previewRef.current) {
+          previewRef.current = new SkinPreview(host, {
+            onSculptCommit: (data) => {
+              setAttachments((prev) =>
+                prev.map((a) =>
+                  attachmentKey(a) === activeKeyRef.current ? { ...a, sculpt: data } : a
+                )
+              );
+            },
+            onHistoryChange: (u, r) => {
+              setCanUndo(u);
+              setCanRedo(r);
+            },
+          });
+        }
         previewRef.current.setAvatar(loaded.scene);
         previewRef.current.setShowAvatar(showAvatar);
-        await previewRef.current.setAttachments(attachments, slot);
+        previewRef.current.setViewDragMode(viewDragMode);
+        previewRef.current.setClayView(clayView);
+        await previewRef.current.setAttachments(attachments, activeKey);
       } catch (err) {
         console.warn('[ModelSkinEditor]', err);
         if (!cancelled) setError('Failed to load player model');
@@ -137,12 +210,33 @@ export function ModelSkinEditor({
   }, [entity.model, entity.customModelUrl, entity.id]);
 
   useEffect(() => {
-    void previewRef.current?.setAttachments(attachments, slot);
-  }, [attachments, slot]);
+    void previewRef.current?.setAttachments(attachments, activeKey);
+  }, [attachments, activeKey]);
 
   useEffect(() => {
     previewRef.current?.setShowAvatar(showAvatar);
   }, [showAvatar]);
+
+  useEffect(() => {
+    previewRef.current?.setBlobBrush(
+      blobBrush
+        ? {
+            brush: blobBrush,
+            radius: brushRadius,
+            strength: brushStrength,
+            symmetryX,
+          }
+        : null
+    );
+  }, [blobBrush, brushRadius, brushStrength, symmetryX]);
+
+  useEffect(() => {
+    previewRef.current?.setViewDragMode(viewDragMode);
+  }, [viewDragMode]);
+
+  useEffect(() => {
+    previewRef.current?.setClayView(clayView);
+  }, [clayView]);
 
   useEffect(() => {
     return () => {
@@ -153,9 +247,14 @@ export function ModelSkinEditor({
 
   const patchActive = (partial: Partial<SkinAttachment>) => {
     setAttachments((prev) => {
-      const exists = prev.some((a) => a.slot === slot);
-      if (!exists) return [...prev, { ...defaultAttachment(slot), ...partial, slot }];
-      return prev.map((a) => (a.slot === slot ? { ...a, ...partial } : a));
+      const key = activeKeyRef.current;
+      const exists = prev.some((a) => attachmentKey(a) === key);
+      if (!exists) {
+        const created = { ...defaultAttachment(slot), ...partial };
+        setActiveKey(attachmentKey(created));
+        return [...prev, created];
+      }
+      return prev.map((a) => (attachmentKey(a) === key ? { ...a, ...partial } : a));
     });
   };
 
@@ -166,36 +265,62 @@ export function ModelSkinEditor({
     });
   };
 
+  const setFeel = (feel: SkinMaterialFeel) => {
+    patchActive({
+      feel,
+      material: materialForFeel(feel, material),
+    });
+  };
+
   const patchShape = (partial: SkinShapeParams) => {
-    patchActive({ shape: { ...shape, ...partial } });
+    patchActive({ shape: { ...shape, ...partial }, sculpt: undefined });
   };
 
   const ensureSlot = (s: SkinAttachSlot) => {
-    setSlot(s);
-    setAttachments((prev) =>
-      prev.some((a) => a.slot === s) ? prev : [...prev, defaultAttachment(s)]
-    );
+    setAttachments((prev) => {
+      const existing = prev.find((a) => a.slot === s);
+      if (existing) {
+        setActiveKey(attachmentKey(existing));
+        return prev;
+      }
+      const created = defaultAttachment(s);
+      setActiveKey(attachmentKey(created));
+      return [...prev, created];
+    });
   };
 
-  const removeSlot = (s: SkinAttachSlot) => {
-    setAttachments((prev) => prev.filter((a) => a.slot !== s));
-    if (slot === s) setSlot('hat');
+  const addCustomPart = () => {
+    const created = defaultAttachment('addon');
+    setAttachments((prev) => [...prev, created]);
+    setActiveKey(attachmentKey(created));
+    setShowAvatar(true);
+    setViewDragMode('turn');
   };
 
-  const useSculpt = (prim: SkinPrimitive) => {
+  const removeActive = () => {
+    setAttachments((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((a) => attachmentKey(a) !== activeKey);
+      setActiveKey(attachmentKey(next[0]));
+      return next;
+    });
+  };
+
+  const usePrimitive = (prim: SkinPrimitive) => {
     const meta = SKIN_ATTACH_SLOTS.find((x) => x.id === slot)!;
     patchActive({
       primitive: prim,
       shape: { ...meta.defaultShape },
       model: undefined,
       customModelUrl: undefined,
+      sculpt: undefined,
       material: activeAtt.material ?? { ...DEFAULT_SKIN_MATERIAL },
     });
     setSourceMode('sculpt');
   };
 
   const captureThumb = async (): Promise<string | undefined> => {
-    const part = attachments.find((a) => a.slot === slot) ?? attachments[0];
+    const part = activeAtt ?? attachments[0];
     if (!part) return previewRef.current?.capture() ?? undefined;
     const solo = await captureSkinPartThumbnail(part, 320);
     return solo ?? previewRef.current?.capture() ?? undefined;
@@ -240,8 +365,11 @@ export function ModelSkinEditor({
     setActiveId(p.id);
     setName(p.name);
     setPrice(p.shopPrice ?? 250);
-    setAttachments(p.attachments.length ? p.attachments : [defaultAttachment('hat')]);
-    setSlot(p.primarySlot);
+    const atts = p.attachments.length ? p.attachments : [defaultAttachment('hat')];
+    setAttachments(atts);
+    const primary =
+      atts.find((a) => a.slot === p.primarySlot) ?? atts[0];
+    setActiveKey(attachmentKey(primary));
   };
 
   const publish = async () => {
@@ -317,14 +445,6 @@ export function ModelSkinEditor({
         <button
           type="button"
           className="w-8 h-8 rounded-lg flex items-center justify-center text-white/60 hover:bg-white/10"
-          title={showAvatar ? 'Hide body (skin only)' : 'Show body'}
-          onClick={() => setShowAvatar((v) => !v)}
-        >
-          {showAvatar ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-        </button>
-        <button
-          type="button"
-          className="w-8 h-8 rounded-lg flex items-center justify-center text-white/60 hover:bg-white/10"
           onClick={onClose}
           aria-label="Close"
         >
@@ -332,7 +452,7 @@ export function ModelSkinEditor({
         </button>
       </div>
 
-      <div className="relative h-52 shrink-0 border-b border-white/10 bg-[#0a1018]">
+      <div className="relative h-56 shrink-0 border-b border-white/10 bg-[#0a1018]">
         <div ref={canvasHostRef} className="absolute inset-0" />
         {loading && (
           <p className="absolute inset-0 flex items-center justify-center text-xs text-white/50">
@@ -342,9 +462,121 @@ export function ModelSkinEditor({
         {error && (
           <p className="absolute bottom-2 left-2 right-2 text-[10px] text-red-300">{error}</p>
         )}
-        <p className="absolute top-2 left-2 text-[9px] uppercase tracking-wider text-white/40 bg-black/50 px-1.5 py-0.5 rounded">
-          {showAvatar ? 'On body' : 'Skin only'}
+        {/* Sculpt vs Turn camera — overlays the live preview */}
+        <div className="absolute top-2 left-2 right-2 flex flex-col gap-1.5 z-10 pointer-events-none">
+          <div className="flex items-center gap-1.5">
+            <div className="flex rounded-lg overflow-hidden border border-white/20 bg-black/65 pointer-events-auto shadow-lg">
+              <button
+                type="button"
+                onClick={() => {
+                  setViewDragMode('sculpt');
+                  if (!blobBrush) setBlobBrush('add');
+                  setShowAvatar(false);
+                }}
+                className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide ${
+                  viewDragMode === 'sculpt'
+                    ? 'bg-fuchsia-500/40 text-fuchsia-50'
+                    : 'text-white/55 hover:bg-white/10'
+                }`}
+                title="Drag to sculpt the mesh"
+              >
+                <Paintbrush className="w-3 h-3" />
+                Sculpt
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewDragMode('turn')}
+                className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide border-l border-white/15 ${
+                  viewDragMode === 'turn'
+                    ? 'bg-sky-500/40 text-sky-50'
+                    : 'text-white/55 hover:bg-white/10'
+                }`}
+                title="Drag to orbit · scroll to zoom · shift-drag to pan"
+              >
+                <Move3d className="w-3 h-3" />
+                Turn
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setClayView((v) => !v)}
+              className={`h-8 px-2 rounded-lg border text-[10px] font-bold uppercase pointer-events-auto flex items-center gap-1 ${
+                clayView
+                  ? 'border-amber-400/50 bg-amber-500/30 text-amber-50'
+                  : 'border-white/20 bg-black/65 text-white/65 hover:bg-white/10'
+              }`}
+              title="Clay / matcap view — easier to read form while sculpting"
+            >
+              <Aperture className="w-3.5 h-3.5" />
+              Clay
+            </button>
+            <button
+              type="button"
+              onClick={() => previewRef.current?.resetCamera()}
+              className="ml-auto w-8 h-8 rounded-lg border border-white/20 bg-black/65 text-white/70 hover:bg-white/10 pointer-events-auto flex items-center justify-center"
+              title="Reset camera"
+              aria-label="Reset camera"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="flex gap-1 pointer-events-auto">
+            {(
+              [
+                ['front', 'Front'],
+                ['side', 'Side'],
+                ['bottom', 'Bottom'],
+                ['top', 'Top'],
+                ['back', 'Back'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => {
+                  setViewDragMode('turn');
+                  previewRef.current?.setCameraPreset(id);
+                }}
+                className="px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-wide border border-white/15 bg-black/55 text-white/60 hover:bg-white/10 hover:text-white/90"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="absolute bottom-1.5 left-2 right-2 text-[9px] text-white/40 pointer-events-none truncate">
+          {viewDragMode === 'turn'
+            ? 'Turn: drag orbit · scroll zoom · shift-pan · use Front/Bottom/Side for quick angles'
+            : 'Sculpt: drag on mesh · Clay helps read form · Turn to see underside'}
         </p>
+      </div>
+
+      {/* Clear body / skin-only toggle */}
+      <div className="shrink-0 flex border-b border-white/10 bg-[#0e1520]">
+        <button
+          type="button"
+          onClick={() => setShowAvatar(true)}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold uppercase tracking-wide border-r border-white/10 ${
+            showAvatar
+              ? 'bg-sky-500/25 text-sky-100'
+              : 'text-white/45 hover:bg-white/5'
+          }`}
+        >
+          <Eye className="w-3.5 h-3.5" />
+          On body
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowAvatar(false)}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold uppercase tracking-wide ${
+            !showAvatar
+              ? 'bg-amber-500/25 text-amber-100'
+              : 'text-white/45 hover:bg-white/5'
+          }`}
+        >
+          <EyeOff className="w-3.5 h-3.5" />
+          Skin only
+        </button>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
@@ -364,13 +596,15 @@ export function ModelSkinEditor({
           <div className="flex flex-wrap gap-1.5">
             {SKIN_ATTACH_SLOTS.map((s) => {
               const on = attachments.some((a) => a.slot === s.id);
+              const selected = slot === s.id;
               return (
                 <button
                   key={s.id}
                   type="button"
                   onClick={() => ensureSlot(s.id)}
+                  title={s.hint}
                   className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide border ${
-                    slot === s.id
+                    selected
                       ? 'bg-amber-500/30 border-amber-400/60 text-amber-100'
                       : on
                         ? 'bg-white/10 border-white/20 text-white/80'
@@ -382,6 +616,39 @@ export function ModelSkinEditor({
               );
             })}
           </div>
+          {attachments.filter((a) => a.slot === 'addon').length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {attachments
+                .filter((a) => a.slot === 'addon')
+                .map((a, i) => (
+                  <button
+                    key={attachmentKey(a)}
+                    type="button"
+                    onClick={() => setActiveKey(attachmentKey(a))}
+                    className={`px-2 py-0.5 rounded text-[9px] border ${
+                      activeKey === attachmentKey(a)
+                        ? 'bg-emerald-500/25 border-emerald-400/50 text-emerald-100'
+                        : 'border-white/10 text-white/45'
+                    }`}
+                  >
+                    Custom {i + 1}
+                  </button>
+                ))}
+            </div>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="w-full mt-2"
+            onClick={addCustomPart}
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" /> Add custom body part
+          </Button>
+          <p className="text-[10px] text-white/35 mt-1 leading-snug">
+            Tail, horn, or custom — squish a cylinder, place with Offset, pick Solid / Cloth / Cape.
+            Placement on the body is the same in gameplay.
+          </p>
         </div>
 
         {/* Source mode */}
@@ -419,7 +686,7 @@ export function ModelSkinEditor({
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => useSculpt(p.id)}
+                    onClick={() => usePrimitive(p.id)}
                     className={`px-2 py-1 rounded text-[10px] border ${
                       activeAtt.primitive === p.id && !activeAtt.model && !activeAtt.customModelUrl
                         ? 'bg-emerald-500/25 border-emerald-400/50 text-emerald-100'
@@ -435,6 +702,123 @@ export function ModelSkinEditor({
                 shape={shape}
                 onChange={patchShape}
               />
+
+              {/* ZBrush-lite blob brushes */}
+              <div className="mt-2 space-y-2 rounded-lg border border-fuchsia-500/25 bg-fuchsia-500/5 p-2.5">
+                <p className="text-[10px] uppercase tracking-wider text-fuchsia-200/90 font-bold">
+                  Blob sculpt (paint on mesh)
+                </p>
+                <p className="text-[10px] text-white/40 leading-snug">
+                  Use <span className="text-amber-200/80">Skin only</span> +{' '}
+                  <span className="text-fuchsia-200/80">Sculpt</span> on the preview to paint.
+                  Switch to <span className="text-sky-200/80">Turn</span> to orbit under the brim,
+                  sides, etc.
+                </p>
+                <div className="flex gap-1.5">
+                  {(
+                    [
+                      ['add', 'Add blob', CirclePlus],
+                      ['remove', 'Remove', CircleMinus],
+                      ['smooth', 'Smooth', Waves],
+                    ] as const
+                  ).map(([id, label, Icon]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setBlobBrush((b) => (b === id ? null : id));
+                        setViewDragMode('sculpt');
+                        setShowAvatar(false);
+                        setSourceMode('sculpt');
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-[10px] font-bold border ${
+                        blobBrush === id && viewDragMode === 'sculpt'
+                          ? 'bg-fuchsia-500/30 border-fuchsia-400/60 text-fuchsia-50'
+                          : 'border-white/10 text-white/55'
+                      }`}
+                    >
+                      <Icon className="w-3 h-3" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSymmetryX((v) => !v)}
+                  className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold border ${
+                    symmetryX
+                      ? 'bg-sky-500/25 border-sky-400/50 text-sky-100'
+                      : 'border-white/10 text-white/50'
+                  }`}
+                >
+                  <FlipHorizontal className="w-3.5 h-3.5" />
+                  Symmetry {symmetryX ? 'ON' : 'OFF'} (mirror L/R)
+                </button>
+                <SliderField
+                  label="Brush"
+                  value={brushRadius}
+                  min={0.04}
+                  max={0.35}
+                  step={0.01}
+                  onChange={setBrushRadius}
+                />
+                <SliderField
+                  label="Power"
+                  value={brushStrength}
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  onChange={setBrushStrength}
+                />
+                <div className="flex gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={!canUndo}
+                    onClick={() => previewRef.current?.undoSculpt()}
+                  >
+                    <Undo2 className="w-3.5 h-3.5 mr-1" /> Undo
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={!canRedo}
+                    onClick={() => previewRef.current?.redoSculpt()}
+                  >
+                    <Redo2 className="w-3.5 h-3.5 mr-1" /> Redo
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={!activeAtt.sculpt}
+                    onClick={() => {
+                      patchActive({ sculpt: undefined });
+                      previewRef.current?.clearSculptHistory();
+                    }}
+                  >
+                    Reset clay
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setBlobBrush(null);
+                      setViewDragMode('turn');
+                    }}
+                  >
+                    Stop brush
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -487,6 +871,33 @@ export function ModelSkinEditor({
         <div className="space-y-2 rounded-lg border border-white/10 bg-black/25 p-2.5">
           <p className="text-[10px] uppercase tracking-wider text-white/45 flex items-center gap-1">
             <Palette className="w-3 h-3" /> Material
+          </p>
+          <p className="text-[10px] text-white/40">Feel — how it acts on the body</p>
+          <div className="flex gap-1.5">
+            {SKIN_MATERIAL_FEELS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                title={f.hint}
+                onClick={() => setFeel(f.id)}
+                className={`flex-1 py-1.5 rounded-md text-[10px] font-bold border ${
+                  (activeAtt.feel ?? slotMeta?.defaultFeel ?? 'solid') === f.id
+                    ? f.id === 'solid'
+                      ? 'bg-stone-500/30 border-stone-300/50 text-stone-100'
+                      : f.id === 'cape'
+                        ? 'bg-violet-500/30 border-violet-400/50 text-violet-100'
+                        : 'bg-teal-500/30 border-teal-400/50 text-teal-100'
+                    : 'border-white/10 text-white/50'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[9px] text-white/35 leading-snug">
+            {SKIN_MATERIAL_FEELS.find(
+              (f) => f.id === (activeAtt.feel ?? slotMeta?.defaultFeel ?? 'solid')
+            )?.hint}
           </p>
           <div className="grid grid-cols-2 gap-2">
             <label className="text-[10px] text-white/40">
@@ -601,7 +1012,7 @@ export function ModelSkinEditor({
         </div>
 
         <Vec3Fields
-          label="Offset"
+          label="Offset (character place — same in game)"
           value={activeAtt.position}
           onChange={(position) => patchActive({ position })}
           step={0.05}
@@ -612,11 +1023,63 @@ export function ModelSkinEditor({
           onChange={(rotation) => patchActive({ rotation })}
           step={5}
         />
-        <Vec3Fields
-          label="Scale"
-          value={activeAtt.scale}
+
+        {/* Attach mode + pair mirror */}
+        <div className="space-y-2 rounded-lg border border-white/10 bg-black/25 p-2.5">
+          <p className="text-[10px] uppercase tracking-wider text-white/45">Placement</p>
+          <div className="flex gap-1.5">
+            {(
+              [
+                ['body', 'Lock on body'],
+                ['bone', 'Follow bone'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => patchActive({ attachMode: id })}
+                className={`flex-1 py-1.5 rounded-md text-[10px] font-bold border ${
+                  (activeAtt.attachMode ?? slotMeta?.defaultAttachMode ?? 'body') === id
+                    ? 'bg-sky-500/25 border-sky-400/50 text-sky-100'
+                    : 'border-white/10 text-white/50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[9px] text-white/35 leading-snug">
+            Lock on body = exact Offset you set here shows the same in play. Follow bone = sticks to
+            head/hand when the avatar animates.
+          </p>
+          {slotMeta?.canPairMirror && (
+            <button
+              type="button"
+              onClick={() => patchActive({ pairMirror: !activeAtt.pairMirror })}
+              className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold border ${
+                activeAtt.pairMirror
+                  ? 'bg-emerald-500/25 border-emerald-400/50 text-emerald-100'
+                  : 'border-white/10 text-white/50'
+              }`}
+            >
+              <FlipHorizontal className="w-3.5 h-3.5" />
+              Pair L/R {activeAtt.pairMirror ? 'ON' : 'OFF'} — edit one, mirror the other
+            </button>
+          )}
+        </div>
+
+        {slot === 'weapon' && (
+          <WeaponCombatPanel
+            combat={resolveWeaponCombat(activeAtt)}
+            onChange={(weapon) => patchActive({ weapon })}
+          />
+        )}
+
+        {/* Fit size — expand/shrink until it matches the body part */}
+        <SizeFitControls
+          scale={activeAtt.scale}
           onChange={(scale) => patchActive({ scale })}
-          step={0.05}
+          slotLabel={slotMeta?.label ?? slot}
         />
 
         <div className="flex gap-2">
@@ -626,7 +1089,8 @@ export function ModelSkinEditor({
             variant="secondary"
             className="flex-1"
             onClick={() => {
-              patchActive(defaultAttachment(slot));
+              const reset = defaultAttachment(slot, activeAtt.id);
+              patchActive(reset);
               setSourceMode('sculpt');
             }}
           >
@@ -636,7 +1100,7 @@ export function ModelSkinEditor({
             type="button"
             size="sm"
             variant="destructive"
-            onClick={() => removeSlot(slot)}
+            onClick={removeActive}
             disabled={attachments.length <= 1}
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -684,8 +1148,9 @@ export function ModelSkinEditor({
               onClick={() => {
                 setActiveId(null);
                 setName('New Hat Skin');
-                setAttachments([defaultAttachment('hat')]);
-                setSlot('hat');
+                const hat = defaultAttachment('hat');
+                setAttachments([hat]);
+                setActiveKey(attachmentKey(hat));
                 setSourceMode('sculpt');
               }}
             >
@@ -823,6 +1288,253 @@ function ShapeFields({
   );
 }
 
+function WeaponCombatPanel({
+  combat,
+  onChange,
+}: {
+  combat: WeaponCombatConfig;
+  onChange: (w: WeaponCombatConfig) => void;
+}) {
+  const patch = (partial: Partial<WeaponCombatConfig>) => onChange({ ...combat, ...partial });
+  const setKind = (kind: WeaponCombatKind) => {
+    onChange(defaultCombatForKind(kind));
+  };
+  const muzzle = combat.muzzleOffset ?? [0, 0.3, 0];
+
+  return (
+    <div className="space-y-2 rounded-lg border border-orange-500/30 bg-orange-500/5 p-2.5">
+      <p className="text-[10px] uppercase tracking-wider text-orange-200/90 font-bold">
+        Weapon combat
+      </p>
+      <p className="text-[10px] text-white/40 leading-snug">
+        Mesh sits on the hand (Follow bone). Swing uses the character&apos;s Attack / Punch anim —
+        not a separate animated weapon rig. Combat is a cone in front (same idea as trapper
+        hitscan).
+      </p>
+      <div className="flex gap-1.5">
+        {WEAPON_COMBAT_KINDS.map((k) => (
+          <button
+            key={k.id}
+            type="button"
+            title={k.hint}
+            onClick={() => setKind(k.id)}
+            className={`flex-1 py-1.5 rounded-md text-[10px] font-bold border ${
+              combat.kind === k.id
+                ? 'bg-orange-500/30 border-orange-400/60 text-orange-50'
+                : 'border-white/10 text-white/50'
+            }`}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+      {combat.kind !== 'cosmetic' && (
+        <>
+          <p className="text-[9px] text-white/35 leading-snug">
+            Range / cooldown drive Play Test swing reach. Damage numbers are stored for a later
+            server combat pass (live match still uses room hitscan constants for trappers).
+          </p>
+          <SliderField
+            label="Range"
+            value={combat.range}
+            min={0.8}
+            max={18}
+            step={0.2}
+            onChange={(range) => patch({ range })}
+          />
+          <SliderField
+            label="Damage (saved · server later)"
+            value={combat.damage}
+            min={5}
+            max={100}
+            step={5}
+            onChange={(damage) => patch({ damage })}
+          />
+          <SliderField
+            label="Cooldown ms"
+            value={combat.cooldownMs}
+            min={150}
+            max={1200}
+            step={20}
+            onChange={(cooldownMs) => patch({ cooldownMs })}
+          />
+        </>
+      )}
+      <div className="flex gap-1.5">
+        {(
+          [
+            ['attack', 'Attack anim'],
+            ['punch', 'Punch anim'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => patch({ attackStyle: id })}
+            className={`flex-1 py-1.5 rounded-md text-[10px] font-bold border ${
+              (combat.attackStyle ?? 'attack') === id
+                ? 'bg-sky-500/25 border-sky-400/50 text-sky-100'
+                : 'border-white/10 text-white/50'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[9px] text-white/35">
+        Tip / muzzle offset (for future VFX — grip stays at Offset above)
+      </p>
+      <div className="grid grid-cols-3 gap-1.5">
+        {(['X', 'Y', 'Z'] as const).map((axis, i) => (
+          <label key={axis} className="text-[9px] text-white/40">
+            {axis}
+            <input
+              type="number"
+              step={0.05}
+              value={muzzle[i]}
+              onChange={(e) => {
+                const next = [...muzzle] as [number, number, number];
+                next[i] = Number(e.target.value) || 0;
+                patch({ muzzleOffset: next });
+              }}
+              className="mt-0.5 w-full rounded bg-black/40 border border-white/10 px-1.5 py-1 text-[11px]"
+            />
+          </label>
+        ))}
+      </div>
+      <p className="text-[9px] text-white/35 leading-snug">
+        Bind Attack / Punch clips on the Player Model studio. Catalog: weapon-sword /
+        weapon-shield, or upload a static GLB.
+      </p>
+    </div>
+  );
+}
+
+function SizeFitControls({
+  scale,
+  onChange,
+  slotLabel,
+}: {
+  scale: [number, number, number];
+  onChange: (s: [number, number, number]) => void;
+  slotLabel: string;
+}) {
+  const [showAxes, setShowAxes] = useState(false);
+  const uniform = Math.max(
+    0.05,
+    (Math.abs(scale[0]) + Math.abs(scale[1]) + Math.abs(scale[2])) / 3
+  );
+
+  const setUniform = (s: number) => {
+    const v = Math.min(5, Math.max(0.15, s));
+    onChange([v, v, v]);
+  };
+
+  const setAxis = (i: 0 | 1 | 2, v: number) => {
+    const next = [...scale] as [number, number, number];
+    next[i] = Math.min(5, Math.max(0.05, v));
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-2.5 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] uppercase tracking-wider text-emerald-200/90 font-bold">
+          Fit size · {slotLabel}
+        </p>
+        <span className="text-[11px] tabular-nums text-emerald-100/80 font-semibold">
+          {uniform.toFixed(2)}×
+        </span>
+      </div>
+      <p className="text-[10px] text-white/40 leading-snug">
+        Drag to expand until it matches the body. This size is saved with the skin.
+      </p>
+
+      <label className="flex items-center gap-2">
+        <span className="text-[10px] text-white/45 w-10 shrink-0">Size</span>
+        <input
+          type="range"
+          min={0.25}
+          max={3.5}
+          step={0.02}
+          value={Math.min(3.5, Math.max(0.25, uniform))}
+          onChange={(e) => setUniform(Number(e.target.value))}
+          className="flex-1 h-2 accent-emerald-400 cursor-pointer"
+        />
+      </label>
+
+      <div className="flex flex-wrap gap-1.5">
+        {[
+          { label: 'Tiny', v: 0.6 },
+          { label: 'Small', v: 0.85 },
+          { label: 'Fit', v: 1.15 },
+          { label: 'Bigger', v: 1.5 },
+          { label: 'Huge', v: 2.2 },
+        ].map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            onClick={() => setUniform(p.v)}
+            className={`px-2 py-1 rounded text-[10px] font-bold border ${
+              Math.abs(uniform - p.v) < 0.08
+                ? 'bg-emerald-500/30 border-emerald-400/50 text-emerald-50'
+                : 'border-white/10 text-white/55 hover:bg-white/5'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setUniform(uniform + 0.15)}
+          className="px-2 py-1 rounded text-[10px] font-bold border border-white/10 text-white/70 hover:bg-white/5"
+          title="Grow a bit"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() => setUniform(uniform - 0.15)}
+          className="px-2 py-1 rounded text-[10px] font-bold border border-white/10 text-white/70 hover:bg-white/5"
+          title="Shrink a bit"
+        >
+          −
+        </button>
+      </div>
+
+      <button
+        type="button"
+        className="text-[10px] text-sky-300/90 hover:text-sky-200"
+        onClick={() => setShowAxes((v) => !v)}
+      >
+        {showAxes ? 'Hide' : 'Show'} per-axis scale (X / Y / Z)
+      </button>
+
+      {showAxes && (
+        <div className="space-y-1.5 pt-1 border-t border-white/10">
+          {(['X width', 'Y height', 'Z depth'] as const).map((label, i) => (
+            <label key={label} className="flex items-center gap-2">
+              <span className="text-[10px] text-white/45 w-16 shrink-0">{label}</span>
+              <input
+                type="range"
+                min={0.15}
+                max={3.5}
+                step={0.02}
+                value={Math.min(3.5, Math.max(0.15, Math.abs(scale[i])))}
+                onChange={(e) => setAxis(i as 0 | 1 | 2, Number(e.target.value))}
+                className="flex-1 h-1.5 accent-sky-400 cursor-pointer"
+              />
+              <span className="w-9 text-right text-[10px] tabular-nums text-white/55">
+                {scale[i].toFixed(2)}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SliderField({
   label,
   value,
@@ -900,11 +1612,45 @@ class SkinPreview {
   private showBody = true;
   private raf = 0;
   private disposed = false;
+  private host: HTMLElement;
+  private raycaster = new THREE.Raycaster();
+  private pointer = new THREE.Vector2();
+  private painting = false;
+  private viewDragMode: ViewDragMode = 'turn';
+  private orbiting = false;
+  private panning = false;
+  private lastPointerX = 0;
+  private lastPointerY = 0;
+  private target = new THREE.Vector3(0, 1.1, 0);
+  private spherical = { theta: 0.35, phi: 1.15, radius: 3.0 };
+  private brush: {
+    brush: SkinSculptBrush;
+    radius: number;
+    strength: number;
+    symmetryX?: boolean;
+  } | null = null;
+  private onSculptCommit?: (data: { positions: number[]; count: number }) => void;
+  private onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void;
+  private commitTimer: number | null = null;
+  private undoStack: { positions: number[]; count: number }[] = [];
+  private redoStack: { positions: number[]; count: number }[] = [];
+  private strokeStartSnapshot: { positions: number[]; count: number } | null = null;
+  private lastFramedKey: string | null = null;
+  private clayView = false;
+  private clayBackup = new Map<string, THREE.Material | THREE.Material[]>();
+  private skinClock = 0;
 
-  constructor(host: HTMLElement) {
-    this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
-    this.camera.position.set(0, 1.35, 3.0);
-    this.camera.lookAt(0, 1.1, 0);
+  constructor(
+    host: HTMLElement,
+    opts?: {
+      onSculptCommit?: (data: { positions: number[]; count: number }) => void;
+      onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void;
+    }
+  ) {
+    this.host = host;
+    this.onSculptCommit = opts?.onSculptCommit;
+    this.onHistoryChange = opts?.onHistoryChange;
+    this.camera = new THREE.PerspectiveCamera(40, 1, 0.05, 80);
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
@@ -916,6 +1662,7 @@ class SkinPreview {
       width: '100%',
       height: '100%',
       display: 'block',
+      touchAction: 'none',
     });
     this.scene.background = new THREE.Color('#0a1018');
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
@@ -923,6 +1670,7 @@ class SkinPreview {
     sun.position.set(2, 4, 3);
     this.scene.add(sun);
     this.scene.add(this.soloRoot);
+    this.applyCameraFromSpherical();
     const resize = () => {
       const w = host.clientWidth || 320;
       const h = host.clientHeight || 208;
@@ -932,14 +1680,336 @@ class SkinPreview {
     };
     resize();
     new ResizeObserver(resize).observe(host);
+
+    const el = this.renderer.domElement;
+    el.addEventListener('pointerdown', this.onPointerDown);
+    el.addEventListener('pointermove', this.onPointerMove);
+    el.addEventListener('pointerup', this.onPointerUp);
+    el.addEventListener('pointerleave', this.onPointerUp);
+    el.addEventListener('pointercancel', this.onPointerUp);
+    el.addEventListener('wheel', this.onWheel, { passive: false });
+    el.addEventListener('contextmenu', this.onContextMenu);
+
     const tick = () => {
       if (this.disposed) return;
       this.raf = requestAnimationFrame(tick);
-      const spin = this.showBody ? this.avatar : this.soloRoot;
-      if (spin) spin.rotation.y += 0.01;
+      this.skinClock += 1 / 60;
+      // Gentle spin only in sculpt idle (not while turning camera or painting)
+      if (
+        this.viewDragMode === 'sculpt' &&
+        !this.painting &&
+        !this.orbiting &&
+        !this.panning
+      ) {
+        const spin = this.showBody ? this.avatar : this.soloRoot;
+        if (spin) spin.rotation.y += 0.004;
+      }
+      if (this.avatar && this.showBody) {
+        tickSkinAttachments(this.avatar, 1 / 60, this.skinClock);
+      }
       this.renderer.render(this.scene, this.camera);
     };
     tick();
+  }
+
+  setViewDragMode(mode: ViewDragMode) {
+    this.viewDragMode = mode;
+    this.painting = false;
+    this.orbiting = false;
+    this.panning = false;
+    this.updateCursor();
+  }
+
+  setClayView(on: boolean) {
+    this.clayView = on;
+    this.applyClayMaterials();
+  }
+
+  private applyClayMaterials() {
+    const roots: THREE.Object3D[] = [this.soloRoot];
+    if (this.avatar) roots.push(this.avatar);
+
+    if (!this.clayView) {
+      // Restore
+      for (const root of roots) {
+        root.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          const id = mesh.uuid;
+          const bak = this.clayBackup.get(id);
+          if (bak) {
+            mesh.material = bak;
+            this.clayBackup.delete(id);
+          }
+        });
+      }
+      return;
+    }
+
+    const clay = new THREE.MeshNormalMaterial({ flatShading: false });
+    for (const root of roots) {
+      root.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        // Only skin parts + solo — skip full avatar body when on body so clay reads the part
+        const isSkin =
+          root === this.soloRoot ||
+          Boolean(mesh.parent?.name?.startsWith('skin_')) ||
+          Boolean(mesh.name?.startsWith('prim_'));
+        if (this.showBody && root === this.avatar && !isSkin) return;
+        if (!this.clayBackup.has(mesh.uuid)) {
+          this.clayBackup.set(mesh.uuid, mesh.material);
+        }
+        mesh.material = clay;
+      });
+    }
+  }
+
+  setCameraPreset(preset: 'front' | 'side' | 'bottom' | 'top' | 'back') {
+    const radius = this.spherical.radius;
+    switch (preset) {
+      case 'front':
+        this.spherical.theta = 0;
+        this.spherical.phi = 1.15;
+        break;
+      case 'back':
+        this.spherical.theta = Math.PI;
+        this.spherical.phi = 1.15;
+        break;
+      case 'side':
+        this.spherical.theta = Math.PI * 0.5;
+        this.spherical.phi = 1.1;
+        break;
+      case 'bottom':
+        this.spherical.theta = 0.2;
+        this.spherical.phi = Math.PI - 0.25;
+        break;
+      case 'top':
+        this.spherical.theta = 0.2;
+        this.spherical.phi = 0.25;
+        break;
+    }
+    this.spherical.radius = radius;
+    this.applyCameraFromSpherical();
+  }
+
+  private updateCursor() {
+    const el = this.renderer.domElement;
+    if (this.viewDragMode === 'turn') {
+      el.style.cursor = this.orbiting || this.panning ? 'grabbing' : 'grab';
+    } else {
+      el.style.cursor = this.brush ? 'crosshair' : 'default';
+    }
+  }
+
+  setBlobBrush(
+    cfg: {
+      brush: SkinSculptBrush;
+      radius: number;
+      strength: number;
+      symmetryX?: boolean;
+    } | null
+  ) {
+    this.brush = cfg;
+    this.updateCursor();
+  }
+
+  private emitHistory() {
+    this.onHistoryChange?.(this.undoStack.length > 0, this.redoStack.length > 0);
+  }
+
+  clearSculptHistory() {
+    this.undoStack = [];
+    this.redoStack = [];
+    this.emitHistory();
+  }
+
+  undoSculpt() {
+    const mesh = findSculptMesh(this.soloRoot);
+    if (!mesh || !this.undoStack.length) return;
+    const current = readSculptData(mesh);
+    if (current) this.redoStack.push(current);
+    const prev = this.undoStack.pop()!;
+    applySculptDataToGeometry(mesh.geometry as THREE.BufferGeometry, prev);
+    this.onSculptCommit?.(prev);
+    this.emitHistory();
+  }
+
+  redoSculpt() {
+    const mesh = findSculptMesh(this.soloRoot);
+    if (!mesh || !this.redoStack.length) return;
+    const current = readSculptData(mesh);
+    if (current) this.undoStack.push(current);
+    const next = this.redoStack.pop()!;
+    applySculptDataToGeometry(mesh.geometry as THREE.BufferGeometry, next);
+    this.onSculptCommit?.(next);
+    this.emitHistory();
+  }
+
+  private applyCameraFromSpherical() {
+    const { theta, phi, radius } = this.spherical;
+    const sinPhi = Math.sin(phi);
+    this.camera.position.set(
+      this.target.x + radius * sinPhi * Math.sin(theta),
+      this.target.y + radius * Math.cos(phi),
+      this.target.z + radius * sinPhi * Math.cos(theta)
+    );
+    this.camera.lookAt(this.target);
+  }
+
+  resetCamera() {
+    if (this.showBody) {
+      this.target.set(0, 1.1, 0);
+      this.spherical = { theta: 0.35, phi: 1.15, radius: 3.0 };
+    } else {
+      this.frameSoloPart();
+    }
+    this.applyCameraFromSpherical();
+  }
+
+  private frameSoloPart() {
+    this.soloRoot.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(this.soloRoot);
+    if (box.isEmpty()) {
+      this.target.set(0, 0.15, 0);
+      this.spherical = { theta: 0.4, phi: 1.1, radius: 1.35 };
+      return;
+    }
+    const center = new THREE.Vector3();
+    const size = new THREE.Vector3();
+    box.getCenter(center);
+    box.getSize(size);
+    this.target.copy(center);
+    const maxDim = Math.max(size.x, size.y, size.z, 0.15);
+    this.spherical = {
+      theta: 0.45,
+      phi: 1.05,
+      radius: Math.max(0.55, maxDim * 2.35),
+    };
+  }
+
+  private onPointerDown = (e: PointerEvent) => {
+    e.preventDefault();
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+    this.renderer.domElement.setPointerCapture?.(e.pointerId);
+
+    if (this.viewDragMode === 'turn' || e.shiftKey || e.button === 1 || e.button === 2) {
+      this.panning = e.shiftKey || e.button === 1;
+      this.orbiting = !this.panning;
+      this.updateCursor();
+      return;
+    }
+
+    // Sculpt mode
+    if (!this.brush) return;
+    this.painting = true;
+    const mesh = findSculptMesh(this.soloRoot);
+    this.strokeStartSnapshot = mesh ? readSculptData(mesh) : null;
+    this.paintAt(e.clientX, e.clientY);
+  };
+
+  private onPointerMove = (e: PointerEvent) => {
+    const dx = e.clientX - this.lastPointerX;
+    const dy = e.clientY - this.lastPointerY;
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+
+    if (this.orbiting) {
+      e.preventDefault();
+      this.spherical.theta -= dx * 0.01;
+      this.spherical.phi = Math.min(
+        Math.PI - 0.08,
+        Math.max(0.08, this.spherical.phi + dy * 0.01)
+      );
+      this.applyCameraFromSpherical();
+      return;
+    }
+
+    if (this.panning) {
+      e.preventDefault();
+      const panScale = this.spherical.radius * 0.0018;
+      const right = new THREE.Vector3();
+      const up = new THREE.Vector3();
+      this.camera.matrixWorld.extractBasis(right, up, new THREE.Vector3());
+      this.target.addScaledVector(right, -dx * panScale);
+      this.target.addScaledVector(up, dy * panScale);
+      this.applyCameraFromSpherical();
+      return;
+    }
+
+    if (!this.painting || !this.brush) return;
+    e.preventDefault();
+    this.paintAt(e.clientX, e.clientY);
+  };
+
+  private onPointerUp = (e: PointerEvent) => {
+    if (this.orbiting || this.panning) {
+      this.orbiting = false;
+      this.panning = false;
+      this.updateCursor();
+      try {
+        this.renderer.domElement.releasePointerCapture?.(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    if (!this.painting) return;
+    this.painting = false;
+    try {
+      this.renderer.domElement.releasePointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    if (this.strokeStartSnapshot) {
+      this.undoStack.push(this.strokeStartSnapshot);
+      if (this.undoStack.length > 40) this.undoStack.shift();
+      this.redoStack = [];
+      this.strokeStartSnapshot = null;
+      this.emitHistory();
+    }
+    this.flushSculptCommit();
+  };
+
+  private onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 1.08 : 0.92;
+    this.spherical.radius = Math.min(12, Math.max(0.25, this.spherical.radius * factor));
+    this.applyCameraFromSpherical();
+  };
+
+  private onContextMenu = (e: Event) => {
+    e.preventDefault();
+  };
+
+  private paintAt(clientX: number, clientY: number) {
+    if (!this.brush) return;
+    const mesh = findSculptMesh(this.soloRoot);
+    if (!mesh) return;
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hits = this.raycaster.intersectObject(mesh, true);
+    if (!hits.length) return;
+    const hitMesh = hits[0].object as THREE.Mesh;
+    if (!hitMesh.isMesh) return;
+    applySculptStroke(hitMesh, hits[0].point, {
+      brush: this.brush.brush,
+      radius: this.brush.radius,
+      strength: this.brush.strength,
+      symmetryX: Boolean(this.brush.symmetryX),
+    });
+  }
+
+  private flushSculptCommit() {
+    const mesh = findSculptMesh(this.soloRoot);
+    if (!mesh) return;
+    const data = readSculptData(mesh);
+    if (data) this.onSculptCommit?.(data);
   }
 
   setAvatar(scene: THREE.Object3D) {
@@ -951,44 +2021,51 @@ class SkinPreview {
   }
 
   setShowAvatar(on: boolean) {
+    const changed = this.showBody !== on;
     this.showBody = on;
     if (this.avatar) this.avatar.visible = on;
     this.soloRoot.visible = !on;
-    if (on) {
-      this.camera.position.set(0, 1.35, 3.0);
-      this.camera.lookAt(0, 1.1, 0);
-    } else {
-      this.camera.position.set(0, 0.35, 1.4);
-      this.camera.lookAt(0, 0.2, 0);
+    if (this.avatar) this.avatar.rotation.y = 0;
+    this.soloRoot.rotation.y = 0;
+    if (changed) {
+      if (!on) this.lastFramedKey = null; // force reframe solo
+      this.resetCamera();
+      this.applyClayMaterials();
     }
   }
 
-  async setAttachments(atts: SkinAttachment[], focusSlot?: SkinAttachSlot) {
+  async setAttachments(atts: SkinAttachment[], focusKey?: string) {
+    if (this.painting || this.orbiting || this.panning) return;
+    // Clear clay backup before rebuild so we don't hold disposed mats
+    this.clayBackup.clear();
     if (this.avatar) await applySkinAttachments(this.avatar, atts);
-    // Solo preview of focused / primary part
     while (this.soloRoot.children.length) this.soloRoot.remove(this.soloRoot.children[0]);
     const primary =
-      (focusSlot ? atts.find((a) => a.slot === focusSlot) : undefined) ?? atts[0];
+      (focusKey ? atts.find((a) => attachmentKey(a) === focusKey) : undefined) ?? atts[0];
     if (primary) {
       try {
         const part = await buildSkinPartMesh(primary);
         part.scale.set(...primary.scale);
-        part.rotation.set(
-          THREE.MathUtils.degToRad(primary.rotation[0]),
-          THREE.MathUtils.degToRad(primary.rotation[1]),
-          THREE.MathUtils.degToRad(primary.rotation[2])
-        );
-        // Center for solo view
+        // Keep identity rotation for easier sculpt aim; spin group instead
+        part.rotation.set(0, 0, 0);
         part.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(part);
         const c = new THREE.Vector3();
         box.getCenter(c);
         part.position.sub(c);
         this.soloRoot.add(part);
+        const key = attachmentKey(primary);
+        const keyChanged = this.lastFramedKey !== key;
+        if (!this.showBody && keyChanged) {
+          this.frameSoloPart();
+          this.applyCameraFromSpherical();
+          this.lastFramedKey = key;
+        }
       } catch (err) {
         console.warn('[SkinPreview solo]', err);
       }
     }
+    if (this.clayView) this.applyClayMaterials();
   }
 
   capture(): string | null {
@@ -1003,6 +2080,15 @@ class SkinPreview {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    if (this.commitTimer) window.clearTimeout(this.commitTimer);
+    const el = this.renderer.domElement;
+    el.removeEventListener('pointerdown', this.onPointerDown);
+    el.removeEventListener('pointermove', this.onPointerMove);
+    el.removeEventListener('pointerup', this.onPointerUp);
+    el.removeEventListener('pointerleave', this.onPointerUp);
+    el.removeEventListener('pointercancel', this.onPointerUp);
+    el.removeEventListener('wheel', this.onWheel);
+    el.removeEventListener('contextmenu', this.onContextMenu);
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

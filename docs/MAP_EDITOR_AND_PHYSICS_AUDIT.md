@@ -332,5 +332,6 @@ Authoritative loop: clients send **intent only** (`input`); server steps at ~30 
 | 2026-07-20 | Wall boxes, jump cut, checkpoints, play-test parity, role-gate, HUD anchors, unit tests, mobile FABs; audit checklist refreshed. |
 | 2026-07-20 | Player Model studio: side panel, die/land slots, match/Play Test honor map avatar bindings. |
 | 2026-07-20 | Timed traps, button-armed hazards, ice/conveyor, teleporters, stair baker — dream-map deathrun loop. |
+| 2026-07-20 | Model Editor skins/weapons — see [`MODEL_EDITOR_AND_SKINS.md`](./MODEL_EDITOR_AND_SKINS.md). |
 
 *Re-run this audit after cloud MAIN sync lands.*

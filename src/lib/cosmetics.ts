@@ -15,7 +15,10 @@ export type SkinCosmeticSlot =
   | 'skin_boots'
   | 'skin_gloves'
   | 'skin_weapon'
-  | 'skin_back';
+  | 'skin_back'
+  | 'skin_tail'
+  | 'skin_horn'
+  | 'skin_addon';
 
 export type CosmeticSlot = 'banner' | 'frame' | 'nickname' | SkinCosmeticSlot;
 

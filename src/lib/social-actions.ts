@@ -19,6 +19,8 @@ import {
   PUBLIC_USER_COSMETIC_SELECT,
   isSkinCosmeticSlot,
 } from '@/lib/cosmetics';
+import { flattenEquippedSkinsMap } from '@/lib/player-skins';
+import type { SkinAttachment } from '@/lib/player-skins';
 
 async function requireSessionUser() {
   const session = await auth();
@@ -1145,6 +1147,20 @@ export async function getMyInventory() {
     where: { userId: user.id },
     orderBy: [{ isEquipped: 'desc' }, { acquiredAt: 'desc' }],
   });
+}
+
+/** Flatten equipped shop skins for the local match avatar. */
+export async function getMyEquippedSkinAttachments(): Promise<SkinAttachment[]> {
+  const user = await requireSessionUser();
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { equippedSkins: true },
+  });
+  const map =
+    row?.equippedSkins && typeof row.equippedSkins === 'object'
+      ? (row.equippedSkins as Record<string, unknown>)
+      : null;
+  return flattenEquippedSkinsMap(map);
 }
 
 /** Equips a cosmetic (banner / frame / nickname), unequipping any other item in that slot. */

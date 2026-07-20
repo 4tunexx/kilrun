@@ -5,7 +5,7 @@ import { suggestPlayerBindings } from '../editor/map-document';
 import { loadPlayerAvatar } from '../editor/player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import { toThree } from '../renderer/coords';
-import { applySkinAttachments } from '../editor/skin-attachments';
+import { applySkinAttachments, tickSkinAttachments } from '../editor/skin-attachments';
 import type { SkinAttachment } from '@/lib/player-skins';
 
 function pickClip(clips: THREE.AnimationClip[], patterns: string[]): THREE.AnimationClip | null {
@@ -70,7 +70,10 @@ export class ThreeCharacter {
   private bindings: PlayerAnimBindings = {};
   private wasGrounded = true;
   private landUntil = 0;
+  private attackUntil = 0;
   private avatarOpts: CharacterAvatarOptions;
+  private avatarScene: THREE.Object3D | null = null;
+  private skinTime = 0;
 
   constructor(_username: string, _isLocal: boolean, avatar?: CharacterAvatarOptions) {
     this.avatarOpts = avatar ?? {};
@@ -94,6 +97,7 @@ export class ThreeCharacter {
         scene.scale.multiplyScalar(scale);
       }
       this.root.add(scene);
+      this.avatarScene = scene;
       this.loaded = true;
       this.root.visible = true;
 
@@ -138,6 +142,8 @@ export class ThreeCharacter {
       bindSlot('strafe_left', ['left', 'strafe']);
       bindSlot('strafe_right', ['right', 'strafe']);
       bindSlot('back', ['back', 'backward']);
+      bindSlot('attack', ['attack', 'slash', 'swing', 'shoot', 'fire', 'punch', 'hit'], false);
+      bindSlot('punch', ['punch', 'hit', 'jab', 'melee'], false);
       bindSlot('die', ['die', 'death', 'dead'], false);
 
       this.actions.get('idle')?.reset().play();
@@ -174,6 +180,15 @@ export class ThreeCharacter {
     next.clampWhenFinished = !loop;
     next.fadeIn(0.12).play();
     this.current = name;
+  }
+
+  /** Play weapon / punch swing (client visual — combat damage is server-side). */
+  public triggerAttack(style: 'attack' | 'punch' = 'attack') {
+    const slot = style === 'punch' && this.actions.has('punch') ? 'punch' : 'attack';
+    const fallback = this.actions.has(slot) ? slot : this.actions.has('punch') ? 'punch' : null;
+    if (!fallback) return;
+    this.attackUntil = performance.now() + 480;
+    this.play(fallback, false);
   }
 
   public update(player: NetPlayerState, dt: number, cameraYaw?: number) {
@@ -225,6 +240,8 @@ export class ThreeCharacter {
 
     if (!player.isAlive) {
       this.play('die', false);
+    } else if (performance.now() < this.attackUntil) {
+      // keep current attack / punch
     } else if (performance.now() < this.landUntil && this.actions.has('land')) {
       this.play('land', false);
     } else if (!player.isGrounded) {
@@ -240,6 +257,8 @@ export class ThreeCharacter {
     }
 
     this.mixer?.update(dt);
+    this.skinTime += dt;
+    if (this.avatarScene) tickSkinAttachments(this.avatarScene, dt, this.skinTime);
   }
 
   public destroy() {

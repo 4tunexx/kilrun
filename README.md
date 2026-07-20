@@ -28,15 +28,19 @@ src/
     verify-email/             # Arcade-themed email OTP verification UI
   components/
     game/                     # Client-side game engine (mode-agnostic + Deathrun)
+      editor/                 # Map editor, Model Editor (skins/weapons), Play Test
       net/                    # Colyseus connection + React state bridge
-      renderer/               # PixiJS app bootstrap, isometric camera, sprites
-      entities/                # Player/obstacle visual representations
-      input/                   # Keyboard/mouse + mobile dual-joystick input
-      modes/deathrun/          # Deathrun-specific HUD, lobby, countdown, results
-      ui/                       # Shared HUD, crosshair
+      renderer/               # Three.js world, camera, overlays
+      entities/               # Player/obstacle visual representations
+      input/                  # Keyboard/mouse + mobile dual-joystick input
+      modes/deathrun/         # Deathrun-specific HUD, lobby, countdown, results
+      ui/                     # Shared HUD, crosshair
     views/                    # App screens (play, lobby, profile, dashboard)
-  lib/                        # Prisma client, server actions
-  auth.ts, middleware.ts       # NextAuth + Clerk middleware
+  lib/                        # Prisma client, server actions, player-skins, weapons
+  auth.ts, middleware.ts      # NextAuth + Clerk middleware
+docs/
+  MODEL_EDITOR_AND_SKINS.md   # Skins / weapons pipeline + later stages
+  MAP_EDITOR_AND_PHYSICS_AUDIT.md
 prisma/
   schema.prisma               # User, Mission, MatchResult models (MongoDB)
 server/                       # Separate deployable: Colyseus game server
@@ -44,6 +48,10 @@ server/                       # Separate deployable: Colyseus game server
   src/schema/                 # Networked state schema
   src/sim/                    # Server-authoritative movement/collision/maps
 ```
+
+### Cosmetics & Model Editor
+
+Player skins (hats, gear, weapons, tails, etc.) are authored in the **Model Editor** inside the map editor, published to the shop, and equipped via inventory. See **[`docs/MODEL_EDITOR_AND_SKINS.md`](./docs/MODEL_EDITOR_AND_SKINS.md)** for the full pipeline and what is still planned for the game server (authoritative weapon damage, remote skin sync).
 
 ## Getting started
 

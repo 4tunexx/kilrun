@@ -34,6 +34,11 @@ import { MobileActionButtons } from './ui/mobile-action-buttons';
 import { Crosshair } from './ui/crosshair';
 import dynamic from 'next/dynamic';
 import {
+  findWeaponAttachment,
+  resolveWeaponCombat,
+} from '@/lib/weapons';
+import type { SkinAttachment } from '@/lib/player-skins';
+import {
   getActivePlayMapId,
   mapDocSpawnPoints,
   mapDocToSimFinishes,
@@ -56,6 +61,8 @@ interface KilrunEngineProps {
   onExit: () => void;
   xpProgress?: number;
   isAdmin?: boolean;
+  /** Shop-equipped skin attachments for the local player avatar. */
+  equippedSkins?: SkinAttachment[] | null;
 }
 
 export default function KilrunEngine({
@@ -63,6 +70,7 @@ export default function KilrunEngine({
   onExit,
   xpProgress = 0,
   isAdmin = false,
+  equippedSkins = null,
 }: KilrunEngineProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -89,6 +97,8 @@ export default function KilrunEngine({
   const { toggle: toggleFullscreen } = useGameFullscreen(rootRef, true);
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
+  const equippedSkinsRef = useRef<SkinAttachment[] | null>(equippedSkins ?? null);
+  equippedSkinsRef.current = equippedSkins ?? null;
 
   // Push MAIN editor map to server when lobby is ready
   useEffect(() => {
@@ -163,6 +173,7 @@ export default function KilrunEngine({
     let cameraPitch = 0.22;
     let sendAccumulatorMs = 0;
     let shootHeld = false;
+    let wasShootEdge = false;
     let interactPulse = false;
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
@@ -179,11 +190,12 @@ export default function KilrunEngine({
     const spawnCharacter = (sessionId: string, username: string) => {
       if (characters.has(sessionId)) return;
       const avatarEntity = customDocRef.current?.entities.find((e) => e.kind === 'player');
-      const view = new ThreeCharacter(
-        username,
-        sessionId === connectionRef.current?.sessionId,
-        { avatarEntity }
-      );
+      const isLocal = sessionId === connectionRef.current?.sessionId;
+      const view = new ThreeCharacter(username, isLocal, {
+        avatarEntity,
+        // Local player: map skins + shop equipped. Remotes: map skins only until server sync.
+        equippedSkins: isLocal ? equippedSkinsRef.current : null,
+      });
       characters.set(sessionId, view);
       world.scene.add(view.root);
     };
@@ -293,7 +305,20 @@ export default function KilrunEngine({
       updateFollowCamera(world.camera, targetPos, cameraYaw, cameraPitch, dt, ZOOM);
 
       if (!frozen) {
-        shootHeld = shootHeld || inputManager.isShootPressed() || inputManager.isAttackPressed();
+        const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
+        if (shootNow && !wasShootEdge && localSessionId) {
+          const weaponAtt =
+            findWeaponAttachment(equippedSkinsRef.current) ??
+            findWeaponAttachment(
+              customDocRef.current?.entities.find((e) => e.kind === 'player')?.playerSkins
+            );
+          const combat = resolveWeaponCombat(weaponAtt);
+          characters
+            .get(localSessionId)
+            ?.triggerAttack(combat.attackStyle ?? 'attack');
+        }
+        wasShootEdge = shootNow;
+        shootHeld = shootHeld || shootNow;
         sendAccumulatorMs += dtMs;
         if (sendAccumulatorMs >= NETWORK_SEND_INTERVAL_MS && localState) {
           sendAccumulatorMs = 0;

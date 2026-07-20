@@ -1,8 +1,5 @@
-/**
- * Body / gear skin slots for the Model Editor → shop → in-game equip pipeline.
- * Attachments can be catalog meshes, uploaded GLBs, or built-in primitives
- * with materials / textures sculpted in the Model Editor.
- */
+import type { WeaponCombatConfig } from './weapons';
+import { DEFAULT_MELEE_COMBAT } from './weapons';
 
 export type SkinAttachSlot =
   | 'hat'
@@ -12,7 +9,10 @@ export type SkinAttachSlot =
   | 'boots'
   | 'gloves'
   | 'weapon'
-  | 'back';
+  | 'back'
+  | 'tail'
+  | 'horn'
+  | 'addon';
 
 /** Built-in shapes you can sculpt without uploading a GLB. */
 export type SkinPrimitive =
@@ -24,6 +24,17 @@ export type SkinPrimitive =
   | 'torus'
   | 'plane';
 
+/**
+ * How the surface behaves / looks:
+ * - solid — hard (horn, armor plate)
+ * - cloth — soft fabric
+ * - cape — drapey cloth that sways
+ */
+export type SkinMaterialFeel = 'solid' | 'cloth' | 'cape';
+
+/** bone = follows skeleton; body = exact character-local placement (editor = gameplay). */
+export type SkinAttachMode = 'bone' | 'body';
+
 export const SKIN_PRIMITIVES: { id: SkinPrimitive; label: string }[] = [
   { id: 'box', label: 'Box / Cube' },
   { id: 'sphere', label: 'Sphere' },
@@ -32,6 +43,16 @@ export const SKIN_PRIMITIVES: { id: SkinPrimitive; label: string }[] = [
   { id: 'cone', label: 'Cone' },
   { id: 'torus', label: 'Torus / Ring' },
   { id: 'plane', label: 'Plane / Flat' },
+];
+
+export const SKIN_MATERIAL_FEELS: {
+  id: SkinMaterialFeel;
+  label: string;
+  hint: string;
+}[] = [
+  { id: 'solid', label: 'Solid', hint: 'Hard — horn, bone, metal, armor' },
+  { id: 'cloth', label: 'Cloth', hint: 'Soft fabric — wraps / flaps lightly' },
+  { id: 'cape', label: 'Cape', hint: 'Drapey cloth — sways like a cape/cloak' },
 ];
 
 export interface SkinShapeParams {
@@ -74,6 +95,51 @@ export const DEFAULT_SKIN_MATERIAL: SkinMaterial = {
   patternColor: '#8b6914',
 };
 
+/** Apply feel presets on top of (or instead of) manual metal/rough when picking a feel. */
+export function materialForFeel(
+  feel: SkinMaterialFeel,
+  base?: Partial<SkinMaterial>
+): SkinMaterial {
+  const color = base?.color ?? DEFAULT_SKIN_MATERIAL.color;
+  const pattern = base?.pattern ?? 'flat';
+  const patternColor = base?.patternColor ?? DEFAULT_SKIN_MATERIAL.patternColor;
+  if (feel === 'solid') {
+    return {
+      ...DEFAULT_SKIN_MATERIAL,
+      ...base,
+      color,
+      pattern,
+      patternColor,
+      metalness: base?.metalness ?? 0.35,
+      roughness: base?.roughness ?? 0.4,
+      opacity: base?.opacity ?? 1,
+    };
+  }
+  if (feel === 'cape') {
+    return {
+      ...DEFAULT_SKIN_MATERIAL,
+      ...base,
+      color,
+      pattern,
+      patternColor,
+      metalness: 0,
+      roughness: 0.92,
+      opacity: base?.opacity ?? 0.96,
+    };
+  }
+  // cloth
+  return {
+    ...DEFAULT_SKIN_MATERIAL,
+    ...base,
+    color,
+    pattern,
+    patternColor,
+    metalness: 0,
+    roughness: 0.88,
+    opacity: base?.opacity ?? 1,
+  };
+}
+
 export const SKIN_ATTACH_SLOTS: {
   id: SkinAttachSlot;
   label: string;
@@ -87,6 +153,12 @@ export const SKIN_ATTACH_SLOTS: {
   defaultPrimitive: SkinPrimitive;
   defaultShape: SkinShapeParams;
   defaultScale: [number, number, number];
+  defaultFeel: SkinMaterialFeel;
+  defaultAttachMode: SkinAttachMode;
+  /** Gloves / boots can auto-mirror L/R. */
+  canPairMirror?: boolean;
+  /** Allow multiple instances (custom addons). */
+  allowMultiple?: boolean;
 }[] = [
   {
     id: 'hat',
@@ -96,8 +168,10 @@ export const SKIN_ATTACH_SLOTS: {
     boneHints: ['head', 'hat', 'skull'],
     cosmeticSlot: 'skin_hat',
     defaultPrimitive: 'cylinder',
-    defaultShape: { radiusTop: 0.28, radiusBottom: 0.32, height: 0.22, radialSegments: 24 },
-    defaultScale: [1, 1, 1],
+    defaultShape: { radiusTop: 0.3, radiusBottom: 0.34, height: 0.24, radialSegments: 24 },
+    defaultScale: [1.05, 1.05, 1.05],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'bone',
   },
   {
     id: 'face',
@@ -107,8 +181,10 @@ export const SKIN_ATTACH_SLOTS: {
     boneHints: ['head', 'face', 'jaw'],
     cosmeticSlot: 'skin_face',
     defaultPrimitive: 'box',
-    defaultShape: { width: 0.35, height: 0.18, depth: 0.08 },
-    defaultScale: [1, 1, 1],
+    defaultShape: { width: 0.42, height: 0.28, depth: 0.12 },
+    defaultScale: [1.15, 1.15, 1.15],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'bone',
   },
   {
     id: 'torso',
@@ -120,6 +196,8 @@ export const SKIN_ATTACH_SLOTS: {
     defaultPrimitive: 'box',
     defaultShape: { width: 0.55, height: 0.55, depth: 0.28 },
     defaultScale: [1, 1, 1],
+    defaultFeel: 'cloth',
+    defaultAttachMode: 'body',
   },
   {
     id: 'pants',
@@ -131,39 +209,49 @@ export const SKIN_ATTACH_SLOTS: {
     defaultPrimitive: 'box',
     defaultShape: { width: 0.42, height: 0.55, depth: 0.24 },
     defaultScale: [1, 1, 1],
+    defaultFeel: 'cloth',
+    defaultAttachMode: 'body',
   },
   {
     id: 'boots',
     label: 'Boots',
-    hint: 'Footwear',
-    defaultOffset: [0, 0.06, 0.05],
-    boneHints: ['foot', 'boot', 'ankle'],
+    hint: 'Footwear (pair mirror L/R)',
+    defaultOffset: [0.12, 0.06, 0.08],
+    boneHints: ['foot', 'boot', 'ankle', 'rightfoot', 'foot_r'],
     cosmeticSlot: 'skin_boots',
     defaultPrimitive: 'box',
-    defaultShape: { width: 0.28, height: 0.14, depth: 0.4 },
+    defaultShape: { width: 0.22, height: 0.14, depth: 0.38 },
     defaultScale: [1, 1, 1],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'bone',
+    canPairMirror: true,
   },
   {
     id: 'gloves',
     label: 'Gloves',
-    hint: 'Hands / gauntlets',
+    hint: 'Hands / gauntlets (pair mirror L/R)',
     defaultOffset: [0.38, 0.95, 0.05],
-    boneHints: ['hand', 'wrist', 'glove'],
+    boneHints: ['hand', 'wrist', 'glove', 'righthand', 'hand_r'],
     cosmeticSlot: 'skin_gloves',
     defaultPrimitive: 'sphere',
-    defaultShape: { radius: 0.1, radialSegments: 16 },
-    defaultScale: [1, 1, 1],
+    defaultShape: { radius: 0.12, radialSegments: 16 },
+    defaultScale: [1.2, 1.2, 1.2],
+    defaultFeel: 'cloth',
+    defaultAttachMode: 'bone',
+    canPairMirror: true,
   },
   {
     id: 'weapon',
     label: 'Weapon',
-    hint: 'Sword, gun, tool in hand',
+    hint: 'Sword / gun on hand — mesh + combat stats',
     defaultOffset: [0.42, 0.92, 0.18],
     boneHints: ['hand_r', 'righthand', 'hand.r', 'weapon', 'right_hand'],
     cosmeticSlot: 'skin_weapon',
     defaultPrimitive: 'box',
     defaultShape: { width: 0.06, height: 0.7, depth: 0.06 },
     defaultScale: [1, 1, 1],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'bone',
   },
   {
     id: 'back',
@@ -175,10 +263,64 @@ export const SKIN_ATTACH_SLOTS: {
     defaultPrimitive: 'plane',
     defaultShape: { width: 0.5, height: 0.7 },
     defaultScale: [1, 1, 1],
+    defaultFeel: 'cape',
+    defaultAttachMode: 'body',
+  },
+  {
+    id: 'tail',
+    label: 'Tail',
+    hint: 'Squish a cylinder/capsule on the back hips',
+    defaultOffset: [0, 0.85, -0.28],
+    boneHints: ['hips', 'pelvis', 'spine'],
+    cosmeticSlot: 'skin_tail',
+    defaultPrimitive: 'capsule',
+    defaultShape: { radius: 0.08, height: 0.55, radialSegments: 16 },
+    defaultScale: [1, 1, 1],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'body',
+  },
+  {
+    id: 'horn',
+    label: 'Horn',
+    hint: 'Solid horns / spikes on the head',
+    defaultOffset: [0.12, 1.72, 0.02],
+    boneHints: ['head', 'hat', 'skull'],
+    cosmeticSlot: 'skin_horn',
+    defaultPrimitive: 'cone',
+    defaultShape: { radius: 0.06, height: 0.28, radialSegments: 16 },
+    defaultScale: [1, 1, 1],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'bone',
+    canPairMirror: true,
+  },
+  {
+    id: 'addon',
+    label: 'Custom part',
+    hint: 'Free-place anything — place once, stays in game',
+    defaultOffset: [0, 1.1, 0.25],
+    boneHints: ['spine', 'chest', 'hips'],
+    cosmeticSlot: 'skin_addon',
+    defaultPrimitive: 'cylinder',
+    defaultShape: { radiusTop: 0.1, radiusBottom: 0.12, height: 0.4, radialSegments: 20 },
+    defaultScale: [1, 1, 1],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'body',
+    allowMultiple: true,
   },
 ];
 
+export interface SkinSculptData {
+  /** Flat xyz vertex positions after blob sculpt. */
+  positions: number[];
+  /** Must match geometry vertex count or sculpt is ignored. */
+  count: number;
+}
+
+export type SkinSculptBrush = 'add' | 'remove' | 'smooth';
+
 export interface SkinAttachment {
+  /** Unique instance id (required for multiple addons). Defaults to slot. */
+  id?: string;
   slot: SkinAttachSlot;
   /** Catalog prototype id (optional if primitive / custom). */
   model?: string;
@@ -187,8 +329,22 @@ export interface SkinAttachment {
   primitive?: SkinPrimitive;
   shape?: SkinShapeParams;
   material?: SkinMaterial;
+  /** solid / cloth / cape — drives look + light sway. */
+  feel?: SkinMaterialFeel;
+  /** bone follows skeleton; body = exact editor character-local coords in game. */
+  attachMode?: SkinAttachMode;
+  /** For gloves/boots/horn — also spawn mirrored L/R copy. */
+  pairMirror?: boolean;
+  /**
+   * Weapon combat (only for slot === 'weapon').
+   * Visual mesh stays on the hand; this drives range/damage/anim style.
+   */
+  weapon?: WeaponCombatConfig;
   /** Uploaded or generated texture (data URL / path). */
   textureUrl?: string;
+  /** ZBrush-style blob sculpt vertex dump (primitives). */
+  sculpt?: SkinSculptData;
+  /** Character-local position (feet at y=0). Same in editor & gameplay. */
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
@@ -219,18 +375,43 @@ export function skinSlotMeta(slot: SkinAttachSlot) {
   return SKIN_ATTACH_SLOTS.find((s) => s.id === slot)!;
 }
 
-export function defaultAttachment(slot: SkinAttachSlot): SkinAttachment {
+export function attachmentKey(att: Pick<SkinAttachment, 'id' | 'slot'>): string {
+  return att.id || att.slot;
+}
+
+export function defaultAttachment(slot: SkinAttachSlot, id?: string): SkinAttachment {
   const meta = skinSlotMeta(slot);
-  return {
+  const feel = meta.defaultFeel;
+  const base: SkinAttachment = {
+    id: id || (meta.allowMultiple ? `${slot}_${Math.random().toString(36).slice(2, 8)}` : slot),
     slot,
     primitive: meta.defaultPrimitive,
     shape: { ...meta.defaultShape },
-    material: { ...DEFAULT_SKIN_MATERIAL },
+    material: materialForFeel(feel),
+    feel,
+    attachMode: meta.defaultAttachMode,
+    pairMirror: Boolean(meta.canPairMirror),
     position: [...meta.defaultOffset] as [number, number, number],
-    rotation: [0, 0, 0],
+    rotation: slot === 'tail' ? [55, 0, 0] : slot === 'weapon' ? [0, 0, -25] : [0, 0, 0],
     scale: [...meta.defaultScale] as [number, number, number],
     model: undefined,
     customModelUrl: undefined,
+  };
+  if (slot === 'weapon') {
+    base.weapon = { ...DEFAULT_MELEE_COMBAT };
+  }
+  return base;
+}
+
+/** Mirror of an attachment across character X (for L/R pairs). */
+export function mirrorAttachmentX(att: SkinAttachment): SkinAttachment {
+  return {
+    ...att,
+    id: `${attachmentKey(att)}_mirror`,
+    position: [-att.position[0], att.position[1], att.position[2]],
+    rotation: [att.rotation[0], -att.rotation[1], -att.rotation[2]],
+    scale: [att.scale[0], att.scale[1], att.scale[2]],
+    pairMirror: false,
   };
 }
 
@@ -248,7 +429,7 @@ export function skinSlotFromCosmetic(slot: string): SkinAttachSlot | null {
 export function skinConfigToJson(preset: PlayerSkinPreset): Record<string, unknown> {
   return {
     kind: 'player_skin',
-    version: 2,
+    version: 3,
     id: preset.id,
     name: preset.name,
     baseModelKey: preset.baseModelKey,
@@ -261,20 +442,58 @@ export function skinConfigToJson(preset: PlayerSkinPreset): Record<string, unkno
 export function parseSkinConfig(raw: unknown): PlayerSkinPreset | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
-  if (o.kind !== 'player_skin') return null;
-  const attachments = Array.isArray(o.attachments) ? (o.attachments as SkinAttachment[]) : [];
-  if (!attachments.length) return null;
-  const primarySlot = (o.primarySlot as SkinAttachSlot) || attachments[0]?.slot || 'hat';
-  return {
-    id: String(o.id || 'skin'),
-    name: String(o.name || 'Skin'),
-    baseModelKey: String(o.baseModelKey || 'default-mannequin'),
-    primarySlot,
-    attachments,
-    thumbnail: typeof o.thumbnail === 'string' ? o.thumbnail : undefined,
-    createdAt: String(o.createdAt || new Date().toISOString()),
-    updatedAt: String(o.updatedAt || new Date().toISOString()),
-  };
+  // Full preset from Model Editor publish
+  if (o.kind === 'player_skin') {
+    const attachments = Array.isArray(o.attachments) ? (o.attachments as SkinAttachment[]) : [];
+    if (!attachments.length) return null;
+    const primarySlot = (o.primarySlot as SkinAttachSlot) || attachments[0]?.slot || 'hat';
+    return {
+      id: String(o.id || 'skin'),
+      name: String(o.name || 'Skin'),
+      baseModelKey: String(o.baseModelKey || 'default-mannequin'),
+      primarySlot,
+      attachments,
+      thumbnail: typeof o.thumbnail === 'string' ? o.thumbnail : undefined,
+      createdAt: String(o.createdAt || new Date().toISOString()),
+      updatedAt: String(o.updatedAt || new Date().toISOString()),
+    };
+  }
+  // Inventory equip sometimes stores { attachments, primarySlot } without kind
+  if (Array.isArray(o.attachments) && o.attachments.length) {
+    const attachments = o.attachments as SkinAttachment[];
+    const primarySlot = (o.primarySlot as SkinAttachSlot) || attachments[0]?.slot || 'hat';
+    return {
+      id: String(o.id || 'skin'),
+      name: String(o.name || 'Skin'),
+      baseModelKey: String(o.baseModelKey || 'default-mannequin'),
+      primarySlot,
+      attachments,
+      thumbnail: typeof o.thumbnail === 'string' ? o.thumbnail : undefined,
+      createdAt: String(o.createdAt || new Date().toISOString()),
+      updatedAt: String(o.updatedAt || new Date().toISOString()),
+    };
+  }
+  return null;
+}
+
+/**
+ * Flatten User.equippedSkins map (cosmeticSlot → cosmeticConfig) into
+ * SkinAttachment[] for ThreeCharacter / play preview.
+ */
+export function flattenEquippedSkinsMap(
+  equipped: Record<string, unknown> | null | undefined
+): SkinAttachment[] {
+  if (!equipped || typeof equipped !== 'object') return [];
+  const byKey = new Map<string, SkinAttachment>();
+  for (const [slotKey, cfg] of Object.entries(equipped)) {
+    if (!isSkinCosmeticSlot(slotKey)) continue;
+    const preset = parseSkinConfig(cfg);
+    if (!preset?.attachments?.length) continue;
+    for (const att of preset.attachments) {
+      byKey.set(attachmentKey(att), att);
+    }
+  }
+  return Array.from(byKey.values());
 }
 
 export function baseModelKeyFromEntity(entity: {
