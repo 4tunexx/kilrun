@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import type {
   SkinAttachment,
+  SkinBondedPart,
   SkinMaterial,
   SkinMaterialFeel,
   SkinPrimitive,
@@ -62,7 +63,7 @@ function plantLocal(mesh: THREE.Object3D) {
   mesh.position.y -= box.min.y;
 }
 
-function makeGeometry(kind: SkinPrimitive, shape: SkinShapeParams = {}): THREE.BufferGeometry {
+export function makeGeometry(kind: SkinPrimitive, shape: SkinShapeParams = {}): THREE.BufferGeometry {
   const w = shape.width ?? 0.4;
   const h = shape.height ?? 0.4;
   const d = shape.depth ?? 0.4;
@@ -207,71 +208,121 @@ async function buildMaterial(att: SkinAttachment): Promise<THREE.MeshStandardMat
 
 /** Build a standalone Object3D for one attachment (for preview / thumbnail). */
 export async function buildSkinPartMesh(att: SkinAttachment): Promise<THREE.Object3D> {
-  if (att.primitive && !att.model && !att.customModelUrl) {
-    const geo = makeGeometry(att.primitive, att.shape ?? {});
-    applySculptDataToGeometry(geo, att.sculpt);
-    const mat = await buildMaterial(att);
+  const bonded = att.bonded?.length ? att.bonded : [];
+
+  const buildPrim = async (
+    primitive: SkinPrimitive,
+    shape: SkinShapeParams | undefined,
+    matSrc: SkinAttachment | SkinBondedPart,
+    name: string,
+    sculpt?: SkinAttachment['sculpt']
+  ) => {
+    const geo = makeGeometry(primitive, shape ?? {});
+    applySculptDataToGeometry(geo, sculpt);
+    const mat = await buildMaterial({
+      ...att,
+      material: matSrc.material ?? att.material,
+      color: matSrc.material?.color || att.color,
+      textureUrl: 'textureUrl' in matSrc ? undefined : att.textureUrl,
+    });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.name = `prim_${attachmentKey(att)}`;
+    mesh.name = name;
     mesh.userData.sculptable = true;
+    mesh.userData.bondId = 'id' in matSrc && name.startsWith('bond_') ? matSrc.id : undefined;
     return mesh;
-  }
+  };
 
-  const src = resolveModelSrc(att.model, att.customModelUrl);
-  if (!src) {
-    const geo = makeGeometry('box', { width: 0.3, height: 0.3, depth: 0.3 });
-    const mat = await buildMaterial(att);
-    return new THREE.Mesh(geo, mat);
-  }
-  const { root } = await loadAnimatedPrefab(src);
-  plantLocal(root);
-  const color = att.material?.color || att.color;
-  const matOverrides = att.material;
-  root.traverse((o) => {
-    const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    const apply = (m: THREE.Material) => {
-      const std = m as THREE.MeshStandardMaterial;
-      if (color && 'color' in std) std.color?.set(color);
-      if (matOverrides) {
-        if (typeof matOverrides.metalness === 'number' && 'metalness' in std) {
-          std.metalness = matOverrides.metalness;
-        }
-        if (typeof matOverrides.roughness === 'number' && 'roughness' in std) {
-          std.roughness = matOverrides.roughness;
-        }
-        if (typeof matOverrides.opacity === 'number') {
-          std.opacity = matOverrides.opacity;
-          std.transparent = matOverrides.opacity < 0.999;
-        }
-      }
-    };
-    if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
-    else if (mesh.material) apply(mesh.material);
-  });
-  if (att.textureUrl) {
-    try {
-      const tex = await loadTexture(att.textureUrl);
+  let primary: THREE.Object3D;
+  if (att.primitive && !att.model && !att.customModelUrl) {
+    primary = await buildPrim(
+      att.primitive,
+      att.shape,
+      att,
+      `prim_${attachmentKey(att)}`,
+      att.sculpt
+    );
+  } else {
+    const src = resolveModelSrc(att.model, att.customModelUrl);
+    if (!src) {
+      primary = await buildPrim('box', { width: 0.3, height: 0.3, depth: 0.3 }, att, `prim_${attachmentKey(att)}`);
+    } else {
+      const { root } = await loadAnimatedPrefab(src);
+      plantLocal(root);
+      const color = att.material?.color || att.color;
+      const matOverrides = att.material;
       root.traverse((o) => {
         const mesh = o as THREE.Mesh;
         if (!mesh.isMesh) return;
+        mesh.userData.sculptable = true;
         const apply = (m: THREE.Material) => {
           const std = m as THREE.MeshStandardMaterial;
-          if ('map' in std) {
-            std.map = tex;
-            std.needsUpdate = true;
+          if (color && 'color' in std) std.color?.set(color);
+          if (matOverrides) {
+            if (typeof matOverrides.metalness === 'number' && 'metalness' in std) {
+              std.metalness = matOverrides.metalness;
+            }
+            if (typeof matOverrides.roughness === 'number' && 'roughness' in std) {
+              std.roughness = matOverrides.roughness;
+            }
+            if (typeof matOverrides.opacity === 'number') {
+              std.opacity = matOverrides.opacity;
+              std.transparent = matOverrides.opacity < 0.999;
+            }
           }
         };
         if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
         else if (mesh.material) apply(mesh.material);
       });
-    } catch {
-      /* ignore */
+      if (att.textureUrl) {
+        try {
+          const tex = await loadTexture(att.textureUrl);
+          root.traverse((o) => {
+            const mesh = o as THREE.Mesh;
+            if (!mesh.isMesh) return;
+            const apply = (m: THREE.Material) => {
+              const std = m as THREE.MeshStandardMaterial;
+              if ('map' in std) {
+                std.map = tex;
+                std.needsUpdate = true;
+              }
+            };
+            if (Array.isArray(mesh.material)) mesh.material.forEach(apply);
+            else if (mesh.material) apply(mesh.material);
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+      primary = root;
     }
   }
-  return root;
+
+  if (!bonded.length) return primary;
+
+  // Compound skin: primary + bonded shapes in one group (editor + gameplay).
+  const group = new THREE.Group();
+  group.name = `compound_${attachmentKey(att)}`;
+  group.add(primary);
+  for (const part of bonded) {
+    const mesh = await buildPrim(
+      part.primitive,
+      part.shape,
+      part,
+      `bond_${part.id}`,
+      part.sculpt
+    );
+    mesh.position.set(...part.position);
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(part.rotation[0]),
+      THREE.MathUtils.degToRad(part.rotation[1]),
+      THREE.MathUtils.degToRad(part.rotation[2])
+    );
+    mesh.scale.set(...part.scale);
+    group.add(mesh);
+  }
+  return group;
 }
 
 function expandAttachments(attachments: SkinAttachment[]): SkinAttachment[] {

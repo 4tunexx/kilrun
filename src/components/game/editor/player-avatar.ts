@@ -10,6 +10,11 @@ import {
 } from './map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
 import { loadCharacterPrefab } from '../renderer/asset-loader';
+import {
+  applyExtraBones,
+  applyPlayerMeshEdits,
+  authoredClipsToThree,
+} from './player-mesh-edits';
 import type * as THREE from 'three';
 
 export interface LoadedPlayerAvatar {
@@ -64,6 +69,24 @@ export function ensureMapPlayerEntity(doc: MapDocument): {
   };
 }
 
+function finalizeAvatar(
+  entity: EditorEntity | null | undefined,
+  scene: THREE.Object3D,
+  animations: THREE.AnimationClip[],
+  isDefaultMannequin: boolean
+): LoadedPlayerAvatar {
+  applyExtraBones(scene, entity?.playerExtraBones);
+  applyPlayerMeshEdits(scene, entity?.playerMeshEdits);
+  const authored = authoredClipsToThree(entity?.playerAuthoredClips);
+  const merged = [...animations, ...authored];
+  // Prefer authored clip when names collide.
+  const byName = new Map<string, THREE.AnimationClip>();
+  for (const c of merged) byName.set(c.name || '(unnamed)', c);
+  const finalClips = Array.from(byName.values());
+  const clipNames = finalClips.map((c) => c.name || '(unnamed)');
+  return { scene, animations: finalClips, clipNames, isDefaultMannequin };
+}
+
 /** Load skinned scene + clips for an avatar entity (or default mannequin). */
 export async function loadPlayerAvatar(
   entity?: EditorEntity | null
@@ -71,16 +94,10 @@ export async function loadPlayerAvatar(
   const src = resolveModelSrc(entity?.model, entity?.customModelUrl);
   if (!src) {
     const { scene, animations } = await loadCharacterPrefab();
-    const clipNames = animations.map((c) => c.name || '(unnamed)');
-    return { scene, animations, clipNames, isDefaultMannequin: true };
+    return finalizeAvatar(entity, scene, animations, true);
   }
-  const { root, clips, clipNames } = await loadAnimatedPrefab(src);
-  return {
-    scene: root,
-    animations: clips,
-    clipNames,
-    isDefaultMannequin: false,
-  };
+  const { root, clips } = await loadAnimatedPrefab(src);
+  return finalizeAvatar(entity, root, clips, false);
 }
 
 /** Merge scanned clips into entity.animation.availableClips + optional auto-bind. */

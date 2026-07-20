@@ -46,14 +46,25 @@ Model Editor (sculpt / catalog / upload GLB)
 | **Sculpt / Turn** | Paint clay vs orbit camera |
 | **Front / Side / Bottom / Top / Back** | Quick camera angles |
 | **Clay view** | Matcap-style shading while sculpting |
+| **Fullscreen sculpt** | Full button — Skin only + Sculpt; paint works on the part |
 | **Primitives + shape + Fit size** | Squish/expand cylinders, etc. |
+| **Insert & bond shapes** | Add spheres/boxes/cones onto a skin, then sculpt each piece |
 | **Blob Add / Remove / Smooth** | ZBrush-lite clay; Symmetry L/R; Undo/Redo |
 | **Solid / Cloth / Cape** | Material feel (+ light sway for cloth/cape) |
-| **Lock on body / Follow bone** | Exact place vs stick to skeleton |
+| **Lock on body / Follow bone** | Exact place vs stick to skeleton (optional bone picker) |
 | **Pair L/R** | Gloves / boots / horns mirror |
 | **Tail / Horn / Custom part** | Extra body attachments |
 | **Weapon combat panel** | Melee / Hitscan / Look only + range / cooldown |
 | **Shop thumbnail** | Live render of **the part** (not full avatar); no 3D shop inspect |
+
+### Player Model studio
+
+| Feature | How to use |
+|---|---|
+| **Mesh tab** | Recolor body meshes; Round+ / Squeeze / axis sliders on selected bone |
+| **Bones tab** | Select skeleton bones; +/- helper bones |
+| **Record tab** | Select bone → Record → move gizmo → Add to timeline → Save clip (keys only that bone) |
+| **Anims tab** | Bind / preview clips including recorded ones |
 
 ---
 

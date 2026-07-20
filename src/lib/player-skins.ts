@@ -318,6 +318,19 @@ export interface SkinSculptData {
 
 export type SkinSculptBrush = 'add' | 'remove' | 'smooth';
 
+/** Extra primitive welded onto a skin part (compound skins). */
+export interface SkinBondedPart {
+  id: string;
+  primitive: SkinPrimitive;
+  shape?: SkinShapeParams;
+  material?: SkinMaterial;
+  /** Local offset relative to the parent skin part. */
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+  sculpt?: SkinSculptData;
+}
+
 export interface SkinAttachment {
   /** Unique instance id (required for multiple addons). Defaults to slot. */
   id?: string;
@@ -344,6 +357,8 @@ export interface SkinAttachment {
   textureUrl?: string;
   /** ZBrush-style blob sculpt vertex dump (primitives). */
   sculpt?: SkinSculptData;
+  /** Extra shapes bonded onto this part (compound skin). */
+  bonded?: SkinBondedPart[];
   /** Character-local position (feet at y=0). Same in editor & gameplay. */
   position: [number, number, number];
   rotation: [number, number, number];
@@ -351,6 +366,27 @@ export interface SkinAttachment {
   bone?: string;
   /** @deprecated use material.color */
   color?: string;
+}
+
+export function createBondedPart(
+  primitive: SkinPrimitive = 'sphere',
+  partial?: Partial<SkinBondedPart>
+): SkinBondedPart {
+  return {
+    id: `bond_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    primitive,
+    shape:
+      primitive === 'box'
+        ? { width: 0.18, height: 0.18, depth: 0.18, radialSegments: 10 }
+        : primitive === 'cylinder'
+          ? { radiusTop: 0.1, radiusBottom: 0.1, height: 0.22, radialSegments: 20 }
+          : { radius: 0.12, radialSegments: 24, heightSegments: 16 },
+    material: { ...DEFAULT_SKIN_MATERIAL },
+    position: [0.12, 0.05, 0],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    ...partial,
+  };
 }
 
 export interface PlayerSkinPreset {

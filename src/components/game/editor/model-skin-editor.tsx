@@ -43,12 +43,14 @@ import {
 import {
   applySculptStroke,
   applySculptDataToGeometry,
+  collectSculptMeshes,
   findSculptMesh,
   readSculptData,
 } from './skin-sculpt';
 import {
   attachmentKey,
   baseModelKeyFromEntity,
+  createBondedPart,
   defaultAttachment,
   DEFAULT_SKIN_MATERIAL,
   materialForFeel,
@@ -140,6 +142,7 @@ export function ModelSkinEditor({
   const [symmetryX, setSymmetryX] = useState(true);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const skipAttachRebuildRef = useRef(false);
   const baseKey = baseModelKeyFromEntity(entity);
 
   const activeAtt =
@@ -180,11 +183,20 @@ export function ModelSkinEditor({
         if (cancelled) return;
         if (!previewRef.current) {
           previewRef.current = new SkinPreview(host, {
-            onSculptCommit: (data) => {
+            onSculptCommit: (data, target) => {
+              // Mesh already mutated in WebGL — skip React→Three rebuild so undo UUIDs stay valid.
+              skipAttachRebuildRef.current = true;
               setAttachments((prev) =>
-                prev.map((a) =>
-                  attachmentKey(a) === activeKeyRef.current ? { ...a, sculpt: data } : a
-                )
+                prev.map((a) => {
+                  if (attachmentKey(a) !== activeKeyRef.current) return a;
+                  if (target?.bondId) {
+                    const bonded = (a.bonded ?? []).map((b) =>
+                      b.id === target.bondId ? { ...b, sculpt: data } : b
+                    );
+                    return { ...a, bonded };
+                  }
+                  return { ...a, sculpt: data };
+                })
               );
             },
             onHistoryChange: (u, r) => {
@@ -213,6 +225,10 @@ export function ModelSkinEditor({
   }, [entity.model, entity.customModelUrl, entity.id]);
 
   useEffect(() => {
+    if (skipAttachRebuildRef.current) {
+      skipAttachRebuildRef.current = false;
+      return;
+    }
     void previewRef.current?.setAttachments(attachments, activeKey);
   }, [attachments, activeKey]);
 
@@ -243,19 +259,32 @@ export function ModelSkinEditor({
 
   useEffect(() => {
     // Expand/collapse changes host size — force WebGL resize after layout.
-    const id = requestAnimationFrame(() => {
+    const run = () => {
       const host = canvasHostRef.current;
       if (!host) return;
       void host.offsetHeight;
       previewRef.current?.forceResize();
-    });
-    const id2 = requestAnimationFrame(() => {
-      previewRef.current?.forceResize();
-    });
+      if (previewExpanded) {
+        previewRef.current?.prepareSculptSession({
+          showAvatar: false,
+          viewDragMode: 'sculpt',
+          brush: blobBrush ?? 'add',
+          radius: brushRadius,
+          strength: brushStrength,
+          symmetryX,
+          clayView: true,
+        });
+      }
+    };
+    const id = requestAnimationFrame(run);
+    const t = window.setTimeout(run, 60);
+    const t2 = window.setTimeout(run, 180);
     return () => {
       cancelAnimationFrame(id);
-      cancelAnimationFrame(id2);
+      window.clearTimeout(t);
+      window.clearTimeout(t2);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewExpanded]);
 
   useEffect(() => {
@@ -499,8 +528,17 @@ export function ModelSkinEditor({
                 type="button"
                 onClick={() => {
                   setViewDragMode('sculpt');
-                  if (!blobBrush) setBlobBrush('add');
+                  setBlobBrush((b) => b ?? 'add');
                   setShowAvatar(false);
+                  previewRef.current?.prepareSculptSession({
+                    showAvatar: false,
+                    viewDragMode: 'sculpt',
+                    brush: blobBrush ?? 'add',
+                    radius: brushRadius,
+                    strength: brushStrength,
+                    symmetryX,
+                    clayView,
+                  });
                 }}
                 className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide ${
                   viewDragMode === 'sculpt'
@@ -546,9 +584,19 @@ export function ModelSkinEditor({
                 setPreviewExpanded(next);
                 if (next) {
                   setViewDragMode('sculpt');
-                  if (!blobBrush) setBlobBrush('add');
+                  setBlobBrush((b) => b ?? 'add');
                   setShowAvatar(false);
                   setClayView(true);
+                  setSourceMode('sculpt');
+                  previewRef.current?.prepareSculptSession({
+                    showAvatar: false,
+                    viewDragMode: 'sculpt',
+                    brush: blobBrush ?? 'add',
+                    radius: brushRadius,
+                    strength: brushStrength,
+                    symmetryX,
+                    clayView: true,
+                  });
                 }
               }}
               className={`h-8 px-2 rounded-lg border text-[10px] font-bold uppercase pointer-events-auto flex items-center gap-1 ${
@@ -889,6 +937,98 @@ export function ModelSkinEditor({
                 onChange={patchShape}
               />
 
+              {/* Bond extra shapes onto this skin part */}
+              <div className="mt-2 space-y-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2.5">
+                <p className="text-[10px] uppercase tracking-wider text-emerald-200/90 font-bold">
+                  Insert &amp; bond shapes
+                </p>
+                <p className="text-[10px] text-white/40 leading-snug">
+                  Add spheres, boxes, cones onto this skin — then sculpt each piece. This is how
+                  layered / stunning skins are built.
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {SKIN_PRIMITIVES.slice(0, 6).map((p) => (
+                    <button
+                      key={`bond-${p.id}`}
+                      type="button"
+                      onClick={() => {
+                        const part = createBondedPart(p.id);
+                        patchActive({ bonded: [...(activeAtt.bonded ?? []), part] });
+                        setShowAvatar(false);
+                        setViewDragMode('sculpt');
+                      }}
+                      className="px-2 py-1 rounded text-[10px] border border-emerald-400/30 text-emerald-100/80 hover:bg-emerald-500/15"
+                    >
+                      + {p.label}
+                    </button>
+                  ))}
+                </div>
+                {(activeAtt.bonded?.length ?? 0) > 0 && (
+                  <ul className="space-y-1.5">
+                    {activeAtt.bonded!.map((b) => (
+                      <li
+                        key={b.id}
+                        className="flex items-center gap-2 rounded-md border border-white/10 bg-black/30 px-2 py-1.5"
+                      >
+                        <span className="text-[10px] text-white/70 flex-1 truncate capitalize">
+                          {b.primitive}
+                        </span>
+                        <label className="text-[9px] text-white/40 flex items-center gap-1">
+                          X
+                          <input
+                            type="number"
+                            step={0.02}
+                            value={b.position[0]}
+                            onChange={(e) => {
+                              const v = Number(e.target.value) || 0;
+                              patchActive({
+                                bonded: activeAtt.bonded!.map((x) =>
+                                  x.id === b.id
+                                    ? { ...x, position: [v, x.position[1], x.position[2]] }
+                                    : x
+                                ),
+                              });
+                            }}
+                            className="w-12 rounded bg-black/40 border border-white/10 px-1 py-0.5 text-[10px] text-white"
+                          />
+                        </label>
+                        <label className="text-[9px] text-white/40 flex items-center gap-1">
+                          Y
+                          <input
+                            type="number"
+                            step={0.02}
+                            value={b.position[1]}
+                            onChange={(e) => {
+                              const v = Number(e.target.value) || 0;
+                              patchActive({
+                                bonded: activeAtt.bonded!.map((x) =>
+                                  x.id === b.id
+                                    ? { ...x, position: [x.position[0], v, x.position[2]] }
+                                    : x
+                                ),
+                              });
+                            }}
+                            className="w-12 rounded bg-black/40 border border-white/10 px-1 py-0.5 text-[10px] text-white"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          title="Remove bonded shape"
+                          onClick={() =>
+                            patchActive({
+                              bonded: (activeAtt.bonded ?? []).filter((x) => x.id !== b.id),
+                            })
+                          }
+                          className="text-rose-300/80 hover:text-rose-200"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
               {/* ZBrush-lite blob brushes */}
               <div className="mt-2 space-y-2 rounded-lg border border-fuchsia-500/25 bg-fuchsia-500/5 p-2.5">
                 <p className="text-[10px] uppercase tracking-wider text-fuchsia-200/90 font-bold">
@@ -912,10 +1052,19 @@ export function ModelSkinEditor({
                       key={id}
                       type="button"
                       onClick={() => {
-                        setBlobBrush((b) => (b === id ? null : id));
+                        setBlobBrush(id);
                         setViewDragMode('sculpt');
                         setShowAvatar(false);
                         setSourceMode('sculpt');
+                        previewRef.current?.prepareSculptSession({
+                          showAvatar: false,
+                          viewDragMode: 'sculpt',
+                          brush: id,
+                          radius: brushRadius,
+                          strength: brushStrength,
+                          symmetryX,
+                          clayView,
+                        });
                       }}
                       className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-[10px] font-bold border ${
                         blobBrush === id && viewDragMode === 'sculpt'
@@ -1273,6 +1422,25 @@ export function ModelSkinEditor({
             Lock on body = exact Offset you set here shows the same in play. Follow bone = sticks to
             head/hand when the avatar animates.
           </p>
+          {(activeAtt.attachMode ?? slotMeta?.defaultAttachMode) === 'bone' && (
+            <label className="block text-[10px] text-white/45">
+              Bone (optional override)
+              <select
+                className="mt-0.5 w-full rounded bg-black/40 border border-white/10 px-2 py-1.5 text-xs text-white"
+                value={activeAtt.bone ?? ''}
+                onChange={(e) =>
+                  patchActive({ bone: e.target.value || undefined })
+                }
+              >
+                <option value="">Auto ({slotMeta?.boneHints?.join(', ') || 'hint'})</option>
+                {(previewRef.current?.getBoneNames?.() ?? []).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {slotMeta?.canPairMirror && (
             <button
               type="button"
@@ -1895,12 +2063,24 @@ class SkinPreview {
     strength: number;
     symmetryX?: boolean;
   } | null = null;
-  private onSculptCommit?: (data: { positions: number[]; count: number }) => void;
+  private onSculptCommit?: (
+    data: { positions: number[]; count: number },
+    target?: { bondId?: string }
+  ) => void;
   private onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void;
   private commitTimer: number | null = null;
-  private undoStack: { positions: number[]; count: number }[] = [];
-  private redoStack: { positions: number[]; count: number }[] = [];
-  private strokeStartSnapshot: { positions: number[]; count: number } | null = null;
+  private undoStack: { positions: number[]; count: number; meshUuid: string; bondId?: string }[] =
+    [];
+  private redoStack: { positions: number[]; count: number; meshUuid: string; bondId?: string }[] =
+    [];
+  private strokeStartSnapshot: {
+    positions: number[];
+    count: number;
+    meshUuid: string;
+    bondId?: string;
+  } | null = null;
+  private strokeChanged = false;
+  private lastSculptMesh: THREE.Mesh | null = null;
   private lastFramedKey: string | null = null;
   private clayView = false;
   private clayBackup = new Map<string, THREE.Material | THREE.Material[]>();
@@ -1913,7 +2093,10 @@ class SkinPreview {
   constructor(
     host: HTMLElement,
     opts?: {
-      onSculptCommit?: (data: { positions: number[]; count: number }) => void;
+      onSculptCommit?: (
+        data: { positions: number[]; count: number },
+        target?: { bondId?: string }
+      ) => void;
       onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void;
     }
   ) {
@@ -1939,6 +2122,7 @@ class SkinPreview {
     const sun = new THREE.DirectionalLight(0xfff0dd, 1);
     sun.position.set(2, 4, 3);
     this.scene.add(sun);
+    this.soloRoot.name = 'soloRoot';
     this.scene.add(this.soloRoot);
     this.applyCameraFromSpherical();
     const resize = () => {
@@ -1980,6 +2164,32 @@ class SkinPreview {
     this.orbiting = false;
     this.panning = false;
     this.updateCursor();
+  }
+
+  /** Instantly arm sculpt mode (used by Full / Sculpt buttons before React effects). */
+  prepareSculptSession(cfg: {
+    showAvatar: boolean;
+    viewDragMode: ViewDragMode;
+    brush: SkinSculptBrush;
+    radius: number;
+    strength: number;
+    symmetryX: boolean;
+    clayView: boolean;
+  }) {
+    this.setShowAvatar(cfg.showAvatar);
+    this.setViewDragMode(cfg.viewDragMode);
+    this.setBlobBrush({
+      brush: cfg.brush,
+      radius: cfg.radius,
+      strength: cfg.strength,
+      symmetryX: cfg.symmetryX,
+    });
+    this.setClayView(cfg.clayView);
+    this.forceResize();
+    if (!cfg.showAvatar) {
+      this.frameSoloPart();
+      this.applyCameraFromSpherical();
+    }
   }
 
   setClayView(on: boolean) {
@@ -2087,25 +2297,66 @@ class SkinPreview {
   }
 
   undoSculpt() {
-    const mesh = findSculptMesh(this.soloRoot);
-    if (!mesh || !this.undoStack.length) return;
+    const entry = this.undoStack.pop();
+    if (!entry) return;
+    const mesh =
+      this.findMeshByUuid(entry.meshUuid) ??
+      findSculptMesh(this.soloRoot) ??
+      this.lastSculptMesh;
+    if (!mesh) {
+      this.undoStack.push(entry);
+      return;
+    }
     const current = readSculptData(mesh);
-    if (current) this.redoStack.push(current);
-    const prev = this.undoStack.pop()!;
-    applySculptDataToGeometry(mesh.geometry as THREE.BufferGeometry, prev);
-    this.onSculptCommit?.(prev);
+    if (current) {
+      this.redoStack.push({
+        ...current,
+        meshUuid: mesh.uuid,
+        bondId: entry.bondId,
+      });
+    }
+    applySculptDataToGeometry(mesh.geometry as THREE.BufferGeometry, entry);
+    this.onSculptCommit?.(entry, { bondId: entry.bondId });
     this.emitHistory();
   }
 
   redoSculpt() {
-    const mesh = findSculptMesh(this.soloRoot);
-    if (!mesh || !this.redoStack.length) return;
+    const entry = this.redoStack.pop();
+    if (!entry) return;
+    const mesh =
+      this.findMeshByUuid(entry.meshUuid) ??
+      findSculptMesh(this.soloRoot) ??
+      this.lastSculptMesh;
+    if (!mesh) {
+      this.redoStack.push(entry);
+      return;
+    }
     const current = readSculptData(mesh);
-    if (current) this.undoStack.push(current);
-    const next = this.redoStack.pop()!;
-    applySculptDataToGeometry(mesh.geometry as THREE.BufferGeometry, next);
-    this.onSculptCommit?.(next);
+    if (current) {
+      this.undoStack.push({
+        ...current,
+        meshUuid: mesh.uuid,
+        bondId: entry.bondId,
+      });
+    }
+    applySculptDataToGeometry(mesh.geometry as THREE.BufferGeometry, entry);
+    this.onSculptCommit?.(entry, { bondId: entry.bondId });
     this.emitHistory();
+  }
+
+  private findMeshByUuid(uuid: string): THREE.Mesh | null {
+    let found: THREE.Mesh | null = null;
+    const visit = (root: THREE.Object3D | null) => {
+      if (!root || found) return;
+      root.traverse((o) => {
+        if (found) return;
+        const m = o as THREE.Mesh;
+        if (m.isMesh && m.uuid === uuid) found = m;
+      });
+    };
+    visit(this.soloRoot);
+    visit(this.avatar);
+    return found;
   }
 
   private applyCameraFromSpherical() {
@@ -2196,8 +2447,37 @@ class SkinPreview {
     // Sculpt mode
     if (!this.brush) return;
     this.painting = true;
-    const mesh = findSculptMesh(this.soloRoot);
-    this.strokeStartSnapshot = mesh ? readSculptData(mesh) : null;
+    this.strokeChanged = false;
+    this.strokeStartSnapshot = null;
+
+    // Raycast first (no mutate) so undo captures the true pre-stroke mesh.
+    const meshes = collectSculptMeshes(
+      this.soloRoot.visible ? this.soloRoot : null,
+      this.showBody && this.avatar ? this.avatar : null
+    );
+    if (meshes.length) {
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      if (rect.width >= 1 && rect.height >= 1) {
+        this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        this.raycaster.setFromCamera(this.pointer, this.camera);
+        const hits = this.raycaster.intersectObjects(meshes, true);
+        const hitMesh = hits[0]?.object as THREE.Mesh | undefined;
+        if (hitMesh?.isMesh) {
+          const data = readSculptData(hitMesh);
+          if (data) {
+            this.strokeStartSnapshot = {
+              ...data,
+              meshUuid: hitMesh.uuid,
+              bondId:
+                typeof hitMesh.userData?.bondId === 'string'
+                  ? hitMesh.userData.bondId
+                  : undefined,
+            };
+          }
+        }
+      }
+    }
     this.paintAt(e.clientX, e.clientY);
   };
 
@@ -2287,13 +2567,14 @@ class SkinPreview {
     } catch {
       /* ignore */
     }
-    if (this.strokeStartSnapshot) {
+    if (this.strokeChanged && this.strokeStartSnapshot) {
       this.undoStack.push(this.strokeStartSnapshot);
       if (this.undoStack.length > 40) this.undoStack.shift();
       this.redoStack = [];
-      this.strokeStartSnapshot = null;
       this.emitHistory();
     }
+    this.strokeStartSnapshot = null;
+    this.strokeChanged = false;
     this.flushSculptCommit();
   };
 
@@ -2308,33 +2589,45 @@ class SkinPreview {
     e.preventDefault();
   };
 
-  private paintAt(clientX: number, clientY: number) {
-    if (!this.brush) return;
-    const mesh = findSculptMesh(this.soloRoot);
-    if (!mesh) return;
+  private paintAt(clientX: number, clientY: number): THREE.Mesh | null {
+    if (!this.brush) return null;
+    const meshes = collectSculptMeshes(
+      this.soloRoot.visible ? this.soloRoot : null,
+      this.showBody && this.avatar ? this.avatar : null
+    );
+    if (!meshes.length) return null;
 
     const rect = this.renderer.domElement.getBoundingClientRect();
-    if (rect.width < 1 || rect.height < 1) return;
+    if (rect.width < 1 || rect.height < 1) return null;
     this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const hits = this.raycaster.intersectObject(mesh, true);
-    if (!hits.length) return;
+    const hits = this.raycaster.intersectObjects(meshes, true);
+    if (!hits.length) return null;
     const hitMesh = hits[0].object as THREE.Mesh;
-    if (!hitMesh.isMesh) return;
-    applySculptStroke(hitMesh, hits[0].point, {
+    if (!hitMesh.isMesh) return null;
+    const changed = applySculptStroke(hitMesh, hits[0].point, {
       brush: this.brush.brush,
       radius: this.brush.radius,
       strength: this.brush.strength,
       symmetryX: Boolean(this.brush.symmetryX),
     });
+    if (changed) {
+      this.strokeChanged = true;
+      this.lastSculptMesh = hitMesh;
+    }
+    return hitMesh;
   }
 
   private flushSculptCommit() {
-    const mesh = findSculptMesh(this.soloRoot);
+    const mesh = this.lastSculptMesh ?? findSculptMesh(this.soloRoot);
     if (!mesh) return;
     const data = readSculptData(mesh);
-    if (data) this.onSculptCommit?.(data);
+    if (data) {
+      this.onSculptCommit?.(data, {
+        bondId: typeof mesh.userData?.bondId === 'string' ? mesh.userData.bondId : undefined,
+      });
+    }
   }
 
   setAvatar(scene: THREE.Object3D) {
@@ -2343,6 +2636,15 @@ class SkinPreview {
     this.avatar = scene;
     this.scene.add(scene);
     this.setShowAvatar(this.showBody);
+  }
+
+  getBoneNames(): string[] {
+    if (!this.avatar) return [];
+    const names: string[] = [];
+    this.avatar.traverse((o) => {
+      if ((o as THREE.Bone).isBone && o.name) names.push(o.name);
+    });
+    return names;
   }
 
   setShowAvatar(on: boolean) {
