@@ -30,6 +30,8 @@ model User {
   notifyEmail Boolean  @default(true)
   isBanned    Boolean  @default(false)
   isVip       Boolean  @default(false)
+  /// When Premium / Ranked access expires (null + isVip = legacy permanent VIP).
+  premiumExpiresAt DateTime?
   isMuted     Boolean  @default(false)
   createdAt   DateTime @default(now())
 

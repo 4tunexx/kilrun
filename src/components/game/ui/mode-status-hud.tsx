@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import type { NetRoomState } from '../../net/types';
+import type { NetRoomState } from '../net/types';
 import type { KilrunMode } from '@/lib/game-modes';
 
 /** Compact in-match status for Horde waves / Competitive score. */

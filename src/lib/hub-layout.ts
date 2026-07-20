@@ -11,6 +11,7 @@ export type HubPageId =
   | 'leaderboard'
   | 'stats'
   | 'store'
+  | 'premium'
   | 'badges'
   | 'community'
   | 'guides'
@@ -37,6 +38,7 @@ export const HUB_NAV_CATALOG: HubNavItemDef[] = [
   { id: 'leaderboard', label: 'Leaderboard', defaultRail: 'left' },
   { id: 'stats', label: 'Statistics', defaultRail: 'left' },
   { id: 'store', label: 'Store', defaultRail: 'left' },
+  { id: 'premium', label: 'Premium', defaultRail: 'left' },
   { id: 'badges', label: 'Badges', defaultRail: 'right' },
   { id: 'community', label: 'Community', defaultRail: 'right' },
   { id: 'guides', label: 'Guides', defaultRail: 'right' },

@@ -78,6 +78,8 @@ interface KilrunEngineProps {
   equippedSkins?: SkinAttachment[] | null;
   /** Which game mode room to join. */
   mode?: KilrunMode;
+  /** Competitive only — casual skips KP; ranked requires Premium. */
+  competitiveQueue?: 'casual' | 'ranked';
 }
 
 export default function KilrunEngine({
@@ -87,12 +89,18 @@ export default function KilrunEngine({
   isAdmin = false,
   equippedSkins = null,
   mode = 'deathrun',
+  competitiveQueue = 'casual',
 }: KilrunEngineProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const pausedRef = useRef(false);
-  const roomName: GameRoomName = mode;
+  const roomName: GameRoomName =
+    mode === 'competitive'
+      ? competitiveQueue === 'ranked'
+        ? 'competitive_ranked'
+        : 'competitive'
+      : mode;
   const {
     connectionRef,
     playersRef,
@@ -208,7 +216,7 @@ export default function KilrunEngine({
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
 
-    const activeId = getActivePlayMapId();
+    const activeId = getActivePlayMapIdForMode(mode);
     if (activeId) {
       const doc = loadMapPlayable(activeId);
       if (doc) {
@@ -463,6 +471,7 @@ export default function KilrunEngine({
               room={room}
               player={localPlayer}
               players={playersRef.current}
+              queue={competitiveQueue}
               onContinue={onExit}
             />
           ) : (

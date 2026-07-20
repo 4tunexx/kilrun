@@ -431,8 +431,9 @@ const COMPETITIVE_REWARDS = {
 } as const;
 
 /**
- * Persist a Competitive 4v4 result, apply Elo-style KP, and sync rank.
- * Rounds are best-of-6 (first to 4 wins typical); pass roundsWon/Lost for margin.
+ * Persist a Competitive 4v4 result.
+ * - ranked (Premium): Elo KP applied
+ * - casual: XP/VP + missions only — no KP / rank change
  */
 export async function recordCompetitiveResult(input: {
   userId: string;
@@ -442,37 +443,54 @@ export async function recordCompetitiveResult(input: {
   roundsWon?: number;
   roundsLost?: number;
   kills?: number;
+  /** Default ranked for backward compat; casual skips KP. */
+  queue?: 'casual' | 'ranked';
 }): Promise<{ xpEarned: number; vpEarned: number; kpDelta: number; kp: number; rank: string }> {
   const { applyKpDelta } = await import('@/lib/progression-actions');
   const { computeCompetitiveKpDelta, KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
+  const { isPremiumActive } = await import('@/lib/premium');
 
   const user = await prisma.user.findUnique({ where: { id: input.userId } });
   if (!user) throw new Error('User not found');
+
+  // Ranked KP only for active Premium — non-premium always treated as casual.
+  const premium = isPremiumActive({
+    isVip: user.isVip,
+    premiumExpiresAt: (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt,
+  });
+  const requested = input.queue ?? 'ranked';
+  const queue = requested === 'ranked' && premium ? 'ranked' : 'casual';
+
   const playerKp =
     typeof (user as { kp?: number }).kp === 'number'
       ? (user as { kp: number }).kp
       : KP_DEFAULT;
 
-  const kpDelta = computeCompetitiveKpDelta({
-    playerKp,
-    opponentAvgKp: input.opponentAvgKp,
-    won: input.outcome === 'win',
-    roundsWon: input.roundsWon,
-    roundsLost: input.roundsLost,
-  });
+  const kpDelta =
+    queue === 'ranked'
+      ? computeCompetitiveKpDelta({
+          playerKp,
+          opponentAvgKp: input.opponentAvgKp,
+          won: input.outcome === 'win',
+          roundsWon: input.roundsWon,
+          roundsLost: input.roundsLost,
+        })
+      : 0;
 
   const reward = COMPETITIVE_REWARDS[input.outcome];
+  const modeTag = queue === 'ranked' ? 'competitive_ranked' : 'competitive';
 
   await prisma.matchResult.create({
     data: {
       userId: input.userId,
-      mode: 'competitive',
+      mode: modeTag,
       role: input.team,
       outcome: input.outcome,
       xpEarned: reward.xp,
       vpEarned: reward.vp,
       kpDelta,
       stats: {
+        queue,
         roundsWon: input.roundsWon ?? 0,
         roundsLost: input.roundsLost ?? 0,
         kills: input.kills ?? 0,
@@ -486,8 +504,20 @@ export async function recordCompetitiveResult(input: {
     data: { vpCurrency: { increment: reward.vp } },
   });
 
-  await grantXp(input.userId, reward.xp, 'Competitive match');
-  const kpResult = await applyKpDelta(input.userId, kpDelta, 'Competitive match');
+  await grantXp(
+    input.userId,
+    reward.xp,
+    queue === 'ranked' ? 'Competitive Ranked' : 'Competitive Casual'
+  );
+
+  let nextKp = playerKp;
+  let rank = user.currentRank || getRankForKp(playerKp);
+  if (queue === 'ranked' && kpDelta) {
+    const kpResult = await applyKpDelta(input.userId, kpDelta, 'Competitive Ranked');
+    nextKp = kpResult?.kp ?? playerKp + kpDelta;
+    rank = kpResult?.rank ?? getRankForKp(nextKp);
+  }
+
   await processMatchProgression({
     userId: input.userId,
     mode: 'competitive',
@@ -495,13 +525,12 @@ export async function recordCompetitiveResult(input: {
     role: input.team,
   });
 
-  const nextKp = kpResult?.kp ?? playerKp + kpDelta;
   return {
     xpEarned: reward.xp,
     vpEarned: reward.vp,
     kpDelta,
     kp: nextKp,
-    rank: kpResult?.rank ?? getRankForKp(nextKp),
+    rank,
   };
 }
 

@@ -16,6 +16,10 @@ interface LobbyViewProps {
   isAdmin?: boolean;
   /** Competitive KP for Elo snapshot at join. */
   kp?: number;
+  /** Premium active — required for ranked queue. */
+  isPremium?: boolean;
+  /** Casual (no KP) vs Ranked Premium. */
+  competitiveQueue?: 'casual' | 'ranked';
 }
 
 const LobbyView: React.FC<LobbyViewProps> = ({
@@ -27,10 +31,12 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   xpProgress = 0,
   isAdmin = false,
   kp,
+  isPremium = false,
+  competitiveQueue = 'casual',
 }) => {
   const joinOptions = useMemo(
-    () => ({ userId, username, avatarUrl, isAdmin, kp }),
-    [userId, username, avatarUrl, isAdmin, kp]
+    () => ({ userId, username, avatarUrl, isAdmin, kp, isPremium }),
+    [userId, username, avatarUrl, isAdmin, kp, isPremium]
   );
   const [equippedSkins, setEquippedSkins] = useState<SkinAttachment[]>([]);
   const [skinsReady, setSkinsReady] = useState(false);
@@ -67,6 +73,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   return (
     <KilrunEngine
       mode={mode}
+      competitiveQueue={competitiveQueue}
       joinOptions={joinOptions}
       onExit={onCancel}
       xpProgress={xpProgress}

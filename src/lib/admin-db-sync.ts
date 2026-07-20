@@ -16,7 +16,7 @@ import { writeAuditLog } from '@/lib/audit';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-20-kp-ranks';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-20-premium-ranked';
 
 async function requireAdmin() {
   const session = await auth();
@@ -53,8 +53,8 @@ export type AdminDbSyncResult = {
  * Push Prisma schema to Mongo and verify KP / skin fields are writable.
  * Call from Admin → Dashboard → Sync database schema.
  *
- * Needed after deploying: User.kp, MatchResult.kpDelta / stats, and any new
- * mission / achievement / badge seed keys.
+ * Needed after deploying: User.kp, User.premiumExpiresAt, MatchResult.kpDelta / stats,
+ * and any new mission / achievement / badge seed keys.
  */
 export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
   const staff = await requireAdmin();
@@ -172,6 +172,28 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`MatchResult verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — MatchResult.kpDelta/stats not writable. (${msg})`
+    );
+  }
+
+  // Runtime verify: Premium membership expiry (Ranked Competitive gate)
+  try {
+    const current = await prisma.user.findUnique({
+      where: { id: staff.id },
+      select: { premiumExpiresAt: true },
+    });
+    const existing = current?.premiumExpiresAt ?? null;
+    await prisma.user.update({
+      where: { id: staff.id },
+      data: { premiumExpiresAt: existing },
+    });
+    steps.push(
+      `premiumExpiresAt field verified (read/write OK, value=${existing ? existing.toISOString() : 'null'})`
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`premiumExpiresAt verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — User.premiumExpiresAt not writable. Run Sync again after deploy. (${msg})`
     );
   }
 

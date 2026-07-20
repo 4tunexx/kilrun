@@ -15,9 +15,12 @@ export interface JoinOptions {
   isAdmin?: boolean;
   /** Competitive KP snapshot (optional). */
   kp?: number;
+  /** Premium membership — required for Ranked Competitive. */
+  isPremium?: boolean;
 }
 
-export type GameRoomName = 'deathrun' | 'horde' | 'competitive';
+export type GameRoomName = 'deathrun' | 'horde' | 'competitive' | 'competitive_ranked';
+
 
 
 export interface RoomCallbacks {

@@ -39,6 +39,8 @@ interface JoinOptions {
   avatarUrl?: string;
   isAdmin?: boolean;
   kp?: number;
+  /** Premium / VIP — required for competitive_ranked. */
+  isPremium?: boolean;
 }
 
 interface SpawnPoint {
@@ -77,7 +79,9 @@ export class CompetitiveRoom extends Room<RoomState> {
 
   onCreate() {
     this.setState(new RoomState());
-    this.state.modeTag = 'competitive';
+    const named = String((this as unknown as { roomName?: string }).roomName ?? '');
+    this.state.modeTag =
+      named === 'competitive_ranked' ? 'competitive_ranked' : 'competitive';
     this.state.platforms.push(
       ...createFromBlueprints([
         { x: 0, y: 0, z: 0, width: 18, depth: 22, kind: 'solid', height: 0.25 },
@@ -148,6 +152,11 @@ export class CompetitiveRoom extends Room<RoomState> {
   }
 
   onJoin(client: Client, options: JoinOptions) {
+    const ranked = this.state.modeTag === 'competitive_ranked';
+    if (ranked && !options.isPremium && !options.isAdmin) {
+      throw new Error('Premium required for Ranked Competitive');
+    }
+
     if (!this.hostSessionId) this.hostSessionId = client.sessionId;
     if (options.isAdmin) this.adminSessions.add(client.sessionId);
 

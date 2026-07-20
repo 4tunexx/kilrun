@@ -893,14 +893,23 @@ export async function getLivePlayerState(userId?: string) {
   const dailyCompleted = dailyBoard.filter((m) => m.isCompleted).length;
   const dailyTotal = Math.max(dailyBoard.length, 5);
 
+  const { isPremiumActive } = await import('@/lib/premium');
+  const premiumExpiresAt = (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt ?? null;
+  const premiumActive = isPremiumActive({
+    isVip: user.isVip,
+    premiumExpiresAt,
+  });
+
   return {
     id: user.id,
     xpProgress: user.xpProgress,
     vpCurrency: user.vpCurrency,
     kp: userKp,
-    currentRank: kpRank,
+    currentRank: premiumActive ? kpRank : 'Go Premium',
     role: user.role,
     isVip: user.isVip,
+    isPremium: premiumActive,
+    premiumExpiresAt: premiumExpiresAt ? new Date(premiumExpiresAt).toISOString() : null,
     emailVerified: user.emailVerified,
     avatarUrl: user.avatarUrl,
     username: user.username,

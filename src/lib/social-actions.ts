@@ -8,7 +8,6 @@ import { INVENTORY_RESELL_RATE } from '@/lib/inventory-constants';
 import {
   canAccessAdmin,
   steamIdsPromotedToAdmin,
-  VIP_UNLOCK_VP_COST,
   type AccountRole,
   isAccountRole,
 } from '@/lib/roles';
@@ -303,42 +302,94 @@ async function grantVipCosmetics(userId: string) {
 }
 
 export async function unlockVipWithVp() {
+  return purchasePremiumWithVp();
+}
+
+/**
+ * Extend Kilrun Premium by 30 days for PREMIUM_VP_COST VP.
+ * Stacks from current expiry if still active.
+ */
+export async function purchasePremiumWithVp() {
+  const { PREMIUM_VP_COST, addPremiumDays, isPremiumActive } = await import('@/lib/premium');
   const user = await requireSessionUser();
-  if (user.isVip || user.role === 'vip') {
-    return { ok: true as const, already: true };
+  if (user.vpCurrency < PREMIUM_VP_COST) {
+    return { ok: false as const, error: `Need ${PREMIUM_VP_COST} VP` };
   }
-  if (user.vpCurrency < VIP_UNLOCK_VP_COST) {
-    return { ok: false as const, error: 'Not enough VP' };
-  }
+
+  const currentExpires =
+    typeof (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt !== 'undefined'
+      ? (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt
+      : null;
+  const nextExpires = addPremiumDays(
+    currentExpires && isPremiumActive({ isVip: user.isVip, premiumExpiresAt: currentExpires })
+      ? new Date(currentExpires)
+      : new Date()
+  );
+
   await prisma.user.update({
     where: { id: user.id },
     data: {
-      vpCurrency: { decrement: VIP_UNLOCK_VP_COST },
+      vpCurrency: { decrement: PREMIUM_VP_COST },
       isVip: true,
+      premiumExpiresAt: nextExpires,
       role: user.role === 'player' ? 'vip' : user.role,
     },
   });
   try {
     await grantVipCosmetics(user.id);
   } catch {
-    // Cosmetics are best-effort — VIP flag already applied.
+    // Cosmetics are best-effort — Premium flag already applied.
   }
   await prisma.notification.create({
     data: {
       userId: user.id,
-      title: 'VIP unlocked',
-      body: `Welcome to VIP! Orange name color, crown badge, exclusive banner, frame, and nickname effect are yours. More in-game VIP perks coming soon.`,
+      title: 'Premium activated',
+      body: `Kilrun Premium is active until ${nextExpires.toLocaleDateString()}. Ranked Competitive (KP) and hub perks unlocked.`,
       type: 'vip',
     },
   });
   await processWebsiteAction(user.id, 'vip');
-  return { ok: true as const, already: false };
+  return {
+    ok: true as const,
+    already: false,
+    premiumExpiresAt: nextExpires.toISOString(),
+  };
+}
+
+/**
+ * Card checkout placeholder — records a billing interest ticket until Stripe is wired.
+ * Returns a support-ticket style confirmation; does not grant Premium yet.
+ */
+export async function requestPremiumCardCheckout() {
+  const user = await requireSessionUser();
+  await prisma.notification.create({
+    data: {
+      userId: user.id,
+      title: 'Premium card checkout',
+      body: 'Card billing ($2.99/mo) is almost ready. You can unlock Premium now with 5000 VP, or open Support for billing help.',
+      type: 'system',
+    },
+  });
+  try {
+    await prisma.supportTicket.create({
+      data: {
+        userId: user.id,
+        subject: 'Premium $2.99/mo checkout request',
+        category: 'Billing / VP',
+        body: 'Player requested Kilrun Premium monthly card checkout ($2.99). Wire Stripe or manually grant 30 days.',
+        status: 'open',
+      },
+    });
+  } catch {
+    // SupportTicket fields may vary — non-fatal
+  }
+  return { ok: true as const, pending: true as const };
 }
 
 /** Mongo: missing isBanned must still count as not banned (false filter skips unset). */
 const NOT_BANNED = { NOT: { isBanned: true } } as const;
 
-export type LeaderboardSort = 'xp' | 'vp' | 'stats';
+export type LeaderboardSort = 'xp' | 'vp' | 'stats' | 'ranked';
 
 export type LeaderboardRow = {
   id: string;
@@ -348,6 +399,8 @@ export type LeaderboardRow = {
   vpCurrency: number;
   currentRank: string;
   isVip: boolean;
+  isPremium?: boolean;
+  kp: number;
   role: string;
   reputation: number;
   wins: number;
@@ -382,6 +435,8 @@ export async function getLeaderboard(opts?: {
       vpCurrency: true,
       currentRank: true,
       isVip: true,
+      kp: true,
+      premiumExpiresAt: true,
       role: true,
       reputation: true,
       ...PUBLIC_USER_COSMETIC_SELECT,
@@ -389,7 +444,7 @@ export async function getLeaderboard(opts?: {
   });
 
   const matchResults = await prisma.matchResult.findMany({
-    select: { userId: true, role: true, outcome: true },
+    select: { userId: true, role: true, outcome: true, mode: true },
   });
 
   const statsByUser = new Map<
@@ -404,21 +459,35 @@ export async function getLeaderboard(opts?: {
     }
     if (r.outcome === 'win' || r.outcome === 'survived') s.wins += 1;
     if (r.outcome === 'loss' || r.outcome === 'eliminated') s.losses += 1;
-    // Trapper round wins count as eliminations / "kills" proxy
+    // Trapper / Competitive kills proxy
     if (r.role === 'trapper' && r.outcome === 'win') s.kills += 1;
+    if ((r.mode === 'competitive' || r.mode === 'competitive_ranked') && r.outcome === 'win') {
+      s.kills += 1;
+    }
   }
 
-  const rows: LeaderboardRow[] = users.map((u) => {
+  const { isPremiumActive } = await import('@/lib/premium');
+  const { getRankForKp, KP_DEFAULT } = await import('@/lib/kp');
+
+  let rows: LeaderboardRow[] = users.map((u) => {
     const s = statsByUser.get(u.id) ?? { wins: 0, losses: 0, kills: 0 };
     const kd = s.losses > 0 ? Math.round((s.kills / s.losses) * 100) / 100 : s.kills;
+    const kp =
+      typeof (u as { kp?: number }).kp === 'number' ? (u as { kp: number }).kp : KP_DEFAULT;
+    const premium = isPremiumActive({
+      isVip: u.isVip,
+      premiumExpiresAt: (u as { premiumExpiresAt?: Date | null }).premiumExpiresAt,
+    });
     return {
       id: u.id,
       username: u.username || 'Player',
       avatarUrl: u.avatarUrl || '',
       xpProgress: u.xpProgress ?? 0,
       vpCurrency: u.vpCurrency ?? 0,
-      currentRank: u.currentRank || 'Unranked',
+      currentRank: premium ? getRankForKp(kp) : 'Go Premium',
       isVip: !!u.isVip,
+      isPremium: premium,
+      kp,
       role: u.role,
       reputation: u.reputation ?? 0,
       wins: s.wins,
@@ -431,20 +500,29 @@ export async function getLeaderboard(opts?: {
     };
   });
 
-  rows.sort((a, b) => {
-    if (sort === 'vp') {
-      if (b.vpCurrency !== a.vpCurrency) return b.vpCurrency - a.vpCurrency;
-      return b.xpProgress - a.xpProgress;
-    }
-    if (sort === 'stats') {
-      if (b.wins !== a.wins) return b.wins - a.wins;
-      if (b.kd !== a.kd) return b.kd - a.kd;
-      if (b.kills !== a.kills) return b.kills - a.kills;
-      return b.xpProgress - a.xpProgress;
-    }
-    if (b.xpProgress !== a.xpProgress) return b.xpProgress - a.xpProgress;
-    return b.vpCurrency - a.vpCurrency;
-  });
+  if (sort === 'ranked') {
+    // COD-style ranked board: Premium players by KP
+    rows = rows.filter((r) => r.isPremium);
+    rows.sort((a, b) => {
+      if (b.kp !== a.kp) return b.kp - a.kp;
+      return b.wins - a.wins;
+    });
+  } else {
+    rows.sort((a, b) => {
+      if (sort === 'vp') {
+        if (b.vpCurrency !== a.vpCurrency) return b.vpCurrency - a.vpCurrency;
+        return b.xpProgress - a.xpProgress;
+      }
+      if (sort === 'stats') {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        if (b.kd !== a.kd) return b.kd - a.kd;
+        if (b.kills !== a.kills) return b.kills - a.kills;
+        return b.xpProgress - a.xpProgress;
+      }
+      if (b.xpProgress !== a.xpProgress) return b.xpProgress - a.xpProgress;
+      return b.vpCurrency - a.vpCurrency;
+    });
+  }
 
   rows.forEach((r, i) => {
     r.rank = i + 1;

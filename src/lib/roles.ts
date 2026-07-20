@@ -33,4 +33,15 @@ export function steamIdsPromotedToAdmin(): Set<string> {
   return new Set([...OWNER_STEAM_IDS, ...fromEnv]);
 }
 
-export const VIP_UNLOCK_VP_COST = 2500;
+export {
+  PREMIUM_VP_COST,
+  PREMIUM_MONTHLY_USD,
+  PREMIUM_DURATION_DAYS,
+  /** @deprecated Use PREMIUM_VP_COST — Premium replaced one-time VIP unlock. */
+  VIP_UNLOCK_VP_COST,
+  isPremiumActive,
+  premiumMsRemaining,
+  formatPremiumCountdown,
+  addPremiumDays,
+} from '@/lib/premium';
+

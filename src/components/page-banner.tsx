@@ -54,9 +54,13 @@ export const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     title: 'Store',
     subtitle: 'Spend VP on cosmetics, boosts, and emotes.',
   },
+  premium: {
+    title: 'Premium',
+    subtitle: 'Unlock Ranked Competitive, KP Elo, and hub perks — $2.99/mo or 5000 VP.',
+  },
   leaderboard: {
     title: 'Leaderboard',
-    subtitle: 'See who is climbing the ranks.',
+    subtitle: 'XP, combat, and Premium Ranked (KP) ladders.',
   },
   community: {
     title: 'Community',
