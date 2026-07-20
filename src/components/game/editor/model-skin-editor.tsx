@@ -378,7 +378,7 @@ export function ModelSkinEditor({
         })();
     setActiveId(saved.id);
     setPresets(listSkinPresets());
-    onApplyToPlayer(attachments);
+    // Do not auto-apply to the map player — shop skins must be purchased/equipped.
   };
 
   const loadPreset = (p: PlayerSkinPreset) => {
@@ -1346,6 +1346,14 @@ export function ModelSkinEditor({
             className="bg-sky-600 hover:bg-sky-500"
           >
             <Save className="w-4 h-4 mr-1" /> Save skin (thumbnail = this part)
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onApplyToPlayer(attachments)}
+            className="border-white/15"
+          >
+            Apply to map player (editor only)
           </Button>
           {onPublishToShop && (
             <Button

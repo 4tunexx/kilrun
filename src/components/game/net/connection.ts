@@ -40,6 +40,7 @@ export interface RoomCallbacks {
   onPlayerRemove?: (sessionId: string) => void;
   onObstacleAdd?: (obstacle: NetObstacleState, index: number) => void;
   onObstacleChange?: (obstacle: NetObstacleState, index: number) => void;
+  onObstacleRemove?: (index: number) => void;
   onPlatformAdd?: (platform: NetPlatformState, index: number) => void;
   onPlatformChange?: (platform: NetPlatformState, index: number) => void;
   onPlatformRemove?: (index: number) => void;
@@ -141,6 +142,7 @@ export class GameConnection {
       };
       obstacles: {
         onAdd: (cb: (obstacle: NetObstacleState, index: number) => void) => void;
+        onRemove: (cb: (obstacle: NetObstacleState, index: number) => void) => void;
       };
       platforms: {
         onAdd: (cb: (platform: NetPlatformState, index: number) => void) => void;
@@ -161,6 +163,9 @@ export class GameConnection {
       callbacks.onObstacleAdd?.(obstacle, index);
       const obstacleProxy = $(obstacle as never) as unknown as { onChange: (cb: () => void) => void };
       obstacleProxy.onChange(() => callbacks.onObstacleChange?.(obstacle, index));
+    });
+    proxy.obstacles.onRemove?.((_obstacle, index) => {
+      callbacks.onObstacleRemove?.(index);
     });
     proxy.platforms?.onAdd?.((platform, index) => {
       callbacks.onPlatformAdd?.(platform, index);

@@ -69,6 +69,10 @@ export function useRoomState(
         obstaclesRef.current.set(index, obstacle);
         rendererCallbacksRef.current.onObstacleChange?.(obstacle, index);
       },
+      onObstacleRemove: (index) => {
+        obstaclesRef.current.delete(index);
+        rendererCallbacksRef.current.onObstacleRemove?.(index);
+      },
       onPlatformAdd: (platform, index) => {
         platformsRef.current.set(index, platform);
         rendererCallbacksRef.current.onPlatformAdd?.(platform, index);

@@ -20,6 +20,7 @@ import {
 } from '@/lib/cosmetics';
 import { flattenEquippedSkinsMap } from '@/lib/player-skins';
 import type { SkinAttachment } from '@/lib/player-skins';
+import { persistSiteImage } from '@/lib/site-asset-upload';
 
 async function requireSessionUser() {
   const session = await auth();
@@ -1912,6 +1913,15 @@ export async function adminUpsertStoreItem(input: {
   cosmeticConfig?: Record<string, unknown> | null;
 }) {
   await requireStaff();
+  let imageUrl = input.imageUrl;
+  // Editor thumbnails arrive as data URLs — persist to a short public path when possible.
+  if (imageUrl && /^data:image\//i.test(imageUrl)) {
+    try {
+      imageUrl = await persistSiteImage(imageUrl, 'misc');
+    } catch (err) {
+      console.warn('[adminUpsertStoreItem] thumbnail persist failed, keeping data URL', err);
+    }
+  }
   const cosmeticData =
     input.cosmeticSlot !== undefined
       ? {
@@ -1938,7 +1948,7 @@ export async function adminUpsertStoreItem(input: {
         itemCategory: input.itemCategory,
         itemSku: input.itemSku,
         vpPrice: input.vpPrice,
-        imageUrl: input.imageUrl,
+        imageUrl,
         isAvailable: input.isAvailable ?? true,
         ...cosmeticData,
       },
@@ -1950,7 +1960,7 @@ export async function adminUpsertStoreItem(input: {
       itemCategory: input.itemCategory,
       itemSku: input.itemSku,
       vpPrice: input.vpPrice,
-      imageUrl: input.imageUrl,
+      imageUrl,
       isAvailable: input.isAvailable ?? true,
       ...cosmeticData,
     },

@@ -51,7 +51,7 @@ function pruneExtraMeshes(root: THREE.Object3D) {
 export interface CharacterAvatarOptions {
   /** Map player entity — drives custom GLB + clip bindings. */
   avatarEntity?: EditorEntity | null;
-  /** Equipped shop skins (merged with entity.playerSkins). */
+  /** Purchased/equipped shop skins only (map editor skins are ignored in live play). */
   equippedSkins?: SkinAttachment[] | null;
 }
 
@@ -101,10 +101,7 @@ export class ThreeCharacter {
       this.loaded = true;
       this.root.visible = true;
 
-      const skins: SkinAttachment[] = [
-        ...(entity?.playerSkins ?? []),
-        ...(this.avatarOpts.equippedSkins ?? []),
-      ];
+      const skins: SkinAttachment[] = [...(this.avatarOpts.equippedSkins ?? [])];
       if (skins.length) {
         void applySkinAttachments(scene, skins);
       }

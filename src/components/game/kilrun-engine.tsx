@@ -201,7 +201,9 @@ export default function KilrunEngine({
     let disposed = false;
     let raf = 0;
     const world = createThreeWorld(hostElement);
-    const map = new ThreeMap(world.scene);
+    const activeId = getActivePlayMapIdForMode(mode);
+    const hasCustomMap = Boolean(activeId && loadMapPlayable(activeId));
+    const map = new ThreeMap(world.scene, { hardcodedDecor: !hasCustomMap });
     const overlay = new CustomMapOverlay(world.scene);
     const characters = new Map<string, ThreeCharacter>();
     const inputManager = new InputManager(hostElement, isMobile);
@@ -216,11 +218,11 @@ export default function KilrunEngine({
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
 
-    const activeId = getActivePlayMapIdForMode(mode);
     if (activeId) {
       const doc = loadMapPlayable(activeId);
       if (doc) {
         customDocRef.current = doc;
+        map.clearHardcodedDecor();
         void overlay.load(doc);
       }
     }
@@ -228,10 +230,14 @@ export default function KilrunEngine({
     const spawnCharacter = (sessionId: string, username: string) => {
       if (characters.has(sessionId)) return;
       const avatarEntity = customDocRef.current?.entities.find((e) => e.kind === 'player');
+      // Keep map avatar model/anims, but never apply unpaid editor skins in live matches.
+      const avatarForPlay = avatarEntity
+        ? { ...avatarEntity, playerSkins: undefined }
+        : undefined;
       const isLocal = sessionId === connectionRef.current?.sessionId;
       const view = new ThreeCharacter(username, isLocal, {
-        avatarEntity,
-        // Local player: map skins + shop equipped. Remotes: map skins only until server sync.
+        avatarEntity: avatarForPlay,
+        // Only purchased/equipped shop skins show in gameplay.
         equippedSkins: isLocal ? equippedSkinsRef.current : null,
       });
       characters.set(sessionId, view);
@@ -250,6 +256,9 @@ export default function KilrunEngine({
       onObstacleChange: (obstacle, index) => {
         void map.upsertObstacle(index, obstacle);
       },
+      onObstacleRemove: (index) => {
+        map.removeObstacle(index);
+      },
       onPlatformAdd: (platform, index) => {
         void map.upsertPlatform(index, platform);
       },
@@ -266,6 +275,8 @@ export default function KilrunEngine({
     obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o as NetObstacleState));
 
     const syncTimer = window.setInterval(() => {
+      map.prunePlatforms(platformsRef.current.keys());
+      map.pruneObstacles(obstaclesRef.current.keys());
       platformsRef.current.forEach((p, i) => void map.upsertPlatform(i, p));
       obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o));
       const live = new Set(playersRef.current.keys());
@@ -345,11 +356,7 @@ export default function KilrunEngine({
       if (!frozen) {
         const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
         if (shootNow && !wasShootEdge && localSessionId) {
-          const weaponAtt =
-            findWeaponAttachment(equippedSkinsRef.current) ??
-            findWeaponAttachment(
-              customDocRef.current?.entities.find((e) => e.kind === 'player')?.playerSkins
-            );
+          const weaponAtt = findWeaponAttachment(equippedSkinsRef.current);
           const combat = resolveWeaponCombat(weaponAtt);
           characters
             .get(localSessionId)
