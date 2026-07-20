@@ -16,7 +16,7 @@ import { writeAuditLog } from '@/lib/audit';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-20-equipped-skins';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-20-kp-ranks';
 
 async function requireAdmin() {
   const session = await auth();
@@ -50,8 +50,11 @@ export type AdminDbSyncResult = {
 };
 
 /**
- * Push Prisma schema to Mongo and verify skin / cosmetic fields are writable.
+ * Push Prisma schema to Mongo and verify KP / skin fields are writable.
  * Call from Admin → Dashboard → Sync database schema.
+ *
+ * Needed after deploying: User.kp, MatchResult.kpDelta / stats, and any new
+ * mission / achievement / badge seed keys.
  */
 export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
   const staff = await requireAdmin();
@@ -126,6 +129,49 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`equippedSkins verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — equippedSkins not writable. Redeploy with latest Prisma schema, then retry. (${msg})`
+    );
+  }
+
+  // Runtime verify: Killrun Points (KP) + rank for Competitive ladder
+  try {
+    const current = await prisma.user.findUnique({
+      where: { id: staff.id },
+      select: { kp: true, currentRank: true },
+    });
+    const kp = typeof current?.kp === 'number' ? current.kp : 1000;
+    await prisma.user.update({
+      where: { id: staff.id },
+      data: { kp },
+    });
+    steps.push(`kp field verified (read/write OK, value=${kp})`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`kp verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — User.kp not writable. Run Sync again after deploy. (${msg})`
+    );
+  }
+
+  // Runtime verify: MatchResult.kpDelta / stats for Competitive + Horde
+  try {
+    const probe = await prisma.matchResult.create({
+      data: {
+        userId: staff.id,
+        mode: 'schema_probe',
+        outcome: 'probe',
+        xpEarned: 0,
+        vpEarned: 0,
+        kpDelta: 0,
+        stats: { probe: true },
+      },
+    });
+    await prisma.matchResult.delete({ where: { id: probe.id } });
+    steps.push('MatchResult.kpDelta + stats verified');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`MatchResult verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — MatchResult.kpDelta/stats not writable. (${msg})`
     );
   }
 

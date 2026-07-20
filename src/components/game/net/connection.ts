@@ -13,7 +13,12 @@ export interface JoinOptions {
   avatarUrl?: string;
   /** Allows pushing MAIN custom maps into the room. */
   isAdmin?: boolean;
+  /** Competitive KP snapshot (optional). */
+  kp?: number;
 }
+
+export type GameRoomName = 'deathrun' | 'horde' | 'competitive';
+
 
 export interface RoomCallbacks {
   onPlayerAdd?: (player: NetPlayerState, sessionId: string) => void;
@@ -49,7 +54,11 @@ export class GameConnection {
     return this.room?.sessionId;
   }
 
-  public async connect(roomName: 'deathrun', options: JoinOptions, callbacks: RoomCallbacks): Promise<void> {
+  public async connect(
+    roomName: GameRoomName,
+    options: JoinOptions,
+    callbacks: RoomCallbacks
+  ): Promise<void> {
     this.room = await this.client.joinOrCreate(roomName, options);
     const state = this.room.state as never;
     const $ = getStateCallbacks(this.room) as <T>(instance: T) => never;
@@ -100,6 +109,13 @@ export class GameConnection {
         winnerRole: s.winnerRole,
         courseStartX: s.courseStartX,
         courseFinishX: s.courseFinishX,
+        modeTag: s.modeTag,
+        wave: s.wave,
+        monstersAlive: s.monstersAlive,
+        teamKills: s.teamKills,
+        roundIndex: s.roundIndex,
+        scoreA: s.scoreA,
+        scoreB: s.scoreB,
       });
     };
     [
@@ -110,6 +126,13 @@ export class GameConnection {
       'winnerRole',
       'courseStartX',
       'courseFinishX',
+      'modeTag',
+      'wave',
+      'monstersAlive',
+      'teamKills',
+      'roundIndex',
+      'scoreA',
+      'scoreB',
     ].forEach((field) => {
       proxy.listen(field, emitRoomChange);
     });
@@ -183,6 +206,52 @@ export class GameConnection {
     }[];
     spawn?: { x: number; y: number; z: number };
     trapperSpawn?: { x: number; y: number; z: number };
+    playerSpawns?: { x: number; y: number; z: number }[];
+    monsterSpawns?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      monsterType?: 'basic' | 'fast' | 'brute' | 'boss';
+      waveMin?: number;
+      waveMax?: number;
+      countPerWave?: number;
+      spawnIntervalSec?: number;
+    }[];
+    teamASpawns?: { x: number; y: number; z: number }[];
+    teamBSpawns?: { x: number; y: number; z: number }[];
+    healthFloors?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      width: number;
+      depth: number;
+      height: number;
+      healPerTick?: number;
+      intervalMs?: number;
+    }[];
+    redZones?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      width: number;
+      depth: number;
+      height: number;
+      damagePerTick?: number;
+      intervalMs?: number;
+    }[];
+    revivePads?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      width: number;
+      depth: number;
+      height: number;
+      reviveTimeMs?: number;
+    }[];
     worldBounds?: {
       minX: number;
       maxX: number;

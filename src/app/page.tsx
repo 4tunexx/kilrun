@@ -39,6 +39,7 @@ export default async function Page() {
         vpCurrency: user.vpCurrency,
         xpProgress: user.xpProgress,
         currentRank: user.currentRank,
+        kp: typeof (user as { kp?: number }).kp === 'number' ? (user as { kp: number }).kp : 1000,
         role: user.role,
         isVip: user.isVip,
         bio: user.bio,

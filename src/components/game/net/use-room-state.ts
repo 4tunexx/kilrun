@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { GameConnection, type JoinOptions, type RoomCallbacks } from './connection';
+import {
+  GameConnection,
+  type GameRoomName,
+  type JoinOptions,
+  type RoomCallbacks,
+} from './connection';
 import type { NetObstacleState, NetPlatformState, NetPlayerState, NetRoomState } from './types';
 
 const DEFAULT_ROOM_STATE: NetRoomState = {
@@ -10,9 +15,19 @@ const DEFAULT_ROOM_STATE: NetRoomState = {
   matchTimeRemainingMs: 0,
   trapperSessionId: '',
   winnerRole: '',
+  modeTag: 'deathrun',
+  wave: 0,
+  monstersAlive: 0,
+  teamKills: 0,
+  roundIndex: 0,
+  scoreA: 0,
+  scoreB: 0,
 };
 
-export function useRoomState(joinOptions: JoinOptions | null) {
+export function useRoomState(
+  joinOptions: JoinOptions | null,
+  roomName: GameRoomName = 'deathrun'
+) {
   const connectionRef = useRef<GameConnection | null>(null);
   const playersRef = useRef<Map<string, NetPlayerState>>(new Map());
   const obstaclesRef = useRef<Map<number, NetObstacleState>>(new Map());
@@ -69,8 +84,9 @@ export function useRoomState(joinOptions: JoinOptions | null) {
       onRoomChange: (r) => setRoom(r),
     };
 
-    connection.connect('deathrun', joinOptions, callbacks).catch((err) => {
-      if (!disposed) setConnectionError(err instanceof Error ? err.message : 'Failed to connect to game server');
+    connection.connect(roomName, joinOptions, callbacks).catch((err) => {
+      if (!disposed)
+        setConnectionError(err instanceof Error ? err.message : 'Failed to connect to game server');
     });
 
     return () => {
@@ -78,7 +94,7 @@ export function useRoomState(joinOptions: JoinOptions | null) {
       connection.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [joinOptions?.userId]);
+  }, [joinOptions?.userId, roomName]);
 
   return {
     connectionRef,

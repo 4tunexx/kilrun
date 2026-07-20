@@ -3,7 +3,7 @@
  * (server/src/schema/RoomState.ts).
  */
 
-export type PlayerRole = 'trapper' | 'runner';
+export type PlayerRole = 'trapper' | 'runner' | 'survivor' | 'team_a' | 'team_b';
 export type MatchPhase = 'lobby' | 'countdown' | 'playing' | 'results';
 
 export interface NetPlayerState {
@@ -26,6 +26,7 @@ export interface NetPlayerState {
   isGrounded: boolean;
   isSprinting: boolean;
   isReady: boolean;
+  kp?: number;
 }
 
 export interface NetPlatformState {
@@ -66,6 +67,13 @@ export interface NetRoomState {
   winnerRole: string;
   courseStartX?: number;
   courseFinishX?: number;
+  modeTag?: string;
+  wave?: number;
+  monstersAlive?: number;
+  teamKills?: number;
+  roundIndex?: number;
+  scoreA?: number;
+  scoreB?: number;
 }
 
 export interface PlayerInputMessage {
