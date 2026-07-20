@@ -308,10 +308,52 @@ Use floor pieces for every standable surface, place a runner spawn, validate, se
 
 ---
 
+## Part H — Deep-dive addendum (post-audit review)
+
+Extra high-severity findings confirmed in a second pass of the editor + sim. Fold these into Phase 0–2 tickets.
+
+### H1. Map / multiplayer authenticity
+
+| Finding | Risk | Suggested phase |
+|---|---|---|
+| `loadCustomMap` is not role-gated — any lobby client can replace platforms | Griefing / overwrite | **Phase 0** |
+| MAIN map + overlay meshes live in **publisher’s** `localStorage`; other clients get pads (if pushed) but may miss props/traps | Visual desync | **Phase 0 / 5** |
+| Starter empty-map floors reach ~X=16 while finish is hardcoded `FINISH_X ≈ 46` | New maps “impossible” to finish | **Phase 0** |
+| Trapper spawn extracted but **never applied** in match (everyone uses runner spawn) | Role imbalance | **Phase 0** |
+| `group` entity kind has no place UI; `isAdmin` prop on `MapEditor` unused | Dead surface / weak guards | Phase 3 polish |
+| Checkpoints tagged on pads but **no respawn logic** in sim | Misleading kind | Phase 4 |
+| Custom map **clears** default timed obstacles with no authoring replacement | Empty deathrun | Phase 4 |
+
+### H2. Physics / input edge cases
+
+| Finding | Risk | Suggested phase |
+|---|---|---|
+| No **jump cut** — `wasJumpHeld` only edges the buffer | Fixed-height only | **Phase 3** |
+| Jump can soft-fail when energy &lt; `JUMP_ENERGY_COST * 0.25` with little feedback | “Dead” Space bar | Phase 1 / 3 |
+| Short mobile jump taps can miss a 30 Hz send frame | Missed jumps | Phase 1 (press latch) |
+| No side/underside AABB push-out — walk through pad volumes; jump up through floors | Unfair / soft walls | **Phase 2** |
+| Horizontal velocity lives only in server `PlayerSimScratch` (not synced); clients lerp `x,y,z` | Laggy feel | Phase 6 |
+| Mobile has **no crouch** mapped | Feature gap | Phase 3 nice-to-have |
+| `findSupportPlatform` snap window can attach oddly near stacked pad edges | Snags / float | Phase 2 |
+
+### H3. Solo-admin workflow that works *today*
+
+1. Admin → Map Editor → New  
+2. Place **many** `floor*` pieces long enough toward finish (~world X ~46)  
+3. Place **Runner Spawn**  
+4. Save → **Set as MAIN**  
+5. Join Deathrun from **that same browser** while still in lobby/countdown so `loadCustomMap` fires  
+6. Treat walls/stairs/doors as **decor only** until Phase 2  
+
+Do **not** use Play Test alone to judge gap difficulty.
+
+---
+
 ## Change log
 
 | Date | Note |
 |---|---|
 | 2026-07-20 | Initial audit from codebase review; no runtime play session logged in this doc. |
+| 2026-07-20 | Added Part H deep-dive from follow-up editor + physics audits (security, finish/spawn gaps, jump/net edge cases). |
 
 *Re-run this audit after Phase 0–1 land; update verdicts in the table at the top.*
