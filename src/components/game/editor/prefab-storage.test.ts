@@ -9,6 +9,7 @@ import {
   mapDocToSimPlatforms,
   mapDocToSimTeleports,
   mapDocToWorldBounds,
+  prepareDocForPlayTest,
 } from './prefab-storage';
 
 function baseDoc(entities: MapDocument['entities']): MapDocument {
@@ -100,6 +101,28 @@ describe('mapDoc spawn / finish / hazards / bounds', () => {
     ]);
     const spawns = mapDocSpawnPoints(doc);
     expect(spawns.runner).toEqual({ x: 3, y: 2, z: 0.5 });
+  });
+
+  it('prepareDocForPlayTest invents Start from Player when missing', () => {
+    const doc = baseDoc([
+      {
+        id: 'p',
+        name: 'Player',
+        kind: 'player',
+        model: 'figurine-cube-detailed',
+        layerId: 'l1',
+        position: [4, 1, 6],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const prepared = prepareDocForPlayTest(doc);
+    expect(prepared.autoStart).toBe(true);
+    expect(prepared.doc.entities.some((e) => e.kind === 'start')).toBe(true);
+    const start = prepared.doc.entities.find((e) => e.kind === 'start')!;
+    expect(start.position).toEqual([4, 1, 6]);
+    const again = prepareDocForPlayTest(prepared.doc);
+    expect(again.autoStart).toBe(false);
   });
 
   it('exports finish volumes and expands world bounds', () => {

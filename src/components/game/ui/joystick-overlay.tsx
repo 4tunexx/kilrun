@@ -46,8 +46,8 @@ export function JoystickOverlay({
     const tick = () => {
       const joy = joystickRef.current;
       if (joy) {
-        paint(leftBaseRef.current, leftKnobRef.current, joy.aimStick);
-        paint(rightBaseRef.current, rightKnobRef.current, joy.moveStick);
+        paint(leftBaseRef.current, leftKnobRef.current, joy.moveStick);
+        paint(rightBaseRef.current, rightKnobRef.current, joy.aimStick);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -59,7 +59,7 @@ export function JoystickOverlay({
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[115] overflow-hidden">
-      {/* Left = aim / look */}
+      {/* Left = move */}
       <div
         ref={leftBaseRef}
         className="absolute top-0 left-0 rounded-full border-2 border-white/35 bg-white/10 transition-opacity duration-75"
@@ -67,10 +67,10 @@ export function JoystickOverlay({
       />
       <div
         ref={leftKnobRef}
-        className="absolute top-0 left-0 rounded-full border-2 border-primary/80 bg-primary/50 shadow-[0_0_20px_rgba(239,68,68,0.45)] transition-opacity duration-75"
+        className="absolute top-0 left-0 rounded-full border-2 border-sky-400/80 bg-sky-400/45 shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-opacity duration-75"
         style={{ width: KNOB_SIZE, height: KNOB_SIZE, opacity: 0 }}
       />
-      {/* Right = move */}
+      {/* Right = aim / look */}
       <div
         ref={rightBaseRef}
         className="absolute top-0 left-0 rounded-full border-2 border-white/35 bg-white/10 transition-opacity duration-75"
@@ -78,13 +78,13 @@ export function JoystickOverlay({
       />
       <div
         ref={rightKnobRef}
-        className="absolute top-0 left-0 rounded-full border-2 border-sky-400/80 bg-sky-400/45 shadow-[0_0_20px_rgba(56,189,248,0.4)] transition-opacity duration-75"
+        className="absolute top-0 left-0 rounded-full border-2 border-primary/80 bg-primary/50 shadow-[0_0_20px_rgba(239,68,68,0.45)] transition-opacity duration-75"
         style={{ width: KNOB_SIZE, height: KNOB_SIZE, opacity: 0 }}
       />
 
       <div className="absolute bottom-3 left-3 right-3 flex justify-between text-[10px] sm:text-xs uppercase tracking-wider text-white/50 font-semibold pointer-events-none">
-        <span>Hold left · aim / look</span>
-        <span>Hold right · move</span>
+        <span>Hold left · move</span>
+        <span>Hold right · look</span>
       </div>
     </div>
   );

@@ -68,8 +68,13 @@ import type { GameRoomName } from './net/connection';
 
 const MapEditor = dynamic(() => import('./editor/map-editor'), { ssr: false });
 
-const PITCH_SENS = 0.0026;
-const ZOOM = 5.8;
+const PITCH_SENS = 0.0028;
+/** TPS boom length — far enough to see body + platforms, close enough for aim. */
+const ZOOM = 6.6;
+const PITCH_MIN = -1.05;
+const PITCH_MAX = 0.72;
+/** Slight look-down so the course ahead reads clearly (Fortnite / TPS idle). */
+const DEFAULT_PITCH = -0.22;
 
 interface KilrunEngineProps {
   joinOptions: JoinOptions;
@@ -238,7 +243,7 @@ export default function KilrunEngine({
     joystickRef.current = inputManager.joystick;
 
     let cameraYaw = 0;
-    let cameraPitch = 0.08;
+    let cameraPitch = DEFAULT_PITCH;
     let sendAccumulatorMs = 0;
     let shootHeld = false;
     let wasShootEdge = false;
@@ -334,7 +339,7 @@ export default function KilrunEngine({
         if (isMobile && inputManager.isAiming()) {
           const aim = inputManager.joystick.getAimVector();
           cameraYaw -= aim.x * CAMERA_YAW_STICK_SENS * dt;
-          cameraPitch -= aim.y * 0.9 * dt;
+          cameraPitch -= aim.y * 0.95 * dt;
           if (!aimingRef.current) {
             aimingRef.current = true;
             setAiming(true);
@@ -350,7 +355,7 @@ export default function KilrunEngine({
         inputManager.consumeMouseLookDeltaX();
         inputManager.consumeMouseLookDeltaY();
       }
-      cameraPitch = THREE.MathUtils.clamp(cameraPitch, -1.0, 0.78);
+      cameraPitch = THREE.MathUtils.clamp(cameraPitch, PITCH_MIN, PITCH_MAX);
 
       const localSessionId = connectionRef.current?.sessionId;
       const localState = localSessionId ? playersRef.current.get(localSessionId) : undefined;

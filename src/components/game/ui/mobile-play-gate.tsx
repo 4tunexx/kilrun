@@ -91,8 +91,8 @@ export function MobilePlayGate({
                 <h3 className="text-2xl font-black text-white">Go fullscreen</h3>
                 <p className="text-slate-300 text-sm leading-relaxed">
                   Tap below for fullscreen play. Then hold{' '}
-                  <span className="text-white font-semibold">left</span> to aim / look and{' '}
-                  <span className="text-white font-semibold">right</span> to move.
+                  <span className="text-white font-semibold">left</span> to move and{' '}
+                  <span className="text-white font-semibold">right</span> to look.
                 </p>
                 <Button size="lg" className="w-full text-lg" onClick={enterPlay}>
                   Enter fullscreen & play

@@ -1,6 +1,8 @@
 /**
  * Plain (non-Colyseus) platformer step used by Map Play Test so preview
  * matches DeathrunRoom / applyMovement behavior as closely as practical.
+ *
+ * Keep tunables in sync with `server/src/sim/constants.ts` + `movement.ts`.
  */
 
 export interface SimPad {
@@ -50,29 +52,36 @@ export interface SimInput {
   crouch: boolean;
 }
 
-const GRAVITY = 30;
-const JUMP_VELOCITY = 9.8;
-const JUMP_CUT = 0.42;
+/** === Tunables (mirror server/src/sim/constants.ts) === */
+const GRAVITY = 32;
+const APEX_GRAVITY_MULT = 0.52;
+const APEX_VZ_THRESHOLD = 2.2;
+const JUMP_VELOCITY = 10.4;
+const JUMP_CUT = 0.4;
 const JUMP_PAD_BOOST = 14;
-const COYOTE_MS = 110;
-const JUMP_BUFFER_MS = 130;
-const GROUND_ACCEL = 32;
-const GROUND_FRICTION = 16;
-const AIR_ACCEL = 12;
-const AIR_CONTROL = 0.78;
-const MAX_GROUND_SPEED = 6.4;
-const SPRINT_MULT = 1.38;
-const MAX_AIR_MULT = 1.08;
-const MAX_FALL = 24;
+const COYOTE_MS = 125;
+const JUMP_BUFFER_MS = 150;
+const GROUND_ACCEL = 40;
+const GROUND_FRICTION = 18;
+const AIR_ACCEL = 14;
+const AIR_CONTROL = 0.88;
+const MAX_GROUND_SPEED = 6.8;
+const SPRINT_MULT = 1.42;
+const MAX_AIR_MULT = 1.12;
+const MAX_FALL = 26;
 const PLAYER_RADIUS = 0.4;
 const PLAYER_HEIGHT = 1.7;
 const MAX_ENERGY = 100;
 const ENERGY_DRAIN = 28;
 const ENERGY_REGEN = 18;
-const JUMP_ENERGY = 6;
+const JUMP_ENERGY = 5;
 const SKIN = 0.02;
 const ENERGY_EXHAUSTED_THRESHOLD = 50;
 const ENERGY_EXHAUSTED_SPEED_MULT = 0.72;
+const LAND_SNAP_FAST = 0.7;
+const LAND_SNAP_SLOW = 0.4;
+/** Past pad rim (beyond capsule radius) we still pull feet back on. */
+const LEDGE_ASSIST = 0.55;
 
 export function createSimScratch(): SimScratch {
   return {
@@ -90,20 +99,48 @@ function findSupport(
   y: number,
   z: number,
   pads: SimPad[],
-  maxSnapDown = 0.35
+  maxSnapDown = LAND_SNAP_SLOW,
+  radius = PLAYER_RADIUS
 ) {
   let best: { pad: SimPad; topZ: number } | null = null;
   for (const pad of pads) {
     const halfW = pad.width / 2;
     const halfD = pad.depth / 2;
-    if (x < pad.x - halfW - PLAYER_RADIUS || x > pad.x + halfW + PLAYER_RADIUS) continue;
-    if (y < pad.y - halfD - PLAYER_RADIUS || y > pad.y + halfD + PLAYER_RADIUS) continue;
+    if (x < pad.x - halfW - radius || x > pad.x + halfW + radius) continue;
+    if (y < pad.y - halfD - radius || y > pad.y + halfD + radius) continue;
     const topZ = pad.z;
     if (z >= topZ - maxSnapDown && z <= topZ + 0.55) {
       if (!best || topZ > best.topZ) best = { pad, topZ };
     }
   }
   return best;
+}
+
+/**
+ * Mario / Celeste-style ledge forgiveness: if you're barely off a pad edge
+ * but still near the top surface, nudge feet back onto the pad.
+ */
+function tryLedgeAssist(
+  x: number,
+  y: number,
+  z: number,
+  pads: SimPad[]
+): { x: number; y: number } | null {
+  for (const pad of pads) {
+    const topZ = pad.z;
+    if (z < topZ - LAND_SNAP_SLOW || z > topZ + 0.55) continue;
+    const halfW = pad.width / 2;
+    const halfD = pad.depth / 2;
+    const ox = Math.max(0, Math.abs(x - pad.x) - halfW);
+    const oy = Math.max(0, Math.abs(y - pad.y) - halfD);
+    if (ox > LEDGE_ASSIST || oy > LEDGE_ASSIST) continue;
+    if (ox <= 0 && oy <= 0) continue; // already inside
+    return {
+      x: clamp(x, pad.x - halfW + 0.04, pad.x + halfW - 0.04),
+      y: clamp(y, pad.y - halfD + 0.04, pad.y + halfD - 0.04),
+    };
+  }
+  return null;
 }
 
 function resolveSolids(body: SimBody, pads: SimPad[]) {
@@ -163,8 +200,17 @@ export function stepPlatformer(
   }
   if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;
 
-  const support = findSupport(body.x, body.y, body.z, pads);
-  let grounded = !!support && body.vz <= 0.15;
+  let support = findSupport(body.x, body.y, body.z, pads);
+  if (!support) {
+    const nudged = tryLedgeAssist(body.x, body.y, body.z, pads);
+    if (nudged) {
+      body.x = nudged.x;
+      body.y = nudged.y;
+      support = findSupport(body.x, body.y, body.z, pads);
+    }
+  }
+
+  let grounded = !!support && body.vz <= 0.2;
   body.isGrounded = grounded;
 
   if (grounded && support) {
@@ -193,10 +239,11 @@ export function stepPlatformer(
   if (
     (body.isGrounded || scratch.coyoteMs > 0) &&
     scratch.jumpBufferMs > 0 &&
-    body.energy >= JUMP_ENERGY * 0.25
+    body.energy >= JUMP_ENERGY * 0.2
   ) {
     body.vz = JUMP_VELOCITY;
     body.isGrounded = false;
+    grounded = false;
     scratch.coyoteMs = 0;
     scratch.jumpBufferMs = 0;
     body.energy = Math.max(0, body.energy - JUMP_ENERGY);
@@ -230,8 +277,10 @@ export function stepPlatformer(
       scratch.velY *= cap / ns;
     }
   } else {
-    scratch.velX += wishX * AIR_ACCEL * AIR_CONTROL * dt;
-    scratch.velY += wishY * AIR_ACCEL * AIR_CONTROL * dt;
+    // Stronger air steer near apex (Celeste / modern platformer)
+    const apexBoost = Math.abs(body.vz) < APEX_VZ_THRESHOLD ? 1.18 : 1;
+    scratch.velX += wishX * AIR_ACCEL * AIR_CONTROL * apexBoost * dt;
+    scratch.velY += wishY * AIR_ACCEL * AIR_CONTROL * apexBoost * dt;
     const airMax = maxSpeed * MAX_AIR_MULT;
     const ns = Math.hypot(scratch.velX, scratch.velY);
     if (ns > airMax && ns > 0) {
@@ -251,10 +300,22 @@ export function stepPlatformer(
   if (Math.abs(body.y - beforePushY) > 1e-5) scratch.velY = 0;
 
   if (!body.isGrounded) {
-    body.vz = Math.max(-MAX_FALL, body.vz - GRAVITY * dt);
+    let g = GRAVITY;
+    if (Math.abs(body.vz) < APEX_VZ_THRESHOLD) g *= APEX_GRAVITY_MULT;
+    body.vz = Math.max(-MAX_FALL, body.vz - g * dt);
     body.z += body.vz * dt;
-    const land = findSupport(body.x, body.y, body.z, pads, 0.5);
-    if (land && body.vz <= 0 && body.z <= land.topZ + 0.05) {
+
+    const snap = body.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
+    let land = findSupport(body.x, body.y, body.z, pads, snap);
+    if (!land) {
+      const nudged = tryLedgeAssist(body.x, body.y, body.z, pads);
+      if (nudged) {
+        body.x = nudged.x;
+        body.y = nudged.y;
+        land = findSupport(body.x, body.y, body.z, pads, snap);
+      }
+    }
+    if (land && body.vz <= 0 && body.z <= land.topZ + 0.08) {
       body.z = land.topZ;
       if (land.pad.kind === 'jumpPad') {
         body.vz = land.pad.boost && land.pad.boost > 0 ? land.pad.boost : JUMP_PAD_BOOST;
@@ -264,6 +325,14 @@ export function stepPlatformer(
         body.vz = 0;
         body.isGrounded = true;
         scratch.coyoteMs = COYOTE_MS;
+        // Same-frame buffered jump on landing (feels like Celeste / modern platformers)
+        if (scratch.jumpBufferMs > 0 && body.energy >= JUMP_ENERGY * 0.2) {
+          body.vz = JUMP_VELOCITY;
+          body.isGrounded = false;
+          scratch.coyoteMs = 0;
+          scratch.jumpBufferMs = 0;
+          body.energy = Math.max(0, body.energy - JUMP_ENERGY);
+        }
       }
     }
   }
