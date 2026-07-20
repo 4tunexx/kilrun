@@ -1042,30 +1042,61 @@ export function ModelSkinEditor({
             />
           )}
           <p className="text-[10px] text-white/35">
-            Upload a PNG/JPG for the hat/gear surface, or use pattern colors above.
+            Upload a PNG/JPG for this part&apos;s surface, or use pattern colors above.
           </p>
         </div>
 
-        <Vec3Sliders
-          label="Offset on player (slide to place hat / gear)"
-          value={activeAtt.position}
-          onChange={(position) => patchActive({ position })}
-          min={-1.5}
-          max={1.5}
-          step={0.01}
-        />
-        <Vec3Sliders
-          label="Rotation °"
-          value={activeAtt.rotation}
-          onChange={(rotation) => patchActive({ rotation })}
-          min={-180}
-          max={180}
-          step={1}
-        />
+        {/* Place any selected part on the player (hat, face, torso, pants, boots, gloves, weapon, custom…) */}
+        <div className="space-y-2 rounded-lg border border-amber-400/25 bg-amber-500/5 p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] uppercase tracking-wider text-amber-200/90 font-bold">
+              Place on player · {slotMeta?.label ?? slot}
+            </p>
+            {!showAvatar && (
+              <button
+                type="button"
+                className="text-[9px] font-bold uppercase text-sky-300 hover:text-sky-100"
+                onClick={() => setShowAvatar(true)}
+              >
+                Show on body
+              </button>
+            )}
+          </div>
+          <p className="text-[9px] text-white/40 leading-snug">
+            Slide X / Y / Z to move this part if it sits wrong. Works for every body slot and custom
+            addons — not only hats. Use <b className="text-white/70">On body</b> to preview.
+          </p>
+          <Vec3Sliders
+            label="Position"
+            value={activeAtt.position}
+            onChange={(position) => {
+              if (!showAvatar) setShowAvatar(true);
+              patchActive({ position });
+            }}
+            mins={[-1.5, -0.25, -1.5]}
+            maxs={[1.5, 2.2, 1.5]}
+            step={0.01}
+            resetTo={slotMeta?.defaultOffset ?? [0, 1, 0]}
+            resetLabel="Reset to slot default"
+          />
+          <Vec3Sliders
+            label="Rotation °"
+            value={activeAtt.rotation}
+            onChange={(rotation) => {
+              if (!showAvatar) setShowAvatar(true);
+              patchActive({ rotation });
+            }}
+            mins={[-180, -180, -180]}
+            maxs={[180, 180, 180]}
+            step={1}
+            resetTo={[0, 0, 0]}
+            resetLabel="Reset rotation"
+          />
+        </div>
 
         {/* Attach mode + pair mirror */}
         <div className="space-y-2 rounded-lg border border-white/10 bg-black/25 p-2.5">
-          <p className="text-[10px] uppercase tracking-wider text-white/45">Placement</p>
+          <p className="text-[10px] uppercase tracking-wider text-white/45">Placement mode</p>
           <div className="flex gap-1.5">
             {(
               [
@@ -1610,56 +1641,70 @@ function Vec3Sliders({
   label,
   value,
   onChange,
-  min,
-  max,
+  mins,
+  maxs,
   step,
+  resetTo,
+  resetLabel,
 }: {
   label: string;
   value: [number, number, number];
   onChange: (v: [number, number, number]) => void;
-  min: number;
-  max: number;
+  mins: [number, number, number];
+  maxs: [number, number, number];
   step: number;
+  resetTo?: [number, number, number];
+  resetLabel?: string;
 }) {
   return (
-    <div className="space-y-2 rounded-lg border border-white/10 bg-black/25 p-2.5">
+    <div className="space-y-2">
       <p className="text-[10px] uppercase tracking-wider text-white/45">{label}</p>
-      {(['X', 'Y', 'Z'] as const).map((axis, i) => (
-        <label key={axis} className="flex items-center gap-2 text-[10px] text-white/50">
-          <span className="w-4 shrink-0 font-bold text-white/70">{axis}</span>
-          <input
-            type="range"
-            min={min}
-            max={max}
-            step={step}
-            value={Math.min(max, Math.max(min, value[i]))}
-            onChange={(e) => {
-              const next = [...value] as [number, number, number];
-              next[i] = Number(e.target.value);
-              onChange(next);
-            }}
-            className="flex-1 accent-amber-400 h-2"
-          />
-          <input
-            type="number"
-            step={step}
-            value={Number(value[i].toFixed(3))}
-            onChange={(e) => {
-              const next = [...value] as [number, number, number];
-              next[i] = Number(e.target.value) || 0;
-              onChange(next);
-            }}
-            className="w-14 shrink-0 rounded bg-black/40 border border-white/10 px-1 py-0.5 text-[10px] tabular-nums text-white text-right"
-          />
-        </label>
-      ))}
-      <button
-        type="button"
-        className="text-[9px] text-white/40 hover:text-amber-200"
-        onClick={() => onChange([0, 0, 0])}
-      >
-        Reset {label.includes('Rotation') ? 'rotation' : 'offset'} to 0
-      </button>
+      {(['X', 'Y', 'Z'] as const).map((axis, i) => {
+        const min = mins[i];
+        const max = maxs[i];
+        const clamped = Math.min(max, Math.max(min, value[i]));
+        const outOfRange = value[i] < min - 1e-6 || value[i] > max + 1e-6;
+        return (
+          <label key={axis} className="flex items-center gap-2 text-[10px] text-white/50">
+            <span className="w-4 shrink-0 font-bold text-white/70">{axis}</span>
+            <input
+              type="range"
+              min={min}
+              max={max}
+              step={step}
+              value={clamped}
+              onChange={(e) => {
+                const next = [...value] as [number, number, number];
+                next[i] = Number(e.target.value);
+                onChange(next);
+              }}
+              className="flex-1 accent-amber-400 h-2"
+            />
+            <input
+              type="number"
+              step={step}
+              value={Number(value[i].toFixed(3))}
+              onChange={(e) => {
+                const next = [...value] as [number, number, number];
+                next[i] = Number(e.target.value) || 0;
+                onChange(next);
+              }}
+              className={`w-14 shrink-0 rounded bg-black/40 border px-1 py-0.5 text-[10px] tabular-nums text-white text-right ${
+                outOfRange ? 'border-amber-400/60' : 'border-white/10'
+              }`}
+            />
+          </label>
+        );
+      })}
+      {resetTo && (
+        <button
+          type="button"
+          className="text-[9px] text-white/40 hover:text-amber-200"
+          onClick={() => onChange([...resetTo] as [number, number, number])}
+        >
+          {resetLabel ?? 'Reset'}
+        </button>
+      )}
     </div>
   );
 }
