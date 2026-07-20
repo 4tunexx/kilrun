@@ -178,6 +178,15 @@ export const SKIN_ATTACH_SLOTS: {
   },
 ];
 
+export interface SkinSculptData {
+  /** Flat xyz vertex positions after blob sculpt. */
+  positions: number[];
+  /** Must match geometry vertex count or sculpt is ignored. */
+  count: number;
+}
+
+export type SkinSculptBrush = 'add' | 'remove' | 'smooth';
+
 export interface SkinAttachment {
   slot: SkinAttachSlot;
   /** Catalog prototype id (optional if primitive / custom). */
@@ -189,6 +198,8 @@ export interface SkinAttachment {
   material?: SkinMaterial;
   /** Uploaded or generated texture (data URL / path). */
   textureUrl?: string;
+  /** ZBrush-style blob sculpt vertex dump (primitives). */
+  sculpt?: SkinSculptData;
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];

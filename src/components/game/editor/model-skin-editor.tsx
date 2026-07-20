@@ -16,6 +16,9 @@ import {
   Image as ImageIcon,
   Eye,
   EyeOff,
+  CirclePlus,
+  CircleMinus,
+  Waves,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { EditorEntity } from './map-document';
@@ -28,6 +31,11 @@ import {
   captureSkinPartThumbnail,
 } from './skin-attachments';
 import {
+  applySculptStroke,
+  findSculptMesh,
+  readSculptData,
+} from './skin-sculpt';
+import {
   baseModelKeyFromEntity,
   defaultAttachment,
   DEFAULT_SKIN_MATERIAL,
@@ -38,6 +46,7 @@ import {
   type SkinAttachment,
   type SkinMaterial,
   type SkinPrimitive,
+  type SkinSculptBrush,
   type SkinShapeParams,
 } from '@/lib/player-skins';
 import {
@@ -71,9 +80,11 @@ export function ModelSkinEditor({
   const previewRef = useRef<SkinPreview | null>(null);
   const glbFileRef = useRef<HTMLInputElement>(null);
   const texFileRef = useRef<HTMLInputElement>(null);
+  const slotRef = useRef<SkinAttachSlot>('hat');
   const [presets, setPresets] = useState<PlayerSkinPreset[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [slot, setSlot] = useState<SkinAttachSlot>('hat');
+  slotRef.current = slot;
   const [attachments, setAttachments] = useState<SkinAttachment[]>([
     defaultAttachment('hat'),
   ]);
@@ -84,6 +95,9 @@ export function ModelSkinEditor({
   const [busy, setBusy] = useState(false);
   const [showAvatar, setShowAvatar] = useState(true);
   const [sourceMode, setSourceMode] = useState<SourceMode>('sculpt');
+  const [blobBrush, setBlobBrush] = useState<SkinSculptBrush | null>('add');
+  const [brushRadius, setBrushRadius] = useState(0.12);
+  const [brushStrength, setBrushStrength] = useState(0.55);
   const baseKey = baseModelKeyFromEntity(entity);
 
   const activeAtt =
@@ -118,7 +132,17 @@ export function ModelSkinEditor({
       try {
         const loaded = await loadPlayerAvatar(entity);
         if (cancelled) return;
-        if (!previewRef.current) previewRef.current = new SkinPreview(host);
+        if (!previewRef.current) {
+          previewRef.current = new SkinPreview(host, {
+            onSculptCommit: (data) => {
+              setAttachments((prev) =>
+                prev.map((a) =>
+                  a.slot === slotRef.current ? { ...a, sculpt: data } : a
+                )
+              );
+            },
+          });
+        }
         previewRef.current.setAvatar(loaded.scene);
         previewRef.current.setShowAvatar(showAvatar);
         await previewRef.current.setAttachments(attachments, slot);
@@ -145,6 +169,14 @@ export function ModelSkinEditor({
   }, [showAvatar]);
 
   useEffect(() => {
+    previewRef.current?.setBlobBrush(
+      blobBrush
+        ? { brush: blobBrush, radius: brushRadius, strength: brushStrength }
+        : null
+    );
+  }, [blobBrush, brushRadius, brushStrength]);
+
+  useEffect(() => {
     return () => {
       previewRef.current?.dispose();
       previewRef.current = null;
@@ -167,7 +199,7 @@ export function ModelSkinEditor({
   };
 
   const patchShape = (partial: SkinShapeParams) => {
-    patchActive({ shape: { ...shape, ...partial } });
+    patchActive({ shape: { ...shape, ...partial }, sculpt: undefined });
   };
 
   const ensureSlot = (s: SkinAttachSlot) => {
@@ -182,13 +214,14 @@ export function ModelSkinEditor({
     if (slot === s) setSlot('hat');
   };
 
-  const useSculpt = (prim: SkinPrimitive) => {
+  const usePrimitive = (prim: SkinPrimitive) => {
     const meta = SKIN_ATTACH_SLOTS.find((x) => x.id === slot)!;
     patchActive({
       primitive: prim,
       shape: { ...meta.defaultShape },
       model: undefined,
       customModelUrl: undefined,
+      sculpt: undefined,
       material: activeAtt.material ?? { ...DEFAULT_SKIN_MATERIAL },
     });
     setSourceMode('sculpt');
@@ -419,7 +452,7 @@ export function ModelSkinEditor({
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => useSculpt(p.id)}
+                    onClick={() => usePrimitive(p.id)}
                     className={`px-2 py-1 rounded text-[10px] border ${
                       activeAtt.primitive === p.id && !activeAtt.model && !activeAtt.customModelUrl
                         ? 'bg-emerald-500/25 border-emerald-400/50 text-emerald-100'
@@ -435,6 +468,80 @@ export function ModelSkinEditor({
                 shape={shape}
                 onChange={patchShape}
               />
+
+              {/* ZBrush-lite blob brushes */}
+              <div className="mt-2 space-y-2 rounded-lg border border-fuchsia-500/25 bg-fuchsia-500/5 p-2.5">
+                <p className="text-[10px] uppercase tracking-wider text-fuchsia-200/90 font-bold">
+                  Blob sculpt (paint on mesh)
+                </p>
+                <p className="text-[10px] text-white/40 leading-snug">
+                  Drag on the preview to add or remove clay. Tip: hide body (eye icon) for a clearer
+                  view. Works on sculpt primitives.
+                </p>
+                <div className="flex gap-1.5">
+                  {(
+                    [
+                      ['add', 'Add blob', CirclePlus],
+                      ['remove', 'Remove', CircleMinus],
+                      ['smooth', 'Smooth', Waves],
+                    ] as const
+                  ).map(([id, label, Icon]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setBlobBrush((b) => (b === id ? null : id));
+                        setShowAvatar(false);
+                        setSourceMode('sculpt');
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-[10px] font-bold border ${
+                        blobBrush === id
+                          ? 'bg-fuchsia-500/30 border-fuchsia-400/60 text-fuchsia-50'
+                          : 'border-white/10 text-white/55'
+                      }`}
+                    >
+                      <Icon className="w-3 h-3" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <SliderField
+                  label="Brush"
+                  value={brushRadius}
+                  min={0.04}
+                  max={0.35}
+                  step={0.01}
+                  onChange={setBrushRadius}
+                />
+                <SliderField
+                  label="Power"
+                  value={brushStrength}
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  onChange={setBrushStrength}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={!activeAtt.sculpt}
+                    onClick={() => patchActive({ sculpt: undefined })}
+                  >
+                    Reset clay
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setBlobBrush(null)}
+                  >
+                    Stop brush
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1026,8 +1133,21 @@ class SkinPreview {
   private showBody = true;
   private raf = 0;
   private disposed = false;
+  private host: HTMLElement;
+  private raycaster = new THREE.Raycaster();
+  private pointer = new THREE.Vector2();
+  private painting = false;
+  private brush: { brush: SkinSculptBrush; radius: number; strength: number } | null = null;
+  private onSculptCommit?: (data: { positions: number[]; count: number }) => void;
+  private commitTimer: number | null = null;
+  private spinPaused = false;
 
-  constructor(host: HTMLElement) {
+  constructor(
+    host: HTMLElement,
+    opts?: { onSculptCommit?: (data: { positions: number[]; count: number }) => void }
+  ) {
+    this.host = host;
+    this.onSculptCommit = opts?.onSculptCommit;
     this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
     this.camera.position.set(0, 1.35, 3.0);
     this.camera.lookAt(0, 1.1, 0);
@@ -1042,6 +1162,7 @@ class SkinPreview {
       width: '100%',
       height: '100%',
       display: 'block',
+      touchAction: 'none',
     });
     this.scene.background = new THREE.Color('#0a1018');
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
@@ -1058,14 +1179,86 @@ class SkinPreview {
     };
     resize();
     new ResizeObserver(resize).observe(host);
+
+    const el = this.renderer.domElement;
+    el.addEventListener('pointerdown', this.onPointerDown);
+    el.addEventListener('pointermove', this.onPointerMove);
+    el.addEventListener('pointerup', this.onPointerUp);
+    el.addEventListener('pointerleave', this.onPointerUp);
+    el.addEventListener('pointercancel', this.onPointerUp);
+
     const tick = () => {
       if (this.disposed) return;
       this.raf = requestAnimationFrame(tick);
-      const spin = this.showBody ? this.avatar : this.soloRoot;
-      if (spin) spin.rotation.y += 0.01;
+      if (!this.spinPaused && !this.painting) {
+        const spin = this.showBody ? this.avatar : this.soloRoot;
+        if (spin) spin.rotation.y += 0.008;
+      }
       this.renderer.render(this.scene, this.camera);
     };
     tick();
+  }
+
+  setBlobBrush(
+    cfg: { brush: SkinSculptBrush; radius: number; strength: number } | null
+  ) {
+    this.brush = cfg;
+    this.spinPaused = Boolean(cfg);
+    this.renderer.domElement.style.cursor = cfg ? 'crosshair' : 'default';
+  }
+
+  private onPointerDown = (e: PointerEvent) => {
+    if (!this.brush) return;
+    e.preventDefault();
+    this.painting = true;
+    this.renderer.domElement.setPointerCapture?.(e.pointerId);
+    this.paintAt(e.clientX, e.clientY);
+  };
+
+  private onPointerMove = (e: PointerEvent) => {
+    if (!this.painting || !this.brush) return;
+    e.preventDefault();
+    this.paintAt(e.clientX, e.clientY);
+  };
+
+  private onPointerUp = (e: PointerEvent) => {
+    if (!this.painting) return;
+    this.painting = false;
+    try {
+      this.renderer.domElement.releasePointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    this.flushSculptCommit();
+  };
+
+  private paintAt(clientX: number, clientY: number) {
+    if (!this.brush) return;
+    const targetRoot = this.showBody ? this.avatar : this.soloRoot;
+    if (!targetRoot) return;
+    const mesh = findSculptMesh(this.soloRoot.visible ? this.soloRoot : targetRoot);
+    if (!mesh) return;
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hits = this.raycaster.intersectObject(mesh, true);
+    if (!hits.length) return;
+    const hitMesh = hits[0].object as THREE.Mesh;
+    if (!hitMesh.isMesh) return;
+    applySculptStroke(hitMesh, hits[0].point, {
+      brush: this.brush.brush,
+      radius: this.brush.radius,
+      strength: this.brush.strength,
+    });
+  }
+
+  private flushSculptCommit() {
+    const mesh = findSculptMesh(this.soloRoot);
+    if (!mesh) return;
+    const data = readSculptData(mesh);
+    if (data) this.onSculptCommit?.(data);
   }
 
   setAvatar(scene: THREE.Object3D) {
@@ -1090,8 +1283,8 @@ class SkinPreview {
   }
 
   async setAttachments(atts: SkinAttachment[], focusSlot?: SkinAttachSlot) {
+    if (this.painting) return; // don't rebuild mid-stroke
     if (this.avatar) await applySkinAttachments(this.avatar, atts);
-    // Solo preview of focused / primary part
     while (this.soloRoot.children.length) this.soloRoot.remove(this.soloRoot.children[0]);
     const primary =
       (focusSlot ? atts.find((a) => a.slot === focusSlot) : undefined) ?? atts[0];
@@ -1099,12 +1292,8 @@ class SkinPreview {
       try {
         const part = await buildSkinPartMesh(primary);
         part.scale.set(...primary.scale);
-        part.rotation.set(
-          THREE.MathUtils.degToRad(primary.rotation[0]),
-          THREE.MathUtils.degToRad(primary.rotation[1]),
-          THREE.MathUtils.degToRad(primary.rotation[2])
-        );
-        // Center for solo view
+        // Keep identity rotation for easier sculpt aim; spin group instead
+        part.rotation.set(0, 0, 0);
         part.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(part);
         const c = new THREE.Vector3();
@@ -1129,6 +1318,13 @@ class SkinPreview {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    if (this.commitTimer) window.clearTimeout(this.commitTimer);
+    const el = this.renderer.domElement;
+    el.removeEventListener('pointerdown', this.onPointerDown);
+    el.removeEventListener('pointermove', this.onPointerMove);
+    el.removeEventListener('pointerup', this.onPointerUp);
+    el.removeEventListener('pointerleave', this.onPointerUp);
+    el.removeEventListener('pointercancel', this.onPointerUp);
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

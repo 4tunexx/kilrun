@@ -14,6 +14,7 @@ import {
   SKIN_ATTACH_SLOTS,
 } from '@/lib/player-skins';
 import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
+import { applySculptDataToGeometry } from './skin-sculpt';
 
 const ATTACH_ROOT_NAME = '__skin_attachments';
 const textureCache = new Map<string, THREE.Texture>();
@@ -52,11 +53,13 @@ function makeGeometry(kind: SkinPrimitive, shape: SkinShapeParams = {}): THREE.B
   const h = shape.height ?? 0.4;
   const d = shape.depth ?? 0.4;
   const r = shape.radius ?? 0.25;
-  const rs = Math.max(3, Math.round(shape.radialSegments ?? 24));
-  const hs = Math.max(1, Math.round(shape.heightSegments ?? 8));
+  // Dense enough for blob sculpt (ZBrush-lite)
+  const rs = Math.max(16, Math.round(shape.radialSegments ?? 32));
+  const hs = Math.max(12, Math.round(shape.heightSegments ?? 24));
+  const boxSeg = Math.max(8, Math.round(shape.radialSegments ?? 12));
   switch (kind) {
     case 'box':
-      return new THREE.BoxGeometry(w, h, d);
+      return new THREE.BoxGeometry(w, h, d, boxSeg, boxSeg, boxSeg);
     case 'sphere':
       return new THREE.SphereGeometry(r, rs, hs);
     case 'cylinder':
@@ -64,18 +67,24 @@ function makeGeometry(kind: SkinPrimitive, shape: SkinShapeParams = {}): THREE.B
         shape.radiusTop ?? r,
         shape.radiusBottom ?? r,
         h,
-        rs
+        rs,
+        Math.max(4, Math.round(hs / 3))
       );
     case 'capsule':
-      return new THREE.CapsuleGeometry(r, Math.max(0.01, h), 4, rs);
+      return new THREE.CapsuleGeometry(r, Math.max(0.01, h), 8, rs);
     case 'cone':
-      return new THREE.ConeGeometry(r, h, rs);
+      return new THREE.ConeGeometry(r, h, rs, Math.max(4, Math.round(hs / 3)));
     case 'torus':
-      return new THREE.TorusGeometry(r, shape.tube ?? r * 0.35, hs, shape.tubularSegments ?? 32);
+      return new THREE.TorusGeometry(
+        r,
+        shape.tube ?? r * 0.35,
+        Math.max(12, hs),
+        shape.tubularSegments ?? 48
+      );
     case 'plane':
-      return new THREE.PlaneGeometry(w, h);
+      return new THREE.PlaneGeometry(w, h, boxSeg, boxSeg);
     default:
-      return new THREE.BoxGeometry(w, h, d);
+      return new THREE.BoxGeometry(w, h, d, boxSeg, boxSeg, boxSeg);
   }
 }
 
@@ -171,11 +180,13 @@ async function buildMaterial(att: SkinAttachment): Promise<THREE.MeshStandardMat
 export async function buildSkinPartMesh(att: SkinAttachment): Promise<THREE.Object3D> {
   if (att.primitive && !att.model && !att.customModelUrl) {
     const geo = makeGeometry(att.primitive, att.shape ?? {});
+    applySculptDataToGeometry(geo, att.sculpt);
     const mat = await buildMaterial(att);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.name = `prim_${att.slot}`;
+    mesh.userData.sculptable = true;
     return mesh;
   }
 
