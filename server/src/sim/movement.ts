@@ -2,6 +2,8 @@ import { PlatformState, PlayerState } from '../schema/RoomState.js';
 import {
   AIR_ACCEL,
   AIR_CONTROL,
+  APEX_GRAVITY_MULT,
+  APEX_VZ_THRESHOLD,
   COYOTE_TIME_MS,
   CROUCH_SPEED_MULTIPLIER,
   ENERGY_DRAIN_RATE,
@@ -16,6 +18,9 @@ import {
   JUMP_ENERGY_COST,
   JUMP_PAD_BOOST,
   JUMP_VELOCITY,
+  LAND_SNAP_FAST,
+  LAND_SNAP_SLOW,
+  LEDGE_ASSIST,
   MAX_AIR_SPEED_MULT,
   MAX_ENERGY,
   MAX_FALL_SPEED,
@@ -97,7 +102,8 @@ export const DEFAULT_WORLD_BOUNDS: WorldBounds = {
 
 /**
  * Authoritative Deathrun platformer step — Quake-inspired accel/friction on
- * XY, gravity + coyote/buffer jump on Z, energy sprint. Shared by all modes.
+ * XY, gravity + coyote/buffer jump + apex hang on Z, energy sprint.
+ * Shared by all modes. Keep feel in sync with `src/lib/platformer-sim.ts`.
  */
 export function applyMovement(
   player: PlayerState,
@@ -143,19 +149,36 @@ export function applyMovement(
   }
   if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;
 
-  const support = findSupportPlatform(
+  let support = findSupportPlatform(
     player.x,
     player.y,
     player.z,
     platforms,
-    PLAYER_RADIUS
+    PLAYER_RADIUS,
+    LAND_SNAP_SLOW
   );
-  const grounded = !!support && player.vz <= 0.15;
+  if (!support) {
+    const nudged = tryLedgeAssist(player.x, player.y, player.z, platforms);
+    if (nudged) {
+      player.x = nudged.x;
+      player.y = nudged.y;
+      support = findSupportPlatform(
+        player.x,
+        player.y,
+        player.z,
+        platforms,
+        PLAYER_RADIUS,
+        LAND_SNAP_SLOW
+      );
+    }
+  }
+
+  let grounded = !!support && player.vz <= 0.2;
   player.isGrounded = grounded;
 
-  if (grounded) {
+  if (grounded && support) {
     scratch.coyoteMs = COYOTE_TIME_MS;
-    player.z = support!.topZ;
+    player.z = support.topZ;
     player.vz = 0;
   } else {
     scratch.coyoteMs = Math.max(0, scratch.coyoteMs - dtSeconds * 1000);
@@ -167,6 +190,7 @@ export function applyMovement(
       support!.platform.boost > 0 ? support!.platform.boost : JUMP_PAD_BOOST;
     player.vz = boost;
     player.isGrounded = false;
+    grounded = false;
     scratch.coyoteMs = 0;
     scratch.jumpBufferMs = 0;
   }
@@ -184,9 +208,10 @@ export function applyMovement(
   const canJump =
     (player.isGrounded || scratch.coyoteMs > 0) &&
     scratch.jumpBufferMs > 0;
-  if (canJump && player.energy >= JUMP_ENERGY_COST * 0.25) {
+  if (canJump && player.energy >= JUMP_ENERGY_COST * 0.2) {
     player.vz = JUMP_VELOCITY;
     player.isGrounded = false;
+    grounded = false;
     scratch.coyoteMs = 0;
     scratch.jumpBufferMs = 0;
     player.energy = Math.max(0, player.energy - JUMP_ENERGY_COST);
@@ -197,7 +222,6 @@ export function applyMovement(
     const onIce = support!.platform.kind === 'ice';
     const friction = onIce ? GROUND_FRICTION * 0.18 : GROUND_FRICTION;
     const accel = onIce ? GROUND_ACCEL * 0.45 : GROUND_ACCEL;
-    // Friction
     const speed = Math.hypot(scratch.velX, scratch.velY);
     if (speed > 0.01) {
       const drop = Math.min(speed, friction * dtSeconds);
@@ -208,11 +232,9 @@ export function applyMovement(
       scratch.velX = 0;
       scratch.velY = 0;
     }
-    // Accel toward wish
     scratch.velX += wishX * accel * dtSeconds;
     scratch.velY += wishY * accel * dtSeconds;
 
-    // Conveyor belt push
     if (support!.platform.kind === 'conveyor' && support!.platform.conveyorSpeed > 0) {
       const spd = support!.platform.conveyorSpeed;
       scratch.velX += support!.platform.conveyorDirX * spd * dtSeconds * 2.2;
@@ -227,9 +249,9 @@ export function applyMovement(
       scratch.velY *= s;
     }
   } else {
-    // Air control
-    scratch.velX += wishX * AIR_ACCEL * AIR_CONTROL * dtSeconds;
-    scratch.velY += wishY * AIR_ACCEL * AIR_CONTROL * dtSeconds;
+    const apexBoost = Math.abs(player.vz) < APEX_VZ_THRESHOLD ? 1.18 : 1;
+    scratch.velX += wishX * AIR_ACCEL * AIR_CONTROL * apexBoost * dtSeconds;
+    scratch.velY += wishY * AIR_ACCEL * AIR_CONTROL * apexBoost * dtSeconds;
     const airMax = maxSpeed * MAX_AIR_SPEED_MULT;
     const newSpeed = Math.hypot(scratch.velX, scratch.velY);
     if (newSpeed > airMax && newSpeed > 0) {
@@ -250,7 +272,6 @@ export function applyMovement(
     bounds.maxY - PLAYER_RADIUS
   );
 
-  // Side / wall AABB push-out for tall solids — kill velocity into the wall so we slide
   const beforePushX = player.x;
   const beforePushY = player.y;
   const pushed = resolveSolidCollisions(
@@ -262,21 +283,38 @@ export function applyMovement(
   if (Math.abs(player.x - beforePushX) > 1e-5) scratch.velX = 0;
   if (Math.abs(player.y - beforePushY) > 1e-5) scratch.velY = 0;
 
-  // Vertical
+  // Vertical — apex hang for readable jump arcs
   if (!player.isGrounded) {
-    player.vz = Math.max(-MAX_FALL_SPEED, player.vz - GRAVITY * dtSeconds);
+    let g = GRAVITY;
+    if (Math.abs(player.vz) < APEX_VZ_THRESHOLD) g *= APEX_GRAVITY_MULT;
+    player.vz = Math.max(-MAX_FALL_SPEED, player.vz - g * dtSeconds);
     player.z += player.vz * dtSeconds;
 
-    // Land on platform while falling
-    const land = findSupportPlatform(
+    const snap = player.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
+    let land = findSupportPlatform(
       player.x,
       player.y,
       player.z,
       platforms,
       PLAYER_RADIUS,
-      0.5
+      snap
     );
-    if (land && player.vz <= 0 && player.z <= land.topZ + 0.05) {
+    if (!land) {
+      const nudged = tryLedgeAssist(player.x, player.y, player.z, platforms);
+      if (nudged) {
+        player.x = nudged.x;
+        player.y = nudged.y;
+        land = findSupportPlatform(
+          player.x,
+          player.y,
+          player.z,
+          platforms,
+          PLAYER_RADIUS,
+          snap
+        );
+      }
+    }
+    if (land && player.vz <= 0 && player.z <= land.topZ + 0.08) {
       player.z = land.topZ;
       if (land.platform.kind === 'jumpPad') {
         player.vz = land.platform.boost > 0 ? land.platform.boost : JUMP_PAD_BOOST;
@@ -286,14 +324,45 @@ export function applyMovement(
         player.vz = 0;
         player.isGrounded = true;
         scratch.coyoteMs = COYOTE_TIME_MS;
+        // Same-frame buffered jump on landing
+        if (scratch.jumpBufferMs > 0 && player.energy >= JUMP_ENERGY_COST * 0.2) {
+          player.vz = JUMP_VELOCITY;
+          player.isGrounded = false;
+          scratch.coyoteMs = 0;
+          scratch.jumpBufferMs = 0;
+          player.energy = Math.max(0, player.energy - JUMP_ENERGY_COST);
+        }
       }
     }
   }
 
-  // Void fall is handled by the room (checkpoint soft-respawn vs eliminate).
   if (player.z < VOID_Z) {
     player.vz = 0;
   }
+}
+
+/** Pull feet back onto a pad when barely off the rim (ledge forgiveness). */
+function tryLedgeAssist(
+  x: number,
+  y: number,
+  z: number,
+  platforms: Iterable<PlatformState>
+): { x: number; y: number } | null {
+  for (const platform of platforms) {
+    const topZ = platform.z;
+    if (z < topZ - LAND_SNAP_SLOW || z > topZ + 0.55) continue;
+    const halfW = platform.width / 2;
+    const halfD = platform.depth / 2;
+    const ox = Math.max(0, Math.abs(x - platform.x) - halfW);
+    const oy = Math.max(0, Math.abs(y - platform.y) - halfD);
+    if (ox > LEDGE_ASSIST || oy > LEDGE_ASSIST) continue;
+    if (ox <= 0 && oy <= 0) continue;
+    return {
+      x: clamp(x, platform.x - halfW + 0.04, platform.x + halfW - 0.04),
+      y: clamp(y, platform.y - halfD + 0.04, platform.y + halfD - 0.04),
+    };
+  }
+  return null;
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -17,7 +17,7 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x081018);
-  scene.fog = new THREE.FogExp2(0x0a1528, 0.026);
+  scene.fog = new THREE.FogExp2(0x0a1528, 0.024);
 
   const camera = new THREE.PerspectiveCamera(55, 1, 0.15, 220);
   camera.position.set(0, 6, -12);
@@ -89,12 +89,14 @@ const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
 
-export type FollowCameraStyle = 'overShoulder' | 'platformer';
-
 /**
- * 3rd-person follow camera.
- * - `overShoulder`: combat aim (screen-center = aim ray, body lower-left)
- * - `platformer`: pulled back + above, looks at the avatar so you always see your body + floor
+ * Modern 3D action-platformer camera (Fortnite / TPS hybrid):
+ * - Boom sits behind + slightly over the right shoulder
+ * - Camera orientation = look yaw/pitch → **screen center is the aim ray** (crosshair)
+ * - Body stays visible in the lower frame; slight downward default pitch reads platforms ahead
+ * - Does NOT lookAt the mesh (that pins the reticle on the head and breaks aim)
+ *
+ * Pitch: up = positive (look at sky). Typical idle ≈ -0.22 (slightly down the course).
  */
 export function updateFollowCamera(
   camera: THREE.PerspectiveCamera,
@@ -102,26 +104,23 @@ export function updateFollowCamera(
   yaw: number,
   pitch: number,
   dt: number,
-  zoomDistance = 5.8,
-  style: FollowCameraStyle = 'overShoulder'
+  zoomDistance = 6.6
 ) {
-  if (style === 'platformer') {
-    updatePlatformerCamera(camera, target, yaw, pitch, dt, zoomDistance);
-    return;
-  }
-
-  const safePitch = THREE.MathUtils.clamp(pitch, -1.05, 0.85);
-  const dist = zoomDistance;
-  /** Chest / shoulder pivot — visual avatar is ~1.8 tall, feet at target.y */
-  const lookHeight = 1.32;
-  const shoulder = 0.58;
+  const safePitch = THREE.MathUtils.clamp(pitch, -1.05, 0.72);
+  /** Chest pivot — feet at target.y, avatar ~1.75–1.8 tall */
+  const lookHeight = 1.26;
+  const shoulder = 0.52;
+  // Looking down: pull boom in a hair + lift so the body stays framed (not under the lens)
+  const lookDown = Math.max(0, -safePitch);
+  const dist = zoomDistance * (1 - lookDown * 0.1);
+  const boomLift = 0.28 + lookDown * 1.15;
 
   const cosPitch = Math.cos(safePitch);
   const sinPitch = Math.sin(safePitch);
   const sinYaw = Math.sin(yaw);
   const cosYaw = Math.cos(yaw);
 
-  // Aim forward in Three space (matches server aim: x=cos(yaw)*cos(pitch), y=sin(yaw)*cos(pitch), z=sin(pitch))
+  // Aim forward in Three space (matches server aim remap)
   _forward.set(sinYaw * cosPitch, sinPitch, cosYaw * cosPitch);
   _right.set(cosYaw, 0, -sinYaw);
 
@@ -131,44 +130,27 @@ export function updateFollowCamera(
     .copy(_pivot)
     .addScaledVector(_forward, -dist)
     .addScaledVector(_right, shoulder);
-  // Slight lift so the shoulder doesn't clip the lens at neutral pitch
-  _desired.y += 0.12;
+  _desired.y += boomLift;
 
-  const lerp = 1 - Math.pow(0.001, dt * 18);
+  // Snappy follow — position lags a touch; orientation is instant (TPS standard)
+  const lerp = 1 - Math.pow(0.001, dt * 20);
   camera.position.lerp(_desired, Math.min(1, lerp));
 
-  // Orient by aim angles — screen center = aim ray (crosshair is not stuck on the head)
   _euler.set(-safePitch, yaw, 0);
   camera.quaternion.setFromEuler(_euler);
 }
 
-/** Classic platformer chase-cam: behind + above, framed on the character. */
-function updatePlatformerCamera(
+/** @deprecated Use updateFollowCamera — kept so older call sites with a style arg still compile. */
+export type FollowCameraStyle = 'overShoulder' | 'platformer';
+
+export function updateFollowCameraStyled(
   camera: THREE.PerspectiveCamera,
   target: THREE.Vector3,
   yaw: number,
   pitch: number,
   dt: number,
-  zoomDistance: number
+  zoomDistance = 6.6,
+  _style?: FollowCameraStyle
 ) {
-  const safePitch = THREE.MathUtils.clamp(pitch, -0.85, 0.45);
-  const dist = Math.max(5.5, zoomDistance);
-  const sinYaw = Math.sin(yaw);
-  const cosYaw = Math.cos(yaw);
-
-  // Pivot at torso so feet + head stay in frame
-  _pivot.set(target.x, target.y + 1.05, target.z);
-
-  // Behind the player; pitch pulls camera up/down along the orbit
-  const back = dist * Math.cos(safePitch);
-  const lift = 2.4 + dist * Math.sin(-safePitch) * 0.85 + 1.6;
-  _desired.set(
-    _pivot.x - sinYaw * back,
-    _pivot.y + lift,
-    _pivot.z - cosYaw * back
-  );
-
-  const lerp = 1 - Math.pow(0.001, dt * 14);
-  camera.position.lerp(_desired, Math.min(1, lerp));
-  camera.lookAt(_pivot.x, _pivot.y + 0.35, _pivot.z);
+  updateFollowCamera(camera, target, yaw, pitch, dt, zoomDistance);
 }

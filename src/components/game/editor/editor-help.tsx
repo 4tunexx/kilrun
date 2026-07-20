@@ -66,7 +66,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'play',
     title: 'Play Test & publish',
-    body: 'Play Test is 3rd-person: you see your body, left stick moves / WASD, right stick looks. Needs a Start spawn on a Solid floor — Player entity alone only sets your look.',
+    body: 'Play Test is 3rd-person TPS (like Fortnite): you see your body, crosshair at screen center is aim, left stick moves / WASD, right stick / mouse looks. Needs a Start spawn on a Solid floor.',
     tip: 'Finish with a clear end pad and test falling into the void. Open HELP anytime for the full guide.',
     tab: 'help',
   },

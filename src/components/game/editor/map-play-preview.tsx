@@ -34,6 +34,12 @@ import {
   findWeaponAttachment,
   resolveWeaponCombat,
 } from '@/lib/weapons';
+import { Crosshair } from '../ui/crosshair';
+
+const PLAY_ZOOM = 6.6;
+const PLAY_PITCH_MIN = -1.05;
+const PLAY_PITCH_MAX = 0.72;
+const PLAY_DEFAULT_PITCH = -0.22;
 
 function addCollisionPadMeshes(scene: THREE.Scene, pads: SimPad[]) {
   const group = new THREE.Group();
@@ -155,7 +161,7 @@ function snapBodyToPads(body: SimBody, pads: SimPad[]) {
 
 /**
  * Play Test uses the same pad export + platformer step as Deathrun match.
- * Camera is a pulled-back 3rd-person platformer chase-cam so the Player Model is visible.
+ * Camera is Fortnite-style TPS: body visible, screen-center crosshair = aim.
  */
 export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -241,7 +247,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
 
     const keys = new Set<string>();
     let yaw = 0;
-    let pitch = -0.28; // look slightly down so body + floor frame correctly
+    let pitch = PLAY_DEFAULT_PITCH;
     let interactPulse = false;
     let attackPulse = false;
     let lastAttackAt = 0;
@@ -407,9 +413,9 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
     const onMove = (e: MouseEvent) => {
-      yaw -= (e.movementX || 0) * 0.0022;
-      pitch -= (e.movementY || 0) * 0.0018;
-      pitch = THREE.MathUtils.clamp(pitch, -0.85, 0.45);
+      yaw -= (e.movementX || 0) * 0.0024;
+      pitch -= (e.movementY || 0) * 0.002;
+      pitch = THREE.MathUtils.clamp(pitch, PLAY_PITCH_MIN, PLAY_PITCH_MAX);
     };
     const onMouseDown = (e: MouseEvent) => {
       if (e.button === 0) attackPulse = true;
@@ -436,9 +442,9 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       const moveStick = joy?.getMoveVector() ?? { x: 0, y: 0 };
       const lookStick = joy?.getAimVector() ?? { x: 0, y: 0 };
       if (lookStick.x || lookStick.y) {
-        yaw -= lookStick.x * 1.15 * dt;
-        pitch -= lookStick.y * 0.85 * dt;
-        pitch = THREE.MathUtils.clamp(pitch, -0.85, 0.45);
+        yaw -= lookStick.x * 1.2 * dt;
+        pitch -= lookStick.y * 0.95 * dt;
+        pitch = THREE.MathUtils.clamp(pitch, PLAY_PITCH_MIN, PLAY_PITCH_MAX);
       }
 
       const sprint =
@@ -529,7 +535,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       const [tx, ty, tz] = simToThree(body.x, body.y, body.z);
       playerPos.set(tx, ty, tz);
 
-      updateFollowCamera(camera, playerPos, yaw, pitch, dt, 8.2, 'platformer');
+      updateFollowCamera(camera, playerPos, yaw, pitch, dt, PLAY_ZOOM);
 
       const colliding = new Set<string>();
       roots.forEach((root, id) => {
@@ -649,8 +655,8 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         </span>
         <span className="text-[10px] sm:text-xs text-white/50 truncate min-w-0">
           {isTouch
-            ? '3rd person · Left move · Right look · Jump / Use / Attack'
-            : '3rd person · WASD · E use · click attack · mouse look'}
+            ? '3rd person TPS · Left move · Right look · Jump / Use / Attack'
+            : '3rd person TPS · WASD · mouse look · E use · click attack'}
         </span>
         <div className="ml-4 flex items-center gap-2 text-xs">
           <span className="text-white/50">HP</span>
@@ -669,6 +675,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       </div>
       <div className="flex-1 relative min-h-0">
         <div ref={hostRef} className="absolute inset-0 touch-none" />
+        <Crosshair visible />
         {loading && (
           <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 pointer-events-none">
             <p className="text-sm font-semibold text-white/80 tracking-wide">Loading play test…</p>

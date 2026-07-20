@@ -31,6 +31,7 @@ import { ResultsScreen } from './modes/deathrun/results-screen';
 import { MobilePlayGate } from './ui/mobile-play-gate';
 import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
+import { Crosshair } from './ui/crosshair';
 import dynamic from 'next/dynamic';
 import {
   findWeaponAttachment,
@@ -67,8 +68,13 @@ import type { GameRoomName } from './net/connection';
 
 const MapEditor = dynamic(() => import('./editor/map-editor'), { ssr: false });
 
-const PITCH_SENS = 0.0026;
-const ZOOM = 8.2;
+const PITCH_SENS = 0.0028;
+/** TPS boom length — far enough to see body + platforms, close enough for aim. */
+const ZOOM = 6.6;
+const PITCH_MIN = -1.05;
+const PITCH_MAX = 0.72;
+/** Slight look-down so the course ahead reads clearly (Fortnite / TPS idle). */
+const DEFAULT_PITCH = -0.22;
 
 interface KilrunEngineProps {
   joinOptions: JoinOptions;
@@ -118,6 +124,8 @@ export default function KilrunEngine({
   const [assetsReady, setAssetsReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [aiming, setAiming] = useState(!detectTouchDevice());
+  const aimingRef = useRef(!detectTouchDevice());
   const { toggle: toggleFullscreen } = useGameFullscreen(rootRef, true);
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
@@ -235,7 +243,7 @@ export default function KilrunEngine({
     joystickRef.current = inputManager.joystick;
 
     let cameraYaw = 0;
-    let cameraPitch = -0.28;
+    let cameraPitch = DEFAULT_PITCH;
     let sendAccumulatorMs = 0;
     let shootHeld = false;
     let wasShootEdge = false;
@@ -331,14 +339,23 @@ export default function KilrunEngine({
         if (isMobile && inputManager.isAiming()) {
           const aim = inputManager.joystick.getAimVector();
           cameraYaw -= aim.x * CAMERA_YAW_STICK_SENS * dt;
-          cameraPitch -= aim.y * 0.9 * dt;
+          cameraPitch -= aim.y * 0.95 * dt;
+          if (!aimingRef.current) {
+            aimingRef.current = true;
+            setAiming(true);
+          }
+        } else if (isMobile) {
+          if (aimingRef.current) {
+            aimingRef.current = false;
+            setAiming(false);
+          }
         }
       } else {
         // Drain deltas so resume doesn't snap
         inputManager.consumeMouseLookDeltaX();
         inputManager.consumeMouseLookDeltaY();
       }
-      cameraPitch = THREE.MathUtils.clamp(cameraPitch, -0.85, 0.45);
+      cameraPitch = THREE.MathUtils.clamp(cameraPitch, PITCH_MIN, PITCH_MAX);
 
       const localSessionId = connectionRef.current?.sessionId;
       const localState = localSessionId ? playersRef.current.get(localSessionId) : undefined;
@@ -368,7 +385,7 @@ export default function KilrunEngine({
       } else {
         overlay.update(dt, null, false, []);
       }
-      updateFollowCamera(world.camera, targetPos, cameraYaw, cameraPitch, dt, ZOOM, 'platformer');
+      updateFollowCamera(world.camera, targetPos, cameraYaw, cameraPitch, dt, ZOOM);
 
       if (!frozen) {
         const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
@@ -519,6 +536,9 @@ export default function KilrunEngine({
           joystickRef={joystickRef}
           enabled={isMobile && room.phase === 'playing' && !paused}
         />
+        {room.phase === 'playing' && !paused && !editorOpen && (
+          <Crosshair visible={aiming || !isMobile} />
+        )}
 
         <PauseMenu
           open={paused && !editorOpen}
