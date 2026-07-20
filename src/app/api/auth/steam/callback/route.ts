@@ -104,6 +104,7 @@ export async function GET(req: NextRequest) {
           avatarUrl,
           vpCurrency: 0,
           xpProgress: 0,
+          kp: 1000,
           currentRank: 'Unranked',
           role: promoteAdmin ? 'admin' : 'player',
           isVip: false,

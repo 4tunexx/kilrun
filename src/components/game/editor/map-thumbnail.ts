@@ -57,8 +57,19 @@ export async function renderMapThumbnail(
       ent.kind === 'spawn_trapper' ||
       ent.kind === 'start' ||
       ent.kind === 'finish' ||
-      ent.kind === 'player';
-    const isHazard = ent.kind === 'hazard' || ent.kind === 'trap' || !!ent.hazard?.enabled;
+      ent.kind === 'player' ||
+      ent.kind === 'spawn_monster' ||
+      ent.kind === 'spawn_team_a' ||
+      ent.kind === 'spawn_team_b' ||
+      ent.kind === 'revive_pad' ||
+      ent.kind === 'health_floor' ||
+      ent.kind === 'red_zone' ||
+      ent.kind === 'wave_anchor';
+    const isHazard =
+      ent.kind === 'hazard' ||
+      ent.kind === 'trap' ||
+      ent.kind === 'red_zone' ||
+      !!ent.hazard?.enabled;
 
     let mesh: THREE.Mesh;
     if (isSpawn) {

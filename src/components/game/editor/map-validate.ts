@@ -1,5 +1,5 @@
 import type { MapDocument } from './map-document';
-import { entityExportsAsPlatform } from './map-document';
+import { entityExportsAsPlatform, getMapGameMode } from './map-document';
 
 export interface MapValidationIssue {
   level: 'error' | 'warn';
@@ -7,6 +7,13 @@ export interface MapValidationIssue {
 }
 
 export function validateMapForPublish(doc: MapDocument): MapValidationIssue[] {
+  const mode = getMapGameMode(doc);
+  if (mode === 'horde') return validateHordeMap(doc);
+  if (mode === 'competitive') return validateCompetitiveMap(doc);
+  return validateDeathrunMap(doc);
+}
+
+function validateDeathrunMap(doc: MapDocument): MapValidationIssue[] {
   const issues: MapValidationIssue[] = [];
   const ents = doc.entities ?? [];
 
@@ -60,6 +67,93 @@ export function validateMapForPublish(doc: MapDocument): MapValidationIssue[] {
     }
   }
 
+  pushOrphanWarnings(ents, issues);
+  return issues;
+}
+
+function validateHordeMap(doc: MapDocument): MapValidationIssue[] {
+  const issues: MapValidationIssue[] = [];
+  const ents = doc.entities ?? [];
+  const starts = ents.filter(
+    (e) => e.kind === 'start' || e.kind === 'spawn_runner' || e.kind === 'player'
+  );
+  const monsters = ents.filter((e) => e.kind === 'spawn_monster');
+  const solids = ents.filter(entityExportsAsPlatform);
+  const health = ents.filter((e) => e.kind === 'health_floor');
+  const revives = ents.filter((e) => e.kind === 'revive_pad');
+
+  if (starts.length === 0) {
+    issues.push({
+      level: 'error',
+      message: 'Add at least one player Start spawn (Horde supports up to 4).',
+    });
+  } else if (starts.length < 4) {
+    issues.push({
+      level: 'warn',
+      message: `Only ${starts.length} player spawn(s) — Horde is designed for 4 players.`,
+    });
+  }
+  if (monsters.length === 0) {
+    issues.push({
+      level: 'error',
+      message: 'Add at least one Monster Spawn for waves.',
+    });
+  }
+  if (solids.length < 1) {
+    issues.push({
+      level: 'error',
+      message: 'Need a solid arena floor for players to stand on.',
+    });
+  }
+  if (health.length === 0) {
+    issues.push({ level: 'warn', message: 'No Health Floor — recommended for longer waves.' });
+  }
+  if (revives.length === 0) {
+    issues.push({ level: 'warn', message: 'No Revive Pad — teammates cannot revive without one.' });
+  }
+
+  pushOrphanWarnings(ents, issues);
+  return issues;
+}
+
+function validateCompetitiveMap(doc: MapDocument): MapValidationIssue[] {
+  const issues: MapValidationIssue[] = [];
+  const ents = doc.entities ?? [];
+  const teamA = ents.filter((e) => e.kind === 'spawn_team_a');
+  const teamB = ents.filter((e) => e.kind === 'spawn_team_b');
+  const solids = ents.filter(entityExportsAsPlatform);
+
+  if (teamA.length === 0) {
+    issues.push({ level: 'error', message: 'Add Team A spawns (up to 4).' });
+  } else if (teamA.length < 4) {
+    issues.push({
+      level: 'warn',
+      message: `Team A has ${teamA.length} spawn(s) — Competitive is 4v4.`,
+    });
+  }
+  if (teamB.length === 0) {
+    issues.push({ level: 'error', message: 'Add Team B spawns (up to 4).' });
+  } else if (teamB.length < 4) {
+    issues.push({
+      level: 'warn',
+      message: `Team B has ${teamB.length} spawn(s) — Competitive is 4v4.`,
+    });
+  }
+  if (solids.length < 1) {
+    issues.push({
+      level: 'error',
+      message: 'Need a solid arena floor for the 4v4 match.',
+    });
+  }
+
+  pushOrphanWarnings(ents, issues);
+  return issues;
+}
+
+function pushOrphanWarnings(
+  ents: MapDocument['entities'],
+  issues: MapValidationIssue[]
+) {
   const orphans = ents.filter(
     (e) =>
       e.kind === 'prop' &&
@@ -72,8 +166,6 @@ export function validateMapForPublish(doc: MapDocument): MapValidationIssue[] {
       message: `${orphans.length} prop(s) are very far from origin — check heights.`,
     });
   }
-
-  return issues;
 }
 
 export function formatValidationSummary(issues: MapValidationIssue[]): string {

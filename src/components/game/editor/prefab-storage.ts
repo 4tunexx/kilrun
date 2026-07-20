@@ -1,8 +1,11 @@
 import type { EditorEntity, MapDocument } from './map-document';
 import { entityExportsAsPlatform, ensureHazard, generateId } from './map-document';
+import type { KilrunMode } from '@/lib/game-modes';
+import { normalizeKilrunMode } from '@/lib/game-modes';
 
 const PREFAB_KEY = 'kilrun.prefabs.v1';
 export const ACTIVE_PLAY_MAP_KEY = 'kilrun.activePlayMapId.v1';
+const ACTIVE_PLAY_MAP_BY_MODE_KEY = 'kilrun.activePlayMapByMode.v1';
 
 export interface PrefabStamp {
   id: string;
@@ -41,6 +44,11 @@ export function savePrefab(name: string, entities: EditorEntity[]): PrefabStamp 
     surface: e.surface ? { ...e.surface } : undefined,
     teleport: e.teleport ? { ...e.teleport } : undefined,
     light: e.light ? { ...e.light } : undefined,
+    monsterSpawn: e.monsterSpawn ? { ...e.monsterSpawn } : undefined,
+    redZone: e.redZone ? { ...e.redZone } : undefined,
+    revive: e.revive ? { ...e.revive } : undefined,
+    healthFloor: e.healthFloor ? { ...e.healthFloor } : undefined,
+    waveAnchor: e.waveAnchor ? { ...e.waveAnchor } : undefined,
   }));
   const stamp: PrefabStamp = {
     id: `prefab_${Date.now().toString(36)}`,
@@ -80,18 +88,66 @@ export function instantiatePrefab(
     surface: e.surface ? { ...e.surface } : undefined,
     teleport: e.teleport ? { ...e.teleport } : undefined,
     light: e.light ? { ...e.light } : undefined,
+    monsterSpawn: e.monsterSpawn ? { ...e.monsterSpawn } : undefined,
+    redZone: e.redZone ? { ...e.redZone } : undefined,
+    revive: e.revive ? { ...e.revive } : undefined,
+    healthFloor: e.healthFloor ? { ...e.healthFloor } : undefined,
+    waveAnchor: e.waveAnchor ? { ...e.waveAnchor } : undefined,
   }));
 }
 
+function readActiveByMode(): Partial<Record<KilrunMode, string>> {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(localStorage.getItem(ACTIVE_PLAY_MAP_BY_MODE_KEY) || '{}') as Partial<
+      Record<KilrunMode, string>
+    >;
+  } catch {
+    return {};
+  }
+}
+
+function writeActiveByMode(map: Partial<Record<KilrunMode, string>>) {
+  localStorage.setItem(ACTIVE_PLAY_MAP_BY_MODE_KEY, JSON.stringify(map));
+}
+
+/** Legacy single active map (Deathrun). Prefer setActivePlayMapIdForMode. */
 export function setActivePlayMapId(id: string | null) {
-  if (typeof window === 'undefined') return;
-  if (id) localStorage.setItem(ACTIVE_PLAY_MAP_KEY, id);
-  else localStorage.removeItem(ACTIVE_PLAY_MAP_KEY);
+  setActivePlayMapIdForMode('deathrun', id);
 }
 
 export function getActivePlayMapId(): string | null {
+  return getActivePlayMapIdForMode('deathrun');
+}
+
+export function setActivePlayMapIdForMode(mode: KilrunMode, id: string | null) {
+  if (typeof window === 'undefined') return;
+  const m = normalizeKilrunMode(mode);
+  const next = { ...readActiveByMode() };
+  if (id) next[m] = id;
+  else delete next[m];
+  writeActiveByMode(next);
+  // Keep legacy key in sync for Deathrun so older clients still work.
+  if (m === 'deathrun') {
+    if (id) localStorage.setItem(ACTIVE_PLAY_MAP_KEY, id);
+    else localStorage.removeItem(ACTIVE_PLAY_MAP_KEY);
+  }
+}
+
+export function getActivePlayMapIdForMode(mode: KilrunMode): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem(ACTIVE_PLAY_MAP_KEY);
+  const m = normalizeKilrunMode(mode);
+  const byMode = readActiveByMode()[m];
+  if (byMode) return byMode;
+  // Migrate legacy Deathrun key once.
+  if (m === 'deathrun') {
+    const legacy = localStorage.getItem(ACTIVE_PLAY_MAP_KEY);
+    if (legacy) {
+      setActivePlayMapIdForMode('deathrun', legacy);
+      return legacy;
+    }
+  }
+  return null;
 }
 
 /** Editor Three (Y-up) → server sim (x forward, y lateral, z height). */

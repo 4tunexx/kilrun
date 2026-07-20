@@ -1,4 +1,8 @@
 import type { SkinAttachment } from '@/lib/player-skins';
+import type { KilrunMode } from '@/lib/game-modes';
+import { normalizeKilrunMode } from '@/lib/game-modes';
+
+export type { KilrunMode };
 
 export type EditorEntityKind =
   | 'prop'
@@ -12,7 +16,105 @@ export type EditorEntityKind =
   | 'group'
   | 'player'
   | 'button'
-  | 'light';
+  | 'light'
+  // Horde
+  | 'spawn_monster'
+  | 'red_zone'
+  | 'revive_pad'
+  | 'health_floor'
+  | 'wave_anchor'
+  // Competitive
+  | 'spawn_team_a'
+  | 'spawn_team_b';
+
+/** Monster spawn authoring for Horde maps. */
+export interface EntityMonsterSpawn {
+  /** basic | fast | brute | boss */
+  monsterType: 'basic' | 'fast' | 'brute' | 'boss';
+  /** First wave this spawn is active (1-based). */
+  waveMin: number;
+  /** Last wave inclusive; 0 = infinite. */
+  waveMax: number;
+  /** How many monsters from this point each eligible wave. */
+  countPerWave: number;
+  /** Seconds between spawns within a wave pulse. */
+  spawnIntervalSec: number;
+}
+
+/** Red / kill zone — damages players standing inside (Horde). */
+export interface EntityRedZone {
+  damagePerTick: number;
+  intervalMs: number;
+  instantKill: boolean;
+}
+
+/** Revive pad — downed teammates can be revived here. */
+export interface EntityRevive {
+  reviveTimeMs: number;
+  /** Max simultaneous revives. */
+  capacity: number;
+}
+
+/** Health floor — standing here regenerates HP. */
+export interface EntityHealthFloor {
+  healPerTick: number;
+  intervalMs: number;
+  /** Optional cap — stop healing above this HP percent (0–100). 0 = no cap. */
+  maxHealPercent: number;
+}
+
+/** Wave anchor — region used for wave scripting / difficulty scaling. */
+export interface EntityWaveAnchor {
+  waveNumber: number;
+  difficultyMultiplier: number;
+  label?: string;
+}
+
+export function defaultMonsterSpawn(): EntityMonsterSpawn {
+  return {
+    monsterType: 'basic',
+    waveMin: 1,
+    waveMax: 0,
+    countPerWave: 2,
+    spawnIntervalSec: 1.5,
+  };
+}
+
+export function ensureMonsterSpawn(ent: EditorEntity): EntityMonsterSpawn {
+  return { ...defaultMonsterSpawn(), ...ent.monsterSpawn };
+}
+
+export function defaultRedZone(): EntityRedZone {
+  return { damagePerTick: 15, intervalMs: 500, instantKill: false };
+}
+
+export function ensureRedZone(ent: EditorEntity): EntityRedZone {
+  return { ...defaultRedZone(), ...ent.redZone };
+}
+
+export function defaultRevive(): EntityRevive {
+  return { reviveTimeMs: 4000, capacity: 1 };
+}
+
+export function ensureRevive(ent: EditorEntity): EntityRevive {
+  return { ...defaultRevive(), ...ent.revive };
+}
+
+export function defaultHealthFloor(): EntityHealthFloor {
+  return { healPerTick: 8, intervalMs: 500, maxHealPercent: 100 };
+}
+
+export function ensureHealthFloor(ent: EditorEntity): EntityHealthFloor {
+  return { ...defaultHealthFloor(), ...ent.healthFloor };
+}
+
+export function defaultWaveAnchor(): EntityWaveAnchor {
+  return { waveNumber: 1, difficultyMultiplier: 1 };
+}
+
+export function ensureWaveAnchor(ent: EditorEntity): EntityWaveAnchor {
+  return { ...defaultWaveAnchor(), ...ent.waveAnchor };
+}
 
 export type SkyPreset = 'cavern' | 'dusk' | 'bright' | 'void' | 'custom';
 export type FloorPreset = 'grid' | 'void' | 'solid' | 'water';
@@ -215,6 +317,16 @@ export interface EditorEntity {
   teleport?: EntityTeleport;
   /** kind === 'light' settings */
   light?: EntityLight;
+  /** kind === 'spawn_monster' */
+  monsterSpawn?: EntityMonsterSpawn;
+  /** kind === 'red_zone' */
+  redZone?: EntityRedZone;
+  /** kind === 'revive_pad' */
+  revive?: EntityRevive;
+  /** kind === 'health_floor' */
+  healthFloor?: EntityHealthFloor;
+  /** kind === 'wave_anchor' */
+  waveAnchor?: EntityWaveAnchor;
 }
 
 export interface EditorLayer {
@@ -238,11 +350,20 @@ export interface MapEnvironment {
 export interface MapDocument {
   version: 1;
   name: string;
+  /**
+   * Which game mode this map is authored for.
+   * Older maps without this field are treated as deathrun.
+   */
+  gameMode?: KilrunMode;
   gridSize: number;
   layers: EditorLayer[];
   entities: EditorEntity[];
   environment?: MapEnvironment;
   meta?: { createdAt?: string; updatedAt?: string };
+}
+
+export function getMapGameMode(doc: MapDocument | null | undefined): KilrunMode {
+  return normalizeKilrunMode(doc?.gameMode);
 }
 
 export const DEFAULT_ENVIRONMENT: MapEnvironment = {
@@ -364,12 +485,19 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
     ent.kind === 'start' ||
     ent.kind === 'button' ||
     ent.kind === 'hazard' ||
-    ent.kind === 'trap'
+    ent.kind === 'trap' ||
+    ent.kind === 'spawn_monster' ||
+    ent.kind === 'wave_anchor' ||
+    ent.kind === 'spawn_team_a' ||
+    ent.kind === 'spawn_team_b' ||
+    ent.kind === 'red_zone'
   ) {
     return false;
   }
-  // Finish pads are standable trigger volumes.
-  if (ent.kind === 'finish') return true;
+  // Finish / revive / health floors are standable trigger volumes.
+  if (ent.kind === 'finish' || ent.kind === 'revive_pad' || ent.kind === 'health_floor') {
+    return true;
+  }
   // Jump pads / ice / conveyor always export (need a pad).
   if (ent.jumpPad?.enabled) return true;
   if (ent.surface?.ice || ent.surface?.conveyor) return true;
@@ -383,6 +511,82 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   return false;
 }
 
+/** Human-readable label for an entity kind (editor UI). */
+export function entityKindLabel(kind: EditorEntityKind): string {
+  switch (kind) {
+    case 'prop':
+      return 'Prop';
+    case 'start':
+      return 'Start (spawn)';
+    case 'finish':
+      return 'Finish';
+    case 'trap':
+      return 'Trap';
+    case 'hazard':
+      return 'Death zone';
+    case 'light':
+      return 'Light';
+    case 'player':
+      return 'Player';
+    case 'button':
+      return 'Button';
+    case 'spawn_runner':
+      return 'Spawn Runner';
+    case 'spawn_trapper':
+      return 'Spawn Trapper';
+    case 'checkpoint':
+      return 'Checkpoint';
+    case 'group':
+      return 'Group';
+    case 'spawn_monster':
+      return 'Monster spawn';
+    case 'red_zone':
+      return 'Red zone';
+    case 'revive_pad':
+      return 'Revive pad';
+    case 'health_floor':
+      return 'Health floor';
+    case 'wave_anchor':
+      return 'Wave anchor';
+    case 'spawn_team_a':
+      return 'Team A spawn';
+    case 'spawn_team_b':
+      return 'Team B spawn';
+    default:
+      return kind;
+  }
+}
+
+/** Entity kinds available in the Kind dropdown / palette for a mode. */
+export function entityKindsForMode(mode: KilrunMode): EditorEntityKind[] {
+  const shared: EditorEntityKind[] = ['prop', 'player', 'light', 'checkpoint'];
+  if (mode === 'horde') {
+    return [
+      ...shared,
+      'start',
+      'spawn_monster',
+      'red_zone',
+      'revive_pad',
+      'health_floor',
+      'wave_anchor',
+      'hazard',
+    ];
+  }
+  if (mode === 'competitive') {
+    return [...shared, 'spawn_team_a', 'spawn_team_b', 'hazard'];
+  }
+  return [
+    ...shared,
+    'start',
+    'finish',
+    'trap',
+    'hazard',
+    'button',
+    'spawn_runner',
+    'spawn_trapper',
+  ];
+}
+
 export function generateId(prefix = 'ent'): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -392,21 +596,42 @@ export function snapToGrid(v: number, grid: number): number {
   return Math.round(v / grid) * grid;
 }
 
-export function createEmptyMap(name = 'Untitled Map'): MapDocument {
+export function createEmptyMap(
+  name = 'Untitled Map',
+  gameMode: KilrunMode = 'deathrun'
+): MapDocument {
+  const mode = normalizeKilrunMode(gameMode);
+  if (mode === 'horde') return createEmptyHordeMap(name);
+  if (mode === 'competitive') return createEmptyCompetitiveMap(name);
+  return createEmptyDeathrunMap(name);
+}
+
+function baseLayers() {
   const floorId = generateId('layer');
   const propsId = generateId('layer');
   const spawnsId = generateId('layer');
-  const now = new Date().toISOString();
   return {
-    version: 1,
-    name,
-    gridSize: 1,
-    environment: { ...DEFAULT_ENVIRONMENT },
+    floorId,
+    propsId,
+    spawnsId,
     layers: [
       { id: floorId, name: 'Floor', visible: true, locked: false, order: 0 },
       { id: propsId, name: 'Props', visible: true, locked: false, order: 1 },
       { id: spawnsId, name: 'Spawns', visible: true, locked: false, order: 2 },
-    ],
+    ] as EditorLayer[],
+  };
+}
+
+function createEmptyDeathrunMap(name: string): MapDocument {
+  const { floorId, spawnsId, layers } = baseLayers();
+  const now = new Date().toISOString();
+  return {
+    version: 1,
+    name,
+    gameMode: 'deathrun',
+    gridSize: 1,
+    environment: { ...DEFAULT_ENVIRONMENT },
+    layers,
     entities: [
       {
         id: generateId(),
@@ -486,6 +711,212 @@ export function createEmptyMap(name = 'Untitled Map'): MapDocument {
   };
 }
 
+function createEmptyHordeMap(name: string): MapDocument {
+  const { floorId, spawnsId, layers } = baseLayers();
+  const now = new Date().toISOString();
+  const arena: EditorEntity = {
+    id: generateId(),
+    name: 'Arena Floor',
+    kind: 'prop',
+    model: 'floor-square',
+    layerId: floorId,
+    position: [0, 0, 0],
+    rotation: [0, 0, 0],
+    scale: [6, 1, 6],
+    color: '#3d5a80',
+    solid: true,
+    animation: defaultAnimation(),
+  };
+  const playerSpawns: EditorEntity[] = [
+    [-2, 0.5, -2],
+    [2, 0.5, -2],
+    [-2, 0.5, 2],
+    [2, 0.5, 2],
+  ].map((pos, i) => ({
+    id: generateId(),
+    name: `Player Spawn ${i + 1}`,
+    kind: 'start' as const,
+    model: 'figurine',
+    layerId: spawnsId,
+    position: pos as [number, number, number],
+    rotation: [0, 0, 0] as [number, number, number],
+    scale: [1, 1, 1] as [number, number, number],
+    color: '#22c55e',
+    animation: defaultAnimation(),
+  }));
+  return {
+    version: 1,
+    name,
+    gameMode: 'horde',
+    gridSize: 1,
+    environment: {
+      ...DEFAULT_ENVIRONMENT,
+      sky: 'void',
+      skyColor: '#12080c',
+      fogColor: '#1a0a10',
+      floorColor: '#2a1520',
+    },
+    layers,
+    entities: [
+      arena,
+      ...playerSpawns,
+      {
+        id: generateId(),
+        name: 'Monster Spawn N',
+        kind: 'spawn_monster',
+        model: 'figurine-large',
+        layerId: spawnsId,
+        position: [0, 0.5, 10],
+        rotation: [0, 180, 0],
+        scale: [1, 1, 1],
+        color: '#f43f5e',
+        monsterSpawn: defaultMonsterSpawn(),
+        animation: defaultAnimation(),
+      },
+      {
+        id: generateId(),
+        name: 'Monster Spawn S',
+        kind: 'spawn_monster',
+        model: 'figurine-large',
+        layerId: spawnsId,
+        position: [0, 0.5, -10],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        color: '#f43f5e',
+        monsterSpawn: { ...defaultMonsterSpawn(), waveMin: 1, countPerWave: 2 },
+        animation: defaultAnimation(),
+      },
+      {
+        id: generateId(),
+        name: 'Health Floor',
+        kind: 'health_floor',
+        model: 'floor-square',
+        layerId: floorId,
+        position: [6, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1.5, 1, 1.5],
+        color: '#34d399',
+        solid: true,
+        healthFloor: defaultHealthFloor(),
+        animation: defaultAnimation(),
+      },
+      {
+        id: generateId(),
+        name: 'Revive Pad',
+        kind: 'revive_pad',
+        model: 'floor-square',
+        layerId: floorId,
+        position: [-6, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1.5, 1, 1.5],
+        color: '#60a5fa',
+        solid: true,
+        revive: defaultRevive(),
+        animation: defaultAnimation(),
+      },
+      {
+        id: generateId(),
+        name: 'Red Zone',
+        kind: 'red_zone',
+        model: 'floor-square',
+        layerId: floorId,
+        position: [0, 0, 6],
+        rotation: [0, 0, 0],
+        scale: [2, 1, 2],
+        color: '#ef4444',
+        redZone: defaultRedZone(),
+        animation: defaultAnimation(),
+      },
+      {
+        id: generateId(),
+        name: 'Wave 1 Anchor',
+        kind: 'wave_anchor',
+        model: 'target-a-square',
+        layerId: spawnsId,
+        position: [0, 0.2, 0],
+        rotation: [0, 0, 0],
+        scale: [0.6, 0.6, 0.6],
+        color: '#fbbf24',
+        waveAnchor: defaultWaveAnchor(),
+        animation: defaultAnimation(),
+      },
+    ],
+    meta: { createdAt: now, updatedAt: now },
+  };
+}
+
+function createEmptyCompetitiveMap(name: string): MapDocument {
+  const { floorId, spawnsId, layers } = baseLayers();
+  const now = new Date().toISOString();
+  const mkTeamSpawn = (
+    team: 'a' | 'b',
+    index: number,
+    pos: [number, number, number]
+  ): EditorEntity => ({
+    id: generateId(),
+    name: `Team ${team.toUpperCase()} Spawn ${index}`,
+    kind: team === 'a' ? 'spawn_team_a' : 'spawn_team_b',
+    model: 'figurine',
+    layerId: spawnsId,
+    position: pos,
+    rotation: [0, team === 'a' ? 0 : 180, 0],
+    scale: [1, 1, 1],
+    color: team === 'a' ? '#38bdf8' : '#f97316',
+    animation: defaultAnimation(),
+  });
+  return {
+    version: 1,
+    name,
+    gameMode: 'competitive',
+    gridSize: 1,
+    environment: {
+      ...DEFAULT_ENVIRONMENT,
+      sky: 'dusk',
+      skyColor: '#0c1220',
+      fogColor: '#101828',
+      floorColor: '#1e293b',
+    },
+    layers,
+    entities: [
+      {
+        id: generateId(),
+        name: 'Arena Floor',
+        kind: 'prop',
+        model: 'floor-square',
+        layerId: floorId,
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [8, 1, 10],
+        color: '#334155',
+        solid: true,
+        animation: defaultAnimation(),
+      },
+      {
+        id: generateId(),
+        name: 'Mid Cover',
+        kind: 'prop',
+        model: 'wall',
+        layerId: floorId,
+        position: [0, 0.5, 0],
+        rotation: [0, 0, 0],
+        scale: [2, 1.2, 0.4],
+        color: '#475569',
+        solid: true,
+        animation: defaultAnimation(),
+      },
+      mkTeamSpawn('a', 1, [-4, 0.5, -6]),
+      mkTeamSpawn('a', 2, [-2, 0.5, -6]),
+      mkTeamSpawn('a', 3, [2, 0.5, -6]),
+      mkTeamSpawn('a', 4, [4, 0.5, -6]),
+      mkTeamSpawn('b', 1, [-4, 0.5, 6]),
+      mkTeamSpawn('b', 2, [-2, 0.5, 6]),
+      mkTeamSpawn('b', 3, [2, 0.5, 6]),
+      mkTeamSpawn('b', 4, [4, 0.5, 6]),
+    ],
+    meta: { createdAt: now, updatedAt: now },
+  };
+}
+
 export function cloneEntity(ent: EditorEntity): EditorEntity {
   return {
     ...ent,
@@ -526,6 +957,11 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
     surface: ent.surface ? { ...ent.surface } : undefined,
     teleport: ent.teleport ? { ...ent.teleport } : undefined,
     light: ent.light ? { ...ent.light } : undefined,
+    monsterSpawn: ent.monsterSpawn ? { ...ent.monsterSpawn } : undefined,
+    redZone: ent.redZone ? { ...ent.redZone } : undefined,
+    revive: ent.revive ? { ...ent.revive } : undefined,
+    healthFloor: ent.healthFloor ? { ...ent.healthFloor } : undefined,
+    waveAnchor: ent.waveAnchor ? { ...ent.waveAnchor } : undefined,
   };
 }
 

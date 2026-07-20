@@ -363,6 +363,7 @@ export async function recordDeathrunResult(input: {
   await grantXp(input.userId, reward.xp, 'Deathrun match');
   await processMatchProgression({
     userId: input.userId,
+    mode: 'deathrun',
     outcome: input.outcome,
     role: input.role,
     score: input.score,
@@ -370,6 +371,138 @@ export async function recordDeathrunResult(input: {
   });
 
   return { xpEarned: reward.xp, vpEarned: reward.vp };
+}
+
+const HORDE_REWARDS: Record<'win' | 'loss' | 'survived' | 'eliminated', { xp: number; vp: number }> = {
+  win: { xp: 160, vp: 45 },
+  survived: { xp: 110, vp: 30 },
+  loss: { xp: 45, vp: 12 },
+  eliminated: { xp: 30, vp: 8 },
+};
+
+/** Persist a finished Horde match + missions / achievements. */
+export async function recordHordeResult(input: {
+  userId: string;
+  outcome: 'win' | 'loss' | 'survived' | 'eliminated';
+  wavesCleared?: number;
+  kills?: number;
+  score?: number;
+}): Promise<{ xpEarned: number; vpEarned: number }> {
+  const reward = HORDE_REWARDS[input.outcome];
+  const bonusXp = Math.min(80, (input.wavesCleared ?? 0) * 4);
+
+  await prisma.matchResult.create({
+    data: {
+      userId: input.userId,
+      mode: 'horde',
+      role: 'survivor',
+      outcome: input.outcome,
+      xpEarned: reward.xp + bonusXp,
+      vpEarned: reward.vp,
+      stats: {
+        wavesCleared: input.wavesCleared ?? 0,
+        kills: input.kills ?? 0,
+      },
+    },
+  });
+
+  await prisma.user.update({
+    where: { id: input.userId },
+    data: { vpCurrency: { increment: reward.vp } },
+  });
+
+  await grantXp(input.userId, reward.xp + bonusXp, 'Horde match');
+  await processMatchProgression({
+    userId: input.userId,
+    mode: 'horde',
+    outcome: input.outcome,
+    role: 'survivor',
+    score: input.score,
+    wavesCleared: input.wavesCleared,
+    kills: input.kills,
+  });
+
+  return { xpEarned: reward.xp + bonusXp, vpEarned: reward.vp };
+}
+
+const COMPETITIVE_REWARDS = {
+  win: { xp: 140, vp: 35 },
+  loss: { xp: 50, vp: 12 },
+} as const;
+
+/**
+ * Persist a Competitive 4v4 result, apply Elo-style KP, and sync rank.
+ * Rounds are best-of-6 (first to 4 wins typical); pass roundsWon/Lost for margin.
+ */
+export async function recordCompetitiveResult(input: {
+  userId: string;
+  team: 'team_a' | 'team_b';
+  outcome: 'win' | 'loss';
+  opponentAvgKp: number;
+  roundsWon?: number;
+  roundsLost?: number;
+  kills?: number;
+}): Promise<{ xpEarned: number; vpEarned: number; kpDelta: number; kp: number; rank: string }> {
+  const { applyKpDelta } = await import('@/lib/progression-actions');
+  const { computeCompetitiveKpDelta, KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
+
+  const user = await prisma.user.findUnique({ where: { id: input.userId } });
+  if (!user) throw new Error('User not found');
+  const playerKp =
+    typeof (user as { kp?: number }).kp === 'number'
+      ? (user as { kp: number }).kp
+      : KP_DEFAULT;
+
+  const kpDelta = computeCompetitiveKpDelta({
+    playerKp,
+    opponentAvgKp: input.opponentAvgKp,
+    won: input.outcome === 'win',
+    roundsWon: input.roundsWon,
+    roundsLost: input.roundsLost,
+  });
+
+  const reward = COMPETITIVE_REWARDS[input.outcome];
+
+  await prisma.matchResult.create({
+    data: {
+      userId: input.userId,
+      mode: 'competitive',
+      role: input.team,
+      outcome: input.outcome,
+      xpEarned: reward.xp,
+      vpEarned: reward.vp,
+      kpDelta,
+      stats: {
+        roundsWon: input.roundsWon ?? 0,
+        roundsLost: input.roundsLost ?? 0,
+        kills: input.kills ?? 0,
+        opponentAvgKp: input.opponentAvgKp,
+      },
+    },
+  });
+
+  await prisma.user.update({
+    where: { id: input.userId },
+    data: { vpCurrency: { increment: reward.vp } },
+  });
+
+  await grantXp(input.userId, reward.xp, 'Competitive match');
+  const kpResult = await applyKpDelta(input.userId, kpDelta, 'Competitive match');
+  await processMatchProgression({
+    userId: input.userId,
+    mode: 'competitive',
+    outcome: input.outcome,
+    role: input.team,
+  });
+
+  const nextKp = kpResult?.kp ?? playerKp + kpDelta;
+  return {
+    xpEarned: reward.xp,
+    vpEarned: reward.vp,
+    kpDelta,
+    kp: nextKp,
+    rank: kpResult?.rank ?? getRankForKp(nextKp),
+  };
 }
 
 /** Bootstrap missions for the current session user (safe to call often). */
