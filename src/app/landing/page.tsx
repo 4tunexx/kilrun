@@ -16,7 +16,7 @@ import AnimatedCounter from '@/components/ui/animated-counter';
 import {
   Users,
   Gamepad2,
-  Gem,
+  Coins,
   Crown,
   ShoppingBag,
   Loader2,
@@ -360,7 +360,7 @@ export default function LandingPage() {
             </Card>
             <Card className="bg-slate-800/60 backdrop-blur-md border-slate-700/50 shadow-lg">
               <CardContent className="pt-6 flex flex-col items-center justify-center">
-                <Gem className="w-10 h-10 mb-3 text-primary" />
+                <Coins className="w-10 h-10 mb-3 text-yellow-400" />
                 <div className="text-4xl font-black">
                   {dataLoading ? (
                     <Loader2 className="w-8 h-8 animate-spin text-slate-400" />

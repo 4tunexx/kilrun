@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import {
   Check,
-  Crown,
   Gem,
   Loader2,
   Shield,
@@ -11,6 +10,7 @@ import {
   Timer,
   CreditCard,
   Coins,
+  Trophy,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -59,12 +59,12 @@ const PERKS = [
     body: 'Premium-only matches with Pulsar anti-cheat online and tighter lobby rules.',
   },
   {
-    icon: Crown,
+    icon: Gem,
     title: 'Premium hub badge',
-    body: 'Gem badge next to Steam & email confirmation — separate from platform VIP crown.',
+    body: 'Gold gem badge next to Steam & email confirmation — separate from platform VIP crown.',
   },
   {
-    icon: Gem,
+    icon: Trophy,
     title: 'Ranked leaderboard',
     body: 'Appear on the Ranked (KP) board — Call of Duty style premium ladder.',
   },
@@ -241,7 +241,7 @@ export default function PremiumView({
         <Card className="border-amber-500/40 bg-gradient-to-b from-amber-500/10 to-slate-900/80">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Coins className="h-5 w-5 text-amber-300" />
+              <Coins className="h-5 w-5 text-yellow-400" />
               Pay with Vault Points
             </CardTitle>
           </CardHeader>
@@ -269,7 +269,7 @@ export default function PremiumView({
               {busy === 'vp' ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : (
-                <Gem className="h-4 w-4 mr-2" />
+                <Gem className="h-4 w-4 mr-2 text-amber-200 fill-amber-300/30" />
               )}
               {active ? 'Extend Premium' : 'Unlock Premium'}
             </Button>

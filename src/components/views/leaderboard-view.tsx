@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Gem, Loader2, Medal, Trophy } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Crown, Gem, Loader2, Medal, Trophy } from 'lucide-react';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -339,12 +339,20 @@ function RankRow({
                 You
               </Badge>
             )}
-            {(row.isPremium || row.isVip) && (
+            {row.isVip && (
               <span
-                className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500/20 border border-amber-400/50 shrink-0"
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-orange-500/20 border border-orange-400/50 shrink-0"
+                title="VIP"
+              >
+                <Crown className="h-2.5 w-2.5 text-orange-300" />
+              </span>
+            )}
+            {row.isPremium && (
+              <span
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500/25 border border-amber-400/60 shrink-0"
                 title="Premium"
               >
-                <Gem className="h-2.5 w-2.5 text-amber-300" />
+                <Gem className="h-2.5 w-2.5 text-amber-300 fill-amber-400/40" />
               </span>
             )}
           </p>

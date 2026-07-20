@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Flame, Loader2 } from 'lucide-react';
+import { Coins, Flame, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -215,7 +215,8 @@ export default function StoreView({ userId }: { userId?: string }) {
                           <div>
                             {onFire ? (
                               <div className="flex items-baseline gap-2">
-                                <p className="font-bold text-orange-400">
+                                <p className="font-bold text-orange-400 flex items-center gap-1">
+                                  <Coins className="h-3.5 w-3.5" />
                                   {effective} VP
                                 </p>
                                 <p className="text-xs text-slate-500 line-through">
@@ -223,7 +224,8 @@ export default function StoreView({ userId }: { userId?: string }) {
                                 </p>
                               </div>
                             ) : (
-                              <p className="font-bold text-yellow-400">
+                              <p className="font-bold text-yellow-400 flex items-center gap-1">
+                                <Coins className="h-3.5 w-3.5" />
                                 {item.vpPrice} VP
                               </p>
                             )}

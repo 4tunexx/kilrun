@@ -10,7 +10,7 @@ import {
   Bell,
   ShoppingBag,
   MessageSquare,
-  Gem,
+  Coins,
   Zap,
   MailX,
   Swords,
@@ -298,7 +298,7 @@ export default function ProfileView({ userId }: { userId: string }) {
             </Card>
             <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
               <CardContent className="pt-5 text-center">
-                <Gem className="w-5 h-5 mx-auto mb-1 text-yellow-400" />
+                <Coins className="w-5 h-5 mx-auto mb-1 text-yellow-400" />
                 <p className="text-2xl font-black">{user?.vpCurrency ?? 0}</p>
                 <p className="text-xs text-slate-400">VP Balance</p>
               </CardContent>
