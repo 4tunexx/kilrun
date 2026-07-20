@@ -85,7 +85,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     title: 'Camera & controls',
     paragraphs: [
       'Orbit: drag with left mouse (short click places in Brush mode; long drag orbits). Scroll to zoom.',
-      'Tools: Select (V) picks objects without placing. Brush (B) paints the active model from Assets. In Brush, click the same model on its cell to select it; Alt+click stacks on top.',
+      'Tools: Select (V) picks objects without placing. Brush (B) paints the active model from Assets. In Brush, click the same model on its cell to select it; Alt+click stacks on top. Alt+drag = box select.',
       'Free Fly (Ctrl): WASD move, mouse look, Space up, C down. Placement disabled. Ctrl again to exit.',
       'W / E / R = translate / rotate / scale. G = grid snap. F = focus selection. Alt+drag = box select. Measure tool = click two ground points.',
       'Ctrl+D duplicate +X, Ctrl+Shift+D +Z. Ctrl+Z / Ctrl+Y undo/redo. Ctrl+S save. Red wire boxes = death zones; yellow lines = button→trap links.',

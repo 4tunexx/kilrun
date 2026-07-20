@@ -186,8 +186,9 @@ export function createEditorViewport(
   const director = new AnimationDirector();
   const entityClips = new Map<string, THREE.AnimationClip[]>();
 
-  // Box-select (Alt+drag)
+  // Box-select (Alt+drag). Short Alt+click falls through so Brush can force-stack.
   let boxSelecting = false;
+  let altBoxPending = false;
   let boxStart = { x: 0, y: 0 };
   const boxOverlay = document.createElement('div');
   Object.assign(boxOverlay.style, {
@@ -763,17 +764,19 @@ export function createEditorViewport(
     if (layer?.locked) return;
 
     let x = point.x;
-    let y = Math.max(0, point.y);
     let z = point.z;
     if (gridSnap) {
       x = snapToGrid(x, gridSize);
       z = snapToGrid(z, gridSize);
-      if (snapY) y = snapToGrid(y, gridSize);
     }
-    // Sit on top of whatever is under this XZ (stacking / floor)
-    const stacked = surfaceYAt(x, z);
-    if (stacked > y) y = stacked;
-    else if (y < 0.001) y = stacked;
+    // Always sit cleanly on the top surface under this XZ cell (layer N above N-1).
+    // Recompute after snap so we never keep a tall Y from a neighboring mesh hit.
+    let y = surfaceYAt(x, z);
+    if (snapY) {
+      const snapped = snapToGrid(y, gridSize);
+      // Snap upward when rounding would sink below the supporting surface.
+      y = snapped + 1e-4 < y ? snapped + gridSize : snapped;
+    }
 
     const modelName =
       model ??
@@ -900,19 +903,31 @@ export function createEditorViewport(
     downX = ev.clientX;
     downY = ev.clientY;
     if (ev.altKey && !freeFly && !measureMode) {
-      boxSelecting = true;
+      // Defer box-select until the pointer actually drags — short Alt+click = force stack.
+      altBoxPending = true;
       boxStart = { x: ev.clientX, y: ev.clientY };
-      const hostRect = host.getBoundingClientRect();
-      boxOverlay.style.display = 'block';
-      boxOverlay.style.left = `${ev.clientX - hostRect.left}px`;
-      boxOverlay.style.top = `${ev.clientY - hostRect.top}px`;
-      boxOverlay.style.width = '0px';
-      boxOverlay.style.height = '0px';
-      orbit.enabled = false;
     }
   };
 
+  const beginBoxSelect = (ev: { clientX: number; clientY: number }) => {
+    if (boxSelecting) return;
+    altBoxPending = false;
+    boxSelecting = true;
+    const hostRect = host.getBoundingClientRect();
+    boxOverlay.style.display = 'block';
+    boxOverlay.style.left = `${boxStart.x - hostRect.left}px`;
+    boxOverlay.style.top = `${boxStart.y - hostRect.top}px`;
+    boxOverlay.style.width = '0px';
+    boxOverlay.style.height = '0px';
+    orbit.enabled = false;
+    void ev;
+  };
+
   const onPointerMoveBox = (ev: PointerEvent) => {
+    if (altBoxPending && !boxSelecting) {
+      const d = Math.hypot(ev.clientX - boxStart.x, ev.clientY - boxStart.y);
+      if (d > 6) beginBoxSelect(ev);
+    }
     if (!boxSelecting) return;
     const hostRect = host.getBoundingClientRect();
     const x1 = Math.min(boxStart.x, ev.clientX) - hostRect.left;
@@ -964,6 +979,8 @@ export function createEditorViewport(
       finishBoxSelect(ev);
       return;
     }
+    // Short Alt+click: cancel pending box-select and continue (force-stack / normal click).
+    if (altBoxPending) altBoxPending = false;
     if ((transform as unknown as { dragging: boolean }).dragging) return;
     const dist = Math.hypot(ev.clientX - downX, ev.clientY - downY);
     if (dist > 5) return;
@@ -1020,15 +1037,16 @@ export function createEditorViewport(
       const placedPt = pickPlacePoint(true);
       const p = placedPt?.point ?? groundHits[0].point;
       let x = p.x;
-      let y = Math.max(0, p.y);
       let z = p.z;
       if (gridSnap) {
         x = snapToGrid(x, gridSize);
         z = snapToGrid(z, gridSize);
-        if (snapY) y = snapToGrid(y, gridSize);
       }
-      const stacked = surfaceYAt(x, z);
-      if (stacked > y) y = stacked;
+      let y = surfaceYAt(x, z);
+      if (snapY) {
+        const snapped = snapToGrid(y, gridSize);
+        y = snapped + 1e-4 < y ? snapped + gridSize : snapped;
+      }
       const origin = stampEntitiesQueue[0].position;
       const placed = stampEntitiesQueue.map((e) => ({
         ...e,
@@ -1104,7 +1122,7 @@ export function createEditorViewport(
   };
 
   const onMouseMove = (ev: MouseEvent) => {
-    if (boxSelecting) {
+    if (altBoxPending || boxSelecting) {
       onPointerMoveBox(ev as unknown as PointerEvent);
       return;
     }

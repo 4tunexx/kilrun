@@ -85,7 +85,12 @@ function makeGeometry(kind: SkinPrimitive, shape: SkinShapeParams = {}): THREE.B
         Math.max(4, Math.round(hs / 3))
       );
     case 'capsule':
-      return new THREE.CapsuleGeometry(r, Math.max(0.01, h), 8, rs);
+      return new THREE.CapsuleGeometry(
+        r,
+        Math.max(0.01, h),
+        Math.max(12, Math.round(hs / 2)),
+        Math.max(20, rs)
+      );
     case 'cone':
       return new THREE.ConeGeometry(r, h, rs, Math.max(4, Math.round(hs / 3)));
     case 'torus':

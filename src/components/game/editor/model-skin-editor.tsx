@@ -26,6 +26,8 @@ import {
   Paintbrush,
   RotateCw,
   Aperture,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { EditorEntity } from './map-document';
@@ -130,6 +132,7 @@ export function ModelSkinEditor({
   const [showAvatar, setShowAvatar] = useState(true);
   const [viewDragMode, setViewDragMode] = useState<ViewDragMode>('turn');
   const [clayView, setClayView] = useState(false);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const [sourceMode, setSourceMode] = useState<SourceMode>('sculpt');
   const [blobBrush, setBlobBrush] = useState<SkinSculptBrush | null>('add');
   const [brushRadius, setBrushRadius] = useState(0.12);
@@ -237,6 +240,17 @@ export function ModelSkinEditor({
   useEffect(() => {
     previewRef.current?.setClayView(clayView);
   }, [clayView]);
+
+  useEffect(() => {
+    // Expand/collapse changes host size — ResizeObserver usually catches it; nudge once.
+    const id = requestAnimationFrame(() => {
+      const host = canvasHostRef.current;
+      if (!host || !previewRef.current) return;
+      // SkinPreview observes host; toggling class updates layout next frame.
+      void host.offsetHeight;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [previewExpanded]);
 
   useEffect(() => {
     return () => {
@@ -452,7 +466,11 @@ export function ModelSkinEditor({
         </button>
       </div>
 
-      <div className="relative h-56 shrink-0 border-b border-white/10 bg-[#0a1018]">
+      <div
+        className={`relative shrink-0 border-b border-white/10 bg-[#0a1018] ${
+          previewExpanded ? 'min-h-[min(70vh,520px)] h-[min(70vh,520px)]' : 'h-56'
+        }`}
+      >
         <div ref={canvasHostRef} className="absolute inset-0" />
         {loading && (
           <p className="absolute inset-0 flex items-center justify-center text-xs text-white/50">
@@ -491,7 +509,7 @@ export function ModelSkinEditor({
                     ? 'bg-sky-500/40 text-sky-50'
                     : 'text-white/55 hover:bg-white/10'
                 }`}
-                title="Drag to orbit · scroll to zoom · shift-drag to pan"
+                title="Drag to orbit · scroll / pinch to zoom · shift-drag to pan"
               >
                 <Move3d className="w-3 h-3" />
                 Turn
@@ -509,6 +527,23 @@ export function ModelSkinEditor({
             >
               <Aperture className="w-3.5 h-3.5" />
               Clay
+            </button>
+            <button
+              type="button"
+              onClick={() => setPreviewExpanded((v) => !v)}
+              className={`h-8 px-2 rounded-lg border text-[10px] font-bold uppercase pointer-events-auto flex items-center gap-1 ${
+                previewExpanded
+                  ? 'border-cyan-400/50 bg-cyan-500/30 text-cyan-50'
+                  : 'border-white/20 bg-black/65 text-white/65 hover:bg-white/10'
+              }`}
+              title={previewExpanded ? 'Exit full view' : 'Expand model view'}
+            >
+              {previewExpanded ? (
+                <Minimize2 className="w-3.5 h-3.5" />
+              ) : (
+                <Maximize2 className="w-3.5 h-3.5" />
+              )}
+              {previewExpanded ? 'Exit' : 'Expand'}
             </button>
             <button
               type="button"
@@ -546,8 +581,8 @@ export function ModelSkinEditor({
         </div>
         <p className="absolute bottom-1.5 left-2 right-2 text-[9px] text-white/40 pointer-events-none truncate">
           {viewDragMode === 'turn'
-            ? 'Turn: drag orbit · scroll zoom · shift-pan · use Front/Bottom/Side for quick angles'
-            : 'Sculpt: drag on mesh · Clay helps read form · Turn to see underside'}
+            ? 'Turn: drag orbit · scroll/pinch zoom · shift-pan · Front/Bottom/Side for angles'
+            : 'Sculpt: drag to add clay · two-finger pinch to zoom · Expand for full view'}
         </p>
       </div>
 
@@ -1011,17 +1046,21 @@ export function ModelSkinEditor({
           </p>
         </div>
 
-        <Vec3Fields
-          label="Offset (character place — same in game)"
+        <Vec3Sliders
+          label="Offset on player (slide to place hat / gear)"
           value={activeAtt.position}
           onChange={(position) => patchActive({ position })}
-          step={0.05}
+          min={-1.5}
+          max={1.5}
+          step={0.01}
         />
-        <Vec3Fields
+        <Vec3Sliders
           label="Rotation °"
           value={activeAtt.rotation}
           onChange={(rotation) => patchActive({ rotation })}
-          step={5}
+          min={-180}
+          max={180}
+          step={1}
         />
 
         {/* Attach mode + pair mirror */}
@@ -1567,38 +1606,60 @@ function SliderField({
   );
 }
 
-function Vec3Fields({
+function Vec3Sliders({
   label,
   value,
   onChange,
+  min,
+  max,
   step,
 }: {
   label: string;
   value: [number, number, number];
   onChange: (v: [number, number, number]) => void;
+  min: number;
+  max: number;
   step: number;
 }) {
   return (
-    <div className="space-y-1">
+    <div className="space-y-2 rounded-lg border border-white/10 bg-black/25 p-2.5">
       <p className="text-[10px] uppercase tracking-wider text-white/45">{label}</p>
-      <div className="grid grid-cols-3 gap-1.5">
-        {(['X', 'Y', 'Z'] as const).map((axis, i) => (
-          <label key={axis} className="text-[10px] text-white/40">
-            {axis}
-            <input
-              type="number"
-              step={step}
-              value={Number(value[i].toFixed(3))}
-              onChange={(e) => {
-                const next = [...value] as [number, number, number];
-                next[i] = Number(e.target.value) || 0;
-                onChange(next);
-              }}
-              className="mt-0.5 w-full rounded bg-black/40 border border-white/10 px-1.5 py-1 text-xs text-white"
-            />
-          </label>
-        ))}
-      </div>
+      {(['X', 'Y', 'Z'] as const).map((axis, i) => (
+        <label key={axis} className="flex items-center gap-2 text-[10px] text-white/50">
+          <span className="w-4 shrink-0 font-bold text-white/70">{axis}</span>
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={Math.min(max, Math.max(min, value[i]))}
+            onChange={(e) => {
+              const next = [...value] as [number, number, number];
+              next[i] = Number(e.target.value);
+              onChange(next);
+            }}
+            className="flex-1 accent-amber-400 h-2"
+          />
+          <input
+            type="number"
+            step={step}
+            value={Number(value[i].toFixed(3))}
+            onChange={(e) => {
+              const next = [...value] as [number, number, number];
+              next[i] = Number(e.target.value) || 0;
+              onChange(next);
+            }}
+            className="w-14 shrink-0 rounded bg-black/40 border border-white/10 px-1 py-0.5 text-[10px] tabular-nums text-white text-right"
+          />
+        </label>
+      ))}
+      <button
+        type="button"
+        className="text-[9px] text-white/40 hover:text-amber-200"
+        onClick={() => onChange([0, 0, 0])}
+      >
+        Reset {label.includes('Rotation') ? 'rotation' : 'offset'} to 0
+      </button>
     </div>
   );
 }
@@ -1640,6 +1701,10 @@ class SkinPreview {
   private clayView = false;
   private clayBackup = new Map<string, THREE.Material | THREE.Material[]>();
   private skinClock = 0;
+  /** Active pointers for pinch-zoom (mobile). */
+  private activePointers = new Map<number, { x: number; y: number }>();
+  private pinchStartDist = 0;
+  private pinchStartRadius = 3;
 
   constructor(
     host: HTMLElement,
@@ -1696,16 +1761,7 @@ class SkinPreview {
       if (this.disposed) return;
       this.raf = requestAnimationFrame(tick);
       this.skinClock += 1 / 60;
-      // Gentle spin only in sculpt idle (not while turning camera or painting)
-      if (
-        this.viewDragMode === 'sculpt' &&
-        !this.painting &&
-        !this.orbiting &&
-        !this.panning
-      ) {
-        const spin = this.showBody ? this.avatar : this.soloRoot;
-        if (spin) spin.rotation.y += 0.004;
-      }
+      // No idle spin — spinning under the brush tore clay and left holes.
       if (this.avatar && this.showBody) {
         tickSkinAttachments(this.avatar, 1 / 60, this.skinClock);
       }
@@ -1892,9 +1948,22 @@ class SkinPreview {
 
   private onPointerDown = (e: PointerEvent) => {
     e.preventDefault();
+    this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     this.lastPointerX = e.clientX;
     this.lastPointerY = e.clientY;
     this.renderer.domElement.setPointerCapture?.(e.pointerId);
+
+    // Two-finger pinch zoom (mobile)
+    if (this.activePointers.size === 2) {
+      this.painting = false;
+      this.orbiting = false;
+      this.panning = false;
+      const pts = [...this.activePointers.values()];
+      this.pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      this.pinchStartRadius = this.spherical.radius;
+      this.updateCursor();
+      return;
+    }
 
     if (this.viewDragMode === 'turn' || e.shiftKey || e.button === 1 || e.button === 2) {
       this.panning = e.shiftKey || e.button === 1;
@@ -1912,6 +1981,26 @@ class SkinPreview {
   };
 
   private onPointerMove = (e: PointerEvent) => {
+    if (this.activePointers.has(e.pointerId)) {
+      this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
+    // Pinch zoom while two fingers are down
+    if (this.activePointers.size >= 2) {
+      e.preventDefault();
+      const pts = [...this.activePointers.values()];
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (this.pinchStartDist > 4) {
+        const scale = this.pinchStartDist / Math.max(4, dist);
+        this.spherical.radius = Math.min(
+          12,
+          Math.max(0.25, this.pinchStartRadius * scale)
+        );
+        this.applyCameraFromSpherical();
+      }
+      return;
+    }
+
     const dx = e.clientX - this.lastPointerX;
     const dy = e.clientY - this.lastPointerY;
     this.lastPointerX = e.clientX;
@@ -1946,6 +2035,11 @@ class SkinPreview {
   };
 
   private onPointerUp = (e: PointerEvent) => {
+    this.activePointers.delete(e.pointerId);
+    if (this.activePointers.size < 2) {
+      this.pinchStartDist = 0;
+    }
+
     if (this.orbiting || this.panning) {
       this.orbiting = false;
       this.panning = false;
@@ -1958,7 +2052,14 @@ class SkinPreview {
       return;
     }
 
-    if (!this.painting) return;
+    if (!this.painting) {
+      try {
+        this.renderer.domElement.releasePointerCapture?.(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     this.painting = false;
     try {
       this.renderer.domElement.releasePointerCapture?.(e.pointerId);
