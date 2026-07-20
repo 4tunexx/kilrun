@@ -1,17 +1,23 @@
 /**
  * Build / attach skin meshes onto a player avatar
  * (primitives with materials/textures, or catalog / uploaded GLBs).
+ * Positions are character-local (feet at y=0) so editor "On body" matches gameplay.
  */
 import * as THREE from 'three';
 import type {
   SkinAttachment,
   SkinMaterial,
+  SkinMaterialFeel,
   SkinPrimitive,
   SkinShapeParams,
 } from '@/lib/player-skins';
 import {
   DEFAULT_SKIN_MATERIAL,
   SKIN_ATTACH_SLOTS,
+  attachmentKey,
+  materialForFeel,
+  mirrorAttachmentX,
+  skinSlotMeta,
 } from '@/lib/player-skins';
 import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
 import { applySculptDataToGeometry } from './skin-sculpt';
@@ -107,7 +113,7 @@ function makeProceduralTexture(mat: SkinMaterial): THREE.CanvasTexture | null {
     const s = 16;
     for (let y = 0; y < 128; y += s) {
       for (let x = 0; x < 128; x += s) {
-        ctx.fillStyle = ((x / s + y / s) % 2 === 0 ? a : b);
+        ctx.fillStyle = (x / s + y / s) % 2 === 0 ? a : b;
         ctx.fillRect(x, y, s, s);
       }
     }
@@ -143,20 +149,30 @@ function loadTexture(url: string): Promise<THREE.Texture> {
   });
 }
 
+function resolveFeel(att: SkinAttachment): SkinMaterialFeel {
+  if (att.feel) return att.feel;
+  try {
+    return skinSlotMeta(att.slot).defaultFeel;
+  } catch {
+    return 'solid';
+  }
+}
+
 async function buildMaterial(att: SkinAttachment): Promise<THREE.MeshStandardMaterial> {
-  const m: SkinMaterial = {
+  const feel = resolveFeel(att);
+  const felt = materialForFeel(feel, {
     ...DEFAULT_SKIN_MATERIAL,
     ...att.material,
     color: att.material?.color || att.color || DEFAULT_SKIN_MATERIAL.color,
-  };
+  });
   const mat = new THREE.MeshStandardMaterial({
-    color: m.color,
-    metalness: m.metalness ?? 0.15,
-    roughness: m.roughness ?? 0.65,
-    transparent: (m.opacity ?? 1) < 0.999,
-    opacity: m.opacity ?? 1,
-    emissive: new THREE.Color(m.emissive || '#000000'),
-    emissiveIntensity: m.emissiveIntensity ?? 0,
+    color: felt.color,
+    metalness: felt.metalness ?? 0.15,
+    roughness: felt.roughness ?? 0.65,
+    transparent: (felt.opacity ?? 1) < 0.999,
+    opacity: felt.opacity ?? 1,
+    emissive: new THREE.Color(felt.emissive || '#000000'),
+    emissiveIntensity: felt.emissiveIntensity ?? 0,
     side: THREE.DoubleSide,
   });
   if (att.textureUrl) {
@@ -167,7 +183,7 @@ async function buildMaterial(att: SkinAttachment): Promise<THREE.MeshStandardMat
       /* ignore bad texture */
     }
   } else {
-    const proc = typeof document !== 'undefined' ? makeProceduralTexture(m) : null;
+    const proc = typeof document !== 'undefined' ? makeProceduralTexture(felt) : null;
     if (proc) {
       mat.map = proc;
       mat.needsUpdate = true;
@@ -185,14 +201,13 @@ export async function buildSkinPartMesh(att: SkinAttachment): Promise<THREE.Obje
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.name = `prim_${att.slot}`;
+    mesh.name = `prim_${attachmentKey(att)}`;
     mesh.userData.sculptable = true;
     return mesh;
   }
 
   const src = resolveModelSrc(att.model, att.customModelUrl);
   if (!src) {
-    // Fallback empty box so UI never goes blank
     const geo = makeGeometry('box', { width: 0.3, height: 0.3, depth: 0.3 });
     const mat = await buildMaterial(att);
     return new THREE.Mesh(geo, mat);
@@ -246,6 +261,82 @@ export async function buildSkinPartMesh(att: SkinAttachment): Promise<THREE.Obje
   return root;
 }
 
+function expandAttachments(attachments: SkinAttachment[]): SkinAttachment[] {
+  const out: SkinAttachment[] = [];
+  for (const att of attachments) {
+    out.push(att);
+    const meta = SKIN_ATTACH_SLOTS.find((s) => s.id === att.slot);
+    if (att.pairMirror && meta?.canPairMirror) {
+      out.push(mirrorAttachmentX(att));
+    }
+  }
+  return out;
+}
+
+/**
+ * Place holder so `att.position` (character-local, feet y=0) matches
+ * the Model Editor "On body" preview exactly in gameplay.
+ */
+function placeHolder(
+  avatarRoot: THREE.Object3D,
+  group: THREE.Group,
+  att: SkinAttachment,
+  holder: THREE.Object3D
+) {
+  const meta = SKIN_ATTACH_SLOTS.find((s) => s.id === att.slot);
+  const mode = att.attachMode ?? meta?.defaultAttachMode ?? 'body';
+  const charLocal = new THREE.Vector3(...att.position);
+
+  avatarRoot.updateMatrixWorld(true);
+
+  if (mode === 'body') {
+    holder.position.copy(charLocal);
+    group.add(holder);
+    return;
+  }
+
+  // Bone mode: convert character-local → bone-local at current bind pose
+  let bone: THREE.Object3D | null = null;
+  if (att.bone) bone = avatarRoot.getObjectByName(att.bone) ?? null;
+  if (!bone && meta) bone = findBone(avatarRoot, meta.boneHints);
+
+  if (!bone) {
+    holder.position.copy(charLocal);
+    group.add(holder);
+    return;
+  }
+
+  const world = avatarRoot.localToWorld(charLocal.clone());
+  const boneLocal = bone.worldToLocal(world);
+  holder.position.copy(boneLocal);
+  bone.add(holder);
+}
+
+async function attachOne(
+  avatarRoot: THREE.Object3D,
+  group: THREE.Group,
+  att: SkinAttachment
+) {
+  const root = await buildSkinPartMesh(att);
+  root.scale.set(...att.scale);
+  root.rotation.set(
+    THREE.MathUtils.degToRad(att.rotation[0]),
+    THREE.MathUtils.degToRad(att.rotation[1]),
+    THREE.MathUtils.degToRad(att.rotation[2])
+  );
+
+  const holder = new THREE.Group();
+  holder.name = `skin_${attachmentKey(att)}`;
+  const feel = resolveFeel(att);
+  holder.userData.skinFeel = feel;
+  holder.userData.skinSway =
+    feel === 'cape' ? 1 : feel === 'cloth' ? 0.45 : 0;
+  holder.userData.baseRotZ = holder.rotation.z;
+  holder.userData.baseRotX = holder.rotation.x;
+  holder.add(root);
+  placeHolder(avatarRoot, group, att, holder);
+}
+
 export async function applySkinAttachments(
   avatarRoot: THREE.Object3D,
   attachments: SkinAttachment[]
@@ -257,43 +348,31 @@ export async function applySkinAttachments(
   group.name = ATTACH_ROOT_NAME;
   avatarRoot.add(group);
 
-  for (const att of attachments) {
+  const expanded = expandAttachments(attachments);
+  for (const att of expanded) {
     try {
-      const root = await buildSkinPartMesh(att);
-      root.scale.set(...att.scale);
-      root.rotation.set(
-        THREE.MathUtils.degToRad(att.rotation[0]),
-        THREE.MathUtils.degToRad(att.rotation[1]),
-        THREE.MathUtils.degToRad(att.rotation[2])
-      );
-
-      const meta = SKIN_ATTACH_SLOTS.find((s) => s.id === att.slot);
-      const boneName = att.bone;
-      let parent: THREE.Object3D = group;
-      if (boneName) {
-        const named = avatarRoot.getObjectByName(boneName);
-        if (named) parent = named;
-      } else if (meta) {
-        const bone = findBone(avatarRoot, meta.boneHints);
-        if (bone) parent = bone;
-      }
-
-      const holder = new THREE.Group();
-      holder.name = `skin_${att.slot}`;
-      holder.position.set(...att.position);
-      if (parent !== group && meta) {
-        holder.position.set(
-          att.position[0] - meta.defaultOffset[0],
-          att.position[1] - meta.defaultOffset[1],
-          att.position[2] - meta.defaultOffset[2]
-        );
-      }
-      holder.add(root);
-      parent.add(holder);
+      await attachOne(avatarRoot, group, att);
     } catch (err) {
       console.warn('[applySkinAttachments]', att.slot, err);
     }
   }
+}
+
+/** Soft sway for cloth / cape parts — call each frame from character update. */
+export function tickSkinAttachments(avatarRoot: THREE.Object3D, dt: number, timeSec?: number) {
+  const group = avatarRoot.getObjectByName(ATTACH_ROOT_NAME);
+  if (!group) return;
+  const t = timeSec ?? performance.now() * 0.001;
+  group.traverse((o) => {
+    const sway = o.userData?.skinSway;
+    if (!sway || typeof sway !== 'number' || sway <= 0) return;
+    const amp = 0.045 * sway;
+    const baseZ = typeof o.userData.baseRotZ === 'number' ? o.userData.baseRotZ : 0;
+    const baseX = typeof o.userData.baseRotX === 'number' ? o.userData.baseRotX : 0;
+    o.rotation.z = baseZ + Math.sin(t * 2.2 + o.id) * amp;
+    o.rotation.x = baseX + Math.sin(t * 1.6 + o.id * 0.7) * amp * 0.55;
+    void dt;
+  });
 }
 
 /**

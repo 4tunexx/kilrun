@@ -28,7 +28,7 @@ import { loadPlayerAvatar, getMapPlayerAvatar } from './player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import { suggestPlayerBindings } from './map-document';
 import { updateFollowCamera } from '../renderer/three-world';
-import { applySkinAttachments } from './skin-attachments';
+import { applySkinAttachments, tickSkinAttachments } from './skin-attachments';
 
 /**
  * Play Test uses the same pad export + platformer step as Deathrun match
@@ -460,6 +460,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       }
 
       director.update(dt);
+      if (playerRoot) tickSkinAttachments(playerRoot, dt, now * 0.001);
 
       renderer.render(scene, camera);
     };

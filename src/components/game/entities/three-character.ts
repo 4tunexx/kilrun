@@ -5,7 +5,7 @@ import { suggestPlayerBindings } from '../editor/map-document';
 import { loadPlayerAvatar } from '../editor/player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import { toThree } from '../renderer/coords';
-import { applySkinAttachments } from '../editor/skin-attachments';
+import { applySkinAttachments, tickSkinAttachments } from '../editor/skin-attachments';
 import type { SkinAttachment } from '@/lib/player-skins';
 
 function pickClip(clips: THREE.AnimationClip[], patterns: string[]): THREE.AnimationClip | null {
@@ -71,6 +71,8 @@ export class ThreeCharacter {
   private wasGrounded = true;
   private landUntil = 0;
   private avatarOpts: CharacterAvatarOptions;
+  private avatarScene: THREE.Object3D | null = null;
+  private skinTime = 0;
 
   constructor(_username: string, _isLocal: boolean, avatar?: CharacterAvatarOptions) {
     this.avatarOpts = avatar ?? {};
@@ -94,6 +96,7 @@ export class ThreeCharacter {
         scene.scale.multiplyScalar(scale);
       }
       this.root.add(scene);
+      this.avatarScene = scene;
       this.loaded = true;
       this.root.visible = true;
 
@@ -240,6 +243,8 @@ export class ThreeCharacter {
     }
 
     this.mixer?.update(dt);
+    this.skinTime += dt;
+    if (this.avatarScene) tickSkinAttachments(this.avatarScene, dt, this.skinTime);
   }
 
   public destroy() {
