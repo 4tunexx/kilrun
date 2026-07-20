@@ -27,6 +27,8 @@ export interface NetPlayerState {
   isSprinting: boolean;
   isReady: boolean;
   kp?: number;
+  /** Compact SkinAttachment[] JSON for remote cosmetics. */
+  equippedSkinsJson?: string;
 }
 
 export interface NetPlatformState {

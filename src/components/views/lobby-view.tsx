@@ -5,6 +5,7 @@ import KilrunEngine from '@/components/game/kilrun-engine';
 import type { KilrunMode } from './play-view';
 import { getMyEquippedSkinAttachments } from '@/lib/social-actions';
 import type { SkinAttachment } from '@/lib/player-skins';
+import { packMatchLoadout } from '@/lib/match-loadout';
 import { getSiteSettings } from '@/lib/progression-actions';
 import { getRankForKp, KP_DEFAULT } from '@/lib/kp';
 import { parseRankConfig, RANK_MM_OPEN_KEY } from '@/lib/rank-config';
@@ -99,6 +100,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   }, [mode, competitiveQueue, kp]);
 
   const canRanked = rankedAccess ?? isPremium;
+  const loadout = useMemo(() => packMatchLoadout(equippedSkins), [equippedSkins]);
   const joinOptions = useMemo(
     () => ({
       userId,
@@ -108,6 +110,8 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       kp,
       isPremium,
       rankedAccess: canRanked,
+      equippedSkinsJson: loadout.equippedSkinsJson,
+      weaponCombat: loadout.weaponCombat,
       ...(mode === 'competitive' && competitiveQueue === 'ranked'
         ? { rankKey, mmWaitSec, minSameRankPlayers }
         : {}),
@@ -125,6 +129,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       rankKey,
       mmWaitSec,
       minSameRankPlayers,
+      loadout,
     ]
   );
 

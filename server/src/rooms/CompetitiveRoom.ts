@@ -8,14 +8,11 @@ import {
 } from '../sim/platforms.js';
 import {
   COMPETITIVE_MIN_PLAYERS_TO_START,
-  HITSCAN_DAMAGE,
-  HITSCAN_RANGE,
   LOBBY_COUNTDOWN_MS,
   MAX_ENERGY,
   OBSTACLE_DAMAGE,
   OBSTACLE_HIT_COOLDOWN_MS,
   PLAYER_RADIUS,
-  SHOOT_COOLDOWN_MS,
   SPAWN_X,
   SPAWN_Z,
   TICK_DT_MS,
@@ -32,6 +29,7 @@ import {
   type WorldBounds,
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
+import { applyLoadoutToPlayer } from '../sim/loadout.js';
 
 interface JoinOptions {
   userId?: string;
@@ -47,6 +45,14 @@ interface JoinOptions {
   rankKey?: string;
   mmWaitSec?: number;
   minSameRankPlayers?: number;
+  equippedSkinsJson?: string;
+  weaponCombat?: {
+    kind?: string;
+    range?: number;
+    damage?: number;
+    cooldownMs?: number;
+    coneRadians?: number;
+  };
 }
 
 interface SpawnPoint {
@@ -211,6 +217,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     player.username = options.username ?? `Player${client.sessionId.slice(0, 4)}`;
     player.avatarUrl = options.avatarUrl ?? '';
     player.kp = typeof options.kp === 'number' ? options.kp : 1000;
+    applyLoadoutToPlayer(player, options);
     player.energy = MAX_ENERGY;
 
     // Balance by current team sizes
@@ -460,9 +467,10 @@ export class CompetitiveRoom extends Room<RoomState> {
         this.damagePlayer(player, 100);
       }
 
-      if (input.shootPressed) {
+      if (input.shootPressed && player.weaponKind !== 'cosmetic') {
         const lastShot = this.lastShotAt.get(sessionId) ?? 0;
-        if (now - lastShot >= SHOOT_COOLDOWN_MS) {
+        const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
+        if (now - lastShot >= cooldown) {
           this.lastShotAt.set(sessionId, now);
           this.resolvePvPShot(player);
         }
@@ -471,6 +479,10 @@ export class CompetitiveRoom extends Room<RoomState> {
   }
 
   private resolvePvPShot(shooter: PlayerState) {
+    if (shooter.weaponKind === 'cosmetic') return;
+    const range = shooter.weaponRange > 0 ? shooter.weaponRange : 14;
+    const damage = shooter.weaponDamage > 0 ? shooter.weaponDamage : 25;
+    const cone = shooter.weaponConeRadians > 0 ? shooter.weaponConeRadians : 0.18;
     for (const target of this.state.players.values()) {
       if (!target.isAlive) continue;
       if (target.role === shooter.role) continue;
@@ -481,10 +493,11 @@ export class CompetitiveRoom extends Room<RoomState> {
           shooter.aimAngle,
           target.x,
           target.y,
-          HITSCAN_RANGE
+          range,
+          cone
         )
       ) {
-        this.damagePlayer(target, HITSCAN_DAMAGE);
+        this.damagePlayer(target, damage);
         break;
       }
     }

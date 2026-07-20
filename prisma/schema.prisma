@@ -490,3 +490,24 @@ model ReputationVote {
   @@unique([voterId, targetId])
   @@index([targetId])
 }
+
+/// Cloud-published match maps (active per mode). Local editor drafts stay in browser storage.
+model GameMap {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// Browser localStorage map id when published from the editor.
+  localId      String?
+  name         String
+  /// deathrun | horde | competitive
+  mode         String
+  /// Full MapDocument JSON (compact enough for Mongo; large assets should be URLs).
+  documentJson String
+  thumbnailUrl String?
+  isActive     Boolean  @default(false)
+  createdById  String?  @db.ObjectId
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([mode, isActive])
+  @@index([localId])
+  @@index([updatedAt])
+}

@@ -28,6 +28,16 @@ export interface JoinOptions {
   mmWaitSec?: number;
   /** Keep same-rank lobby if at least this many players. */
   minSameRankPlayers?: number;
+  /** Compact SkinAttachment[] JSON for remote cosmetics sync. */
+  equippedSkinsJson?: string;
+  /** Weapon combat from equipped loadout (server clamps). */
+  weaponCombat?: {
+    kind: string;
+    range: number;
+    damage: number;
+    cooldownMs: number;
+    coneRadians?: number;
+  };
 }
 
 export type GameRoomName = 'deathrun' | 'horde' | 'competitive' | 'competitive_ranked';

@@ -36,6 +36,14 @@ export class PlayerState extends Schema {
   @type('boolean') hasCheckpoint = false;
   /** Competitive KP snapshot at join (optional). */
   @type('number') kp = 1000;
+  /** Compact JSON of equipped SkinAttachment[] for remote cosmetics. */
+  @type('string') equippedSkinsJson = '[]';
+  /** Authoritative weapon combat from equipped loadout (clamped on join). */
+  @type('string') weaponKind = 'hitscan';
+  @type('number') weaponRange = 14;
+  @type('number') weaponDamage = 25;
+  @type('number') weaponCooldownMs = 350;
+  @type('number') weaponConeRadians = 0.18;
 }
 
 /** Solid walkable surface for the shared platformer physics. */

@@ -38,6 +38,7 @@ import {
   resolveWeaponCombat,
 } from '@/lib/weapons';
 import type { SkinAttachment } from '@/lib/player-skins';
+import { parseEquippedSkinsJson } from '@/lib/match-loadout';
 import {
   getActivePlayMapIdForMode,
   mapDocSpawnPoints,
@@ -57,6 +58,7 @@ import {
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
 import type { KilrunMode } from '@/lib/game-modes';
+import { getActiveCloudMapDocument } from '@/lib/game-map-actions';
 import { HordeLobbyOverlay } from './modes/horde/lobby-overlay';
 import { HordeResultsScreen } from './modes/horde/results-screen';
 import { CompetitiveLobbyOverlay } from './modes/competitive/lobby-overlay';
@@ -122,8 +124,27 @@ export default function KilrunEngine({
   const { toggle: toggleFullscreen } = useGameFullscreen(rootRef, true);
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
+  const cloudDocRef = useRef<MapDocument | null>(null);
   const equippedSkinsRef = useRef<SkinAttachment[] | null>(equippedSkins ?? null);
   equippedSkinsRef.current = equippedSkins ?? null;
+
+  // Prefer cloud Active map for this mode (works for all clients), fall back to localStorage.
+  useEffect(() => {
+    let cancelled = false;
+    void getActiveCloudMapDocument(mode)
+      .then((cloud) => {
+        if (cancelled || !cloud?.document) return;
+        cloudDocRef.current = cloud.document;
+        // Allow lobby effect to re-push if we already short-circuited on local-only miss.
+        customLoadedRef.current = false;
+      })
+      .catch(() => {
+        /* local fallback only */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
 
   // Push Active editor map for this mode to the server when lobby is ready
   useEffect(() => {
@@ -135,9 +156,14 @@ export default function KilrunEngine({
     if (customLoadedRef.current) return;
     if (!connectionRef.current?.sessionId) return;
 
-    const mapId = getActivePlayMapIdForMode(mode);
-    if (!mapId) return;
-    const doc = loadMapPlayable(mapId);
+    const resolveDoc = (): MapDocument | null => {
+      if (cloudDocRef.current) return cloudDocRef.current;
+      const mapId = getActivePlayMapIdForMode(mode);
+      if (!mapId) return null;
+      return loadMapPlayable(mapId);
+    };
+
+    const doc = resolveDoc();
     if (!doc) return;
 
     const platforms = mapDocToSimPlatforms(doc);
@@ -202,7 +228,9 @@ export default function KilrunEngine({
     let raf = 0;
     const world = createThreeWorld(hostElement);
     const activeId = getActivePlayMapIdForMode(mode);
-    const hasCustomMap = Boolean(activeId && loadMapPlayable(activeId));
+    const localDoc = activeId ? loadMapPlayable(activeId) : null;
+    const playDoc = cloudDocRef.current ?? localDoc;
+    const hasCustomMap = Boolean(playDoc);
     const map = new ThreeMap(world.scene, { hardcodedDecor: !hasCustomMap });
     const overlay = new CustomMapOverlay(world.scene);
     const characters = new Map<string, ThreeCharacter>();
@@ -218,13 +246,10 @@ export default function KilrunEngine({
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
 
-    if (activeId) {
-      const doc = loadMapPlayable(activeId);
-      if (doc) {
-        customDocRef.current = doc;
-        map.clearHardcodedDecor();
-        void overlay.load(doc);
-      }
+    if (playDoc) {
+      customDocRef.current = playDoc;
+      map.clearHardcodedDecor();
+      void overlay.load(playDoc);
     }
 
     const spawnCharacter = (sessionId: string, username: string) => {
@@ -235,10 +260,14 @@ export default function KilrunEngine({
         ? { ...avatarEntity, playerSkins: undefined }
         : undefined;
       const isLocal = sessionId === connectionRef.current?.sessionId;
+      const netPlayer = playersRef.current.get(sessionId);
+      const remoteSkins = !isLocal
+        ? parseEquippedSkinsJson(netPlayer?.equippedSkinsJson)
+        : null;
       const view = new ThreeCharacter(username, isLocal, {
         avatarEntity: avatarForPlay,
-        // Only purchased/equipped shop skins show in gameplay.
-        equippedSkins: isLocal ? equippedSkinsRef.current : null,
+        // Local: purchased/equipped. Remotes: synced loadout from join.
+        equippedSkins: isLocal ? equippedSkinsRef.current : remoteSkins,
       });
       characters.set(sessionId, view);
       world.scene.add(view.root);

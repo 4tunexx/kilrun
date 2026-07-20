@@ -47,6 +47,7 @@ import {
   type KilrunMode,
 } from '@/lib/game-modes';
 import { getMapGameMode } from '@/components/game/editor/map-document';
+import { publishCloudMap } from '@/lib/game-map-actions';
 
 const MapEditor = dynamic(() => import('@/components/game/editor/map-editor'), {
   ssr: false,
@@ -336,11 +337,40 @@ export function AdminMapEditorPanel() {
                           variant="secondary"
                           className="h-7 text-xs"
                           onClick={() => {
-                            setActivePlayMapIdForMode(selectedMode, m.id);
-                            setActiveId(m.id);
-                            toast({
-                              title: `“${m.name}” is Active ${modeInfo.shortTitle} map`,
-                            });
+                            void (async () => {
+                              setActivePlayMapIdForMode(selectedMode, m.id);
+                              setActiveId(m.id);
+                              const doc = loadMapPlayable(m.id);
+                              if (doc) {
+                                try {
+                                  await publishCloudMap({
+                                    localId: m.id,
+                                    name: m.name,
+                                    mode: selectedMode,
+                                    document: doc,
+                                    thumbnailDataUrl: getMapThumbnail(m.id),
+                                    setActive: true,
+                                  });
+                                  toast({
+                                    title: `“${m.name}” is Active ${modeInfo.shortTitle} map`,
+                                    description: 'Published to cloud for all players.',
+                                  });
+                                  return;
+                                } catch (err) {
+                                  console.warn('[Active cloud publish]', err);
+                                  toast({
+                                    title: `“${m.name}” is Active locally`,
+                                    description:
+                                      'Cloud publish failed — run Admin → Sync database schema if GameMap is missing, then retry Active.',
+                                    variant: 'destructive',
+                                  });
+                                  return;
+                                }
+                              }
+                              toast({
+                                title: `“${m.name}” is Active ${modeInfo.shortTitle} map`,
+                              });
+                            })();
                           }}
                         >
                           <Star className="h-3 w-3 mr-1" /> Active

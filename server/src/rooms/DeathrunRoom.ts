@@ -16,11 +16,8 @@ import {
   MIN_PLAYERS_TO_START,
   OBSTACLE_DAMAGE,
   OBSTACLE_HIT_COOLDOWN_MS,
-  HITSCAN_DAMAGE,
-  HITSCAN_RANGE,
   PLAYER_HEIGHT,
   PLAYER_RADIUS,
-  SHOOT_COOLDOWN_MS,
   SPAWN_X,
   SPAWN_Z,
   TICK_DT_MS,
@@ -37,6 +34,7 @@ import {
   type WorldBounds,
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
+import { applyLoadoutToPlayer } from '../sim/loadout.js';
 
 interface JoinOptions {
   userId?: string;
@@ -44,6 +42,16 @@ interface JoinOptions {
   avatarUrl?: string;
   /** Staff / map publisher — allowed to push MAIN custom maps. */
   isAdmin?: boolean;
+  /** Compact SkinAttachment[] JSON for remote cosmetics. */
+  equippedSkinsJson?: string;
+  /** Optional weapon combat override (clamped server-side). */
+  weaponCombat?: {
+    kind?: string;
+    range?: number;
+    damage?: number;
+    cooldownMs?: number;
+    coneRadians?: number;
+  };
 }
 
 interface FinishZone {
@@ -224,6 +232,7 @@ export class DeathrunRoom extends Room<RoomState> {
     player.userId = options.userId ?? client.sessionId;
     player.username = options.username ?? `Player${client.sessionId.slice(0, 4)}`;
     player.avatarUrl = options.avatarUrl ?? '';
+    applyLoadoutToPlayer(player, options);
     this.applySpawnPosition(player, this.state.players.size);
     player.energy = MAX_ENERGY;
     player.role = 'runner';
@@ -496,20 +505,27 @@ export class DeathrunRoom extends Room<RoomState> {
       }
 
       if (player.role === 'trapper' && player.isAlive && input.shootPressed) {
-        const lastShot = this.lastShotAt.get(sessionId) ?? 0;
-        if (now - lastShot >= SHOOT_COOLDOWN_MS) {
-          this.lastShotAt.set(sessionId, now);
-          this.resolveTrapperShot(player);
+        if (player.weaponKind !== 'cosmetic') {
+          const lastShot = this.lastShotAt.get(sessionId) ?? 0;
+          const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
+          if (now - lastShot >= cooldown) {
+            this.lastShotAt.set(sessionId, now);
+            this.resolveTrapperShot(player);
+          }
         }
       }
     });
   }
 
   private resolveTrapperShot(trapper: PlayerState) {
+    if (trapper.weaponKind === 'cosmetic') return;
+    const range = trapper.weaponRange > 0 ? trapper.weaponRange : 14;
+    const damage = trapper.weaponDamage > 0 ? trapper.weaponDamage : 25;
+    const cone = trapper.weaponConeRadians > 0 ? trapper.weaponConeRadians : 0.18;
     for (const target of this.state.players.values()) {
       if (target.role !== 'runner' || !target.isAlive || target.hasFinished) continue;
-      if (isHitByShot(trapper.x, trapper.y, trapper.aimAngle, target.x, target.y, HITSCAN_RANGE)) {
-        this.damagePlayer(target, HITSCAN_DAMAGE);
+      if (isHitByShot(trapper.x, trapper.y, trapper.aimAngle, target.x, target.y, range, cone)) {
+        this.damagePlayer(target, damage);
         break;
       }
     }
