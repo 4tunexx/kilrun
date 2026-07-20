@@ -302,12 +302,42 @@ async function grantVipCosmetics(userId: string) {
 }
 
 export async function unlockVipWithVp() {
-  return purchasePremiumWithVp();
+  const { VIP_UNLOCK_VP_COST } = await import('@/lib/vip');
+  const user = await requireSessionUser();
+  if (user.isVip || user.role === 'vip') {
+    return { ok: true as const, already: true };
+  }
+  if (user.vpCurrency < VIP_UNLOCK_VP_COST) {
+    return { ok: false as const, error: 'Not enough VP' };
+  }
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      vpCurrency: { decrement: VIP_UNLOCK_VP_COST },
+      isVip: true,
+      role: user.role === 'player' ? 'vip' : user.role,
+    },
+  });
+  try {
+    await grantVipCosmetics(user.id);
+  } catch {
+    // Cosmetics are best-effort — VIP flag already applied.
+  }
+  await prisma.notification.create({
+    data: {
+      userId: user.id,
+      title: 'VIP unlocked',
+      body: `Welcome to VIP! Orange name color, crown badge, exclusive banner, frame, and nickname effect are yours. More in-game VIP perks coming soon.`,
+      type: 'vip',
+    },
+  });
+  await processWebsiteAction(user.id, 'vip');
+  return { ok: true as const, already: false };
 }
 
 /**
  * Extend Kilrun Premium using admin-configured VP price / duration (or a named offer).
- * Stacks from current expiry if still active.
+ * Stacks from current expiry if still active. Does not grant platform VIP.
  */
 export async function purchasePremiumWithVp(offerId?: string) {
   const { addPremiumDays, isPremiumActive } = await import('@/lib/premium');
@@ -343,7 +373,8 @@ export async function purchasePremiumWithVp(offerId?: string) {
       ? (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt
       : null;
   const nextExpires = addPremiumDays(
-    currentExpires && isPremiumActive({ isVip: user.isVip, premiumExpiresAt: currentExpires })
+    currentExpires &&
+      isPremiumActive({ isVip: user.isVip, premiumExpiresAt: currentExpires })
       ? new Date(currentExpires)
       : new Date(),
     durationDays
@@ -353,25 +384,17 @@ export async function purchasePremiumWithVp(offerId?: string) {
     where: { id: user.id },
     data: {
       ...(vpCost > 0 ? { vpCurrency: { decrement: vpCost } } : {}),
-      isVip: true,
       premiumExpiresAt: nextExpires,
-      role: user.role === 'player' ? 'vip' : user.role,
     },
   });
-  try {
-    await grantVipCosmetics(user.id);
-  } catch {
-    // Cosmetics are best-effort — Premium flag already applied.
-  }
   await prisma.notification.create({
     data: {
       userId: user.id,
       title: 'Premium activated',
-      body: `Kilrun Premium (${label}) is active until ${nextExpires.toLocaleDateString()}. Ranked Competitive (KP) and hub perks unlocked.`,
-      type: 'vip',
+      body: `Kilrun Premium (${label}) is active until ${nextExpires.toLocaleDateString()}. Ranked Competitive (KP Elo) unlocked.`,
+      type: 'system',
     },
   });
-  await processWebsiteAction(user.id, 'vip');
   return {
     ok: true as const,
     already: false,

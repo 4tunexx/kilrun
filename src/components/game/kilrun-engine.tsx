@@ -458,7 +458,17 @@ export default function KilrunEngine({
           (mode === 'horde' ? (
             <HordeLobbyOverlay playerCount={playerCount} />
           ) : mode === 'competitive' ? (
-            <CompetitiveLobbyOverlay playerCount={playerCount} />
+            <CompetitiveLobbyOverlay
+              playerCount={playerCount}
+              queue={competitiveQueue}
+              isAdmin={isAdmin}
+              searching={room.phase === 'lobby'}
+              onForceStart={
+                isAdmin
+                  ? () => connectionRef.current?.sendForceStart()
+                  : undefined
+              }
+            />
           ) : (
             <LobbyOverlay playerCount={playerCount} />
           ))}

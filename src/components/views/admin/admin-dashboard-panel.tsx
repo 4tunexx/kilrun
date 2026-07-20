@@ -21,6 +21,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import {
   adminGetDashboardOverview,
+  adminRestartColyseus,
   adminToggleService,
   type AdminDashboardOverview,
 } from '@/lib/admin-dashboard';
@@ -117,6 +118,40 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
     } catch (e: unknown) {
       toast({
         title: e instanceof Error ? e.message : 'Toggle failed',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleRestartColyseus = async () => {
+    if (
+      !window.confirm(
+        'Restart the Colyseus game server now? Active matches will disconnect. The host should bring it back in a few seconds.'
+      )
+    ) {
+      return;
+    }
+    setBusy('colyseus');
+    try {
+      const result = await adminRestartColyseus();
+      if (!result.ok) {
+        toast({
+          title: 'Colyseus restart failed',
+          description: result.error,
+          variant: 'destructive',
+        });
+        return;
+      }
+      toast({
+        title: 'Colyseus restarting',
+        description: result.detail ?? 'Restart signal sent',
+      });
+      await load();
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Restart failed',
         variant: 'destructive',
       });
     } finally {
@@ -301,6 +336,32 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
                 </div>
               </div>
             ))}
+            {isAdmin && (
+              <div className="rounded-lg border border-sky-700/40 bg-sky-950/20 p-2.5 space-y-2">
+                <p className="text-sm font-medium flex items-center gap-2">
+                  <Server className="h-4 w-4 text-sky-300" /> Colyseus game server
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Soft-restart rooms after deploy. Set{' '}
+                  <code className="text-slate-400">GAME_SERVER_ADMIN_SECRET</code> on both
+                  web and game server.
+                </p>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="w-full"
+                  disabled={Boolean(busy)}
+                  onClick={() => void handleRestartColyseus()}
+                >
+                  {busy === 'colyseus' ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-1.5" />
+                  )}
+                  Restart Colyseus
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 

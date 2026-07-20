@@ -7,11 +7,11 @@ import {
   type PlatformBlueprint,
 } from '../sim/platforms.js';
 import {
+  COMPETITIVE_MIN_PLAYERS_TO_START,
   HITSCAN_DAMAGE,
   HITSCAN_RANGE,
   LOBBY_COUNTDOWN_MS,
   MAX_ENERGY,
-  MIN_PLAYERS_TO_START,
   OBSTACLE_DAMAGE,
   OBSTACLE_HIT_COOLDOWN_MS,
   PLAYER_RADIUS,
@@ -137,6 +137,17 @@ export class CompetitiveRoom extends Room<RoomState> {
         ...this.latestInputs.get(client.sessionId),
         ...input,
       });
+    });
+
+    this.onMessage('forceStart', (client) => {
+      if (this.state.phase !== 'lobby') return;
+      if (!this.adminSessions.has(client.sessionId)) return;
+      // Admin can launch even alone — skip matchmaking wait.
+      this.state.phase = 'countdown';
+      this.state.countdownMs = LOBBY_COUNTDOWN_MS;
+      console.log(
+        `[CompetitiveRoom] admin forceStart (${this.state.players.size} player(s))`
+      );
     });
 
     this.onMessage('loadCustomMap', (client, data: Record<string, unknown>) => {
@@ -273,7 +284,7 @@ export class CompetitiveRoom extends Room<RoomState> {
             `[CompetitiveRoom] same-rank underfilled (${this.state.players.size}/${this.minSameRank}) — opened lobby`
           );
         }
-        if (this.state.players.size >= MIN_PLAYERS_TO_START) {
+        if (this.state.players.size >= COMPETITIVE_MIN_PLAYERS_TO_START) {
           this.state.phase = 'countdown';
           this.state.countdownMs = LOBBY_COUNTDOWN_MS;
         }

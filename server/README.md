@@ -72,7 +72,8 @@ Your public URL will be `wss://<app-name>.fly.dev`. Requires a credit card once 
 | Variable | Required | Description |
 | --- | --- | --- |
 | `PORT` | No | Defaults to `2567`. Most hosts inject this automatically. |
-| `CLIENT_ORIGIN` | Recommended | CORS allow-origin for the HTTP endpoints (`/healthz`, `/monitor`). Set to your deployed Next.js origin, e.g. `https://kilrun.vercel.app`. Defaults to `*` if unset. |
+| `CLIENT_ORIGIN` | Recommended | CORS allow-origin for the HTTP endpoints (`/healthz`, `/monitor`, `/admin/restart`). Set to your deployed Next.js origin, e.g. `https://kilrun.vercel.app`. Defaults to `*` if unset. |
+| `GAME_SERVER_ADMIN_SECRET` | Recommended | Shared secret for `POST /admin/restart` (must match the Next.js env of the same name). Used by Admin → Dashboard → Restart Colyseus. |
 
 ### Wiring the deployed server into the Next.js app
 

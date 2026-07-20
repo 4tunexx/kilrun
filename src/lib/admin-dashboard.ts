@@ -296,3 +296,93 @@ export async function adminToggleService(
   }
   return { ok: true as const };
 }
+
+/**
+ * Ask the Colyseus game server to exit so its host restarts it.
+ * Requires GAME_SERVER_ADMIN_SECRET on both Next.js and the game server,
+ * plus NEXT_PUBLIC_GAME_SERVER_URL (ws/wss → http/https).
+ */
+export async function adminRestartColyseus(): Promise<{
+  ok: boolean;
+  error?: string;
+  detail?: string;
+}> {
+  const actor = await requireStaff();
+  if (actor.role !== 'admin') {
+    throw new Error('Admin only');
+  }
+
+  const secret = process.env.GAME_SERVER_ADMIN_SECRET || '';
+  if (!secret) {
+    return {
+      ok: false,
+      error: 'GAME_SERVER_ADMIN_SECRET is not set on the web app',
+    };
+  }
+
+  const wsUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || '';
+  if (!wsUrl) {
+    return {
+      ok: false,
+      error: 'NEXT_PUBLIC_GAME_SERVER_URL is not set',
+    };
+  }
+
+  let httpUrl: string;
+  try {
+    const u = new URL(wsUrl);
+    u.protocol = u.protocol === 'wss:' ? 'https:' : 'http:';
+    u.pathname = '/admin/restart';
+    u.search = '';
+    u.hash = '';
+    httpUrl = u.toString();
+  } catch {
+    return { ok: false, error: 'Invalid NEXT_PUBLIC_GAME_SERVER_URL' };
+  }
+
+  try {
+    const res = await fetch(httpUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-secret': secret,
+      },
+      body: JSON.stringify({ secret }),
+      cache: 'no-store',
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      restarting?: boolean;
+    };
+    if (!res.ok || !body.ok) {
+      return {
+        ok: false,
+        error: body.error || `Game server returned ${res.status}`,
+      };
+    }
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          action: 'colyseus_restart',
+          actorId: actor.id,
+          actorUsername: actor.username,
+          detail: `Restart requested via ${httpUrl}`,
+        },
+      });
+    } catch {
+      // Audit is best-effort
+    }
+
+    return {
+      ok: true,
+      detail: 'Restart signal sent — Colyseus should come back in a few seconds',
+    };
+  } catch (e: unknown) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'Failed to reach game server',
+    };
+  }
+}

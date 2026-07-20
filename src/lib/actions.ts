@@ -550,3 +550,98 @@ export async function bootstrapMyMissions() {
   if (!user) return;
   await ensurePlayerMissions(user.id);
 }
+
+export type RankedStatsSummary = {
+  kp: number;
+  peakKp: number;
+  currentRank: string;
+  peakRank: string;
+  isPremium: boolean;
+  premiumExpiresAt: string | null;
+  rankedWins: number;
+  rankedLosses: number;
+  casualWins: number;
+  casualLosses: number;
+  matchesPlayed: number;
+};
+
+/** Own-profile Ranked panel — KP / peak / competitive win-loss. */
+export async function getMyRankedStats(userId: string): Promise<RankedStatsSummary> {
+  const { isPremiumActive } = await import('@/lib/premium');
+  const { KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    return {
+      kp: KP_DEFAULT,
+      peakKp: KP_DEFAULT,
+      currentRank: 'Unranked',
+      peakRank: 'Unranked',
+      isPremium: false,
+      premiumExpiresAt: null,
+      rankedWins: 0,
+      rankedLosses: 0,
+      casualWins: 0,
+      casualLosses: 0,
+      matchesPlayed: 0,
+    };
+  }
+
+  const premiumExpiresAt =
+    (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt ?? null;
+  const isPremium = isPremiumActive({
+    isVip: user.isVip,
+    premiumExpiresAt,
+  });
+  const kp =
+    typeof (user as { kp?: number }).kp === 'number'
+      ? (user as { kp: number }).kp
+      : KP_DEFAULT;
+  const peakKp = Math.max(
+    typeof (user as { peakKp?: number }).peakKp === 'number'
+      ? (user as { peakKp: number }).peakKp
+      : kp,
+    kp
+  );
+  const peakRank =
+    (user as { peakRank?: string }).peakRank || getRankForKp(peakKp);
+
+  const results = await prisma.matchResult.findMany({
+    where: {
+      userId,
+      mode: { in: ['competitive', 'competitive_ranked'] },
+    },
+    select: { mode: true, outcome: true },
+  });
+
+  let rankedWins = 0;
+  let rankedLosses = 0;
+  let casualWins = 0;
+  let casualLosses = 0;
+  for (const r of results) {
+    const ranked = r.mode === 'competitive_ranked';
+    if (r.outcome === 'win') {
+      if (ranked) rankedWins += 1;
+      else casualWins += 1;
+    } else if (r.outcome === 'loss') {
+      if (ranked) rankedLosses += 1;
+      else casualLosses += 1;
+    }
+  }
+
+  return {
+    kp,
+    peakKp,
+    currentRank: getRankForKp(kp),
+    peakRank,
+    isPremium,
+    premiumExpiresAt: premiumExpiresAt
+      ? new Date(premiumExpiresAt).toISOString()
+      : null,
+    rankedWins,
+    rankedLosses,
+    casualWins,
+    casualLosses,
+    matchesPlayed: results.length,
+  };
+}

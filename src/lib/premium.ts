@@ -1,6 +1,6 @@
 /**
  * Kilrun Premium — monthly membership for Ranked Competitive (KP / Elo).
- * VIP cosmetics stay tied to Premium while the subscription is active.
+ * Platform VIP (crown / cosmetics) is a separate permanent unlock — see vip.ts.
  * Live prices/offers come from SiteSettings via premium-config.ts.
  */
 
@@ -16,11 +16,9 @@ export const PREMIUM_VP_COST = DEFAULT_PREMIUM_CONFIG.vpCost;
 export const PREMIUM_MONTHLY_USD = DEFAULT_PREMIUM_CONFIG.monthlyUsd;
 export const PREMIUM_DURATION_DAYS = DEFAULT_PREMIUM_CONFIG.durationDays;
 
-/** @deprecated Prefer PREMIUM_VP_COST — kept for older VIP dialog callers. */
-export const VIP_UNLOCK_VP_COST = PREMIUM_VP_COST;
-
 export type CompetitiveQueue = 'casual' | 'ranked';
 
+/** True when Premium subscription is currently active (expiry in the future). */
 export function isPremiumActive(input: {
   isVip?: boolean | null;
   premiumExpiresAt?: Date | string | null;
@@ -31,8 +29,8 @@ export function isPremiumActive(input: {
   if (expires && !Number.isNaN(expires.getTime()) && expires.getTime() > Date.now()) {
     return true;
   }
-  // Legacy permanent VIP (no expiry set) still counts as Premium.
-  if (input.isVip && !expires) return true;
+  // `isVip` is platform VIP only — it does not grant Premium / Ranked.
+  void input.isVip;
   return false;
 }
 

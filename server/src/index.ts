@@ -19,6 +19,39 @@ app.get('/healthz', (_req, res) => {
   res.json({ status: 'ok', uptimeSeconds: process.uptime() });
 });
 
+/**
+ * Soft-restart Colyseus: exits so the process manager (tsx watch / Docker / Fly / Railway)
+ * brings the server back up. Protected by GAME_SERVER_ADMIN_SECRET.
+ */
+app.post('/admin/restart', (req, res) => {
+  const secret = process.env.GAME_SERVER_ADMIN_SECRET || '';
+  const provided =
+    (typeof req.headers['x-admin-secret'] === 'string'
+      ? req.headers['x-admin-secret']
+      : '') ||
+    (typeof req.body?.secret === 'string' ? req.body.secret : '');
+
+  if (!secret) {
+    res.status(503).json({
+      ok: false,
+      error: 'GAME_SERVER_ADMIN_SECRET is not configured on the game server',
+    });
+    return;
+  }
+  if (!provided || provided !== secret) {
+    res.status(401).json({ ok: false, error: 'Unauthorized' });
+    return;
+  }
+
+  res.json({ ok: true, restarting: true, uptimeSeconds: process.uptime() });
+  // Let the response flush, then exit so the host restarts the process.
+  setTimeout(() => {
+    // eslint-disable-next-line no-console
+    console.log('[game-server] admin restart requested — exiting');
+    process.exit(0);
+  }, 250);
+});
+
 // Lightweight room-state dashboard for local debugging; not linked from the game itself.
 app.use('/monitor', monitor());
 
