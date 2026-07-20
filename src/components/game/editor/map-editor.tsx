@@ -32,8 +32,16 @@ import {
   Skull,
   Zap,
   Ruler,
+  Menu,
+  EyeOff,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  PanelLeftClose,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useIsMobile } from '@/hooks/use-mobile';
 import type { EditorEntity, FloorPreset, MapDocument, SkyPreset } from './map-document';
 import { ensureAnimation, ensureEnvironment, ensureHazard, generateId } from './map-document';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
@@ -128,6 +136,15 @@ export function MapEditor({
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
   const [measureMode, setMeasureMode] = useState(false);
   const [measureDist, setMeasureDist] = useState<number | null>(null);
+  /** Master hide: collapses top bar, side menus, tools, and properties for a clear canvas. */
+  const [uiCollapsed, setUiCollapsed] = useState(false);
+  /** Mobile left asset/library drawer (overlay). Desktop keeps the panel in-flow. */
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  /** Mobile/desktop properties inspector visibility when something is selected. */
+  const [propsOpen, setPropsOpen] = useState(true);
+  /** Bottom transform/place toolbar. */
+  const [toolsOpen, setToolsOpen] = useState(true);
+  const isMobile = useIsMobile();
   const isTouch = typeof window !== 'undefined' && detectTouchDevice();
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
@@ -199,6 +216,46 @@ export function MapEditor({
     setPrefabs(listPrefabs());
     setActivePlayId(getActivePlayMapId());
   }, []);
+
+  // Mobile: start with menus tucked away so the viewport is usable for placing.
+  useEffect(() => {
+    if (!isMobile) {
+      setUiCollapsed(false);
+      setSidebarOpen(true);
+      setPropsOpen(true);
+      setToolsOpen(true);
+      return;
+    }
+    setUiCollapsed(true);
+    setSidebarOpen(false);
+    setToolsOpen(false);
+    setPropsOpen(false);
+    setShowHelp(false);
+  }, [isMobile]);
+
+  // Re-open properties when selection changes (unless chrome is fully hidden).
+  useEffect(() => {
+    if (selectedId && !uiCollapsed) setPropsOpen(true);
+  }, [selectedId, uiCollapsed]);
+
+  const collapseAllMenus = () => {
+    setUiCollapsed(true);
+    setSidebarOpen(false);
+    setPropsOpen(false);
+    setToolsOpen(false);
+    setShowHelp(false);
+  };
+
+  const expandMenus = () => {
+    setUiCollapsed(false);
+    if (isMobile) {
+      setToolsOpen(true);
+    } else {
+      setSidebarOpen(true);
+      setToolsOpen(true);
+      setPropsOpen(true);
+    }
+  };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -487,7 +544,11 @@ export function MapEditor({
           <div className="fixed inset-0 z-[51] pointer-events-none">
             <JoystickOverlay joystickRef={joystickRef} enabled={freeFly} />
           </div>
-          <div className="fixed bottom-20 right-3 z-[120] flex flex-col gap-2 pointer-events-auto">
+          <div
+            className={`fixed z-[120] flex flex-col gap-2 pointer-events-auto ${
+              uiCollapsed ? 'bottom-6 right-3' : 'bottom-20 right-3'
+            }`}
+          >
             <button
               type="button"
               className="w-14 h-14 rounded-full border-2 border-sky-400/70 bg-sky-500/35 text-white font-black text-[10px] uppercase tracking-wider active:scale-95"
@@ -518,16 +579,52 @@ export function MapEditor({
           </div>
         </>
       )}
+
+      {/* Restored when chrome is hidden — one tap brings menus back */}
+      {uiCollapsed && (
+        <div className="fixed top-3 left-3 z-[140] flex flex-col gap-2 pointer-events-auto">
+          <button
+            type="button"
+            onClick={expandMenus}
+            className="flex items-center gap-1.5 rounded-xl border border-cyan-400/70 bg-cyan-500/40 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95"
+            title="Show editor menus"
+          >
+            <Menu className="w-4 h-4" />
+            Menus
+          </button>
+        </div>
+      )}
+
+      {/* Mobile quick access while chrome is visible */}
+      {!uiCollapsed && isMobile && (
+        <div className="fixed top-14 left-3 z-[140] flex flex-col gap-2 pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((v) => !v)}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold uppercase tracking-wide shadow-lg active:scale-95 ${
+              sidebarOpen
+                ? 'border-amber-400/60 bg-amber-500/30 text-white'
+                : 'border-white/25 bg-black/75 text-white/90 backdrop-blur'
+            }`}
+            title={sidebarOpen ? 'Close library drawer' : 'Open library drawer'}
+          >
+            {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            Library
+          </button>
+        </div>
+      )}
+
       {/* Top bar */}
-      <div className="h-12 border-b border-white/10 flex items-center gap-2 px-3 bg-[#121a24] relative z-[60]">
-        <span className="text-xs font-bold tracking-widest text-cyan-300/90 uppercase">Map Editor</span>
+      {!uiCollapsed && (
+      <div className="h-12 border-b border-white/10 flex items-center gap-2 px-3 bg-[#121a24] relative z-[60] overflow-x-auto shrink-0">
+        <span className="text-xs font-bold tracking-widest text-cyan-300/90 uppercase shrink-0">Map Editor</span>
         <input
-          className="ml-2 bg-black/40 border border-white/10 rounded px-2 py-1 text-sm w-56"
+          className="ml-2 bg-black/40 border border-white/10 rounded px-2 py-1 text-sm w-40 sm:w-56 shrink-0"
           value={doc.name}
           onChange={(e) => setDoc((d) => ({ ...d, name: e.target.value }))}
         />
         <select
-          className="bg-black/40 border border-white/10 rounded px-2 py-1 text-sm"
+          className="bg-black/40 border border-white/10 rounded px-2 py-1 text-sm shrink-0"
           value={mapId}
           onChange={(e) => {
             const id = e.target.value;
@@ -550,7 +647,7 @@ export function MapEditor({
 
         <Button
           size="sm"
-          className="ml-2 bg-emerald-600 hover:bg-emerald-500 text-white"
+          className="ml-2 bg-emerald-600 hover:bg-emerald-500 text-white shrink-0"
           onClick={startPlay}
         >
           <Play className="w-4 h-4 mr-1" /> Play Test
@@ -558,41 +655,52 @@ export function MapEditor({
         <Button
           size="sm"
           variant="secondary"
-          className={activePlayId === mapId ? 'border border-emerald-400/50 text-emerald-200' : ''}
+          className={`shrink-0 ${activePlayId === mapId ? 'border border-emerald-400/50 text-emerald-200' : ''}`}
           onClick={publishToMatch}
           title="Use this map in Deathrun matches"
         >
           {activePlayId === mapId ? 'MAIN map ✓' : 'Set as MAIN map'}
         </Button>
 
-        <Button
-          size="sm"
-          variant={freeFly ? 'default' : 'secondary'}
-          className={freeFly ? 'bg-amber-600 hover:bg-amber-500' : ''}
-          onClick={() => apiRef.current?.setFreeFly(!freeFly)}
-          title="Toggle free fly (Ctrl)"
-        >
-          <Navigation className="w-4 h-4 mr-1" /> {freeFly ? 'Free Fly ON' : 'Free Fly'}
-        </Button>
+        {!isMobile && (
+          <Button
+            size="sm"
+            variant={freeFly ? 'default' : 'secondary'}
+            className={`shrink-0 ${freeFly ? 'bg-amber-600 hover:bg-amber-500' : ''}`}
+            onClick={() => apiRef.current?.setFreeFly(!freeFly)}
+            title="Toggle free fly (Ctrl)"
+          >
+            <Navigation className="w-4 h-4 mr-1" /> {freeFly ? 'Free Fly ON' : 'Free Fly'}
+          </Button>
+        )}
 
-        <Button size="sm" variant="secondary" disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)">
+        <Button size="sm" variant="secondary" className="shrink-0" disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)">
           <Undo2 className="w-4 h-4" />
         </Button>
-        <Button size="sm" variant="secondary" disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Y)">
+        <Button size="sm" variant="secondary" className="shrink-0" disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Y)">
           <Redo2 className="w-4 h-4" />
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => setShowHelp((v) => !v)} title="Tips">
+        <Button size="sm" variant="secondary" className="shrink-0" onClick={() => setShowHelp((v) => !v)} title="Tips">
           <HelpCircle className="w-4 h-4" />
         </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="shrink-0 border border-cyan-400/40 text-cyan-100"
+          onClick={collapseAllMenus}
+          title="Hide all menus for placing"
+        >
+          <EyeOff className="w-4 h-4 mr-1" /> Hide UI
+        </Button>
 
-        <div className="flex-1" />
-        <Button size="sm" variant="secondary" onClick={persist}>
+        <div className="flex-1 min-w-2" />
+        <Button size="sm" variant="secondary" className="shrink-0" onClick={persist}>
           <Save className="w-4 h-4 mr-1" /> Save
         </Button>
-        <Button size="sm" variant="secondary" onClick={doExport}>
+        <Button size="sm" variant="secondary" className="shrink-0" onClick={doExport}>
           <Download className="w-4 h-4 mr-1" /> Export
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()}>
+        <Button size="sm" variant="secondary" className="shrink-0" onClick={() => fileRef.current?.click()}>
           <Upload className="w-4 h-4 mr-1" /> Import
         </Button>
         <input
@@ -619,13 +727,30 @@ export function MapEditor({
             }
           }}
         />
-        <Button size="sm" variant="destructive" onClick={requestClose} title="Exit (Esc)">
+        <Button size="sm" variant="destructive" className="shrink-0" onClick={requestClose} title="Exit (Esc)">
           <X className="w-4 h-4" />
         </Button>
       </div>
+      )}
 
-      <div className="flex-1 flex min-h-0">
-        <div className="w-10 border-r border-white/10 bg-[#0f1620] flex flex-col items-center py-2 gap-1">
+      <div className="flex-1 flex min-h-0 relative">
+        {!uiCollapsed && isMobile && sidebarOpen && (
+          <button
+            type="button"
+            aria-label="Close library"
+            className="absolute inset-0 z-[65] bg-black/50"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        {!uiCollapsed && (!isMobile || sidebarOpen) && (
+        <div
+          className={`border-r border-white/10 bg-[#0f1620] flex flex-col items-center py-2 gap-1 z-[70] ${
+            isMobile
+              ? 'absolute left-0 top-0 bottom-0 w-10 shadow-xl'
+              : 'w-10 relative'
+          }`}
+        >
           {(
             [
               ['assets', Box],
@@ -644,14 +769,35 @@ export function MapEditor({
               className={`w-8 h-8 rounded flex items-center justify-center ${
                 tab === id ? 'bg-cyan-500/20 text-cyan-300' : 'text-white/50 hover:text-white'
               }`}
-              onClick={() => setTab(id)}
+              onClick={() => {
+                setTab(id);
+                if (isMobile) setSidebarOpen(true);
+              }}
             >
               <Icon className="w-4 h-4" />
             </button>
           ))}
+          {isMobile && (
+            <button
+              type="button"
+              title="Close library"
+              className="mt-auto w-8 h-8 rounded flex items-center justify-center text-white/60 hover:text-white"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          )}
         </div>
+        )}
 
-        <div className="w-72 border-r border-white/10 bg-[#121a24] flex flex-col min-h-0">
+        {!uiCollapsed && (!isMobile || sidebarOpen) && (
+        <div
+          className={`border-r border-white/10 bg-[#121a24] flex flex-col min-h-0 z-[70] ${
+            isMobile
+              ? 'absolute left-10 top-0 bottom-0 w-[min(18rem,calc(100vw-2.5rem))] shadow-2xl'
+              : 'w-72 relative'
+          }`}
+        >
           {tab === 'assets' && (
             <>
               <div className="p-2 border-b border-white/10 space-y-1">
@@ -676,7 +822,14 @@ export function MapEditor({
                   <button
                     key={name}
                     type="button"
-                    onClick={() => setBrush(name)}
+                    onClick={() => {
+                      setBrush(name);
+                      // Free the canvas after picking a brush on mobile.
+                      if (isMobile) {
+                        setSidebarOpen(false);
+                        setUiCollapsed(true);
+                      }
+                    }}
                     className={`rounded border p-1 text-left ${
                       brush === name ? 'border-cyan-400 bg-cyan-500/10' : 'border-white/10 hover:border-white/30'
                     }`}
@@ -849,6 +1002,10 @@ export function MapEditor({
                       onClick={() => {
                         const ents = instantiatePrefab(p, [0, 0, 0], activeLayerId);
                         apiRef.current?.stampEntities(ents);
+                        if (isMobile) {
+                          setSidebarOpen(false);
+                          setUiCollapsed(true);
+                        }
                       }}
                       title="Click ground to stamp"
                     >
@@ -1038,12 +1195,13 @@ export function MapEditor({
             </div>
           )}
         </div>
+        )}
 
         {/* Viewport */}
         <div className="flex-1 relative min-w-0">
           <div ref={hostRef} className="absolute inset-0" />
 
-          {freeFly && (
+          {freeFly && !uiCollapsed && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-amber-600/90 text-white text-xs font-bold px-3 py-1.5 rounded-full tracking-wide pointer-events-none text-center max-w-[90vw] z-[40]">
               {isTouch
                 ? 'FREE FLY · Left look · Right move · Fly toward look · Edit to place'
@@ -1051,14 +1209,18 @@ export function MapEditor({
             </div>
           )}
 
-          {showHelp && !freeFly && (
-            <div className="absolute top-3 left-3 max-w-xs bg-black/75 border border-white/15 rounded-xl p-3 text-[11px] text-white/70 space-y-1 pointer-events-none z-[40]">
+          {showHelp && !freeFly && !uiCollapsed && (
+            <div
+              className={`absolute max-w-xs bg-black/75 border border-white/15 rounded-xl p-3 text-[11px] text-white/70 space-y-1 pointer-events-none z-[40] ${
+                isMobile ? 'top-24 left-3' : 'top-3 left-3'
+              }`}
+            >
               <p className="text-cyan-300 font-bold tracking-wide">QUICK TIPS</p>
-              {isTouch ? (
+              {isTouch || isMobile ? (
                 <>
-                  <p>· Tap <b className="text-white">Fly</b> for joysticks (left look, right move)</p>
-                  <p>· Look down + push forward to fly downward</p>
-                  <p>· Exit fly with <b className="text-white">Edit</b> to place assets</p>
+                  <p>· Tap <b className="text-white">Hide UI</b> for a clear place canvas</p>
+                  <p>· <b className="text-white">Library</b> opens assets; pick a model then tap ground</p>
+                  <p>· <b className="text-white">Fly</b> for joysticks · <b className="text-white">Edit</b> to place</p>
                   <p>· Set <b className="text-white">MAIN map</b> so Deathrun loads it</p>
                 </>
               ) : (
@@ -1073,7 +1235,7 @@ export function MapEditor({
             </div>
           )}
 
-          {measureMode && (
+          {measureMode && !uiCollapsed && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-cyan-700/90 text-white text-xs font-bold px-3 py-1.5 rounded-full tracking-wide pointer-events-none">
               MEASURE · click two ground points
               {measureDist != null ? ` · ${measureDist.toFixed(2)} u` : ''}
@@ -1086,7 +1248,8 @@ export function MapEditor({
             onStep={onTutorialStep}
           />
 
-          <div className="absolute bottom-14 left-3 text-[10px] text-white/45 bg-black/50 px-2 py-1 rounded pointer-events-none">
+          {!uiCollapsed && (
+          <div className="absolute bottom-14 left-3 text-[10px] text-white/45 bg-black/50 px-2 py-1 rounded pointer-events-none z-[40] max-w-[55vw] truncate">
             {doc.entities.length} entities · grid {doc.gridSize}
             {gridSnap ? ' · snap' : ''}
             {snapY ? 'Y' : ''}
@@ -1097,8 +1260,22 @@ export function MapEditor({
                 ? ` · sel: ${selected.name}`
                 : ''}
           </div>
+          )}
 
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 border border-white/15 rounded-xl px-2 py-1.5 backdrop-blur">
+          {!uiCollapsed && (
+          <button
+            type="button"
+            onClick={() => setToolsOpen((v) => !v)}
+            className="absolute bottom-3 left-3 z-[80] flex items-center gap-1 rounded-xl border border-white/20 bg-black/75 px-2.5 py-2 text-[10px] font-bold uppercase tracking-wide text-white/90 backdrop-blur active:scale-95"
+            title={toolsOpen ? 'Hide tool bar' : 'Show tool bar'}
+          >
+            {toolsOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+            Tools
+          </button>
+          )}
+
+          {!uiCollapsed && toolsOpen && (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 border border-white/15 rounded-xl px-2 py-1.5 backdrop-blur z-[80] max-w-[calc(100vw-7rem)] overflow-x-auto">
             <ToolBtn active={mode === 'translate'} onClick={() => setMode('translate')} title="Move (W)">
               <Move3d className="w-4 h-4" />
             </ToolBtn>
@@ -1181,10 +1358,37 @@ export function MapEditor({
               <Trash2 className="w-4 h-4 text-red-300" />
             </ToolBtn>
           </div>
+          )}
 
-          {selected && (
-            <div className="absolute top-3 right-3 w-72 bg-black/75 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm max-h-[calc(100%-6rem)] overflow-y-auto">
-              <p className="text-[10px] tracking-widest text-white/50 uppercase">Properties</p>
+          {!uiCollapsed && selected && !propsOpen && (
+            <button
+              type="button"
+              onClick={() => setPropsOpen(true)}
+              className="absolute top-3 right-3 z-[80] flex items-center gap-1.5 rounded-xl border border-cyan-400/50 bg-cyan-500/30 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95"
+            >
+              Props
+            </button>
+          )}
+
+          {!uiCollapsed && selected && propsOpen && (
+            <div
+              className={`absolute z-[80] bg-black/80 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm overflow-y-auto ${
+                isMobile
+                  ? 'left-3 right-3 bottom-16 top-auto max-h-[45vh] w-auto'
+                  : 'top-3 right-3 w-72 max-h-[calc(100%-6rem)]'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] tracking-widest text-white/50 uppercase">Properties</p>
+                <button
+                  type="button"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-white/70 hover:bg-white/10"
+                  title="Collapse properties"
+                  onClick={() => setPropsOpen(false)}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
               <label className="block text-xs text-white/60">
                 Name
                 <input
