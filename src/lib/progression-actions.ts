@@ -1048,6 +1048,8 @@ export async function getGlobalChat(take = 40) {
           role: true,
           isVip: true,
           emailVerified: true,
+          equippedFrameConfig: true,
+          equippedNicknameConfig: true,
         },
       },
     },

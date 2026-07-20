@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, Medal, Trophy } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -217,17 +217,26 @@ function PodiumSeat({
     <div className={cn('flex flex-col items-center text-center', className)}>
       <div className="relative mb-2">
         {crown && <Trophy className="absolute -top-5 left-1/2 -translate-x-1/2 h-5 w-5 text-amber-300" />}
-        <Avatar
+        <div
           className={cn(
-            'border-2 shadow-lg mx-auto',
-            place === 1 ? 'h-20 w-20 border-amber-400/70' : 'h-14 w-14 sm:h-16 sm:w-16',
-            place === 2 && 'border-slate-300/50',
-            place === 3 && 'border-orange-500/50'
+            'mx-auto',
+            place === 1 ? 'h-20 w-20' : 'h-14 w-14 sm:h-16 sm:w-16'
           )}
         >
-          <AvatarImage src={row.avatarUrl} />
-          <AvatarFallback>{(row.username || 'P').charAt(0)}</AvatarFallback>
-        </Avatar>
+          <PlayerAvatar
+            src={row.avatarUrl}
+            name={row.username || 'P'}
+            isVip={row.isVip}
+            frameConfig={row.equippedFrameConfig}
+            className="h-full w-full"
+            borderClassName={cn(
+              'border-2 shadow-lg',
+              place === 1 && 'border-amber-400/70',
+              place === 2 && 'border-slate-300/50',
+              place === 3 && 'border-orange-500/50'
+            )}
+          />
+        </div>
         <span
           className={cn(
             'absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-slate-900 border border-slate-600 flex items-center justify-center text-[10px] font-black',
@@ -237,7 +246,13 @@ function PodiumSeat({
           {place}
         </span>
       </div>
-      <UserHoverCard userId={row.id} role={row.role} isVip={row.isVip} className="text-sm font-bold truncate max-w-full">
+      <UserHoverCard
+        userId={row.id}
+        role={row.role}
+        isVip={row.isVip}
+        nicknameEffect={row.equippedNicknameConfig}
+        className="text-sm font-bold truncate max-w-full"
+      >
         {row.username}
       </UserHoverCard>
       {isSelf && (
@@ -288,13 +303,24 @@ function RankRow({
         <span className="w-10 text-center font-black text-slate-400 tabular-nums flex items-center justify-center gap-0.5">
           <Medal className="h-3.5 w-3.5 opacity-40" />#{row.rank}
         </span>
-        <Avatar>
-          <AvatarImage src={row.avatarUrl} />
-          <AvatarFallback>{(row.username || 'P').charAt(0)}</AvatarFallback>
-        </Avatar>
+        <div className="h-10 w-10 shrink-0">
+          <PlayerAvatar
+            src={row.avatarUrl}
+            name={row.username || 'P'}
+            isVip={row.isVip}
+            frameConfig={row.equippedFrameConfig}
+            className="h-full w-full"
+          />
+        </div>
         <div className="min-w-0 flex-1">
           <p className="font-bold truncate flex items-center gap-2">
-            <UserHoverCard userId={row.id} role={row.role} isVip={row.isVip} className="truncate">
+            <UserHoverCard
+              userId={row.id}
+              role={row.role}
+              isVip={row.isVip}
+              nicknameEffect={row.equippedNicknameConfig}
+              className="truncate"
+            >
               {row.username || 'Player'}
             </UserHoverCard>
             {isSelf && (

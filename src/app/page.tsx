@@ -44,6 +44,8 @@ export default async function Page() {
         bio: user.bio,
         email: user.email,
         emailVerified: user.emailVerified,
+        equippedFrameConfig: user.equippedFrameConfig ?? null,
+        equippedNicknameConfig: user.equippedNicknameConfig ?? null,
       }}
     />
   );

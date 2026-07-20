@@ -3,7 +3,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { Crown, ExternalLink, Loader2, ThumbsUp } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { LevelBar } from '@/components/ui/level-bar';
@@ -15,6 +14,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ShowcaseChips } from '@/components/showcase-chips';
+import { AvatarWithFrame } from '@/components/avatar-with-frame';
+import { NicknameEffectText } from '@/components/nickname-effect';
 import { useHoverCapable } from '@/hooks/use-hover-capable';
 import { useProfileNavigation } from '@/components/providers/profile-navigation-context';
 import { getPublicProfileSummary } from '@/lib/public-profile-actions';
@@ -44,6 +45,8 @@ export type MiniProfileSummary = {
   levelProgressPercent: number;
   reputation: number;
   equippedBannerConfig: unknown | null;
+  equippedFrameConfig?: unknown | null;
+  equippedNicknameConfig?: unknown | null;
   showcase: ShowcaseDisplayItem[];
   showcaseLayout?: ShowcaseLayout;
 };
@@ -55,12 +58,15 @@ export function UserHoverCard({
   userId,
   role,
   isVip,
+  nicknameEffect,
   children,
   className,
 }: {
   userId: string;
   role?: string | null;
   isVip?: boolean | null;
+  /** Equipped nickname cosmetic — when set, styles the trigger name. */
+  nicknameEffect?: unknown | null;
   children: ReactNode;
   className?: string;
 }) {
@@ -105,6 +111,9 @@ export function UserHoverCard({
     }
   };
 
+  const label =
+    typeof children === 'string' || typeof children === 'number' ? String(children) : null;
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -112,7 +121,7 @@ export function UserHoverCard({
           type="button"
           className={cn(
             'text-left font-semibold transition-colors hover:underline underline-offset-2',
-            getRoleTextColorClass(role, isVip),
+            !nicknameEffect && getRoleTextColorClass(role, isVip),
             className
           )}
           onMouseEnter={
@@ -126,7 +135,11 @@ export function UserHoverCard({
           onMouseLeave={hoverCapable ? scheduleClose : undefined}
           onClick={handleTriggerClick}
         >
-          {children}
+          {label && nicknameEffect ? (
+            <NicknameEffectText name={label} effect={nicknameEffect} />
+          ) : (
+            children
+          )}
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -225,20 +238,25 @@ export function MiniProfileCard({
       </div>
       <div className="-mt-8 px-4 pb-4 pt-0 min-w-0">
         <div className="flex items-end gap-3 min-w-0">
-          <Avatar className="h-14 w-14 shrink-0 border-4 border-slate-900 shadow-lg">
-            <AvatarImage src={summary.avatarUrl} alt={summary.username} />
-            <AvatarFallback>{summary.username.charAt(0)}</AvatarFallback>
-          </Avatar>
+          <AvatarWithFrame
+            src={summary.avatarUrl}
+            alt={summary.username}
+            fallback={summary.username.charAt(0)}
+            frameConfig={summary.equippedFrameConfig}
+            sizeClass="h-14 w-14"
+            borderClassName="border-4 border-slate-900 shadow-lg"
+          />
           {/* Name + rank fill the space to the RIGHT of the avatar (no dead gap, no overlap) */}
           <div className="min-w-0 flex-1 pb-0.5 flex items-center gap-2 flex-nowrap">
-            <p
+            <NicknameEffectText
+              name={summary.username}
+              effect={summary.equippedNicknameConfig}
               className={cn(
                 'truncate font-bold text-base leading-tight',
-                getRoleTextColorClass(summary.role, summary.isVip)
+                !summary.equippedNicknameConfig &&
+                  getRoleTextColorClass(summary.role, summary.isVip)
               )}
-            >
-              {summary.username}
-            </p>
+            />
             {summary.isVip && (
               <Badge className="h-5 shrink-0 bg-yellow-500 text-[10px] text-black">VIP</Badge>
             )}

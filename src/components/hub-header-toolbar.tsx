@@ -11,7 +11,8 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
+import { NicknameEffectText } from '@/components/nickname-effect';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -39,6 +40,8 @@ type SearchHit = {
   isVip?: boolean;
   xpProgress?: number;
   currentRank?: string;
+  equippedFrameConfig?: unknown | null;
+  equippedNicknameConfig?: unknown | null;
 };
 
 type NotifRow = {
@@ -50,7 +53,15 @@ type NotifRow = {
 };
 
 type ConvoRow = {
-  peer: { id: string; username: string; avatarUrl: string };
+  peer: {
+    id: string;
+    username: string;
+    avatarUrl: string;
+    role?: string;
+    isVip?: boolean;
+    equippedFrameConfig?: unknown | null;
+    equippedNicknameConfig?: unknown | null;
+  };
   lastMessage: string;
   createdAt: Date | string;
   unread: number;
@@ -271,12 +282,22 @@ export function HubHeaderToolbar({
                           setQuery('');
                         }}
                       >
-                        <Avatar className="h-8 w-8 shrink-0">
-                          <AvatarImage src={player.avatarUrl} />
-                          <AvatarFallback>{player.username.charAt(0)}</AvatarFallback>
-                        </Avatar>
+                        <div className="h-8 w-8 shrink-0">
+                          <PlayerAvatar
+                            src={player.avatarUrl}
+                            name={player.username}
+                            isVip={player.isVip}
+                            frameConfig={player.equippedFrameConfig}
+                            className="h-full w-full"
+                            crownClassName="h-3.5 w-3.5"
+                          />
+                        </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-semibold truncate">{player.username}</p>
+                          <NicknameEffectText
+                            name={player.username}
+                            effect={player.equippedNicknameConfig}
+                            className="text-sm font-semibold truncate block"
+                          />
                           <p className="text-[11px] text-slate-400 truncate">
                             {player.role} · Lv {level}
                           </p>
@@ -467,13 +488,23 @@ export function HubHeaderToolbar({
                     onOpenMessages();
                   }}
                 >
-                  <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarImage src={c.peer.avatarUrl} />
-                    <AvatarFallback>{c.peer.username.charAt(0)}</AvatarFallback>
-                  </Avatar>
+                  <div className="h-8 w-8 shrink-0">
+                    <PlayerAvatar
+                      src={c.peer.avatarUrl}
+                      name={c.peer.username}
+                      isVip={c.peer.isVip}
+                      frameConfig={c.peer.equippedFrameConfig}
+                      className="h-full w-full"
+                      crownClassName="h-3.5 w-3.5"
+                    />
+                  </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold truncate">{c.peer.username}</p>
+                      <NicknameEffectText
+                        name={c.peer.username}
+                        effect={c.peer.equippedNicknameConfig}
+                        className="text-sm font-semibold truncate"
+                      />
                       {c.unread > 0 && (
                         <span className="text-[10px] font-bold text-primary shrink-0">
                           {c.unread}

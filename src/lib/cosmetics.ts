@@ -6,6 +6,22 @@ import type { CSSProperties } from 'react';
 
 export type CosmeticSlot = 'banner' | 'frame' | 'nickname';
 
+/** Prisma select fragment — include on any public user card / list row. */
+export const PUBLIC_USER_COSMETIC_SELECT = {
+  equippedFrameConfig: true,
+  equippedNicknameConfig: true,
+} as const;
+
+/** Common author/peer select used by chat, friends, forum, messages. */
+export const PUBLIC_USER_CARD_SELECT = {
+  id: true,
+  username: true,
+  avatarUrl: true,
+  role: true,
+  isVip: true,
+  ...PUBLIC_USER_COSMETIC_SELECT,
+} as const;
+
 export type FrameStyle =
   | 'ring'
   | 'double'
