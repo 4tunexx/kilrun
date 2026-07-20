@@ -125,6 +125,8 @@ export interface SessionPlayer {
   vpCurrency: number;
   xpProgress: number;
   currentRank: string;
+  /** Killrun Points — competitive Elo. */
+  kp?: number;
   role: string;
   isVip: boolean;
   bio: string;
@@ -202,6 +204,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [dailyDone, setDailyDone] = useState(0);
   const [dailyTotal, setDailyTotal] = useState(5);
   const [currentRank, setCurrentRank] = useState(user.currentRank);
+  const [kp, setKp] = useState(user.kp ?? 1000);
   const [emailVerified, setEmailVerified] = useState(user.emailVerified);
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
@@ -291,6 +294,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       setXpProgress(live.xpProgress);
       setVpBalance(live.vpCurrency);
       setCurrentRank(live.currentRank);
+      if (typeof live.kp === 'number') setKp(live.kp);
       setIsVip(live.isVip);
       setEmailVerified(live.emailVerified);
       setUnreadCount(live.unreadNotifications);
@@ -605,6 +609,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           avatarUrl={user.avatarUrl}
           xpProgress={xpProgress}
           isAdmin={user.role === 'admin'}
+          kp={kp}
         />
       </ProfileNavigationProvider>
     );

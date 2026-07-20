@@ -475,6 +475,107 @@ export function mapDocSpawnPoints(doc: MapDocument) {
   return { runner: toSim(runner), trapper: toSim(trapper) };
 }
 
+/** All player start positions (Horde supports up to 4). */
+export function mapDocPlayerSpawns(doc: MapDocument): { x: number; y: number; z: number }[] {
+  const starts = doc.entities.filter(
+    (e) =>
+      e.visible !== false &&
+      (e.kind === 'start' || e.kind === 'spawn_runner' || e.kind === 'player')
+  );
+  if (!starts.length) {
+    const fallback = mapDocSpawnPoints(doc).runner;
+    return fallback ? [fallback] : [];
+  }
+  return starts.map((e) => ({
+    x: e.position[2],
+    y: e.position[0],
+    z: e.position[1],
+  }));
+}
+
+export function mapDocMonsterSpawns(doc: MapDocument) {
+  return doc.entities
+    .filter((e) => e.visible !== false && e.kind === 'spawn_monster')
+    .map((e) => {
+      const ms = e.monsterSpawn;
+      return {
+        id: e.id,
+        x: e.position[2],
+        y: e.position[0],
+        z: e.position[1],
+        monsterType: ms?.monsterType ?? ('basic' as const),
+        waveMin: ms?.waveMin ?? 1,
+        waveMax: ms?.waveMax ?? 0,
+        countPerWave: ms?.countPerWave ?? 2,
+        spawnIntervalSec: ms?.spawnIntervalSec ?? 1.5,
+      };
+    });
+}
+
+export function mapDocTeamSpawns(doc: MapDocument) {
+  const toSim = (e: EditorEntity) => ({
+    x: e.position[2],
+    y: e.position[0],
+    z: e.position[1],
+  });
+  return {
+    teamA: doc.entities
+      .filter((e) => e.visible !== false && e.kind === 'spawn_team_a')
+      .map(toSim),
+    teamB: doc.entities
+      .filter((e) => e.visible !== false && e.kind === 'spawn_team_b')
+      .map(toSim),
+  };
+}
+
+function padZoneFromEntity(
+  e: EditorEntity,
+  extra: Record<string, number | undefined> = {}
+) {
+  return {
+    id: e.id,
+    x: e.position[2],
+    y: e.position[0],
+    z: e.position[1],
+    width: Math.max(1.2, Math.abs(e.scale[0]) * 2),
+    depth: Math.max(1.2, Math.abs(e.scale[2]) * 2),
+    height: Math.max(1.2, Math.abs(e.scale[1]) * 2),
+    ...extra,
+  };
+}
+
+export function mapDocHealthFloors(doc: MapDocument) {
+  return doc.entities
+    .filter((e) => e.visible !== false && e.kind === 'health_floor')
+    .map((e) =>
+      padZoneFromEntity(e, {
+        healPerTick: e.healthFloor?.healPerTick ?? 8,
+        intervalMs: e.healthFloor?.intervalMs ?? 500,
+      })
+    );
+}
+
+export function mapDocRedZones(doc: MapDocument) {
+  return doc.entities
+    .filter((e) => e.visible !== false && e.kind === 'red_zone')
+    .map((e) =>
+      padZoneFromEntity(e, {
+        damagePerTick: e.redZone?.damagePerTick ?? 15,
+        intervalMs: e.redZone?.intervalMs ?? 500,
+      })
+    );
+}
+
+export function mapDocRevivePads(doc: MapDocument) {
+  return doc.entities
+    .filter((e) => e.visible !== false && e.kind === 'revive_pad')
+    .map((e) =>
+      padZoneFromEntity(e, {
+        reviveTimeMs: e.revive?.reviveTimeMs ?? 4000,
+      })
+    );
+}
+
 /** Bake a stairs-like prop into thin solid pads for climbable collision. */
 export function bakeStairsToPads(stairs: EditorEntity, steps = 6): EditorEntity[] {
   const n = Math.max(3, Math.min(16, Math.round(steps)));

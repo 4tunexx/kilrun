@@ -25,8 +25,8 @@ interface ModeDefinition {
 
 const modes: ModeDefinition[] = [
   { id: 'deathrun', icon: Skull, isLive: true },
-  { id: 'horde', icon: Users, isLive: false },
-  { id: 'competitive', icon: Swords, isLive: false },
+  { id: 'horde', icon: Users, isLive: true },
+  { id: 'competitive', icon: Swords, isLive: true },
 ];
 
 interface PlayViewProps {
@@ -54,8 +54,7 @@ export default function PlayView({ onPlay }: PlayViewProps) {
       <div>
         <h2 className="text-2xl font-bold tracking-tight text-slate-100">Play</h2>
         <p className="text-sm text-slate-400 mt-1">
-          Pick a mode. Deathrun is live — Horde and Competitive maps can already be authored in
-          Admin → Map Editor.
+          Pick a mode. Set each mode&apos;s Active Match Map in Admin → Map Editor before queuing.
         </p>
       </div>
 

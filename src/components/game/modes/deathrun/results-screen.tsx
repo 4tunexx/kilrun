@@ -22,7 +22,11 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ room, player, onCo
   useEffect(() => {
     if (hasRecordedRef.current || !player.userId) return;
     hasRecordedRef.current = true;
-    recordDeathrunResult({ userId: player.userId, role: player.role, outcome })
+    recordDeathrunResult({
+      userId: player.userId,
+      role: player.role === 'trapper' ? 'trapper' : 'runner',
+      outcome,
+    })
       .then((result) => setRewards(result))
       .catch(() => {
         // Non-fatal: the player still sees their result even if the write fails.

@@ -153,7 +153,7 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
   const handleSchemaSync = async () => {
     if (
       !window.confirm(
-        'Sync Prisma schema to MongoDB now? This runs prisma db push and verifies skin fields (equippedSkins). Safe for Mongo — does not wipe player data.'
+        'Sync Prisma schema to MongoDB now? This runs prisma db push and verifies KP ranks (User.kp), MatchResult fields, and skin fields. Safe for Mongo — does not wipe player data.'
       )
     ) {
       return;
@@ -166,7 +166,7 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
         title: 'Database schema synced',
         description:
           result.cliPush === 'ok'
-            ? 'prisma db push OK · skin fields ready'
+            ? 'prisma db push OK · KP + skins ready'
             : `Field verify OK · CLI: ${result.cliPush}`,
       });
       await load();
@@ -392,8 +392,11 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-slate-400">
-              After deploying Model Editor / skins changes, press this once so Mongo
-              gets the latest Prisma fields (e.g. <code className="text-slate-300">equippedSkins</code>
+              After deploying schema changes (KP ranks, MatchResult stats, skins), press this once
+              so Mongo gets the latest Prisma fields (
+              <code className="text-slate-300">User.kp</code>,{' '}
+              <code className="text-slate-300">MatchResult.kpDelta</code>,{' '}
+              <code className="text-slate-300">equippedSkins</code>
               ). No CLI needed on your laptop.
             </p>
             <div className="rounded-lg border border-slate-700/50 bg-slate-950/40 px-3 py-2 text-xs text-slate-400 space-y-1">
