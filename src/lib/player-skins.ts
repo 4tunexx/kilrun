@@ -1,8 +1,5 @@
-/**
- * Body / gear skin slots for the Model Editor → shop → in-game equip pipeline.
- * Attachments can be catalog meshes, uploaded GLBs, or built-in primitives
- * with materials / textures sculpted in the Model Editor.
- */
+import type { WeaponCombatConfig } from './weapons';
+import { DEFAULT_MELEE_COMBAT } from './weapons';
 
 export type SkinAttachSlot =
   | 'hat'
@@ -246,7 +243,7 @@ export const SKIN_ATTACH_SLOTS: {
   {
     id: 'weapon',
     label: 'Weapon',
-    hint: 'Sword, gun, tool in hand',
+    hint: 'Sword / gun on hand — mesh + combat stats',
     defaultOffset: [0.42, 0.92, 0.18],
     boneHints: ['hand_r', 'righthand', 'hand.r', 'weapon', 'right_hand'],
     cosmeticSlot: 'skin_weapon',
@@ -338,6 +335,11 @@ export interface SkinAttachment {
   attachMode?: SkinAttachMode;
   /** For gloves/boots/horn — also spawn mirrored L/R copy. */
   pairMirror?: boolean;
+  /**
+   * Weapon combat (only for slot === 'weapon').
+   * Visual mesh stays on the hand; this drives range/damage/anim style.
+   */
+  weapon?: WeaponCombatConfig;
   /** Uploaded or generated texture (data URL / path). */
   textureUrl?: string;
   /** ZBrush-style blob sculpt vertex dump (primitives). */
@@ -380,7 +382,7 @@ export function attachmentKey(att: Pick<SkinAttachment, 'id' | 'slot'>): string 
 export function defaultAttachment(slot: SkinAttachSlot, id?: string): SkinAttachment {
   const meta = skinSlotMeta(slot);
   const feel = meta.defaultFeel;
-  return {
+  const base: SkinAttachment = {
     id: id || (meta.allowMultiple ? `${slot}_${Math.random().toString(36).slice(2, 8)}` : slot),
     slot,
     primitive: meta.defaultPrimitive,
@@ -390,11 +392,15 @@ export function defaultAttachment(slot: SkinAttachSlot, id?: string): SkinAttach
     attachMode: meta.defaultAttachMode,
     pairMirror: Boolean(meta.canPairMirror),
     position: [...meta.defaultOffset] as [number, number, number],
-    rotation: slot === 'tail' ? [55, 0, 0] : [0, 0, 0],
+    rotation: slot === 'tail' ? [55, 0, 0] : slot === 'weapon' ? [0, 0, -25] : [0, 0, 0],
     scale: [...meta.defaultScale] as [number, number, number],
     model: undefined,
     customModelUrl: undefined,
   };
+  if (slot === 'weapon') {
+    base.weapon = { ...DEFAULT_MELEE_COMBAT };
+  }
+  return base;
 }
 
 /** Mirror of an attachment across character X (for L/R pairs). */

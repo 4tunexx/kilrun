@@ -54,7 +54,6 @@ import {
   SKIN_MATERIAL_FEELS,
   SKIN_PRIMITIVES,
   type PlayerSkinPreset,
-  type SkinAttachMode,
   type SkinAttachSlot,
   type SkinAttachment,
   type SkinMaterial,
@@ -63,6 +62,13 @@ import {
   type SkinSculptBrush,
   type SkinShapeParams,
 } from '@/lib/player-skins';
+import {
+  WEAPON_COMBAT_KINDS,
+  defaultCombatForKind,
+  resolveWeaponCombat,
+  type WeaponCombatConfig,
+  type WeaponCombatKind,
+} from '@/lib/weapons';
 import {
   createSkinPreset,
   deleteSkinPreset,
@@ -74,10 +80,6 @@ import {
 type SourceMode = 'sculpt' | 'catalog' | 'upload';
 /** Viewport drag: paint clay vs orbit camera around the part. */
 type ViewDragMode = 'sculpt' | 'turn';
-
-function slotAllowsMultiple(s: SkinAttachSlot) {
-  return Boolean(SKIN_ATTACH_SLOTS.find((x) => x.id === s)?.allowMultiple);
-}
 
 /**
  * Self-contained Model Editor — sculpt primitives, paint materials/textures,
@@ -1054,6 +1056,13 @@ export function ModelSkinEditor({
           )}
         </div>
 
+        {slot === 'weapon' && (
+          <WeaponCombatPanel
+            combat={resolveWeaponCombat(activeAtt)}
+            onChange={(weapon) => patchActive({ weapon })}
+          />
+        )}
+
         {/* Fit size — expand/shrink until it matches the body part */}
         <SizeFitControls
           scale={activeAtt.scale}
@@ -1263,6 +1272,124 @@ function ShapeFields({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function WeaponCombatPanel({
+  combat,
+  onChange,
+}: {
+  combat: WeaponCombatConfig;
+  onChange: (w: WeaponCombatConfig) => void;
+}) {
+  const patch = (partial: Partial<WeaponCombatConfig>) => onChange({ ...combat, ...partial });
+  const setKind = (kind: WeaponCombatKind) => {
+    onChange(defaultCombatForKind(kind));
+  };
+  const muzzle = combat.muzzleOffset ?? [0, 0.3, 0];
+
+  return (
+    <div className="space-y-2 rounded-lg border border-orange-500/30 bg-orange-500/5 p-2.5">
+      <p className="text-[10px] uppercase tracking-wider text-orange-200/90 font-bold">
+        Weapon combat
+      </p>
+      <p className="text-[10px] text-white/40 leading-snug">
+        Mesh sits on the hand (Follow bone). Swing uses the character&apos;s Attack / Punch anim —
+        not a separate animated weapon rig. Combat is a cone in front (same idea as trapper
+        hitscan).
+      </p>
+      <div className="flex gap-1.5">
+        {WEAPON_COMBAT_KINDS.map((k) => (
+          <button
+            key={k.id}
+            type="button"
+            title={k.hint}
+            onClick={() => setKind(k.id)}
+            className={`flex-1 py-1.5 rounded-md text-[10px] font-bold border ${
+              combat.kind === k.id
+                ? 'bg-orange-500/30 border-orange-400/60 text-orange-50'
+                : 'border-white/10 text-white/50'
+            }`}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+      {combat.kind !== 'cosmetic' && (
+        <>
+          <SliderField
+            label="Range"
+            value={combat.range}
+            min={0.8}
+            max={18}
+            step={0.2}
+            onChange={(range) => patch({ range })}
+          />
+          <SliderField
+            label="Damage"
+            value={combat.damage}
+            min={5}
+            max={100}
+            step={5}
+            onChange={(damage) => patch({ damage })}
+          />
+          <SliderField
+            label="Cooldown ms"
+            value={combat.cooldownMs}
+            min={150}
+            max={1200}
+            step={20}
+            onChange={(cooldownMs) => patch({ cooldownMs })}
+          />
+        </>
+      )}
+      <div className="flex gap-1.5">
+        {(
+          [
+            ['attack', 'Attack anim'],
+            ['punch', 'Punch anim'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => patch({ attackStyle: id })}
+            className={`flex-1 py-1.5 rounded-md text-[10px] font-bold border ${
+              (combat.attackStyle ?? 'attack') === id
+                ? 'bg-sky-500/25 border-sky-400/50 text-sky-100'
+                : 'border-white/10 text-white/50'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[9px] text-white/35">
+        Tip / muzzle offset (for future VFX — grip stays at Offset above)
+      </p>
+      <div className="grid grid-cols-3 gap-1.5">
+        {(['X', 'Y', 'Z'] as const).map((axis, i) => (
+          <label key={axis} className="text-[9px] text-white/40">
+            {axis}
+            <input
+              type="number"
+              step={0.05}
+              value={muzzle[i]}
+              onChange={(e) => {
+                const next = [...muzzle] as [number, number, number];
+                next[i] = Number(e.target.value) || 0;
+                patch({ muzzleOffset: next });
+              }}
+              className="mt-0.5 w-full rounded bg-black/40 border border-white/10 px-1.5 py-1 text-[11px]"
+            />
+          </label>
+        ))}
+      </div>
+      <p className="text-[9px] text-white/35 leading-snug">
+        Bind Attack / Punch clips on the Player Model studio. Catalog: weapon-sword /
+        weapon-shield, or upload a static GLB.
+      </p>
     </div>
   );
 }

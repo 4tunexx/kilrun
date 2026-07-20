@@ -41,7 +41,9 @@ export type PlayerAnimSlot =
   | 'strafe_left'
   | 'strafe_right'
   | 'back'
-  | 'die';
+  | 'die'
+  | 'attack'
+  | 'punch';
 
 export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string; hint?: string }[] = [
   { id: 'idle', label: 'Idle', hint: 'Standing still' },
@@ -54,6 +56,8 @@ export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string; hint?: stri
   { id: 'strafe_left', label: 'Strafe Left (A)' },
   { id: 'strafe_right', label: 'Strafe Right (D)' },
   { id: 'back', label: 'Walk Back (S)' },
+  { id: 'attack', label: 'Attack / Swing', hint: 'Weapon swing or shoot pose' },
+  { id: 'punch', label: 'Punch / Unarmed', hint: 'Fallback when no weapon' },
   { id: 'die', label: 'Die / Eliminated', hint: 'Plays once on death' },
 ];
 
@@ -78,6 +82,8 @@ export function suggestPlayerBindings(clips: string[]): PlayerAnimBindings {
     strafe_left: find('left', 'strafe_l', 'strafe left') ?? walk,
     strafe_right: find('right', 'strafe_r', 'strafe right') ?? walk,
     back: find('back', 'backward', 'reverse') ?? walk,
+    attack: find('attack', 'slash', 'swing', 'shoot', 'fire', 'punch', 'hit') ?? idle,
+    punch: find('punch', 'hit', 'jab', 'melee') ?? find('attack', 'slash') ?? idle,
     die: find('die', 'death', 'dead', 'elim') ?? idle,
   };
 }
@@ -494,6 +500,9 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
         }
       : undefined,
     playerAnims: ent.playerAnims ? { ...ent.playerAnims } : undefined,
+    playerSkins: ent.playerSkins
+      ? ent.playerSkins.map((a) => ({ ...a, shape: a.shape ? { ...a.shape } : undefined }))
+      : undefined,
     hazard: ent.hazard ? { ...ent.hazard } : undefined,
     jumpPad: ent.jumpPad ? { ...ent.jumpPad } : undefined,
     surface: ent.surface ? { ...ent.surface } : undefined,

@@ -34,6 +34,10 @@ import { MobileActionButtons } from './ui/mobile-action-buttons';
 import { Crosshair } from './ui/crosshair';
 import dynamic from 'next/dynamic';
 import {
+  findWeaponAttachment,
+  resolveWeaponCombat,
+} from '@/lib/weapons';
+import {
   getActivePlayMapId,
   mapDocSpawnPoints,
   mapDocToSimFinishes,
@@ -163,6 +167,7 @@ export default function KilrunEngine({
     let cameraPitch = 0.22;
     let sendAccumulatorMs = 0;
     let shootHeld = false;
+    let wasShootEdge = false;
     let interactPulse = false;
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
@@ -293,7 +298,18 @@ export default function KilrunEngine({
       updateFollowCamera(world.camera, targetPos, cameraYaw, cameraPitch, dt, ZOOM);
 
       if (!frozen) {
-        shootHeld = shootHeld || inputManager.isShootPressed() || inputManager.isAttackPressed();
+        const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
+        if (shootNow && !wasShootEdge && localSessionId) {
+          const weaponAtt = findWeaponAttachment(
+            customDocRef.current?.entities.find((e) => e.kind === 'player')?.playerSkins
+          );
+          const combat = resolveWeaponCombat(weaponAtt);
+          characters
+            .get(localSessionId)
+            ?.triggerAttack(combat.attackStyle ?? 'attack');
+        }
+        wasShootEdge = shootNow;
+        shootHeld = shootHeld || shootNow;
         sendAccumulatorMs += dtMs;
         if (sendAccumulatorMs >= NETWORK_SEND_INTERVAL_MS && localState) {
           sendAccumulatorMs = 0;

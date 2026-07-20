@@ -29,6 +29,10 @@ import { normalizeCharacter } from '../renderer/asset-loader';
 import { suggestPlayerBindings } from './map-document';
 import { updateFollowCamera } from '../renderer/three-world';
 import { applySkinAttachments, tickSkinAttachments } from './skin-attachments';
+import {
+  findWeaponAttachment,
+  resolveWeaponCombat,
+} from '@/lib/weapons';
 
 /**
  * Play Test uses the same pad export + platformer step as Deathrun match
@@ -91,6 +95,8 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     let pitch = 0;
     let interactPulse = false;
     let attackPulse = false;
+    let lastAttackAt = 0;
+    let attackAnimUntil = 0;
     let raf = 0;
     const pads = mapDocToSimPlatforms(doc);
     const finishes = mapDocToSimFinishes(doc);
@@ -389,12 +395,50 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       // 3rd-person follow — same feel as Deathrun match
       updateFollowCamera(camera, playerPos, yaw, pitch, dt, 8.4);
 
+      const colliding = new Set<string>();
+      roots.forEach((root, id) => {
+        if (playerPos.distanceTo(root.position) < 1.2) colliding.add(id);
+      });
+
       if (playerRoot && playerId) {
         playerRoot.position.set(tx, ty, tz);
         playerRoot.rotation.y = yaw;
         const justLanded = !wasGrounded && body.isGrounded;
         wasGrounded = body.isGrounded;
         if (justLanded) landUntil = performance.now() + 280;
+
+        const weaponAtt = findWeaponAttachment(avatarEntity?.playerSkins);
+        const combat = resolveWeaponCombat(weaponAtt);
+        let attackThisFrame = false;
+
+        if (joy?.consumeAttackPulse()) attackPulse = true;
+        if (attackPulse) {
+          attackPulse = false;
+          if (now - lastAttackAt >= combat.cooldownMs) {
+            lastAttackAt = now;
+            attackAnimUntil = now + Math.min(650, Math.max(380, combat.cooldownMs));
+            attackThisFrame = true;
+            if (combat.kind !== 'cosmetic') {
+              const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+              const reach = Math.max(1.2, combat.range);
+              const aimPoint = playerPos
+                .clone()
+                .addScaledVector(forward, Math.min(reach, combat.kind === 'hitscan' ? 3.2 : 2.2));
+              aimPoint.y += 0.9;
+              const hitRadius = combat.kind === 'hitscan' ? 1.6 : Math.max(1.35, reach * 0.55);
+              roots.forEach((root, id) => {
+                if (root.position.distanceTo(aimPoint) > hitRadius) return;
+                const ent = doc.entities.find((e) => e.id === id);
+                if (!ent) return;
+                if (ent.animation?.trigger === 'interact' || ent.kind === 'button') {
+                  colliding.add(id);
+                  director.evaluateTriggers([ent], playerPos, true, colliding);
+                }
+              });
+            }
+          }
+        }
+
         director.updatePlayer(playerId, avatarBindings ?? avatarEntity?.playerAnims, {
           moving: Math.abs(moveX) + Math.abs(moveY) > 0.05,
           sprint,
@@ -404,36 +448,15 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
           moveZ: wishFwd,
           alive: hpLocal > 0,
           justLanded: performance.now() < landUntil,
+          attack: attackThisFrame,
+          attackStyle: combat.attackStyle ?? 'attack',
         });
       }
-
-      const colliding = new Set<string>();
-      roots.forEach((root, id) => {
-        if (playerPos.distanceTo(root.position) < 1.2) colliding.add(id);
-      });
 
       director.evaluateTriggers(doc.entities, playerPos, interactPulse, colliding);
       interactPulse = false;
       if (joy?.consumeActionPulse()) {
         director.evaluateTriggers(doc.entities, playerPos, true, colliding);
-      }
-
-      // Attack — punch / melee toward look direction (buttons, traps in front)
-      if (joy?.consumeAttackPulse()) attackPulse = true;
-      if (attackPulse) {
-        attackPulse = false;
-        const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-        const aimPoint = playerPos.clone().addScaledVector(forward, 1.6);
-        aimPoint.y += 0.9;
-        roots.forEach((root, id) => {
-          if (root.position.distanceTo(aimPoint) > 1.35) return;
-          const ent = doc.entities.find((e) => e.id === id);
-          if (!ent) return;
-          if (ent.animation?.trigger === 'interact' || ent.kind === 'button') {
-            colliding.add(id);
-            director.evaluateTriggers([ent], playerPos, true, colliding);
-          }
-        });
       }
 
       for (const ent of doc.entities) {

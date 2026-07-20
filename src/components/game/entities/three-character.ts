@@ -70,6 +70,7 @@ export class ThreeCharacter {
   private bindings: PlayerAnimBindings = {};
   private wasGrounded = true;
   private landUntil = 0;
+  private attackUntil = 0;
   private avatarOpts: CharacterAvatarOptions;
   private avatarScene: THREE.Object3D | null = null;
   private skinTime = 0;
@@ -141,6 +142,8 @@ export class ThreeCharacter {
       bindSlot('strafe_left', ['left', 'strafe']);
       bindSlot('strafe_right', ['right', 'strafe']);
       bindSlot('back', ['back', 'backward']);
+      bindSlot('attack', ['attack', 'slash', 'swing', 'shoot', 'fire', 'punch', 'hit'], false);
+      bindSlot('punch', ['punch', 'hit', 'jab', 'melee'], false);
       bindSlot('die', ['die', 'death', 'dead'], false);
 
       this.actions.get('idle')?.reset().play();
@@ -177,6 +180,15 @@ export class ThreeCharacter {
     next.clampWhenFinished = !loop;
     next.fadeIn(0.12).play();
     this.current = name;
+  }
+
+  /** Play weapon / punch swing (client visual — combat damage is server-side). */
+  public triggerAttack(style: 'attack' | 'punch' = 'attack') {
+    const slot = style === 'punch' && this.actions.has('punch') ? 'punch' : 'attack';
+    const fallback = this.actions.has(slot) ? slot : this.actions.has('punch') ? 'punch' : null;
+    if (!fallback) return;
+    this.attackUntil = performance.now() + 480;
+    this.play(fallback, false);
   }
 
   public update(player: NetPlayerState, dt: number, cameraYaw?: number) {
@@ -228,6 +240,8 @@ export class ThreeCharacter {
 
     if (!player.isAlive) {
       this.play('die', false);
+    } else if (performance.now() < this.attackUntil) {
+      // keep current attack / punch
     } else if (performance.now() < this.landUntil && this.actions.has('land')) {
       this.play('land', false);
     } else if (!player.isGrounded) {

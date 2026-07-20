@@ -101,11 +101,36 @@ export class AnimationDirector {
       alive?: boolean;
       /** Rising edge of grounded after air time. */
       justLanded?: boolean;
+      /** One-shot weapon / punch swing this frame. */
+      attack?: boolean;
+      /** Prefer attack vs punch clip. */
+      attackStyle?: 'attack' | 'punch';
     }
   ) {
     if (!bindings) return;
     if (state.alive === false) {
       const clip = bindings.die || bindings.idle;
+      this.play(entityId, clip, false);
+      return;
+    }
+    // Let attack / punch finish before locomotion takes over
+    {
+      const curName = this.current.get(entityId);
+      const attackClips = [bindings.attack, bindings.punch].filter(Boolean) as string[];
+      if (curName && attackClips.includes(curName) && !state.attack) {
+        const action = this.actions.get(entityId)?.get(curName);
+        if (action?.isRunning()) {
+          const dur = action.getClip()?.duration ?? 0.4;
+          if (action.time < dur * 0.92) return;
+        }
+      }
+    }
+    if (state.attack) {
+      const style = state.attackStyle ?? 'attack';
+      const clip =
+        (style === 'punch'
+          ? bindings.punch || bindings.attack
+          : bindings.attack || bindings.punch) || bindings.idle;
       this.play(entityId, clip, false);
       return;
     }
