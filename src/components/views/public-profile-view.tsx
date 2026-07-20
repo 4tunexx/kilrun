@@ -33,6 +33,9 @@ import {
 } from '@/lib/social-actions';
 import { getPublicProfile, type PublicProfile } from '@/lib/public-profile-actions';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import {
+  ProfileHeroBanner,
+} from '@/components/profile-hero-banner';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
@@ -173,32 +176,35 @@ export default function PublicProfileView({
       )}
 
       <Card className={`${PANEL} overflow-hidden`}>
-        <div
-          className={`relative h-28 sm:h-40 w-full ${
-            banner
-              ? bannerAnimationClass(banner)
-              : 'bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800'
-          }`}
-          style={banner ? bannerStyle(banner) : undefined}
-        >
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-black/35 pointer-events-none" />
-          <p
-            className={`absolute top-3 left-3 sm:top-4 sm:left-4 z-20 text-xs sm:text-sm font-semibold capitalize drop-shadow-md ${getRoleTextColorClass(
-              profile.role,
-              profile.isVip
-            )}`}
-          >
-            <span className="rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm border border-white/10">
+        <ProfileHeroBanner
+          banner={banner}
+          rounded
+          topLeft={
+            <span
+              className={`rounded-md bg-black/45 px-2 py-1 text-xs sm:text-sm font-semibold capitalize backdrop-blur-sm border border-white/10 drop-shadow-md ${getRoleTextColorClass(
+                profile.role,
+                profile.isVip
+              )}`}
+            >
               {profile.role}
               {profile.countryCode && getCountryName(profile.countryCode)
                 ? ` · ${getCountryName(profile.countryCode)}`
                 : ''}{' '}
               · Joined {formatDistanceToNow(new Date(profile.createdAt))} ago
             </span>
-          </p>
-          <div className="absolute bottom-3 left-[6.25rem] sm:left-[7.5rem] right-3 z-20 flex items-center gap-2 min-w-0 pointer-events-none">
+          }
+          avatar={
+            <AvatarWithFrame
+              src={profile.avatarUrl}
+              alt={profile.username}
+              fallback={profile.username.charAt(0)}
+              frameConfig={profile.equippedFrameConfig}
+              sizeClass="h-24 w-24 sm:h-28 sm:w-28"
+            />
+          }
+          title={
             <h2
-              className={`text-xl sm:text-3xl font-black truncate flex items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)] ${getRoleTextColorClass(
+              className={`text-xl sm:text-3xl font-black truncate flex items-center gap-2 ${getRoleTextColorClass(
                 profile.role,
                 profile.isVip
               )}`}
@@ -220,34 +226,20 @@ export default function PublicProfileView({
                 />
               )}
               {profile.isVip && (
-                <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px] pointer-events-auto">
-                  VIP
-                </Badge>
+                <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px]">VIP</Badge>
               )}
             </h2>
-          </div>
-        </div>
+          }
+          subtitle={
+            profile.statusMessage ? (
+              <p className="text-sm text-slate-300 mt-1 line-clamp-2">{profile.statusMessage}</p>
+            ) : undefined
+          }
+        />
 
         <CardContent className="pt-0 pb-0 relative z-20">
-          <div className="-mt-12 sm:-mt-14 flex flex-col sm:flex-row sm:items-end gap-4 pb-5">
-            <AvatarWithFrame
-              src={profile.avatarUrl}
-              alt={profile.username}
-              fallback={profile.username.charAt(0)}
-              frameConfig={profile.equippedFrameConfig}
-              sizeClass="h-24 w-24 sm:h-28 sm:w-28"
-            />
-
-            <div className="min-w-0 flex-1 pb-1 sm:pt-10">
-              {profile.statusMessage ? (
-                <p className="text-sm text-slate-300 line-clamp-2">{profile.statusMessage}</p>
-              ) : (
-                <div className="hidden sm:block h-5" aria-hidden />
-              )}
-            </div>
-
-            {profile.friendStatus !== 'self' && (
-              <div className="flex flex-wrap gap-2 pb-1 items-center">
+          {profile.friendStatus !== 'self' && (
+              <div className="flex flex-wrap gap-2 pb-4 items-center">
                 {profile.myReputationVote !== 0 ? (
                   <div
                     className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-semibold opacity-60 cursor-not-allowed ${
@@ -367,10 +359,9 @@ export default function PublicProfileView({
                 )}
               </div>
             )}
-          </div>
 
           {profile.bio && (
-            <p className="mt-4 mb-4 text-slate-300 whitespace-pre-wrap text-sm sm:text-base">
+            <p className="mb-4 text-slate-300 whitespace-pre-wrap text-sm sm:text-base">
               {profile.bio}
             </p>
           )}

@@ -1,11 +1,19 @@
 'use client';
 
 import { useRef, useState, type ReactNode } from 'react';
-import { Crown, Loader2, ThumbsUp } from 'lucide-react';
+import { Crown, ExternalLink, Loader2, ThumbsUp } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { LevelBar } from '@/components/ui/level-bar';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { ShowcaseChips } from '@/components/showcase-chips';
 import { useHoverCapable } from '@/hooks/use-hover-capable';
 import { useProfileNavigation } from '@/components/providers/profile-navigation-context';
@@ -41,14 +49,7 @@ export type MiniProfileSummary = {
 };
 
 /**
- * Wraps a username anywhere in the hub (forum, chat, leaderboard, friends,
- * messages...). Desktop: hovering shows a mini profile card; clicking the
- * username or the card navigates to the full public profile. Touch: first
- * tap opens the card, tapping again (the username or the card) navigates.
- *
- * Pass `role`/`isVip` when already known so the name is colored correctly
- * (admin red / moderator green / VIP orange) even before the hover card's
- * own fetch resolves.
+ * Wraps a username anywhere in the hub. Desktop hover → mini card; click navigates.
  */
 export function UserHoverCard({
   userId,
@@ -158,9 +159,9 @@ export function MiniProfileCard({
   onViewProfile?: () => void;
   layoutOverride?: Partial<ShowcaseLayout>;
   className?: string;
-  /** Optional site mark; defaults to Kilrun K. */
   markLogoUrl?: string | null;
 }) {
+  const [logoOpen, setLogoOpen] = useState(false);
   const banner = summary.equippedBannerConfig
     ? normalizeBannerConfig(summary.equippedBannerConfig)
     : null;
@@ -172,53 +173,81 @@ export function MiniProfileCard({
   const position: ShowcasePosition = layout.position;
   const align: ShowcaseAlign = layout.align;
   const markSrc = resolveMarkLogo(markLogoUrl) || DEFAULT_MARK_LOGO;
+  const siteUrl =
+    typeof window !== 'undefined' ? window.location.origin : 'https://kilrun.vercel.app';
 
   const showcaseBlock =
     summary.showcase.length > 0 ? (
-      <div className="mt-3 min-w-0 overflow-hidden">
+      <div className="mt-2 min-w-0 overflow-hidden">
         <ShowcaseChips items={summary.showcase} compact align={align} />
       </div>
     ) : null;
+
+  const logoButton = (
+    <button
+      type="button"
+      title="Kilrun — enlarge & visit"
+      className="absolute top-1.5 right-1.5 z-20 h-7 w-7 rounded-md bg-black/35 p-0.5 backdrop-blur-sm border border-white/15 transition hover:scale-110 hover:bg-black/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setLogoOpen(true);
+      }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={markSrc}
+        alt="Kilrun"
+        className="h-full w-full object-contain drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)] select-none"
+        draggable={false}
+      />
+    </button>
+  );
 
   const body = (
     <>
       <div
         className={cn(
-          'relative h-16 w-full',
+          'relative h-24 w-full',
           banner ? bannerAnimationClass(banner) : 'bg-gradient-to-r from-slate-800 to-slate-700'
         )}
-        style={banner ? bannerStyle(banner) : undefined}
+        style={
+          banner
+            ? {
+                ...bannerStyle(banner),
+                backgroundPosition: 'center',
+              }
+            : undefined
+        }
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={markSrc}
-          alt="Kilrun"
-          className="absolute top-1.5 right-1.5 z-10 h-6 w-6 object-contain drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)] pointer-events-none select-none"
-          draggable={false}
-        />
+        <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/35 via-transparent to-transparent" />
+        {logoButton}
       </div>
-      <div className="-mt-8 p-4 pt-0 min-w-0">
-        <Avatar className="h-16 w-16 border-4 border-slate-900 shadow-lg">
-          <AvatarImage src={summary.avatarUrl} alt={summary.username} />
-          <AvatarFallback>{summary.username.charAt(0)}</AvatarFallback>
-        </Avatar>
-        <div className="mt-2 flex flex-wrap items-center gap-2 min-w-0">
-          <p
-            className={cn(
-              'truncate font-bold text-lg transition-colors',
-              getRoleTextColorClass(summary.role, summary.isVip)
+      <div className="-mt-8 px-4 pb-4 pt-0 min-w-0">
+        <div className="flex items-end gap-3 min-w-0">
+          <Avatar className="h-14 w-14 shrink-0 border-4 border-slate-900 shadow-lg">
+            <AvatarImage src={summary.avatarUrl} alt={summary.username} />
+            <AvatarFallback>{summary.username.charAt(0)}</AvatarFallback>
+          </Avatar>
+          {/* Name + rank fill the space to the RIGHT of the avatar (no dead gap, no overlap) */}
+          <div className="min-w-0 flex-1 pb-0.5 flex items-center gap-2 flex-nowrap">
+            <p
+              className={cn(
+                'truncate font-bold text-base leading-tight',
+                getRoleTextColorClass(summary.role, summary.isVip)
+              )}
+            >
+              {summary.username}
+            </p>
+            {summary.isVip && (
+              <Badge className="h-5 shrink-0 bg-yellow-500 text-[10px] text-black">VIP</Badge>
             )}
-          >
-            {summary.username}
-          </p>
-          {summary.isVip && (
-            <Badge className="h-5 bg-yellow-500 text-[10px] text-black">VIP</Badge>
-          )}
+            <span className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-yellow-400">
+              <Crown className="h-3 w-3" /> {summary.currentRank}
+            </span>
+          </div>
         </div>
-        <p className="flex items-center gap-1 text-xs font-semibold text-yellow-400">
-          <Crown className="h-3 w-3" /> {summary.currentRank}
-        </p>
-        <div className="mt-3">
+        <div className="mt-2.5">
           <LevelBar
             level={summary.level}
             xpIntoLevel={summary.xpIntoLevel}
@@ -227,7 +256,7 @@ export function MiniProfileCard({
           />
         </div>
         {position === 'after_level' ? showcaseBlock : null}
-        <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
+        <div className="mt-2.5 flex items-center justify-between text-xs text-slate-400">
           <span
             className={`flex items-center gap-1 font-semibold ${
               summary.reputation > 0
@@ -249,6 +278,37 @@ export function MiniProfileCard({
         </div>
         {position === 'bottom' ? showcaseBlock : null}
       </div>
+
+      <Dialog open={logoOpen} onOpenChange={setLogoOpen}>
+        <DialogContent
+          className="bg-slate-900 border-slate-700 text-white max-w-sm"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DialogHeader>
+            <DialogTitle>Kilrun</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Official mark — open the hub website.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-4 py-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={markSrc}
+              alt="Kilrun"
+              className="h-28 w-28 object-contain drop-shadow-xl"
+            />
+            <Button
+              className="w-full"
+              onClick={() => {
+                window.open(siteUrl, '_blank', 'noopener,noreferrer');
+                setLogoOpen(false);
+              }}
+            >
+              <ExternalLink className="h-4 w-4 mr-2" /> Visit {siteUrl.replace(/^https?:\/\//, '')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 

@@ -57,6 +57,9 @@ import {
 } from '@/lib/social-actions';
 import type { MatchStat, User as UserModel } from '@/generated/prisma';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import {
+  ProfileHeroBanner,
+} from '@/components/profile-hero-banner';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import { ShowcaseEditor } from '@/components/views/profile/showcase-editor';
 import { useToast } from '@/hooks/use-toast';
@@ -191,33 +194,33 @@ export default function ProfileView({ userId }: { userId: string }) {
   return (
     <div className="pb-6">
       <div className="relative">
-        <div
-          className={`relative h-28 sm:h-40 w-full ${
-            equippedBanner
-              ? bannerAnimationClass(equippedBanner)
-              : 'bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800'
-          }`}
-          style={equippedBanner ? bannerStyle(equippedBanner) : undefined}
-        >
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-transparent to-black/30 pointer-events-none" />
-          <p
-            className={`absolute top-3 left-3 sm:top-4 sm:left-4 z-20 text-xs sm:text-sm font-semibold capitalize drop-shadow-md ${getRoleTextColorClass(
-              user?.role,
-              user?.isVip
-            )}`}
-          >
-            <span className="rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm border border-white/10">
+        <ProfileHeroBanner
+          banner={equippedBanner}
+          topLeft={
+            <span
+              className={`rounded-md bg-black/45 px-2 py-1 text-xs sm:text-sm font-semibold capitalize backdrop-blur-sm border border-white/10 drop-shadow-md ${getRoleTextColorClass(
+                user?.role,
+                user?.isVip
+              )}`}
+            >
               {user?.role ?? 'player'}
               {user?.isVip ? ' · VIP' : ''}
               {user?.createdAt
                 ? ` · Joined ${formatDistanceToNow(new Date(user.createdAt))} ago`
                 : ''}
             </span>
-          </p>
-          {/* Nickname + flag sit on the banner (above the art), next to where the avatar overlaps */}
-          <div className="absolute bottom-3 left-[6.5rem] sm:left-[8.5rem] right-4 z-20 flex items-center gap-3 min-w-0 pointer-events-none">
+          }
+          avatar={
+            <AvatarWithFrame
+              src={user?.avatarUrl}
+              alt={user?.username ?? 'Player avatar'}
+              fallback={user?.username?.charAt(0) ?? '?'}
+              frameConfig={user?.equippedFrameConfig}
+            />
+          }
+          title={
             <h1
-              className={`text-2xl sm:text-4xl md:text-5xl font-black truncate flex items-center gap-3 drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)] ${getRoleTextColorClass(
+              className={`text-2xl sm:text-4xl md:text-5xl font-black truncate flex items-center gap-2 sm:gap-3 ${getRoleTextColorClass(
                 user?.role,
                 user?.isVip
               )}`}
@@ -233,31 +236,22 @@ export default function ProfileView({ userId }: { userId: string }) {
                   alt={getCountryName(countryCode) ?? countryCode}
                   width={28}
                   height={21}
-                  className="rounded-sm shadow-md shrink-0 pointer-events-auto"
+                  className="rounded-sm shadow-md shrink-0"
                   unoptimized
                 />
               )}
             </h1>
-          </div>
-        </div>
+          }
+          subtitle={
+            statusMessage ? (
+              <p className="text-sm sm:text-base text-slate-300 mt-1 line-clamp-2">
+                {statusMessage}
+              </p>
+            ) : undefined
+          }
+        />
 
         <div className="px-4 sm:px-8 relative z-20">
-          <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-6 -mt-12 sm:-mt-16 mb-6">
-            <AvatarWithFrame
-              src={user?.avatarUrl}
-              alt={user?.username ?? 'Player avatar'}
-              fallback={user?.username?.charAt(0) ?? '?'}
-              frameConfig={user?.equippedFrameConfig}
-            />
-            <div className="min-w-0 flex-1 pb-1 sm:pt-14">
-              {statusMessage ? (
-                <p className="text-sm sm:text-base text-slate-300 line-clamp-2">{statusMessage}</p>
-              ) : (
-                <div className="hidden sm:block h-6" aria-hidden />
-              )}
-            </div>
-          </div>
-
       <Tabs defaultValue="profile" className="w-full">
         <TabsList className="w-full h-auto flex flex-wrap justify-start gap-1 bg-slate-800/60 p-1 mb-4">
           <TabsTrigger value="profile" className="flex-none">
@@ -589,12 +583,16 @@ export default function ProfileView({ userId }: { userId: string }) {
             </CardHeader>
             <CardContent className="space-y-4">
               <div
-                className={`h-20 sm:h-28 w-full rounded-lg border border-slate-700/50 ${
+                className={`h-20 sm:h-28 w-full rounded-lg border border-slate-700/50 overflow-hidden ${
                   equippedBanner
                     ? bannerAnimationClass(equippedBanner)
                     : 'bg-gradient-to-r from-slate-800 to-slate-700'
                 }`}
-                style={equippedBanner ? bannerStyle(equippedBanner) : undefined}
+                style={
+                  equippedBanner
+                    ? { ...bannerStyle(equippedBanner), backgroundPosition: 'center' }
+                    : undefined
+                }
               />
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm text-slate-400">

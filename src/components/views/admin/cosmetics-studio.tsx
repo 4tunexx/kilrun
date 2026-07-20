@@ -267,9 +267,15 @@ function BannerPanel({ onCreated }: { onCreated?: () => void }) {
         <div className="space-y-1">
           <Label>Live preview</Label>
           <div
-            className={`h-28 w-full rounded-lg border border-slate-700 overflow-hidden ${bannerAnimationClass(config)}`}
-            style={bannerStyle(config)}
+            className={`aspect-[21/9] w-full min-h-[7rem] rounded-lg border border-slate-700 overflow-hidden ${bannerAnimationClass(config)}`}
+            style={{
+              ...bannerStyle(config),
+              backgroundPosition: 'center',
+            }}
           />
+          <p className="text-[11px] text-slate-500">
+            Same gradient fill players see on profile headers &amp; store cards.
+          </p>
         </div>
         <ShopMetaFields
           itemName={itemName}

@@ -96,14 +96,16 @@ export function bannerGradientCss(config: BannerConfig): string {
 /** Inline style object for a div rendering this banner. */
 export function bannerStyle(config: BannerConfig): CSSProperties {
   const c = normalizeBannerConfig(config);
+  const sweeping =
+    c.animated && (c.animationStyle === 'shimmer' || c.animationStyle === 'wave');
   return {
     backgroundImage: bannerGradientCss(c),
-    backgroundSize:
-      c.animated && (c.animationStyle === 'shimmer' || c.animationStyle === 'wave')
-        ? '200% 200%'
-        : '100% 100%',
+    backgroundSize: sweeping ? '200% 200%' : 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
     opacity: c.opacity ?? 1,
-    filter: (c.blur ?? 0) > 0 ? `blur(${(c.blur ?? 0) * 2}px)` : undefined,
+    // Soft blur as an overlay feel — keep modest so profile banners don't look muddy
+    filter: (c.blur ?? 0) > 0 ? `blur(${(c.blur ?? 0) * 1.25}px)` : undefined,
   };
 }
 
