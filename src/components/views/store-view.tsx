@@ -63,15 +63,24 @@ export default function StoreView({ userId }: { userId?: string }) {
 
   useEffect(() => {
     let isMounted = true;
-    getStoreItems().then((data) => {
-      if (!isMounted) return;
-      setItems(data as CatalogItem[]);
-      setIsLoading(false);
-    });
+    getStoreItems()
+      .then((data) => {
+        if (!isMounted) return;
+        setItems(data as CatalogItem[]);
+        setIsLoading(false);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setIsLoading(false);
+        toast({
+          title: 'Failed to load store',
+          variant: 'destructive',
+        });
+      });
     return () => {
       isMounted = false;
     };
-  }, [userId]);
+  }, [userId, toast]);
 
   const fireCount = useMemo(
     () => items.filter((i) => isFireSaleActive(i)).length,

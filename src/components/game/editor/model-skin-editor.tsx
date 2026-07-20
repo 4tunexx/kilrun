@@ -1612,6 +1612,7 @@ class SkinPreview {
   private showBody = true;
   private raf = 0;
   private disposed = false;
+  private resizeObserver: ResizeObserver | null = null;
   private host: HTMLElement;
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
@@ -1679,7 +1680,8 @@ class SkinPreview {
       this.renderer.setSize(w, h, false);
     };
     resize();
-    new ResizeObserver(resize).observe(host);
+    this.resizeObserver = new ResizeObserver(resize);
+    this.resizeObserver.observe(host);
 
     const el = this.renderer.domElement;
     el.addEventListener('pointerdown', this.onPointerDown);
@@ -2081,6 +2083,8 @@ class SkinPreview {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     if (this.commitTimer) window.clearTimeout(this.commitTimer);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     const el = this.renderer.domElement;
     el.removeEventListener('pointerdown', this.onPointerDown);
     el.removeEventListener('pointermove', this.onPointerMove);

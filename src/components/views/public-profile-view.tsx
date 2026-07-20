@@ -6,8 +6,8 @@ import {
   ArrowLeft,
   Award,
   Check,
-  Crown,
   Gauge,
+  Gem,
   Loader2,
   Lock,
   MessageSquare,
@@ -489,7 +489,7 @@ export default function PublicProfileView({
                     imageUrl={profile.peakRankImage}
                     size={22}
                   />
-                  <Crown className="h-4 w-4" /> {profile.peakRank || profile.currentRank}
+                  <Gem className="h-4 w-4 text-amber-300 fill-amber-400/40" /> {profile.peakRank || profile.currentRank}
                 </p>
                 {typeof profile.peakKp === 'number' && (
                   <p className="text-[10px] text-slate-500 mt-1 tabular-nums">

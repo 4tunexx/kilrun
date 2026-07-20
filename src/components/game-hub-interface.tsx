@@ -290,6 +290,16 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     setPulsarOn(isPulsarActive());
   }, []);
 
+  useEffect(() => {
+    if (currentPage === 'public-profile' && !viewingProfileUserId) {
+      navigate(previousPage === 'public-profile' ? 'home' : previousPage);
+    }
+    if (currentPage === 'lobby' && !lobbyMode) {
+      navigate('play');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, viewingProfileUserId, lobbyMode]);
+
   // Refresh equipped cosmetics when opening the right profile rail
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -652,9 +662,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           username: user.username,
           avatarUrl: user.avatarUrl,
           xpProgress,
-          isAdmin: showAdmin,
+          isAdmin: user.role === 'admin',
           kp,
-          isPremium: rankedAccess,
+          isPremium,
+          rankedAccess,
           competitiveQueue: lobbyMode === 'competitive' ? competitiveQueue : 'casual',
         };
       } else if (currentPage === 'messages') {
@@ -663,8 +674,11 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         props.viewerRole = user.role;
       } else if (currentPage === 'public-profile') {
         if (!viewingProfileUserId) {
-          navigate(previousPage);
-          return null;
+          return (
+            <div className="p-6 text-center text-slate-400 text-sm">
+              Profile unavailable.
+            </div>
+          );
         }
         props = {
           userId: viewingProfileUserId,
@@ -678,14 +692,15 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       }
 
       if (currentPage === 'lobby' && !lobbyMode) {
-        navigate('play');
         return (
           <PlayView
             onPlay={handlePlay}
             isPremium={isPremium}
             rankedAccess={rankedAccess}
             freeRankedWeek={freeRankedWeek}
+            pulsarOn={pulsarOn}
             onOpenPremium={() => navigate('premium')}
+            onOpenPulsar={() => setIsMenuOpen(true)}
           />
         );
       }
@@ -750,9 +765,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           username={user.username}
           avatarUrl={user.avatarUrl}
           xpProgress={xpProgress}
-          isAdmin={showAdmin}
+          isAdmin={user.role === 'admin'}
           kp={kp}
-          isPremium={rankedAccess}
+          isPremium={isPremium}
+          rankedAccess={rankedAccess}
           competitiveQueue={lobbyMode === 'competitive' ? competitiveQueue : 'casual'}
         />
       </ProfileNavigationProvider>
@@ -1217,29 +1233,36 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                       <button
                         type="button"
                         onClick={() => {
-                          if (!isPremium) navigate('premium');
+                          if (!rankedAccess) navigate('premium');
                         }}
                         className={`mt-4 bg-slate-800/50 px-4 py-2 rounded-lg text-center w-full transition-colors ${
-                          !isPremium
+                          !rankedAccess
                             ? 'hover:bg-amber-500/10 hover:ring-1 hover:ring-amber-500/40 cursor-pointer'
                             : 'cursor-default'
                         }`}
-                        title={isPremium ? undefined : 'Unlock Premium to show your KP rank'}
+                        title={
+                          rankedAccess
+                            ? undefined
+                            : 'Unlock Premium to show your KP rank'
+                        }
                       >
                         <div className="text-xs text-slate-400">Rank</div>
                         <div
                           className={`text-lg font-bold ${
-                            isPremium ? 'text-yellow-400' : 'text-amber-300'
+                            rankedAccess ? 'text-yellow-400' : 'text-amber-300'
                           }`}
                         >
-                          {isPremium ? currentRank : 'Go Premium'}
+                          {rankedAccess
+                            ? currentRank
+                            : 'Go Premium'}
                         </div>
-                        {isPremium ? (
+                        {rankedAccess ? (
                           <div className="text-[10px] text-slate-500 mt-0.5 tabular-nums">
                             {kp.toLocaleString()} KP
                             {peakRank && peakRank !== currentRank
                               ? ` · Peak ${peakRank}`
                               : ''}
+                            {freeRankedWeek && !isPremium ? ' · Free week' : ''}
                           </div>
                         ) : peakRank && peakRank !== 'Unranked' ? (
                           <div className="text-[10px] text-slate-500 mt-0.5">

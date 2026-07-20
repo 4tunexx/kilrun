@@ -1067,17 +1067,27 @@ export function createEditorViewport(
   renderer.domElement.addEventListener('pointerup', onPointerUp);
   window.addEventListener('mousemove', onMouseMove);
 
+  let ctrlAloneCandidate = false;
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Shift') shiftHeld = true;
     keys.add(e.code);
-    if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat) {
-      e.preventDefault();
-      setFreeFly(!freeFly);
+    if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
+      if (!e.repeat) ctrlAloneCandidate = true;
+    } else {
+      // Any other key with Ctrl (undo/save) cancels Free Fly toggle.
+      ctrlAloneCandidate = false;
     }
   };
   const onKeyUp = (e: KeyboardEvent) => {
     if (e.key === 'Shift') shiftHeld = false;
     keys.delete(e.code);
+    if (
+      (e.code === 'ControlLeft' || e.code === 'ControlRight') &&
+      ctrlAloneCandidate
+    ) {
+      ctrlAloneCandidate = false;
+      setFreeFly(!freeFly);
+    }
   };
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);

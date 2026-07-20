@@ -19,8 +19,10 @@ interface LobbyViewProps {
   isAdmin?: boolean;
   /** Competitive KP for Elo snapshot at join. */
   kp?: number;
-  /** Premium active — required for ranked queue. */
+  /** Premium membership active. */
   isPremium?: boolean;
+  /** Premium or free Ranked week — may enter Ranked queue. */
+  rankedAccess?: boolean;
   /** Casual (no KP) vs Ranked Premium. */
   competitiveQueue?: 'casual' | 'ranked';
 }
@@ -35,6 +37,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   isAdmin = false,
   kp,
   isPremium = false,
+  rankedAccess,
   competitiveQueue = 'casual',
 }) => {
   const [equippedSkins, setEquippedSkins] = useState<SkinAttachment[]>([]);
@@ -95,6 +98,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
     };
   }, [mode, competitiveQueue, kp]);
 
+  const canRanked = rankedAccess ?? isPremium;
   const joinOptions = useMemo(
     () => ({
       userId,
@@ -103,7 +107,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       isAdmin,
       kp,
       isPremium,
-      rankedAccess: isPremium,
+      rankedAccess: canRanked,
       ...(mode === 'competitive' && competitiveQueue === 'ranked'
         ? { rankKey, mmWaitSec, minSameRankPlayers }
         : {}),
@@ -115,6 +119,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       isAdmin,
       kp,
       isPremium,
+      canRanked,
       mode,
       competitiveQueue,
       rankKey,

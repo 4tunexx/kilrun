@@ -103,7 +103,8 @@ export class GameConnection {
   ) {
     if (this.disposed || !this.room) return;
     const state = this.room.state as unknown as NetRoomState;
-    if (state.phase !== 'lobby' && state.phase !== 'countdown') return;
+    // Never tear down a room that already started countdown / match.
+    if (state.phase !== 'lobby') return;
 
     let count = 0;
     try {
