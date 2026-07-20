@@ -10,6 +10,7 @@ import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
 import { AnimationDirector } from './animation-director';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
+import { Crosshair } from '../ui/crosshair';
 import { detectTouchDevice } from '../utils/constants';
 import {
   createSimScratch,
@@ -27,6 +28,7 @@ import { loadPlayerAvatar, getMapPlayerAvatar } from './player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import { suggestPlayerBindings } from './map-document';
 import { updateFollowCamera } from '../renderer/three-world';
+import { applySkinAttachments } from './skin-attachments';
 
 /**
  * Play Test uses the same pad export + platformer step as Deathrun match
@@ -88,6 +90,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     let yaw = 0;
     let pitch = 0;
     let interactPulse = false;
+    let attackPulse = false;
     let raf = 0;
     const pads = mapDocToSimPlatforms(doc);
     const finishes = mapDocToSimFinishes(doc);
@@ -161,6 +164,9 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
               availableClips: loaded.clipNames,
             };
           }
+          if (avatarEntity.playerSkins?.length) {
+            await applySkinAttachments(root, avatarEntity.playerSkins);
+          }
         }
       } catch (err) {
         console.warn('[PlayPreview] avatar load failed', err);
@@ -174,17 +180,29 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
           const src = resolveModelSrc(ent.model, ent.customModelUrl);
           if (src) {
             const { root, clips } = await loadAnimatedPrefab(src);
-            root.position.set(...ent.position);
-            root.rotation.set(
+            // Plant feet so stacked props / spawn models sit on the floor
+            root.updateMatrixWorld(true);
+            const box = new THREE.Box3().setFromObject(root);
+            if (!box.isEmpty()) {
+              const center = new THREE.Vector3();
+              box.getCenter(center);
+              root.position.x -= center.x;
+              root.position.z -= center.z;
+              root.position.y -= box.min.y;
+            }
+            const planted = new THREE.Group();
+            planted.add(root);
+            planted.position.set(...ent.position);
+            planted.rotation.set(
               THREE.MathUtils.degToRad(ent.rotation[0]),
               THREE.MathUtils.degToRad(ent.rotation[1]),
               THREE.MathUtils.degToRad(ent.rotation[2])
             );
-            root.scale.set(...ent.scale);
-            root.userData.entityId = ent.id;
-            scene.add(root);
-            roots.set(ent.id, root);
-            director.register(ent.id, root, clips);
+            planted.scale.set(...ent.scale);
+            planted.userData.entityId = ent.id;
+            scene.add(planted);
+            roots.set(ent.id, planted);
+            director.register(ent.id, planted, clips);
             if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
               director.playDefault(ent);
             }
@@ -246,6 +264,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     const onKeyDown = (e: KeyboardEvent) => {
       keys.add(e.code);
       if (e.code === 'KeyE') interactPulse = true;
+      if (e.code === 'KeyF' || e.code === 'Mouse0') attackPulse = true;
       if (e.key === 'Escape') onClose();
     };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
@@ -254,9 +273,13 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       pitch -= (e.movementY || 0) * 0.002;
       pitch = THREE.MathUtils.clamp(pitch, -0.35, 0.55);
     };
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 0) attackPulse = true;
+    };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('mousemove', onMove);
+    window.addEventListener('mousedown', onMouseDown);
 
     let joy: DualJoystick | null = null;
     if (detectTouchDevice()) {
@@ -391,6 +414,27 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
 
       director.evaluateTriggers(doc.entities, playerPos, interactPulse, colliding);
       interactPulse = false;
+      if (joy?.consumeActionPulse()) {
+        director.evaluateTriggers(doc.entities, playerPos, true, colliding);
+      }
+
+      // Attack — punch / melee toward look direction (buttons, traps in front)
+      if (joy?.consumeAttackPulse()) attackPulse = true;
+      if (attackPulse) {
+        attackPulse = false;
+        const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        const aimPoint = playerPos.clone().addScaledVector(forward, 1.6);
+        aimPoint.y += 0.9;
+        roots.forEach((root, id) => {
+          if (root.position.distanceTo(aimPoint) > 1.35) return;
+          const ent = doc.entities.find((e) => e.id === id);
+          if (!ent) return;
+          if (ent.animation?.trigger === 'interact' || ent.kind === 'button') {
+            colliding.add(id);
+            director.evaluateTriggers([ent], playerPos, true, colliding);
+          }
+        });
+      }
 
       for (const ent of doc.entities) {
         const hz = ensureHazard(ent);
@@ -428,6 +472,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mousedown', onMouseDown);
       joy?.destroy();
       joystickRef.current = null;
       if (document.pointerLockElement) document.exitPointerLock?.();
@@ -445,8 +490,8 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         </span>
         <span className="text-[10px] sm:text-xs text-white/50 truncate min-w-0">
           {isTouch
-            ? '3rd person · Sticks · Jump/Sprint'
-            : '3rd person · WASD · Space jump · mouse look'}
+            ? '3rd person · Sticks · Jump / Use / Attack'
+            : '3rd person · WASD · E use · click attack · mouse look'}
         </span>
         <div className="ml-4 flex items-center gap-2 text-xs">
           <span className="text-white/50">HP</span>
@@ -465,10 +510,41 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       </div>
       <div className="flex-1 relative min-h-0">
         <div ref={hostRef} className="absolute inset-0 touch-none" />
+        <Crosshair visible offsetX={0} offsetY={0} />
         {isTouch && (
           <>
             <JoystickOverlay joystickRef={joystickRef} enabled />
-            <div className="absolute bottom-20 right-3 z-[120] flex flex-col gap-2 pointer-events-auto">
+            <div className="absolute bottom-16 right-3 z-[120] flex flex-col gap-2 pointer-events-auto items-end">
+              <button
+                type="button"
+                className="w-12 h-12 rounded-full border-2 border-amber-400/70 bg-amber-500/35 text-white font-black text-[10px] uppercase tracking-wider active:scale-95"
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  joystickRef.current?.setAttackHeld(true);
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  joystickRef.current?.setAttackHeld(false);
+                }}
+                onTouchCancel={() => joystickRef.current?.setAttackHeld(false)}
+              >
+                Attack
+              </button>
+              <button
+                type="button"
+                className="w-12 h-12 rounded-full border-2 border-violet-400/70 bg-violet-500/35 text-white font-black text-[10px] uppercase tracking-wider active:scale-95"
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  joystickRef.current?.setActionHeld(true);
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  joystickRef.current?.setActionHeld(false);
+                }}
+                onTouchCancel={() => joystickRef.current?.setActionHeld(false)}
+              >
+                Use
+              </button>
               <button
                 type="button"
                 className="w-14 h-14 rounded-full border-2 border-emerald-400/70 bg-emerald-500/35 text-white font-black text-[10px] uppercase tracking-wider active:scale-95"

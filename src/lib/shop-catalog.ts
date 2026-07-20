@@ -52,12 +52,13 @@ export function resolveShopTab(item: StoreItemLike): Exclude<ShopTabId, 'fire' |
   if (slot === 'banner') return 'banners';
   if (slot === 'frame') return 'frames';
   if (slot === 'nickname') return 'nickname';
+  if (slot === 'skin' || slot.startsWith('skin_')) return 'skins';
 
   const cat = (item.itemCategory || '').toLowerCase();
   if (cat.includes('banner')) return 'banners';
   if (cat.includes('frame')) return 'frames';
   if (cat.includes('nickname') || cat.includes('nick')) return 'nickname';
-  if (cat.includes('skin')) return 'skins';
+  if (cat.includes('skin') || cat.includes('hat') || cat.includes('outfit')) return 'skins';
   if (cat.includes('perk')) return 'perks';
   if (cat.includes('boost') || cat.includes('xp')) return 'boosts';
   if (cat.includes('emote')) return 'emotes';

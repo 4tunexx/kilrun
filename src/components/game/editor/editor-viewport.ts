@@ -72,6 +72,14 @@ import { loadAnimatedPrefab, resolveModelSrc, scanModelClips } from './model-sca
 
 export type TransformMode = 'translate' | 'rotate' | 'scale';
 
+export interface EditorCameraState {
+  position: [number, number, number];
+  target: [number, number, number];
+  freeFly: boolean;
+  yaw: number;
+  pitch: number;
+}
+
 export interface EditorViewportApi {
   setDoc: (doc: MapDocument) => void;
   getDoc: () => MapDocument;
@@ -97,6 +105,13 @@ export interface EditorViewportApi {
   stampEntities: (entities: EditorEntity[]) => void;
   duplicateSelected: (axis?: 'x' | 'y' | 'z') => void;
   focusSelected: () => void;
+  /** Restore default edit camera (or Start / edit focus). */
+  resetCamera: () => void;
+  getCameraState: () => EditorCameraState;
+  setCameraState: (state: EditorCameraState) => void;
+  /** Pause WebGL loop while Play Test overlays the editor. */
+  setPaused: (paused: boolean) => void;
+  resize: () => void;
   deleteSelected: () => void;
   updateSelected: (patch: Partial<EditorEntity>) => void;
   previewAnim: (which: 'default' | 'active') => void;
@@ -136,12 +151,16 @@ export function createEditorViewport(
   let gridSize = doc.gridSize || 1;
   let shiftHeld = false;
   let freeFly = false;
+  /** Pause render loop while Play Test overlays (keeps WebGL context alive). */
+  let paused = false;
   /** When false, solid/hazard gizmos only draw for the current selection (less clutter). */
   let showAllCollisionGizmos = false;
   let measureMode = false;
   let measureA: THREE.Vector3 | null = null;
   const keys = new Set<string>();
   let touchAxes = { moveX: 0, moveY: 0, lookX: 0, lookY: 0, sprint: false };
+  const DEFAULT_CAM_POS = new THREE.Vector3(12, 14, 18);
+  const DEFAULT_CAM_TARGET = new THREE.Vector3(0, 0, 0);
   const director = new AnimationDirector();
   const entityClips = new Map<string, THREE.AnimationClip[]>();
 
@@ -339,6 +358,55 @@ export function createEditorViewport(
     return loadAnimatedPrefab(src);
   }
 
+  /** Shift mesh so local AABB feet sit on y=0 (no gap / float under props & avatars). */
+  function plantLocalFeet(obj: THREE.Object3D) {
+    obj.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(obj);
+    if (box.isEmpty()) return;
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    obj.position.x -= center.x;
+    obj.position.z -= center.z;
+    obj.position.y -= box.min.y;
+  }
+
+  /** World Y of the top surface under a point (mesh AABB or ground). */
+  function surfaceYAt(x: number, z: number, ignoreId?: string): number {
+    let best = 0;
+    roots.forEach((root, id) => {
+      if (ignoreId && id === ignoreId) return;
+      if (!root.visible) return;
+      const box = new THREE.Box3().setFromObject(root);
+      if (box.isEmpty()) return;
+      if (x < box.min.x - 0.05 || x > box.max.x + 0.05) return;
+      if (z < box.min.z - 0.05 || z > box.max.z + 0.05) return;
+      if (box.max.y > best) best = box.max.y;
+    });
+    return best;
+  }
+
+  function pickPlacePoint(
+    preferStack: boolean
+  ): { point: THREE.Vector3; stackedOnId?: string } | null {
+    const pickables = Array.from(roots.values()).filter((r) => r.visible);
+    const meshHits = raycaster.intersectObjects(pickables, true);
+    const groundHits = raycaster.intersectObject(ground);
+
+    if (preferStack && meshHits.length) {
+      let o: THREE.Object3D | null = meshHits[0].object;
+      while (o && !o.userData.entityId) o = o.parent;
+      if (o?.userData.entityId) {
+        const box = new THREE.Box3().setFromObject(o);
+        const p = meshHits[0].point.clone();
+        p.y = box.max.y;
+        return { point: p, stackedOnId: o.userData.entityId as string };
+      }
+    }
+    if (groundHits[0]) return { point: groundHits[0].point.clone() };
+    if (meshHits[0]) return { point: meshHits[0].point.clone() };
+    return null;
+  }
+
   function makeSpawnMarker(
     kind: 'spawn_runner' | 'spawn_trapper' | 'start' | 'finish',
     color: string
@@ -414,7 +482,10 @@ export function createEditorViewport(
       if (ent.model || ent.customModelUrl) {
         try {
           const loaded = await loadModel(ent.model, ent.customModelUrl);
-          root = loaded.root;
+          // Wrap + plant feet so entity.position.y is the stand surface (no gap/clip)
+          root = new THREE.Group();
+          plantLocalFeet(loaded.root);
+          root.add(loaded.root);
           entityClips.set(ent.id, loaded.clips);
           // Persist discovered clips back into document
           if (loaded.clipNames.length) {
@@ -660,6 +731,10 @@ export function createEditorViewport(
       z = snapToGrid(z, gridSize);
       if (snapY) y = snapToGrid(y, gridSize);
     }
+    // Sit on top of whatever is under this XZ (stacking / floor)
+    const stacked = surfaceYAt(x, z);
+    if (stacked > y) y = stacked;
+    else if (y < 0.001) y = stacked;
 
     const modelName =
       model ??
@@ -870,6 +945,16 @@ export function createEditorViewport(
 
     const pickables = Array.from(roots.values()).filter((r) => r.visible);
     const hits = raycaster.intersectObjects(pickables, true);
+
+    // With a brush active, place on mesh tops / ground (stack) instead of only selecting
+    if (brush && !measureMode && !ev.shiftKey) {
+      const placed = pickPlacePoint(true);
+      if (placed) {
+        placeAt(placed.point, 'prop', brush);
+        return;
+      }
+    }
+
     if (hits.length) {
       let o: THREE.Object3D | null = hits[0].object;
       while (o && !o.userData.entityId) o = o.parent;
@@ -880,7 +965,8 @@ export function createEditorViewport(
     }
 
     if (groundHits[0] && stampEntitiesQueue?.length) {
-      const p = groundHits[0].point;
+      const placedPt = pickPlacePoint(true);
+      const p = placedPt?.point ?? groundHits[0].point;
       let x = p.x;
       let y = Math.max(0, p.y);
       let z = p.z;
@@ -889,6 +975,8 @@ export function createEditorViewport(
         z = snapToGrid(z, gridSize);
         if (snapY) y = snapToGrid(y, gridSize);
       }
+      const stacked = surfaceYAt(x, z);
+      if (stacked > y) y = stacked;
       const origin = stampEntitiesQueue[0].position;
       const placed = stampEntitiesQueue.map((e) => ({
         ...e,
@@ -950,6 +1038,7 @@ export function createEditorViewport(
   const clock = new THREE.Clock();
   const tick = () => {
     raf = requestAnimationFrame(tick);
+    if (paused) return;
     const dt = Math.min(clock.getDelta(), 0.05);
 
     if (freeFly) {
@@ -1075,7 +1164,7 @@ export function createEditorViewport(
       const t = new THREE.Vector3();
       camera.getWorldDirection(t);
       const p = camera.position.clone().add(t.multiplyScalar(8));
-      p.y = kind === 'finish' ? 0 : 0.5;
+      p.y = surfaceYAt(p.x, p.z);
       const model =
         kind === 'finish'
           ? 'floor-square'
@@ -1088,7 +1177,7 @@ export function createEditorViewport(
       const t = new THREE.Vector3();
       camera.getWorldDirection(t);
       const p = camera.position.clone().add(t.multiplyScalar(8));
-      p.y = kind === 'player' || kind === 'finish' ? 0 : 0.5;
+      p.y = surfaceYAt(p.x, p.z);
       placeAt(p, kind, model);
     },
     stampEntities: (entities) => {
@@ -1144,6 +1233,62 @@ export function createEditorViewport(
         obj.position.z + dist * 0.6
       );
       orbit.update();
+    },
+    resetCamera: () => {
+      // Prefer Start / player spawn / player entity as the edit "home"
+      const home =
+        doc.entities.find((e) => e.kind === 'start') ||
+        doc.entities.find((e) => e.kind === 'spawn_runner') ||
+        doc.entities.find((e) => e.kind === 'player');
+      const target = home
+        ? new THREE.Vector3(...home.position)
+        : DEFAULT_CAM_TARGET.clone();
+      if (freeFly) setFreeFly(false);
+      orbit.target.copy(target);
+      camera.position.set(target.x + 12, target.y + 14, target.z + 18);
+      yaw = 0;
+      pitch = -0.4;
+      orbit.update();
+      setSize();
+    },
+    getCameraState: () => ({
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      target: [orbit.target.x, orbit.target.y, orbit.target.z],
+      freeFly,
+      yaw,
+      pitch,
+    }),
+    setCameraState: (state) => {
+      camera.position.set(...state.position);
+      orbit.target.set(...state.target);
+      yaw = state.yaw;
+      pitch = state.pitch;
+      if (state.freeFly !== freeFly) setFreeFly(state.freeFly);
+      else {
+        orbit.update();
+        if (freeFly) {
+          const forward = new THREE.Vector3(
+            Math.sin(yaw) * Math.cos(pitch),
+            Math.sin(pitch),
+            Math.cos(yaw) * Math.cos(pitch)
+          );
+          camera.lookAt(camera.position.clone().add(forward));
+        }
+      }
+      setSize();
+      renderer.render(scene, camera);
+    },
+    setPaused: (on) => {
+      paused = on;
+      if (!on) {
+        clock.getDelta();
+        setSize();
+        renderer.render(scene, camera);
+      }
+    },
+    resize: () => {
+      setSize();
+      renderer.render(scene, camera);
     },
     deleteSelected: () => {
       const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];

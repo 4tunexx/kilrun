@@ -31,6 +31,7 @@ import { ResultsScreen } from './modes/deathrun/results-screen';
 import { MobilePlayGate } from './ui/mobile-play-gate';
 import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
+import { Crosshair } from './ui/crosshair';
 import dynamic from 'next/dynamic';
 import {
   getActivePlayMapId,
@@ -83,6 +84,8 @@ export default function KilrunEngine({
   const [assetsReady, setAssetsReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [aiming, setAiming] = useState(!detectTouchDevice());
+  const aimingRef = useRef(!detectTouchDevice());
   const { toggle: toggleFullscreen } = useGameFullscreen(rootRef, true);
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
@@ -242,6 +245,15 @@ export default function KilrunEngine({
           const aim = inputManager.joystick.getAimVector();
           cameraYaw -= aim.x * CAMERA_YAW_STICK_SENS * dt;
           cameraPitch -= aim.y * 0.9 * dt;
+          if (!aimingRef.current) {
+            aimingRef.current = true;
+            setAiming(true);
+          }
+        } else if (isMobile) {
+          if (aimingRef.current) {
+            aimingRef.current = false;
+            setAiming(false);
+          }
         }
       } else {
         // Drain deltas so resume doesn't snap
@@ -260,7 +272,9 @@ export default function KilrunEngine({
       });
       map.update(dt);
 
-      if (!frozen && inputManager.isInteractPressed()) interactPulse = true;
+      if (!frozen && (inputManager.isInteractPressed() || inputManager.consumeInteractPulse())) {
+        interactPulse = true;
+      }
 
       if (localState) {
         const [tx, ty, tz] = toThree(localState.x, localState.y, localState.z ?? 0);
@@ -279,7 +293,7 @@ export default function KilrunEngine({
       updateFollowCamera(world.camera, targetPos, cameraYaw, cameraPitch, dt, ZOOM);
 
       if (!frozen) {
-        shootHeld = shootHeld || inputManager.isShootPressed();
+        shootHeld = shootHeld || inputManager.isShootPressed() || inputManager.isAttackPressed();
         sendAccumulatorMs += dtMs;
         if (sendAccumulatorMs >= NETWORK_SEND_INTERVAL_MS && localState) {
           sendAccumulatorMs = 0;
@@ -379,6 +393,9 @@ export default function KilrunEngine({
           joystickRef={joystickRef}
           enabled={isMobile && room.phase === 'playing' && !paused}
         />
+        {room.phase === 'playing' && !paused && !editorOpen && (
+          <Crosshair visible={aiming || !isMobile} />
+        )}
 
         <PauseMenu
           open={paused && !editorOpen}

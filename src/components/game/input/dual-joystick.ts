@@ -29,6 +29,10 @@ export class DualJoystick {
   private shootPulse = false;
   private jumpHeld = false;
   private sprintHeld = false;
+  private actionHeld = false;
+  private attackHeld = false;
+  private actionPulse = false;
+  private attackPulse = false;
   private lastLeftTapAt = 0;
   private lastLeftTapPos: Vector2 = { x: 0, y: 0 };
 
@@ -131,7 +135,7 @@ export class DualJoystick {
     return pulse;
   }
 
-  /** Driven by on-screen Jump / Sprint buttons (mobile). */
+  /** Driven by on-screen Jump / Sprint / Action / Attack buttons (mobile). */
   public setJumpHeld(held: boolean) {
     this.jumpHeld = held;
   }
@@ -140,12 +144,44 @@ export class DualJoystick {
     this.sprintHeld = held;
   }
 
+  public setActionHeld(held: boolean) {
+    if (held && !this.actionHeld) this.actionPulse = true;
+    this.actionHeld = held;
+  }
+
+  public setAttackHeld(held: boolean) {
+    if (held && !this.attackHeld) this.attackPulse = true;
+    this.attackHeld = held;
+  }
+
   public isJumpHeld(): boolean {
     return this.jumpHeld;
   }
 
   public isSprintHeld(): boolean {
     return this.sprintHeld;
+  }
+
+  public isActionHeld(): boolean {
+    return this.actionHeld;
+  }
+
+  public isAttackHeld(): boolean {
+    return this.attackHeld;
+  }
+
+  /** One-shot interact (E / Action button). */
+  public consumeActionPulse(): boolean {
+    const pulse = this.actionPulse;
+    this.actionPulse = false;
+    return pulse;
+  }
+
+  /** One-shot attack (click / Attack button). */
+  public consumeAttackPulse(): boolean {
+    const pulse = this.attackPulse;
+    this.attackPulse = false;
+    return pulse;
   }
 
   public destroy() {
@@ -157,5 +193,7 @@ export class DualJoystick {
     this.moveStick = freshStick();
     this.jumpHeld = false;
     this.sprintHeld = false;
+    this.actionHeld = false;
+    this.attackHeld = false;
   }
 }

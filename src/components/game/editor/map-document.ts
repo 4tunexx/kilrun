@@ -1,3 +1,5 @@
+import type { SkinAttachment } from '@/lib/player-skins';
+
 export type EditorEntityKind =
   | 'prop'
   | 'spawn_runner'
@@ -187,6 +189,11 @@ export interface EditorEntity {
   animation?: EntityAnimation;
   /** Only for kind === 'player' */
   playerAnims?: PlayerAnimBindings;
+  /**
+   * Model Editor skin attachments (hat, pants, weapon, …) authored against
+   * this player mesh — shown in Play Test / match when set on the avatar.
+   */
+  playerSkins?: SkinAttachment[];
   /** Death zone / damage on touch */
   hazard?: EntityHazard;
   /**

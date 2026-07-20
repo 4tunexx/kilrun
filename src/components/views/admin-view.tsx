@@ -98,6 +98,7 @@ import {
   getEffectiveVpPrice,
   isFireSaleActive,
 } from '@/lib/shop-catalog';
+import { SKIN_ATTACH_SLOTS } from '@/lib/player-skins';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -176,6 +177,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
     itemSku: '',
     vpPrice: 100,
     imageUrl: '',
+    cosmeticSlot: 'skin_hat' as string,
   });
   const [fireSaleSelected, setFireSaleSelected] = useState<string[]>([]);
   const [fireSaleForm, setFireSaleForm] = useState({
@@ -2051,9 +2053,35 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   </Select>
                   <p className="text-[11px] text-slate-500">
                     Banners, frames, and nickname effects are created in Cosmetics Studio
-                    above.
+                    above. Body skins come from Map Editor → Model Editor, or pick a skin
+                    slot below.
                   </p>
                 </div>
+                {itemForm.itemCategory === 'Skins' && (
+                  <div className="space-y-1">
+                    <Label>Skin slot</Label>
+                    <Select
+                      value={itemForm.cosmeticSlot}
+                      onValueChange={(v) =>
+                        setItemForm((f) => ({ ...f, cosmeticSlot: v }))
+                      }
+                    >
+                      <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SKIN_ATTACH_SLOTS.map((s) => (
+                          <SelectItem key={s.cosmeticSlot} value={s.cosmeticSlot}>
+                            {s.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-slate-500">
+                      Hat, pants, boots, gloves, weapon, etc. — matches Model Editor slots.
+                    </p>
+                  </div>
+                )}
                 <div className="space-y-1">
                   <Label>VP price</Label>
                   <Input
@@ -2080,8 +2108,15 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   onClick={() =>
                     runAction('create-item', async () => {
                       await adminUpsertStoreItem({
-                        ...itemForm,
+                        itemName: itemForm.itemName,
+                        itemCategory: itemForm.itemCategory,
+                        itemSku: itemForm.itemSku,
+                        vpPrice: itemForm.vpPrice,
                         imageUrl: itemForm.imageUrl || undefined,
+                        cosmeticSlot:
+                          itemForm.itemCategory === 'Skins'
+                            ? itemForm.cosmeticSlot
+                            : null,
                       });
                       setItemForm({
                         itemName: '',
@@ -2089,6 +2124,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                         itemSku: '',
                         vpPrice: 100,
                         imageUrl: '',
+                        cosmeticSlot: 'skin_hat',
                       });
                       toast({ title: 'Item created' });
                       await reload();
