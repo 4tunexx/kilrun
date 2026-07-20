@@ -24,6 +24,10 @@ import {
   adminToggleService,
   type AdminDashboardOverview,
 } from '@/lib/admin-dashboard';
+import {
+  adminGetSchemaSyncStatus,
+  adminSyncDatabaseSchema,
+} from '@/lib/admin-db-sync';
 import { adminSeedProgression } from '@/lib/progression-actions';
 import { adminImportSeedFile } from '@/lib/admin-seed-import';
 import { useToast } from '@/hooks/use-toast';
@@ -60,14 +64,26 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
   const [data, setData] = useState<AdminDashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [schemaStatus, setSchemaStatus] = useState<{
+    version: string | null;
+    at: string | null;
+    cliPush: string | null;
+    expectedVersion: string;
+    upToDate: boolean;
+  } | null>(null);
+  const [lastSyncLog, setLastSyncLog] = useState<string[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const load = async () => {
     setLoading(true);
     try {
-      const overview = await adminGetDashboardOverview();
+      const [overview, sync] = await Promise.all([
+        adminGetDashboardOverview(),
+        adminGetSchemaSyncStatus(),
+      ]);
       setData(overview);
+      setSchemaStatus(sync);
     } catch (e: unknown) {
       toast({
         title: e instanceof Error ? e.message : 'Failed to load dashboard',
@@ -127,6 +143,36 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
     } catch (e: unknown) {
       toast({
         title: e instanceof Error ? e.message : 'Seed failed',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleSchemaSync = async () => {
+    if (
+      !window.confirm(
+        'Sync Prisma schema to MongoDB now? This runs prisma db push and verifies skin fields (equippedSkins). Safe for Mongo — does not wipe player data.'
+      )
+    ) {
+      return;
+    }
+    setBusy('schema');
+    try {
+      const result = await adminSyncDatabaseSchema();
+      setLastSyncLog(result.steps);
+      toast({
+        title: 'Database schema synced',
+        description:
+          result.cliPush === 'ok'
+            ? 'prisma db push OK · skin fields ready'
+            : `Field verify OK · CLI: ${result.cliPush}`,
+      });
+      await load();
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Schema sync failed',
         variant: 'destructive',
       });
     } finally {
@@ -336,6 +382,76 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
           </CardContent>
         </Card>
       </div>
+
+      {isAdmin && (
+        <Card className="bg-slate-800/40 border-slate-700/30">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Database className="h-4 w-4 text-primary" /> Database schema sync
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-slate-400">
+              After deploying Model Editor / skins changes, press this once so Mongo
+              gets the latest Prisma fields (e.g. <code className="text-slate-300">equippedSkins</code>
+              ). No CLI needed on your laptop.
+            </p>
+            <div className="rounded-lg border border-slate-700/50 bg-slate-950/40 px-3 py-2 text-xs text-slate-400 space-y-1">
+              <p>
+                Expected version:{' '}
+                <span className="font-mono text-slate-200">
+                  {schemaStatus?.expectedVersion ?? '—'}
+                </span>
+              </p>
+              <p>
+                Last sync:{' '}
+                {schemaStatus?.at ? (
+                  <>
+                    <span className="text-slate-200">
+                      {formatDistanceToNow(new Date(schemaStatus.at), { addSuffix: true })}
+                    </span>
+                    {schemaStatus.upToDate ? (
+                      <Badge className="ml-2 bg-emerald-600/30 text-emerald-200 border-emerald-500/40">
+                        up to date
+                      </Badge>
+                    ) : (
+                      <Badge className="ml-2 bg-amber-600/30 text-amber-100 border-amber-500/40">
+                        needs sync
+                      </Badge>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-amber-200">never — run sync before using shop skins</span>
+                )}
+              </p>
+            </div>
+            <Button
+              disabled={Boolean(busy)}
+              onClick={() => void handleSchemaSync()}
+              className="bg-cyan-700 hover:bg-cyan-600"
+            >
+              {busy === 'schema' ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Database className="h-4 w-4 mr-2" />
+              )}
+              Sync database schema (prisma db push)
+            </Button>
+            {lastSyncLog && lastSyncLog.length > 0 && (
+              <ul className="text-[11px] text-slate-500 space-y-0.5 font-mono">
+                {lastSyncLog.map((line) => (
+                  <li key={line}>· {line}</li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-slate-500 flex items-start gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-400" />
+              Safe on MongoDB — does not wipe players. If CLI push is skipped on serverless,
+              field verify still confirms skins can save.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {isAdmin && (
         <Card className="bg-slate-800/40 border-slate-700/30">

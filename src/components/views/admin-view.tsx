@@ -6,6 +6,7 @@ import {
   Award,
   ClipboardList,
   FileText,
+  Database,
   Flame,
   LayoutDashboard,
   Loader2,
@@ -98,6 +99,8 @@ import {
   getEffectiveVpPrice,
   isFireSaleActive,
 } from '@/lib/shop-catalog';
+import { SKIN_ATTACH_SLOTS } from '@/lib/player-skins';
+import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -176,6 +179,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
     itemSku: '',
     vpPrice: 100,
     imageUrl: '',
+    cosmeticSlot: 'skin_hat' as string,
   });
   const [fireSaleSelected, setFireSaleSelected] = useState<string[]>([]);
   const [fireSaleForm, setFireSaleForm] = useState({
@@ -1873,6 +1877,45 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
 
         {isAdmin && (
           <TabsContent value="shop" className="mt-4 space-y-4">
+            <Card className="bg-slate-800/40 border-cyan-700/30">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Database className="h-4 w-4 text-cyan-300" />
+                  Skins DB ready?
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-wrap items-center gap-3">
+                <p className="text-sm text-slate-400 flex-1 min-w-[200px]">
+                  Before publishing Model Editor skins, sync Prisma → Mongo once so{' '}
+                  <code className="text-slate-300">equippedSkins</code> works. Same
+                  action as Dashboard → Database schema sync.
+                </p>
+                <Button
+                  variant="outline"
+                  disabled={busyKey === 'schema-sync'}
+                  onClick={() =>
+                    runAction('schema-sync', async () => {
+                      const result = await adminSyncDatabaseSchema();
+                      toast({
+                        title: 'Database schema synced',
+                        description:
+                          result.cliPush === 'ok'
+                            ? 'prisma db push OK'
+                            : `Verified · CLI ${result.cliPush}`,
+                      });
+                    })
+                  }
+                >
+                  {busyKey === 'schema-sync' ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Database className="h-4 w-4 mr-2" />
+                  )}
+                  Sync schema now
+                </Button>
+              </CardContent>
+            </Card>
+
             <CosmeticsStudio onCreated={reload} />
 
             <Card className="bg-slate-800/40 border-slate-700/30">
@@ -2051,9 +2094,35 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   </Select>
                   <p className="text-[11px] text-slate-500">
                     Banners, frames, and nickname effects are created in Cosmetics Studio
-                    above.
+                    above. Body skins come from Map Editor → Model Editor, or pick a skin
+                    slot below.
                   </p>
                 </div>
+                {itemForm.itemCategory === 'Skins' && (
+                  <div className="space-y-1">
+                    <Label>Skin slot</Label>
+                    <Select
+                      value={itemForm.cosmeticSlot}
+                      onValueChange={(v) =>
+                        setItemForm((f) => ({ ...f, cosmeticSlot: v }))
+                      }
+                    >
+                      <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SKIN_ATTACH_SLOTS.map((s) => (
+                          <SelectItem key={s.cosmeticSlot} value={s.cosmeticSlot}>
+                            {s.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-slate-500">
+                      Hat, pants, boots, gloves, weapon, etc. — matches Model Editor slots.
+                    </p>
+                  </div>
+                )}
                 <div className="space-y-1">
                   <Label>VP price</Label>
                   <Input
@@ -2080,8 +2149,15 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   onClick={() =>
                     runAction('create-item', async () => {
                       await adminUpsertStoreItem({
-                        ...itemForm,
+                        itemName: itemForm.itemName,
+                        itemCategory: itemForm.itemCategory,
+                        itemSku: itemForm.itemSku,
+                        vpPrice: itemForm.vpPrice,
                         imageUrl: itemForm.imageUrl || undefined,
+                        cosmeticSlot:
+                          itemForm.itemCategory === 'Skins'
+                            ? itemForm.cosmeticSlot
+                            : null,
                       });
                       setItemForm({
                         itemName: '',
@@ -2089,6 +2165,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                         itemSku: '',
                         vpPrice: 100,
                         imageUrl: '',
+                        cosmeticSlot: 'skin_hat',
                       });
                       toast({ title: 'Item created' });
                       await reload();

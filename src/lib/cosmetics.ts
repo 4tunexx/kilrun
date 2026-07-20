@@ -3,8 +3,24 @@
  * equip actions, and profile rendering.
  */
 import type { CSSProperties } from 'react';
+import type { SkinAttachSlot } from '@/lib/player-skins';
+import { SKIN_ATTACH_SLOTS, isSkinCosmeticSlot } from '@/lib/player-skins';
 
-export type CosmeticSlot = 'banner' | 'frame' | 'nickname';
+export type SkinCosmeticSlot =
+  | 'skin'
+  | 'skin_hat'
+  | 'skin_face'
+  | 'skin_torso'
+  | 'skin_pants'
+  | 'skin_boots'
+  | 'skin_gloves'
+  | 'skin_weapon'
+  | 'skin_back';
+
+export type CosmeticSlot = 'banner' | 'frame' | 'nickname' | SkinCosmeticSlot;
+
+export { isSkinCosmeticSlot, SKIN_ATTACH_SLOTS };
+export type { SkinAttachSlot };
 
 /** Prisma select fragment — include on any public user card / list row. */
 export const PUBLIC_USER_COSMETIC_SELECT = {

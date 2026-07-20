@@ -42,6 +42,8 @@ import {
   Rocket,
   FlagTriangleRight,
   PersonStanding,
+  Home,
+  Shirt,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -69,10 +71,19 @@ import {
   MOOD_PRESETS,
   saveMap,
 } from './map-storage';
-import { createEditorViewport, type EditorViewportApi, type TransformMode } from './editor-viewport';
+import {
+  createEditorViewport,
+  type EditorCameraState,
+  type EditorViewportApi,
+  type TransformMode,
+} from './editor-viewport';
 import { MapPlayPreview } from './map-play-preview';
 import { PlayerModelStudio } from './player-model-studio';
+import { ModelSkinEditor } from './model-skin-editor';
 import { ensureMapPlayerEntity } from './player-avatar';
+import type { SkinAttachment } from '@/lib/player-skins';
+import { adminUpsertStoreItem } from '@/lib/social-actions';
+import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
 import {
   BUILTIN_TEXTURES,
   deleteCustomTexture,
@@ -169,7 +180,9 @@ export function MapEditor({
   /** Bottom transform/place toolbar. */
   const [toolsOpen, setToolsOpen] = useState(!mobileFirst);
   const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
+  const [modelEditorOpen, setModelEditorOpen] = useState(false);
   const [showAllCollisionGizmos, setShowAllCollisionGizmos] = useState(false);
+  const cameraBeforePlayRef = useRef<EditorCameraState | null>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
 
@@ -544,11 +557,46 @@ export function MapEditor({
     }
     setSelectedId(ensured.entity.id);
     apiRef.current?.setSelectedId(ensured.entity.id);
+    setModelEditorOpen(false);
     setPlayerStudioOpen(true);
     setUiCollapsed(false);
     setPropsOpen(false);
     setSidebarOpen(false);
     setToolsOpen(false);
+  };
+
+  const openModelEditor = () => {
+    const ensured = ensureMapPlayerEntity(docRef.current);
+    if (ensured.created) {
+      scheduleHistory();
+      setDoc(ensured.doc);
+      docRef.current = ensured.doc;
+      apiRef.current?.setDoc(ensured.doc);
+    }
+    setSelectedId(ensured.entity.id);
+    apiRef.current?.setSelectedId(ensured.entity.id);
+    setPlayerStudioOpen(false);
+    setModelEditorOpen(true);
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(false);
+    setToolsOpen(false);
+  };
+
+  const applySkinsToPlayer = (attachments: SkinAttachment[]) => {
+    const player = findPlayerEntity(docRef.current);
+    if (!player) return;
+    scheduleHistory();
+    setDoc((d) => {
+      const entities = d.entities.map((e) =>
+        e.id === player.id ? { ...e, playerSkins: attachments } : e
+      );
+      const next = { ...d, entities };
+      docRef.current = next;
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+    toast({ title: 'Skins applied to player avatar' });
   };
 
   const playerAvatar = findPlayerEntity(doc);
@@ -583,6 +631,9 @@ export function MapEditor({
 
   const startPlay = () => {
     if (freeFly) apiRef.current?.setFreeFly(false);
+    // Snapshot camera so Exit restores the exact map view you left
+    cameraBeforePlayRef.current = apiRef.current?.getCameraState() ?? null;
+    apiRef.current?.setPaused(true);
     // Ensure a player avatar exists so Play Test can show 3rd-person character
     const ensured = ensureMapPlayerEntity(docRef.current);
     if (ensured.created) {
@@ -594,15 +645,18 @@ export function MapEditor({
     setPlayTest(true);
   };
 
-  if (playTest) {
-    return createPortal(
-      <MapPlayPreview
-        doc={apiRef.current?.getDoc() ?? doc}
-        onClose={() => setPlayTest(false)}
-      />,
-      document.body
-    );
-  }
+  const exitPlayTest = () => {
+    setPlayTest(false);
+    // Keep editor host mounted — resume WebGL and restore camera (fixes blank screen)
+    requestAnimationFrame(() => {
+      apiRef.current?.setPaused(false);
+      apiRef.current?.resize();
+      const saved = cameraBeforePlayRef.current;
+      if (saved) apiRef.current?.setCameraState(saved);
+      else apiRef.current?.resetCamera();
+      cameraBeforePlayRef.current = null;
+    });
+  };
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] bg-[#0d121a] text-white flex flex-col">
@@ -763,6 +817,19 @@ export function MapEditor({
         </button>
       )}
 
+      {/* Always-available camera home — find your edit view if you get lost */}
+      {!playTest && (
+        <button
+          type="button"
+          onClick={() => apiRef.current?.resetCamera()}
+          className="fixed top-1/2 right-2 z-[130] -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-400/40 bg-black/70 text-emerald-200 shadow-lg hover:bg-emerald-500/25 active:scale-95"
+          title="Reset camera to edit location"
+          aria-label="Reset camera to edit location"
+        >
+          <Home className="w-4 h-4" />
+        </button>
+      )}
+
       {/* Top bar */}
       {!uiCollapsed && (
       <div className="h-12 border-b border-white/10 flex items-center gap-2 px-3 bg-[#121a24] relative z-[60] overflow-x-auto shrink-0">
@@ -810,6 +877,16 @@ export function MapEditor({
         >
           <PersonStanding className="w-4 h-4 mr-1" />
           {isMobile ? 'Avatar' : 'Player Model'}
+        </Button>
+        <Button
+          size="sm"
+          variant={modelEditorOpen ? 'default' : 'secondary'}
+          className={`shrink-0 ${modelEditorOpen ? 'bg-amber-600 hover:bg-amber-500 text-white' : ''}`}
+          onClick={() => (modelEditorOpen ? setModelEditorOpen(false) : openModelEditor())}
+          title="Model Editor — skins, hats, pants, weapons for shop"
+        >
+          <Shirt className="w-4 h-4 mr-1" />
+          {isMobile ? 'Skins' : 'Model Editor'}
         </Button>
         <Button
           size="sm"
@@ -1500,6 +1577,12 @@ export function MapEditor({
             <ToolBtn onClick={() => apiRef.current?.focusSelected()} title="Focus selection (F)">
               <Crosshair className="w-4 h-4" />
             </ToolBtn>
+            <ToolBtn
+              onClick={() => apiRef.current?.resetCamera()}
+              title="Reset camera to edit home (Start / spawn)"
+            >
+              <Home className="w-4 h-4 text-emerald-300" />
+            </ToolBtn>
             <ToolBtn onClick={() => apiRef.current?.placeSpawn('start')} title="Start (player spawn)">
               <Flag className="w-4 h-4 text-emerald-400" />
             </ToolBtn>
@@ -1515,6 +1598,13 @@ export function MapEditor({
               title="Player Model studio"
             >
               <PersonStanding className="w-4 h-4 text-sky-300" />
+            </ToolBtn>
+            <ToolBtn
+              active={modelEditorOpen}
+              onClick={() => (modelEditorOpen ? setModelEditorOpen(false) : openModelEditor())}
+              title="Model Editor — skins, hats, gear"
+            >
+              <Shirt className="w-4 h-4 text-amber-300" />
             </ToolBtn>
             <ToolBtn
               onClick={() => apiRef.current?.placeEntity('player', brush ?? 'figurine')}
@@ -1557,7 +1647,7 @@ export function MapEditor({
           </div>
           )}
 
-          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && (
+          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && !modelEditorOpen && (
             <button
               type="button"
               onClick={() => setPropsOpen(true)}
@@ -1567,7 +1657,7 @@ export function MapEditor({
             </button>
           )}
 
-          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && (
+          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && !modelEditorOpen && (
             <div
               className={`absolute z-[80] bg-black/80 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm overflow-y-auto ${
                 isMobile
@@ -2195,8 +2285,46 @@ export function MapEditor({
               onChange={(patch) => patchEntityById(playerAvatar.id, patch)}
             />
           )}
+          {modelEditorOpen && playerAvatar && (
+            <ModelSkinEditor
+              entity={playerAvatar}
+              isMobile={isMobile}
+              onClose={() => setModelEditorOpen(false)}
+              onApplyToPlayer={applySkinsToPlayer}
+              onPublishToShop={async (payload) => {
+                try {
+                  // Ensure Mongo has skin fields before first publish
+                  await adminSyncDatabaseSchema().catch(() => null);
+                  await adminUpsertStoreItem({
+                    itemName: payload.itemName,
+                    itemCategory: payload.itemCategory,
+                    itemSku: payload.itemSku,
+                    vpPrice: payload.vpPrice,
+                    imageUrl: payload.imageUrl,
+                    cosmeticSlot: payload.cosmeticSlot,
+                    cosmeticConfig: payload.cosmeticConfig,
+                  });
+                  toast({
+                    title: 'Skin published to shop',
+                    description: `${payload.itemName} is now in Skins.`,
+                  });
+                } catch (e: unknown) {
+                  const msg = e instanceof Error ? e.message : 'Publish failed';
+                  toast({ title: msg, variant: 'destructive' });
+                }
+              }}
+            />
+          )}
         </div>
       </div>
+      {playTest && (
+        <div className="fixed inset-0 z-[10050]">
+          <MapPlayPreview
+            doc={apiRef.current?.getDoc() ?? doc}
+            onClose={exitPlayTest}
+          />
+        </div>
+      )}
     </div>,
     document.body
   );

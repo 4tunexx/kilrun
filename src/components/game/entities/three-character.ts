@@ -5,6 +5,8 @@ import { suggestPlayerBindings } from '../editor/map-document';
 import { loadPlayerAvatar } from '../editor/player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import { toThree } from '../renderer/coords';
+import { applySkinAttachments } from '../editor/skin-attachments';
+import type { SkinAttachment } from '@/lib/player-skins';
 
 function pickClip(clips: THREE.AnimationClip[], patterns: string[]): THREE.AnimationClip | null {
   const lower = clips.map((c) => ({ clip: c, name: c.name.toLowerCase() }));
@@ -49,6 +51,8 @@ function pruneExtraMeshes(root: THREE.Object3D) {
 export interface CharacterAvatarOptions {
   /** Map player entity — drives custom GLB + clip bindings. */
   avatarEntity?: EditorEntity | null;
+  /** Equipped shop skins (merged with entity.playerSkins). */
+  equippedSkins?: SkinAttachment[] | null;
 }
 
 export class ThreeCharacter {
@@ -92,6 +96,14 @@ export class ThreeCharacter {
       this.root.add(scene);
       this.loaded = true;
       this.root.visible = true;
+
+      const skins: SkinAttachment[] = [
+        ...(entity?.playerSkins ?? []),
+        ...(this.avatarOpts.equippedSkins ?? []),
+      ];
+      if (skins.length) {
+        void applySkinAttachments(scene, skins);
+      }
 
       this.mixer = new THREE.AnimationMixer(scene);
       const byName = new Map(animations.map((c) => [c.name || '(unnamed)', c]));

@@ -17,6 +17,7 @@ import { normalizeForumCategory } from '@/lib/forum-categories';
 import {
   PUBLIC_USER_CARD_SELECT,
   PUBLIC_USER_COSMETIC_SELECT,
+  isSkinCosmeticSlot,
 } from '@/lib/cosmetics';
 
 async function requireSessionUser() {
@@ -1190,6 +1191,23 @@ export async function equipInventoryItem(inventoryItemId: string) {
         cosmeticEquipCount: { increment: 1 },
       },
     });
+  } else if (item.cosmeticSlot && isSkinCosmeticSlot(item.cosmeticSlot)) {
+    const prev = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { equippedSkins: true },
+    });
+    const map =
+      prev?.equippedSkins && typeof prev.equippedSkins === 'object'
+        ? { ...(prev.equippedSkins as Record<string, unknown>) }
+        : {};
+    map[item.cosmeticSlot] = item.cosmeticConfig ?? { itemName: item.itemName };
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        equippedSkins: map as Prisma.InputJsonValue,
+        cosmeticEquipCount: { increment: 1 },
+      },
+    });
   } else {
     await prisma.user.update({
       where: { id: user.id },
@@ -1231,6 +1249,20 @@ export async function unequipCosmeticSlot(cosmeticSlot: string) {
         equippedNicknameConfig: null,
       },
     });
+  } else if (isSkinCosmeticSlot(cosmeticSlot)) {
+    const prev = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { equippedSkins: true },
+    });
+    const map =
+      prev?.equippedSkins && typeof prev.equippedSkins === 'object'
+        ? { ...(prev.equippedSkins as Record<string, unknown>) }
+        : {};
+    delete map[cosmeticSlot];
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { equippedSkins: map as Prisma.InputJsonValue },
+    });
   }
   return { ok: true as const };
 }
@@ -1257,6 +1289,20 @@ async function clearEquippedSnapshot(
     await prisma.user.update({
       where: { id: userId },
       data: { equippedNicknameItemName: null, equippedNicknameConfig: null },
+    });
+  } else if (slot && isSkinCosmeticSlot(slot)) {
+    const prev = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { equippedSkins: true },
+    });
+    const map =
+      prev?.equippedSkins && typeof prev.equippedSkins === 'object'
+        ? { ...(prev.equippedSkins as Record<string, unknown>) }
+        : {};
+    delete map[slot];
+    await prisma.user.update({
+      where: { id: userId },
+      data: { equippedSkins: map as Prisma.InputJsonValue },
     });
   }
 }

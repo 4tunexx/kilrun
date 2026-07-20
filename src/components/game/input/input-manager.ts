@@ -54,7 +54,11 @@ export class InputManager {
   }
 
   public isInteractPressed(): boolean {
-    return this.keyboard.isPressed('e');
+    return this.keyboard.isPressed('e') || this.joystick.isActionHeld();
+  }
+
+  public consumeInteractPulse(): boolean {
+    return this.joystick.consumeActionPulse();
   }
 
   public isJumpPressed(): boolean {
@@ -63,6 +67,12 @@ export class InputManager {
 
   public isSprintPressed(): boolean {
     return this.keyboard.isPressed('shift') || this.joystick.isSprintHeld();
+  }
+
+  public isAttackPressed(): boolean {
+    return this.isMobile
+      ? this.joystick.consumeAttackPulse() || this.joystick.consumeShootPulse()
+      : this.mouse.isFiring() || this.joystick.consumeAttackPulse();
   }
 
   /** Camera yaw turn from Q/E keys (desktop) — mouse orbit is RMB-only. */

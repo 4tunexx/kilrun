@@ -65,6 +65,9 @@ model User {
   equippedNicknameItemName String?
   equippedNicknameConfig   Json?
 
+  /// Equipped body skins from Model Editor (Record<slot, skinConfig>).
+  equippedSkins Json?
+
   /// Optional display status line shown on public profile.
   statusMessage String @default("")
 
@@ -130,12 +133,12 @@ model StoreItem {
   imageUrl     String?
   isAvailable  Boolean @default(true)
 
-  /// Which equip slot this cosmetic occupies: banner | frame | nickname.
+  /// Which equip slot this cosmetic occupies: banner | frame | nickname | skin_*.
   /// Null for non-equippable items (boosts, emotes, consumables, ...).
   cosmeticSlot String?
   /// Generated banner config (colors, gradient angle, animation style).
   bannerConfig Json?
-  /// Frame / nickname effect config JSON (see src/lib/cosmetics.ts).
+  /// Frame / nickname / player skin config JSON (see src/lib/cosmetics.ts, player-skins.ts).
   cosmeticConfig Json?
 
   /// Times purchased — used for "Popular" sort.
