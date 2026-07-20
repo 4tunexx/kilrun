@@ -98,7 +98,7 @@ export function AdminPremiumPanel() {
       <Card className="bg-slate-900/50 border-amber-500/30">
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">
-            <Gem className="h-4 w-4 text-amber-300" />
+            <Gem className="h-4 w-4 text-amber-300 fill-amber-400/30" />
             Premium pricing
           </CardTitle>
         </CardHeader>

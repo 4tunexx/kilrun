@@ -1,7 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ArrowRight, Skull, Swords, Users, Lock, Ban, Gem, Zap } from 'lucide-react';
+import {
+  ArrowRight,
+  Skull,
+  Swords,
+  Users,
+  Lock,
+  Ban,
+  Gem,
+  Zap,
+  ShieldCheck,
+} from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -36,7 +46,10 @@ interface PlayViewProps {
   /** Premium or free Ranked week — can enter Ranked queue. */
   rankedAccess?: boolean;
   freeRankedWeek?: boolean;
+  /** Pulsar anticheat must be on for Competitive. */
+  pulsarOn?: boolean;
   onOpenPremium?: () => void;
+  onOpenPulsar?: () => void;
 }
 
 export default function PlayView({
@@ -44,7 +57,9 @@ export default function PlayView({
   isPremium = false,
   rankedAccess,
   freeRankedWeek = false,
+  pulsarOn = false,
   onOpenPremium,
+  onOpenPulsar,
 }: PlayViewProps) {
   const canRanked = rankedAccess ?? isPremium;
   const [gameDisabled, setGameDisabled] = useState(false);
@@ -68,7 +83,7 @@ export default function PlayView({
         <h2 className="text-2xl font-bold tracking-tight text-slate-100">Play</h2>
         <p className="text-sm text-slate-400 mt-1">
           Casual Competitive never touches KP. Ranked Competitive requires Premium and moves your
-          Elo rank.
+          Elo rank. Competitive needs Pulsar anticheat online.
         </p>
       </div>
 
@@ -79,6 +94,20 @@ export default function PlayView({
         </div>
       )}
 
+      {!pulsarOn && (
+        <button
+          type="button"
+          onClick={() => onOpenPulsar?.()}
+          className="w-full rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100 flex gap-2 text-left hover:bg-emerald-500/15 transition-colors"
+        >
+          <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            <span className="font-semibold">Pulsar offline</span> — activate anticheat in the right
+            panel before starting Competitive.
+          </span>
+        </button>
+      )}
+
       <div className="grid gap-4 md:grid-cols-3">
         {modes.map((mode) => {
           const info = KILRUN_MODE_INFO[mode.id];
@@ -86,6 +115,7 @@ export default function PlayView({
           const canPlay = mode.isLive && !gameDisabled;
 
           if (mode.id === 'competitive') {
+            const canComp = canPlay && pulsarOn;
             return (
               <Card
                 key={mode.id}
@@ -104,16 +134,31 @@ export default function PlayView({
                   <Button
                     className="w-full"
                     variant="secondary"
-                    disabled={!canPlay}
-                    onClick={() => onPlay('competitive', { competitiveQueue: 'casual' })}
+                    disabled={!canComp}
+                    onClick={() => {
+                      if (!pulsarOn) {
+                        onOpenPulsar?.();
+                        return;
+                      }
+                      onPlay('competitive', { competitiveQueue: 'casual' });
+                    }}
                   >
-                    <Zap className="h-4 w-4 mr-1" /> Casual
+                    {!pulsarOn ? (
+                      <ShieldCheck className="h-4 w-4 mr-1" />
+                    ) : (
+                      <Zap className="h-4 w-4 mr-1" />
+                    )}
+                    {!pulsarOn ? 'Casual · Enable Pulsar' : 'Casual'}
                     <ArrowRight className="h-4 w-4 ml-auto" />
                   </Button>
                   <Button
                     className="w-full bg-amber-600 hover:bg-amber-500 text-black font-bold"
                     disabled={!canPlay}
                     onClick={() => {
+                      if (!pulsarOn) {
+                        onOpenPulsar?.();
+                        return;
+                      }
                       if (!canRanked) {
                         onOpenPremium?.();
                         return;
@@ -121,12 +166,18 @@ export default function PlayView({
                       onPlay('competitive', { competitiveQueue: 'ranked' });
                     }}
                   >
-                    <Gem className="h-4 w-4 mr-1" />
-                    {canRanked
-                      ? freeRankedWeek && !isPremium
-                        ? 'Ranked · Free Week'
-                        : 'Ranked Premium'
-                      : 'Ranked · Go Premium'}
+                    {!pulsarOn ? (
+                      <ShieldCheck className="h-4 w-4 mr-1" />
+                    ) : (
+                      <Gem className="h-4 w-4 mr-1 fill-amber-900/20" />
+                    )}
+                    {!pulsarOn
+                      ? 'Ranked · Enable Pulsar'
+                      : canRanked
+                        ? freeRankedWeek && !isPremium
+                          ? 'Ranked · Free Week'
+                          : 'Ranked Premium'
+                        : 'Ranked · Go Premium'}
                     <ArrowRight className="h-4 w-4 ml-auto" />
                   </Button>
                   <p className="text-[11px] text-slate-500">

@@ -26,6 +26,7 @@ import {
   Gem,
   Crown,
   ShieldCheck,
+  Coins,
   type LucideIcon,
 } from 'lucide-react';
 import HomeView from '@/components/views/home-view';
@@ -474,6 +475,15 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     opts?: { competitiveQueue?: CompetitiveQueue }
   ) => {
     if (mode === 'competitive') {
+      if (!pulsarOn) {
+        toast({
+          title: 'Pulsar required',
+          description: 'Activate Pulsar anticheat in the right panel before Competitive.',
+          variant: 'destructive',
+        });
+        setIsMenuOpen(true);
+        return;
+      }
       const queue = opts?.competitiveQueue ?? 'casual';
       if (queue === 'ranked' && !rankedAccess) {
         navigate('premium');
@@ -490,6 +500,17 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   };
 
   const handleAgreeAndPlay = () => {
+    if (!pulsarOn && pendingCompetitiveMode === 'competitive') {
+      toast({
+        title: 'Pulsar required',
+        description: 'Activate Pulsar anticheat before Competitive.',
+        variant: 'destructive',
+      });
+      setIsCompetitiveDialogOpen(false);
+      setPendingCompetitiveMode(null);
+      setIsMenuOpen(true);
+      return;
+    }
     if (pendingCompetitiveMode) {
       setLobbyMode(pendingCompetitiveMode);
       navigate('lobby');
@@ -550,7 +571,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   };
 
   const leftNavItems = hubNav.left.filter(
-    (id) => isStaff || hubPages[id] !== false
+    (id) =>
+      id !== 'premium' && // Premium is the dedicated gold gem button (avoid duplicate)
+      (isStaff || hubPages[id] !== false)
   );
   const rightNavItems = hubNav.right.filter(
     (id) => isStaff || hubPages[id] !== false
@@ -587,7 +610,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         props.isPremium = isPremium;
         props.rankedAccess = rankedAccess;
         props.freeRankedWeek = freeRankedWeek;
+        props.pulsarOn = pulsarOn;
         props.onOpenPremium = () => navigate('premium');
+        props.onOpenPulsar = () => setIsMenuOpen(true);
       } else if (currentPage === 'premium') {
         props.vpBalance = vpBalance;
         props.isVip = isVip;
@@ -793,7 +818,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                       onClick={() => setIsVipDialogOpen(true)}
                       className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 shrink-0 group relative ${
                         isVip
-                          ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.15)]'
+                          ? 'bg-orange-500/20 text-orange-300 border border-orange-400/50 shadow-[0_0_12px_rgba(249,115,22,0.2)]'
                           : 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 shadow-[0_0_10px_rgba(239,68,68,0.1)]'
                       }`}
                     >
@@ -864,11 +889,11 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                     onClick={() => navigate('premium')}
                     className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 shrink-0 group relative ${
                       isPremium
-                        ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.15)]'
-                        : 'bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/20'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-400/50 shadow-[0_0_12px_rgba(245,158,11,0.25)]'
+                        : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30'
                     }`}
                   >
-                    <Gem className="w-6 h-6 transition-transform group-hover:rotate-12" />
+                    <Gem className="w-6 h-6 text-amber-300 fill-amber-400/30 transition-transform group-hover:rotate-12" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right">
@@ -1117,8 +1142,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                         {isPremium && (
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <span className="inline-flex w-5 h-5 rounded-full bg-amber-500/20 border border-amber-400/60 items-center justify-center shrink-0 align-middle">
-                                <Gem className="w-3 h-3 text-amber-300" />
+                              <span className="inline-flex w-5 h-5 rounded-full bg-amber-500/25 border border-amber-400/70 items-center justify-center shrink-0 align-middle">
+                                <Gem className="w-3 h-3 text-amber-300 fill-amber-400/40" />
                               </span>
                             </TooltipTrigger>
                             <TooltipContent>Kilrun Premium</TooltipContent>
@@ -1223,7 +1248,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                           </div>
                         ) : null}
                       </button>
-                      <div className="mt-2 text-sm text-slate-300">{vpBalance} VP</div>
+                      <div className="mt-2 text-sm text-slate-300 flex items-center justify-center gap-1.5">
+                        <Coins className="h-3.5 w-3.5 text-yellow-400" />
+                        {vpBalance.toLocaleString()} VP
+                      </div>
                     </div>
 
                     <div className="w-full h-px bg-slate-700/50 my-6" />
@@ -1320,8 +1348,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                       — KP Elo will move, and this lobby is Premium-only.
                     </p>
                     <p className="text-slate-400 text-xs">
-                      Fair play required. Cheating or boosting may result in bans.
-                    </p>
+                    Fair play required. Cheating or boosting may result in bans. Pulsar anticheat must stay online.
+                  </p>
                   </>
                 ) : (
                   <p>

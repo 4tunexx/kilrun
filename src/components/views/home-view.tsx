@@ -6,7 +6,7 @@ import {
   Trophy,
   Gauge,
   Clock,
-  Gem,
+  Coins,
   Loader2,
   Newspaper,
   MessageCircle,
@@ -248,7 +248,7 @@ export default function HomeView({
             className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
             onClick={() => onNavigate?.('store')}
           >
-            <Gem className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-yellow-400 transition group-hover:scale-110" />
+            <Coins className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-yellow-400 transition group-hover:scale-110" />
             <div className="text-2xl sm:text-3xl font-black tracking-tight">
               <AnimatedCounter end={vpCurrency} />
             </div>
