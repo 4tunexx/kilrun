@@ -1951,19 +1951,27 @@ class SkinPreview {
     this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     this.lastPointerX = e.clientX;
     this.lastPointerY = e.clientY;
-    this.renderer.domElement.setPointerCapture?.(e.pointerId);
 
-    // Two-finger pinch zoom (mobile)
+    // Two-finger pinch zoom (mobile) — release capture so both fingers track.
     if (this.activePointers.size === 2) {
       this.painting = false;
       this.orbiting = false;
       this.panning = false;
+      for (const id of this.activePointers.keys()) {
+        try {
+          this.renderer.domElement.releasePointerCapture?.(id);
+        } catch {
+          /* ignore */
+        }
+      }
       const pts = [...this.activePointers.values()];
       this.pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
       this.pinchStartRadius = this.spherical.radius;
       this.updateCursor();
       return;
     }
+
+    this.renderer.domElement.setPointerCapture?.(e.pointerId);
 
     if (this.viewDragMode === 'turn' || e.shiftKey || e.button === 1 || e.button === 2) {
       this.panning = e.shiftKey || e.button === 1;

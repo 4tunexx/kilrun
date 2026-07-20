@@ -1196,7 +1196,7 @@ export function MapEditor({
               </div>
               <p className="text-[10px] text-white/40 p-2 border-t border-white/10">
                 {editTool === 'brush'
-                  ? 'Brush: click ground to paint. Click same model to select it. Alt+click stacks on top.'
+                  ? 'Brush: click ground to paint. Click same model to select it. Alt+click stacks on top (Alt+drag = box select).'
                   : 'Select: click objects to pick them. Pick a model or Brush to paint.'}{' '}
                 Orbit drag = move view. Ctrl = free fly.
               </p>
