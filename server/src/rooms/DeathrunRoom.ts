@@ -124,6 +124,7 @@ export class DeathrunRoom extends Room<RoomState> {
 
   onCreate() {
     this.setState(new RoomState());
+    this.state.modeTag = 'deathrun';
     this.state.platforms.push(...createDeathrunPlatforms());
     this.state.obstacles.push(...createDeathrunObstacles());
     this.obstacleTimers = this.state.obstacles.map(() => 0);
