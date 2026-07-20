@@ -1,6 +1,7 @@
 /**
  * Body / gear skin slots for the Model Editor → shop → in-game equip pipeline.
- * Attachments are offsets relative to character sockets (or named bones when present).
+ * Attachments can be catalog meshes, uploaded GLBs, or built-in primitives
+ * with materials / textures sculpted in the Model Editor.
  */
 
 export type SkinAttachSlot =
@@ -13,6 +14,66 @@ export type SkinAttachSlot =
   | 'weapon'
   | 'back';
 
+/** Built-in shapes you can sculpt without uploading a GLB. */
+export type SkinPrimitive =
+  | 'box'
+  | 'sphere'
+  | 'cylinder'
+  | 'capsule'
+  | 'cone'
+  | 'torus'
+  | 'plane';
+
+export const SKIN_PRIMITIVES: { id: SkinPrimitive; label: string }[] = [
+  { id: 'box', label: 'Box / Cube' },
+  { id: 'sphere', label: 'Sphere' },
+  { id: 'cylinder', label: 'Cylinder' },
+  { id: 'capsule', label: 'Capsule' },
+  { id: 'cone', label: 'Cone' },
+  { id: 'torus', label: 'Torus / Ring' },
+  { id: 'plane', label: 'Plane / Flat' },
+];
+
+export interface SkinShapeParams {
+  /** Box / plane */
+  width?: number;
+  height?: number;
+  depth?: number;
+  /** Sphere / cylinder / cone / capsule / torus */
+  radius?: number;
+  radiusTop?: number;
+  radiusBottom?: number;
+  /** Torus tube radius */
+  tube?: number;
+  /** Detail */
+  radialSegments?: number;
+  heightSegments?: number;
+  tubularSegments?: number;
+}
+
+export interface SkinMaterial {
+  color: string;
+  metalness: number;
+  roughness: number;
+  opacity: number;
+  emissive?: string;
+  emissiveIntensity?: number;
+  /** flat | stripes | checker | gradient — procedural when no textureUrl */
+  pattern?: 'flat' | 'stripes' | 'checker' | 'gradient';
+  patternColor?: string;
+}
+
+export const DEFAULT_SKIN_MATERIAL: SkinMaterial = {
+  color: '#c4a574',
+  metalness: 0.15,
+  roughness: 0.65,
+  opacity: 1,
+  emissive: '#000000',
+  emissiveIntensity: 0,
+  pattern: 'flat',
+  patternColor: '#8b6914',
+};
+
 export const SKIN_ATTACH_SLOTS: {
   id: SkinAttachSlot;
   label: string;
@@ -22,6 +83,10 @@ export const SKIN_ATTACH_SLOTS: {
   /** Preferred bone name substrings (case-insensitive). */
   boneHints: string[];
   cosmeticSlot: string;
+  /** Sensible starter primitive for this slot. */
+  defaultPrimitive: SkinPrimitive;
+  defaultShape: SkinShapeParams;
+  defaultScale: [number, number, number];
 }[] = [
   {
     id: 'hat',
@@ -30,6 +95,9 @@ export const SKIN_ATTACH_SLOTS: {
     defaultOffset: [0, 1.62, 0],
     boneHints: ['head', 'hat', 'skull'],
     cosmeticSlot: 'skin_hat',
+    defaultPrimitive: 'cylinder',
+    defaultShape: { radiusTop: 0.28, radiusBottom: 0.32, height: 0.22, radialSegments: 24 },
+    defaultScale: [1, 1, 1],
   },
   {
     id: 'face',
@@ -38,6 +106,9 @@ export const SKIN_ATTACH_SLOTS: {
     defaultOffset: [0, 1.42, 0.12],
     boneHints: ['head', 'face', 'jaw'],
     cosmeticSlot: 'skin_face',
+    defaultPrimitive: 'box',
+    defaultShape: { width: 0.35, height: 0.18, depth: 0.08 },
+    defaultScale: [1, 1, 1],
   },
   {
     id: 'torso',
@@ -46,6 +117,9 @@ export const SKIN_ATTACH_SLOTS: {
     defaultOffset: [0, 1.05, 0],
     boneHints: ['spine', 'chest', 'torso', 'body'],
     cosmeticSlot: 'skin_torso',
+    defaultPrimitive: 'box',
+    defaultShape: { width: 0.55, height: 0.55, depth: 0.28 },
+    defaultScale: [1, 1, 1],
   },
   {
     id: 'pants',
@@ -54,6 +128,9 @@ export const SKIN_ATTACH_SLOTS: {
     defaultOffset: [0, 0.72, 0],
     boneHints: ['hips', 'pelvis', 'leg'],
     cosmeticSlot: 'skin_pants',
+    defaultPrimitive: 'box',
+    defaultShape: { width: 0.42, height: 0.55, depth: 0.24 },
+    defaultScale: [1, 1, 1],
   },
   {
     id: 'boots',
@@ -62,6 +139,9 @@ export const SKIN_ATTACH_SLOTS: {
     defaultOffset: [0, 0.06, 0.05],
     boneHints: ['foot', 'boot', 'ankle'],
     cosmeticSlot: 'skin_boots',
+    defaultPrimitive: 'box',
+    defaultShape: { width: 0.28, height: 0.14, depth: 0.4 },
+    defaultScale: [1, 1, 1],
   },
   {
     id: 'gloves',
@@ -70,6 +150,9 @@ export const SKIN_ATTACH_SLOTS: {
     defaultOffset: [0.38, 0.95, 0.05],
     boneHints: ['hand', 'wrist', 'glove'],
     cosmeticSlot: 'skin_gloves',
+    defaultPrimitive: 'sphere',
+    defaultShape: { radius: 0.1, radialSegments: 16 },
+    defaultScale: [1, 1, 1],
   },
   {
     id: 'weapon',
@@ -78,6 +161,9 @@ export const SKIN_ATTACH_SLOTS: {
     defaultOffset: [0.42, 0.92, 0.18],
     boneHints: ['hand_r', 'righthand', 'hand.r', 'weapon', 'right_hand'],
     cosmeticSlot: 'skin_weapon',
+    defaultPrimitive: 'box',
+    defaultShape: { width: 0.06, height: 0.7, depth: 0.06 },
+    defaultScale: [1, 1, 1],
   },
   {
     id: 'back',
@@ -86,17 +172,28 @@ export const SKIN_ATTACH_SLOTS: {
     defaultOffset: [0, 1.15, -0.22],
     boneHints: ['spine', 'back', 'chest'],
     cosmeticSlot: 'skin_back',
+    defaultPrimitive: 'plane',
+    defaultShape: { width: 0.5, height: 0.7 },
+    defaultScale: [1, 1, 1],
   },
 ];
 
 export interface SkinAttachment {
   slot: SkinAttachSlot;
+  /** Catalog prototype id (optional if primitive / custom). */
   model?: string;
   customModelUrl?: string;
+  /** Built-in sculptable shape — preferred over catalog when set. */
+  primitive?: SkinPrimitive;
+  shape?: SkinShapeParams;
+  material?: SkinMaterial;
+  /** Uploaded or generated texture (data URL / path). */
+  textureUrl?: string;
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
   bone?: string;
+  /** @deprecated use material.color */
   color?: string;
 }
 
@@ -108,6 +205,7 @@ export interface PlayerSkinPreset {
   /** Primary shop slot (usually the first attachment's slot). */
   primarySlot: SkinAttachSlot;
   attachments: SkinAttachment[];
+  /** Shop / inventory card — should be the skin part itself, not full avatar. */
   thumbnail?: string;
   createdAt: string;
   updatedAt: string;
@@ -125,9 +223,14 @@ export function defaultAttachment(slot: SkinAttachSlot): SkinAttachment {
   const meta = skinSlotMeta(slot);
   return {
     slot,
+    primitive: meta.defaultPrimitive,
+    shape: { ...meta.defaultShape },
+    material: { ...DEFAULT_SKIN_MATERIAL },
     position: [...meta.defaultOffset] as [number, number, number],
     rotation: [0, 0, 0],
-    scale: [1, 1, 1],
+    scale: [...meta.defaultScale] as [number, number, number],
+    model: undefined,
+    customModelUrl: undefined,
   };
 }
 
@@ -145,7 +248,7 @@ export function skinSlotFromCosmetic(slot: string): SkinAttachSlot | null {
 export function skinConfigToJson(preset: PlayerSkinPreset): Record<string, unknown> {
   return {
     kind: 'player_skin',
-    version: 1,
+    version: 2,
     id: preset.id,
     name: preset.name,
     baseModelKey: preset.baseModelKey,
@@ -181,4 +284,9 @@ export function baseModelKeyFromEntity(entity: {
   if (entity?.customModelUrl) return `custom:${entity.customModelUrl.slice(0, 48)}`;
   if (entity?.model) return entity.model;
   return 'default-mannequin';
+}
+
+/** True when attachment is a sculptable primitive (no external mesh required). */
+export function isPrimitiveSkin(att: SkinAttachment): boolean {
+  return Boolean(att.primitive) && !att.customModelUrl && !att.model;
 }

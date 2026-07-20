@@ -11,20 +11,34 @@ import {
   Trash2,
   ShoppingBag,
   RotateCcw,
+  Box,
+  Palette,
+  Image as ImageIcon,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { EditorEntity } from './map-document';
 import { PROTOTYPE_MODELS } from './prototype-catalog';
 import { loadPlayerAvatar } from './player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
-import { applySkinAttachments } from './skin-attachments';
+import {
+  applySkinAttachments,
+  buildSkinPartMesh,
+  captureSkinPartThumbnail,
+} from './skin-attachments';
 import {
   baseModelKeyFromEntity,
   defaultAttachment,
+  DEFAULT_SKIN_MATERIAL,
   SKIN_ATTACH_SLOTS,
+  SKIN_PRIMITIVES,
   type PlayerSkinPreset,
   type SkinAttachSlot,
   type SkinAttachment,
+  type SkinMaterial,
+  type SkinPrimitive,
+  type SkinShapeParams,
 } from '@/lib/player-skins';
 import {
   createSkinPreset,
@@ -34,9 +48,11 @@ import {
   skinPresetShopPayload,
 } from './skin-library';
 
+type SourceMode = 'sculpt' | 'catalog' | 'upload';
+
 /**
- * Model Editor — author hat/pants/boots/gloves/weapon skins on the chosen
- * player model, save presets, and prepare them for the shop Skins category.
+ * Self-contained Model Editor — sculpt primitives, paint materials/textures,
+ * save skin-only presets with part thumbnails for the shop.
  */
 export function ModelSkinEditor({
   entity,
@@ -47,34 +63,49 @@ export function ModelSkinEditor({
 }: {
   entity: EditorEntity;
   onClose: () => void;
-  /** Persist attachments onto the map player entity for Play Test. */
   onApplyToPlayer: (attachments: SkinAttachment[]) => void;
-  /** Optional admin publish hook. */
   onPublishToShop?: (payload: ReturnType<typeof skinPresetShopPayload>) => Promise<void> | void;
   isMobile?: boolean;
 }) {
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<SkinPreview | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const glbFileRef = useRef<HTMLInputElement>(null);
+  const texFileRef = useRef<HTMLInputElement>(null);
   const [presets, setPresets] = useState<PlayerSkinPreset[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [slot, setSlot] = useState<SkinAttachSlot>('hat');
   const [attachments, setAttachments] = useState<SkinAttachment[]>([
     defaultAttachment('hat'),
   ]);
-  const [name, setName] = useState('New Skin');
+  const [name, setName] = useState('New Hat Skin');
   const [price, setPrice] = useState(250);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showAvatar, setShowAvatar] = useState(true);
+  const [sourceMode, setSourceMode] = useState<SourceMode>('sculpt');
   const baseKey = baseModelKeyFromEntity(entity);
 
   const activeAtt =
     attachments.find((a) => a.slot === slot) ?? defaultAttachment(slot);
+  const material: SkinMaterial = {
+    ...DEFAULT_SKIN_MATERIAL,
+    ...activeAtt.material,
+    color: activeAtt.material?.color || activeAtt.color || DEFAULT_SKIN_MATERIAL.color,
+  };
+  const shape: SkinShapeParams = activeAtt.shape ?? {};
 
   useEffect(() => {
-    setPresets(listSkinPresets().filter((p) => p.baseModelKey === baseKey || true));
+    setPresets(listSkinPresets());
   }, [baseKey]);
+
+  useEffect(() => {
+    // Sync source mode tabs from active attachment
+    if (activeAtt.customModelUrl) setSourceMode('upload');
+    else if (activeAtt.model) setSourceMode('catalog');
+    else setSourceMode('sculpt');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slot, activeAtt.model, activeAtt.customModelUrl, activeAtt.primitive]);
 
   useEffect(() => {
     const host = canvasHostRef.current;
@@ -89,7 +120,8 @@ export function ModelSkinEditor({
         if (cancelled) return;
         if (!previewRef.current) previewRef.current = new SkinPreview(host);
         previewRef.current.setAvatar(loaded.scene);
-        await previewRef.current.setAttachments(attachments);
+        previewRef.current.setShowAvatar(showAvatar);
+        await previewRef.current.setAttachments(attachments, slot);
       } catch (err) {
         console.warn('[ModelSkinEditor]', err);
         if (!cancelled) setError('Failed to load player model');
@@ -105,8 +137,12 @@ export function ModelSkinEditor({
   }, [entity.model, entity.customModelUrl, entity.id]);
 
   useEffect(() => {
-    void previewRef.current?.setAttachments(attachments);
-  }, [attachments]);
+    void previewRef.current?.setAttachments(attachments, slot);
+  }, [attachments, slot]);
+
+  useEffect(() => {
+    previewRef.current?.setShowAvatar(showAvatar);
+  }, [showAvatar]);
 
   useEffect(() => {
     return () => {
@@ -123,6 +159,17 @@ export function ModelSkinEditor({
     });
   };
 
+  const patchMaterial = (partial: Partial<SkinMaterial>) => {
+    patchActive({
+      material: { ...material, ...partial },
+      color: partial.color ?? material.color,
+    });
+  };
+
+  const patchShape = (partial: SkinShapeParams) => {
+    patchActive({ shape: { ...shape, ...partial } });
+  };
+
   const ensureSlot = (s: SkinAttachSlot) => {
     setSlot(s);
     setAttachments((prev) =>
@@ -135,30 +182,56 @@ export function ModelSkinEditor({
     if (slot === s) setSlot('hat');
   };
 
-  const saveCurrent = () => {
+  const useSculpt = (prim: SkinPrimitive) => {
+    const meta = SKIN_ATTACH_SLOTS.find((x) => x.id === slot)!;
+    patchActive({
+      primitive: prim,
+      shape: { ...meta.defaultShape },
+      model: undefined,
+      customModelUrl: undefined,
+      material: activeAtt.material ?? { ...DEFAULT_SKIN_MATERIAL },
+    });
+    setSourceMode('sculpt');
+  };
+
+  const captureThumb = async (): Promise<string | undefined> => {
+    const part = attachments.find((a) => a.slot === slot) ?? attachments[0];
+    if (!part) return previewRef.current?.capture() ?? undefined;
+    const solo = await captureSkinPartThumbnail(part, 320);
+    return solo ?? previewRef.current?.capture() ?? undefined;
+  };
+
+  const saveCurrent = async () => {
+    const thumb = await captureThumb();
+    const primary = attachments[0]?.slot ?? slot;
     const saved = activeId
       ? saveSkinPreset({
           id: activeId,
           name,
           baseModelKey: baseKey,
-          primarySlot: attachments[0]?.slot ?? slot,
+          primarySlot: slot || primary,
           attachments,
           shopPrice: price,
           createdAt: presets.find((p) => p.id === activeId)?.createdAt ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           listedForShop: true,
-          thumbnail: previewRef.current?.capture() ?? undefined,
+          thumbnail: thumb,
         })
-      : createSkinPreset({
-          name,
-          baseModelKey: baseKey,
-          primarySlot: attachments[0]?.slot ?? slot,
-          attachments,
-        });
-    if (!activeId) {
-      setActiveId(saved.id);
-      saveSkinPreset({ ...saved, shopPrice: price, thumbnail: previewRef.current?.capture() ?? undefined });
-    }
+      : (() => {
+          const created = createSkinPreset({
+            name,
+            baseModelKey: baseKey,
+            primarySlot: slot || primary,
+            attachments,
+          });
+          return saveSkinPreset({
+            ...created,
+            shopPrice: price,
+            thumbnail: thumb,
+            primarySlot: slot,
+          });
+        })();
+    setActiveId(saved.id);
     setPresets(listSkinPresets());
     onApplyToPlayer(attachments);
   };
@@ -175,21 +248,23 @@ export function ModelSkinEditor({
     if (!onPublishToShop) return;
     setBusy(true);
     try {
-      saveCurrent();
+      await saveCurrent();
+      const thumb = await captureThumb();
       const preset =
         listSkinPresets().find((p) => p.id === activeId) ??
         createSkinPreset({
           name,
           baseModelKey: baseKey,
-          primarySlot: attachments[0]?.slot ?? slot,
+          primarySlot: slot,
           attachments,
         });
       const withMeta = saveSkinPreset({
         ...preset,
         name,
         attachments,
+        primarySlot: slot,
         shopPrice: price,
-        thumbnail: previewRef.current?.capture() ?? preset.thumbnail,
+        thumbnail: thumb ?? preset.thumbnail,
         listedForShop: true,
       });
       await onPublishToShop(skinPresetShopPayload(withMeta));
@@ -199,12 +274,27 @@ export function ModelSkinEditor({
     }
   };
 
-  const onUpload = (file: File) => {
+  const onUploadGlb = (file: File) => {
     const reader = new FileReader();
     reader.onload = () => {
       const url = String(reader.result || '');
       if (!url) return;
-      patchActive({ customModelUrl: url, model: undefined });
+      patchActive({
+        customModelUrl: url,
+        model: undefined,
+        primitive: undefined,
+      });
+      setSourceMode('upload');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const onUploadTex = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result || '');
+      if (!url) return;
+      patchActive({ textureUrl: url });
     };
     reader.readAsDataURL(file);
   };
@@ -212,7 +302,7 @@ export function ModelSkinEditor({
   return (
     <aside
       className={`flex flex-col bg-[#0c121a] border-white/10 text-white shadow-2xl z-[90] ${
-        isMobile ? 'absolute inset-0 border-0' : 'relative w-[min(100%,440px)] shrink-0 border-l'
+        isMobile ? 'absolute inset-0 border-0' : 'relative w-[min(100%,460px)] shrink-0 border-l'
       }`}
       aria-label="Model Editor"
     >
@@ -222,10 +312,16 @@ export function ModelSkinEditor({
           <p className="text-xs font-bold tracking-wide uppercase text-amber-200 truncate">
             Model Editor
           </p>
-          <p className="text-[10px] text-white/45 truncate">
-            Skins · hats · gear · shop
-          </p>
+          <p className="text-[10px] text-white/45 truncate">Sculpt · paint · texture · shop</p>
         </div>
+        <button
+          type="button"
+          className="w-8 h-8 rounded-lg flex items-center justify-center text-white/60 hover:bg-white/10"
+          title={showAvatar ? 'Hide body (skin only)' : 'Show body'}
+          onClick={() => setShowAvatar((v) => !v)}
+        >
+          {showAvatar ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+        </button>
         <button
           type="button"
           className="w-8 h-8 rounded-lg flex items-center justify-center text-white/60 hover:bg-white/10"
@@ -236,16 +332,19 @@ export function ModelSkinEditor({
         </button>
       </div>
 
-      <div className="relative h-44 shrink-0 border-b border-white/10 bg-[#0a1018]">
+      <div className="relative h-52 shrink-0 border-b border-white/10 bg-[#0a1018]">
         <div ref={canvasHostRef} className="absolute inset-0" />
         {loading && (
           <p className="absolute inset-0 flex items-center justify-center text-xs text-white/50">
-            Loading model…
+            Loading…
           </p>
         )}
         {error && (
           <p className="absolute bottom-2 left-2 right-2 text-[10px] text-red-300">{error}</p>
         )}
+        <p className="absolute top-2 left-2 text-[9px] uppercase tracking-wider text-white/40 bg-black/50 px-1.5 py-0.5 rounded">
+          {showAvatar ? 'On body' : 'Skin only'}
+        </p>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
@@ -255,11 +354,13 @@ export function ModelSkinEditor({
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="w-full rounded-lg bg-black/40 border border-white/10 px-2 py-1.5 text-sm"
+            placeholder="e.g. Golden Cap"
           />
         </div>
 
+        {/* Slots */}
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-white/45 mb-1.5">Body slots</p>
+          <p className="text-[10px] uppercase tracking-wider text-white/45 mb-1.5">Body slot</p>
           <div className="flex flex-wrap gap-1.5">
             {SKIN_ATTACH_SLOTS.map((s) => {
               const on = attachments.some((a) => a.slot === s.id);
@@ -281,14 +382,63 @@ export function ModelSkinEditor({
               );
             })}
           </div>
-          <p className="text-[10px] text-white/40 mt-1">{skinSlotMetaHint(slot)}</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="col-span-2 space-y-1">
-            <label className="text-[10px] uppercase tracking-wider text-white/45">
-              Mesh for {slot}
-            </label>
+        {/* Source mode */}
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-white/45 mb-1.5 flex items-center gap-1">
+            <Box className="w-3 h-3" /> Create / source
+          </p>
+          <div className="flex gap-1 mb-2">
+            {(
+              [
+                ['sculpt', 'Sculpt'],
+                ['catalog', 'Catalog'],
+                ['upload', 'Upload'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSourceMode(id)}
+                className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase border ${
+                  sourceMode === id
+                    ? 'bg-sky-500/25 border-sky-400/50 text-sky-100'
+                    : 'border-white/10 text-white/50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {sourceMode === 'sculpt' && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-1.5">
+                {SKIN_PRIMITIVES.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => useSculpt(p.id)}
+                    className={`px-2 py-1 rounded text-[10px] border ${
+                      activeAtt.primitive === p.id && !activeAtt.model && !activeAtt.customModelUrl
+                        ? 'bg-emerald-500/25 border-emerald-400/50 text-emerald-100'
+                        : 'border-white/10 text-white/55 hover:bg-white/5'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <ShapeFields
+                primitive={activeAtt.primitive ?? 'box'}
+                shape={shape}
+                onChange={patchShape}
+              />
+            </div>
+          )}
+
+          {sourceMode === 'catalog' && (
             <select
               className="w-full rounded-lg bg-black/40 border border-white/10 px-2 py-1.5 text-xs"
               value={activeAtt.model || ''}
@@ -296,6 +446,7 @@ export function ModelSkinEditor({
                 patchActive({
                   model: e.target.value || undefined,
                   customModelUrl: undefined,
+                  primitive: undefined,
                 })
               }
             >
@@ -306,27 +457,147 @@ export function ModelSkinEditor({
                 </option>
               ))}
             </select>
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="col-span-2"
-            onClick={() => fileRef.current?.click()}
-          >
-            <Upload className="w-3.5 h-3.5 mr-1" /> Upload GLB for slot
-          </Button>
+          )}
+
+          {sourceMode === 'upload' && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="w-full"
+              onClick={() => glbFileRef.current?.click()}
+            >
+              <Upload className="w-3.5 h-3.5 mr-1" /> Upload GLB mesh
+            </Button>
+          )}
           <input
-            ref={fileRef}
+            ref={glbFileRef}
             type="file"
             accept=".glb,.gltf,model/gltf-binary"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) onUpload(f);
+              if (f) onUploadGlb(f);
               e.target.value = '';
             }}
           />
+        </div>
+
+        {/* Material */}
+        <div className="space-y-2 rounded-lg border border-white/10 bg-black/25 p-2.5">
+          <p className="text-[10px] uppercase tracking-wider text-white/45 flex items-center gap-1">
+            <Palette className="w-3 h-3" /> Material
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[10px] text-white/40">
+              Color
+              <input
+                type="color"
+                value={normalizeHex(material.color)}
+                onChange={(e) => patchMaterial({ color: e.target.value })}
+                className="mt-0.5 block w-full h-8 rounded cursor-pointer bg-transparent border border-white/10"
+              />
+            </label>
+            <label className="text-[10px] text-white/40">
+              Pattern color
+              <input
+                type="color"
+                value={normalizeHex(material.patternColor || '#8b6914')}
+                onChange={(e) => patchMaterial({ patternColor: e.target.value })}
+                className="mt-0.5 block w-full h-8 rounded cursor-pointer bg-transparent border border-white/10"
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {(['flat', 'stripes', 'checker', 'gradient'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => patchMaterial({ pattern: p })}
+                className={`px-2 py-1 rounded text-[10px] border capitalize ${
+                  (material.pattern ?? 'flat') === p
+                    ? 'bg-violet-500/25 border-violet-400/50 text-violet-100'
+                    : 'border-white/10 text-white/50'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+          <SliderField
+            label="Metal"
+            value={material.metalness}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={(metalness) => patchMaterial({ metalness })}
+          />
+          <SliderField
+            label="Rough"
+            value={material.roughness}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={(roughness) => patchMaterial({ roughness })}
+          />
+          <SliderField
+            label="Opacity"
+            value={material.opacity}
+            min={0.1}
+            max={1}
+            step={0.05}
+            onChange={(opacity) => patchMaterial({ opacity })}
+          />
+        </div>
+
+        {/* Texture */}
+        <div className="space-y-2 rounded-lg border border-white/10 bg-black/25 p-2.5">
+          <p className="text-[10px] uppercase tracking-wider text-white/45 flex items-center gap-1">
+            <ImageIcon className="w-3 h-3" /> Texture
+          </p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="flex-1"
+              onClick={() => texFileRef.current?.click()}
+            >
+              <Upload className="w-3.5 h-3.5 mr-1" /> Upload image
+            </Button>
+            {activeAtt.textureUrl && (
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                onClick={() => patchActive({ textureUrl: undefined })}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+          <input
+            ref={texFileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onUploadTex(f);
+              e.target.value = '';
+            }}
+          />
+          {activeAtt.textureUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={activeAtt.textureUrl}
+              alt="Texture preview"
+              className="h-16 w-16 rounded object-cover border border-white/15"
+            />
+          )}
+          <p className="text-[10px] text-white/35">
+            Upload a PNG/JPG for the hat/gear surface, or use pattern colors above.
+          </p>
         </div>
 
         <Vec3Fields
@@ -354,9 +625,12 @@ export function ModelSkinEditor({
             size="sm"
             variant="secondary"
             className="flex-1"
-            onClick={() => patchActive(defaultAttachment(slot))}
+            onClick={() => {
+              patchActive(defaultAttachment(slot));
+              setSourceMode('sculpt');
+            }}
           >
-            <RotateCcw className="w-3.5 h-3.5 mr-1" /> Reset slot
+            <RotateCcw className="w-3.5 h-3.5 mr-1" /> Reset part
           </Button>
           <Button
             type="button"
@@ -370,9 +644,7 @@ export function ModelSkinEditor({
         </div>
 
         <div className="space-y-1">
-          <label className="text-[10px] uppercase tracking-wider text-white/45">
-            Shop VP price
-          </label>
+          <label className="text-[10px] uppercase tracking-wider text-white/45">Shop VP price</label>
           <input
             type="number"
             min={0}
@@ -383,8 +655,12 @@ export function ModelSkinEditor({
         </div>
 
         <div className="flex flex-col gap-2">
-          <Button type="button" onClick={saveCurrent} className="bg-sky-600 hover:bg-sky-500">
-            <Save className="w-4 h-4 mr-1" /> Save skin + apply to player
+          <Button
+            type="button"
+            onClick={() => void saveCurrent()}
+            className="bg-sky-600 hover:bg-sky-500"
+          >
+            <Save className="w-4 h-4 mr-1" /> Save skin (thumbnail = this part)
           </Button>
           {onPublishToShop && (
             <Button
@@ -407,17 +683,20 @@ export function ModelSkinEditor({
               className="text-[10px] text-sky-300 flex items-center gap-1"
               onClick={() => {
                 setActiveId(null);
-                setName('New Skin');
+                setName('New Hat Skin');
                 setAttachments([defaultAttachment('hat')]);
                 setSlot('hat');
+                setSourceMode('sculpt');
               }}
             >
               <Plus className="w-3 h-3" /> New
             </button>
           </div>
-          <ul className="space-y-1 max-h-36 overflow-y-auto">
+          <ul className="space-y-1 max-h-40 overflow-y-auto">
             {presets.length === 0 && (
-              <li className="text-[11px] text-white/40 px-1">No skins yet — save one above.</li>
+              <li className="text-[11px] text-white/40 px-1">
+                No skins yet — sculpt a hat above and save.
+              </li>
             )}
             {presets.map((p) => (
               <li
@@ -428,7 +707,21 @@ export function ModelSkinEditor({
                     : 'border-white/10 bg-black/25'
                 }`}
               >
-                <button type="button" className="flex-1 text-left truncate" onClick={() => loadPreset(p)}>
+                {p.thumbnail ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={p.thumbnail}
+                    alt=""
+                    className="w-9 h-9 rounded object-cover border border-white/10 shrink-0"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded bg-white/5 border border-white/10 shrink-0" />
+                )}
+                <button
+                  type="button"
+                  className="flex-1 text-left truncate"
+                  onClick={() => loadPreset(p)}
+                >
                   <span className="font-semibold">{p.name}</span>
                   <span className="text-white/40 ml-1">· {p.primarySlot}</span>
                 </button>
@@ -449,16 +742,117 @@ export function ModelSkinEditor({
         </div>
 
         <p className="text-[10px] text-white/35 leading-relaxed">
-          Skins stick to the player model you selected ({baseKey}). Equip from inventory
-          after purchase — attachments follow the body in Play Test and matches.
+          Sculpt a box/cylinder/etc., paint color + texture, then save. Shop cards use a
+          thumbnail of <em>this skin part</em> (hat, boots…), not the whole avatar.
         </p>
       </div>
     </aside>
   );
 }
 
-function skinSlotMetaHint(slot: SkinAttachSlot) {
-  return SKIN_ATTACH_SLOTS.find((s) => s.id === slot)?.hint ?? '';
+function normalizeHex(c: string): string {
+  if (/^#[0-9a-fA-F]{6}$/.test(c)) return c;
+  if (/^#[0-9a-fA-F]{3}$/.test(c)) {
+    return `#${c[1]}${c[1]}${c[2]}${c[2]}${c[3]}${c[3]}`;
+  }
+  return '#c4a574';
+}
+
+function ShapeFields({
+  primitive,
+  shape,
+  onChange,
+}: {
+  primitive: SkinPrimitive;
+  shape: SkinShapeParams;
+  onChange: (p: SkinShapeParams) => void;
+}) {
+  const num = (
+    key: keyof SkinShapeParams,
+    label: string,
+    def: number,
+    step = 0.02,
+    min = 0.02,
+    max = 2
+  ) => (
+    <label key={key} className="text-[10px] text-white/40">
+      {label}
+      <input
+        type="number"
+        step={step}
+        min={min}
+        max={max}
+        value={Number(((shape[key] as number | undefined) ?? def).toFixed(3))}
+        onChange={(e) => onChange({ [key]: Number(e.target.value) || def })}
+        className="mt-0.5 w-full rounded bg-black/40 border border-white/10 px-1.5 py-1 text-xs text-white"
+      />
+    </label>
+  );
+
+  return (
+    <div className="grid grid-cols-3 gap-1.5">
+      {(primitive === 'box' || primitive === 'plane') && (
+        <>
+          {num('width', 'W', 0.4)}
+          {num('height', 'H', 0.4)}
+          {primitive === 'box' && num('depth', 'D', 0.4)}
+        </>
+      )}
+      {(primitive === 'sphere' ||
+        primitive === 'cylinder' ||
+        primitive === 'capsule' ||
+        primitive === 'cone' ||
+        primitive === 'torus') && (
+        <>
+          {primitive === 'cylinder' ? (
+            <>
+              {num('radiusTop', 'R top', 0.28)}
+              {num('radiusBottom', 'R bot', 0.32)}
+              {num('height', 'H', 0.22)}
+            </>
+          ) : (
+            <>
+              {num('radius', 'Radius', 0.25)}
+              {(primitive === 'capsule' || primitive === 'cone') && num('height', 'H', 0.4)}
+              {primitive === 'torus' && num('tube', 'Tube', 0.08)}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SliderField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-[10px] text-white/45">
+      <span className="w-12 shrink-0">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="flex-1 accent-amber-400"
+      />
+      <span className="w-8 text-right tabular-nums text-white/60">{value.toFixed(2)}</span>
+    </label>
+  );
 }
 
 function Vec3Fields({
@@ -502,25 +896,36 @@ class SkinPreview {
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
   private avatar: THREE.Object3D | null = null;
+  private soloRoot = new THREE.Group();
+  private showBody = true;
   private raf = 0;
   private disposed = false;
 
   constructor(host: HTMLElement) {
     this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
-    this.camera.position.set(0, 1.2, 3.2);
-    this.camera.lookAt(0, 0.9, 0);
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    this.camera.position.set(0, 1.35, 3.0);
+    this.camera.lookAt(0, 1.1, 0);
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true,
+    });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     host.appendChild(this.renderer.domElement);
-    Object.assign(this.renderer.domElement.style, { width: '100%', height: '100%', display: 'block' });
+    Object.assign(this.renderer.domElement.style, {
+      width: '100%',
+      height: '100%',
+      display: 'block',
+    });
     this.scene.background = new THREE.Color('#0a1018');
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.7));
     const sun = new THREE.DirectionalLight(0xfff0dd, 1);
     sun.position.set(2, 4, 3);
     this.scene.add(sun);
+    this.scene.add(this.soloRoot);
     const resize = () => {
       const w = host.clientWidth || 320;
-      const h = host.clientHeight || 176;
+      const h = host.clientHeight || 208;
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(w, h, false);
@@ -530,7 +935,8 @@ class SkinPreview {
     const tick = () => {
       if (this.disposed) return;
       this.raf = requestAnimationFrame(tick);
-      if (this.avatar) this.avatar.rotation.y += 0.008;
+      const spin = this.showBody ? this.avatar : this.soloRoot;
+      if (spin) spin.rotation.y += 0.01;
       this.renderer.render(this.scene, this.camera);
     };
     tick();
@@ -541,17 +947,54 @@ class SkinPreview {
     normalizeCharacter(scene, 1.75);
     this.avatar = scene;
     this.scene.add(scene);
+    this.setShowAvatar(this.showBody);
   }
 
-  async setAttachments(atts: SkinAttachment[]) {
-    if (!this.avatar) return;
-    await applySkinAttachments(this.avatar, atts);
+  setShowAvatar(on: boolean) {
+    this.showBody = on;
+    if (this.avatar) this.avatar.visible = on;
+    this.soloRoot.visible = !on;
+    if (on) {
+      this.camera.position.set(0, 1.35, 3.0);
+      this.camera.lookAt(0, 1.1, 0);
+    } else {
+      this.camera.position.set(0, 0.35, 1.4);
+      this.camera.lookAt(0, 0.2, 0);
+    }
+  }
+
+  async setAttachments(atts: SkinAttachment[], focusSlot?: SkinAttachSlot) {
+    if (this.avatar) await applySkinAttachments(this.avatar, atts);
+    // Solo preview of focused / primary part
+    while (this.soloRoot.children.length) this.soloRoot.remove(this.soloRoot.children[0]);
+    const primary =
+      (focusSlot ? atts.find((a) => a.slot === focusSlot) : undefined) ?? atts[0];
+    if (primary) {
+      try {
+        const part = await buildSkinPartMesh(primary);
+        part.scale.set(...primary.scale);
+        part.rotation.set(
+          THREE.MathUtils.degToRad(primary.rotation[0]),
+          THREE.MathUtils.degToRad(primary.rotation[1]),
+          THREE.MathUtils.degToRad(primary.rotation[2])
+        );
+        // Center for solo view
+        part.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(part);
+        const c = new THREE.Vector3();
+        box.getCenter(c);
+        part.position.sub(c);
+        this.soloRoot.add(part);
+      } catch (err) {
+        console.warn('[SkinPreview solo]', err);
+      }
+    }
   }
 
   capture(): string | null {
     try {
       this.renderer.render(this.scene, this.camera);
-      return this.renderer.domElement.toDataURL('image/jpeg', 0.7);
+      return this.renderer.domElement.toDataURL('image/jpeg', 0.75);
     } catch {
       return null;
     }
