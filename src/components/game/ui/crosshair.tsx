@@ -5,7 +5,7 @@ import React from 'react';
 /**
  * Always visible on desktop; on mobile it only appears while the aim
  * joystick is actively held (`visible` is driven by `InputManager.isAiming()`).
- * Optional `offsetX`/`offsetY` shift the reticle with the left aim stick.
+ * Optional `offsetX`/`offsetY` shift the reticle with the look stick.
  */
 export const Crosshair: React.FC<{
   visible: boolean;

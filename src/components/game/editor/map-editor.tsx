@@ -72,6 +72,7 @@ import {
   ensureTeleport,
   ensureWaveAnchor,
   entityExportsAsPlatform,
+  entityKindHint,
   entityKindLabel,
   entityKindsForMode,
   findPlayerEntity,
@@ -2055,7 +2056,7 @@ export function MapEditor({
             >
               <Home className="w-4 h-4 text-emerald-300" />
             </ToolBtn>
-            <ToolBtn onClick={() => apiRef.current?.placeSpawn('start')} title="Start (player spawn)">
+            <ToolBtn onClick={() => apiRef.current?.placeSpawn('start')} title="Start spawn — where you appear in Play Test (not the Player avatar)">
               <Flag className="w-4 h-4 text-emerald-400" />
             </ToolBtn>
             {gameMode === 'deathrun' && (
@@ -2226,6 +2227,18 @@ export function MapEditor({
                   ))}
                 </select>
               </label>
+              {entityKindHint(selected.kind) && (
+                <p className="text-[10px] leading-snug text-cyan-200/80 -mt-1">
+                  {entityKindHint(selected.kind)}
+                </p>
+              )}
+              {selected.kind === 'player' && (
+                <p className="text-[10px] leading-snug text-amber-200/90 rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1.5">
+                  Player = your avatar look only. Tap <span className="font-bold">START</span> (green
+                  flag) to place where you spawn in Play Test — standing a Player on a platform is not
+                  enough.
+                </p>
+              )}
 
               {selected.kind !== 'light' && (
                 <>

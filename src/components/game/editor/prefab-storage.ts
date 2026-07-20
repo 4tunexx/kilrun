@@ -475,6 +475,51 @@ export function mapDocSpawnPoints(doc: MapDocument) {
   return { runner: toSim(runner), trapper: toSim(trapper) };
 }
 
+/**
+ * Play Test needs a real Start marker. If the creator only placed a Player
+ * (avatar config), clone its position into a Start so spawn ≠ “mysterious void”.
+ * Also returns whether we had to invent one (for a toast / banner).
+ */
+export function prepareDocForPlayTest(doc: MapDocument): {
+  doc: MapDocument;
+  autoStart: boolean;
+} {
+  const hasStart = doc.entities.some(
+    (e) => e.visible !== false && (e.kind === 'start' || e.kind === 'spawn_runner')
+  );
+  if (hasStart) return { doc, autoStart: false };
+
+  const player =
+    doc.entities.find((e) => e.kind === 'player' && e.visible !== false) ??
+    doc.entities.find((e) => e.kind === 'player');
+
+  const layerId =
+    doc.layers.find((l) => /spawn/i.test(l.name))?.id ??
+    doc.layers[doc.layers.length - 1]?.id ??
+    doc.layers[0]?.id ??
+    'layer_0';
+
+  const position: [number, number, number] = player
+    ? [player.position[0], player.position[1], player.position[2]]
+    : [0, 0.5, 0];
+
+  const start: EditorEntity = {
+    id: generateId(),
+    name: 'Start (auto)',
+    kind: 'start',
+    layerId,
+    position,
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    color: '#22c55e',
+  };
+
+  return {
+    doc: { ...doc, entities: [...doc.entities, start] },
+    autoStart: true,
+  };
+}
+
 /** All player start positions (Horde supports up to 4). */
 export function mapDocPlayerSpawns(doc: MapDocument): { x: number; y: number; z: number }[] {
   const starts = doc.entities.filter(

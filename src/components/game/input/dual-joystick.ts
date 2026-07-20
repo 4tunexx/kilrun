@@ -17,10 +17,10 @@ function freshStick(): StickState {
 }
 
 /**
- * Mobile control scheme: right half of the screen = movement joystick,
- * left half = aim + camera joystick, double-tapping the left half fires the
- * weapon. Joysticks only exist while a finger is actually down -- they
- * spawn under wherever the touch started and vanish on release.
+ * Mobile control scheme (standard platformer / twin-stick):
+ * left half = movement, right half = aim / look.
+ * Double-tap the right half to fire. Joysticks only exist while a finger
+ * is down — they spawn under the touch and vanish on release.
  */
 export class DualJoystick {
   public moveStick: StickState = freshStick();
@@ -33,8 +33,8 @@ export class DualJoystick {
   private attackHeld = false;
   private actionPulse = false;
   private attackPulse = false;
-  private lastLeftTapAt = 0;
-  private lastLeftTapPos: Vector2 = { x: 0, y: 0 };
+  private lastAimTapAt = 0;
+  private lastAimTapPos: Vector2 = { x: 0, y: 0 };
 
   private readonly onTouchStart: (e: TouchEvent) => void;
   private readonly onTouchMove: (e: TouchEvent) => void;
@@ -61,23 +61,23 @@ export class DualJoystick {
       const localX = touch.clientX - rect.left;
       const isLeftHalf = localX < width / 2;
 
-      if (isLeftHalf && !this.aimStick.active) {
-        this.aimStick = { active: true, start: { ...pos }, current: { ...pos }, id: touch.identifier };
-        this.registerLeftTap(pos);
-      } else if (!isLeftHalf && !this.moveStick.active) {
+      if (isLeftHalf && !this.moveStick.active) {
         this.moveStick = { active: true, start: { ...pos }, current: { ...pos }, id: touch.identifier };
+      } else if (!isLeftHalf && !this.aimStick.active) {
+        this.aimStick = { active: true, start: { ...pos }, current: { ...pos }, id: touch.identifier };
+        this.registerAimTap(pos);
       }
     }
   }
 
-  private registerLeftTap(pos: Vector2) {
+  private registerAimTap(pos: Vector2) {
     const now = performance.now();
-    const dist = Math.hypot(pos.x - this.lastLeftTapPos.x, pos.y - this.lastLeftTapPos.y);
-    if (now - this.lastLeftTapAt < DOUBLE_TAP_WINDOW_MS && dist < DOUBLE_TAP_MAX_DISTANCE) {
+    const dist = Math.hypot(pos.x - this.lastAimTapPos.x, pos.y - this.lastAimTapPos.y);
+    if (now - this.lastAimTapAt < DOUBLE_TAP_WINDOW_MS && dist < DOUBLE_TAP_MAX_DISTANCE) {
       this.shootPulse = true;
     }
-    this.lastLeftTapAt = now;
-    this.lastLeftTapPos = pos;
+    this.lastAimTapAt = now;
+    this.lastAimTapPos = pos;
   }
 
   private handleMove(e: TouchEvent) {

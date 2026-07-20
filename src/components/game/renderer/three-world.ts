@@ -89,11 +89,12 @@ const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
 
+export type FollowCameraStyle = 'overShoulder' | 'platformer';
+
 /**
- * Fortnite-style over-shoulder 3rd person:
- * - Pivot at chest/shoulder, camera offset to the right
- * - Camera orientation follows yaw/pitch so screen-center (crosshair) aims into the world
- * - Does NOT lookAt the player mesh (that pinned the reticle on the head)
+ * 3rd-person follow camera.
+ * - `overShoulder`: combat aim (screen-center = aim ray, body lower-left)
+ * - `platformer`: pulled back + above, looks at the avatar so you always see your body + floor
  */
 export function updateFollowCamera(
   camera: THREE.PerspectiveCamera,
@@ -101,8 +102,14 @@ export function updateFollowCamera(
   yaw: number,
   pitch: number,
   dt: number,
-  zoomDistance = 5.8
+  zoomDistance = 5.8,
+  style: FollowCameraStyle = 'overShoulder'
 ) {
+  if (style === 'platformer') {
+    updatePlatformerCamera(camera, target, yaw, pitch, dt, zoomDistance);
+    return;
+  }
+
   const safePitch = THREE.MathUtils.clamp(pitch, -1.05, 0.85);
   const dist = zoomDistance;
   /** Chest / shoulder pivot — visual avatar is ~1.8 tall, feet at target.y */
@@ -133,4 +140,35 @@ export function updateFollowCamera(
   // Orient by aim angles — screen center = aim ray (crosshair is not stuck on the head)
   _euler.set(-safePitch, yaw, 0);
   camera.quaternion.setFromEuler(_euler);
+}
+
+/** Classic platformer chase-cam: behind + above, framed on the character. */
+function updatePlatformerCamera(
+  camera: THREE.PerspectiveCamera,
+  target: THREE.Vector3,
+  yaw: number,
+  pitch: number,
+  dt: number,
+  zoomDistance: number
+) {
+  const safePitch = THREE.MathUtils.clamp(pitch, -0.85, 0.45);
+  const dist = Math.max(5.5, zoomDistance);
+  const sinYaw = Math.sin(yaw);
+  const cosYaw = Math.cos(yaw);
+
+  // Pivot at torso so feet + head stay in frame
+  _pivot.set(target.x, target.y + 1.05, target.z);
+
+  // Behind the player; pitch pulls camera up/down along the orbit
+  const back = dist * Math.cos(safePitch);
+  const lift = 2.4 + dist * Math.sin(-safePitch) * 0.85 + 1.6;
+  _desired.set(
+    _pivot.x - sinYaw * back,
+    _pivot.y + lift,
+    _pivot.z - cosYaw * back
+  );
+
+  const lerp = 1 - Math.pow(0.001, dt * 14);
+  camera.position.lerp(_desired, Math.min(1, lerp));
+  camera.lookAt(_pivot.x, _pivot.y + 0.35, _pivot.z);
 }

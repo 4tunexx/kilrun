@@ -43,8 +43,8 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'spawns',
     title: 'Spawns, Player & Buttons',
-    body: 'Green flag = Runner Spawn, Red = Trapper Spawn. Blue person = Player entity (for animation bindings). Yellow button = Button that can open doors via Signal or Interact (E).',
-    tip: 'Every Deathrun map needs at least one Runner Spawn.',
+    body: 'Green START flag = where you spawn in Play Test / as Runner. Blue Player entity = avatar model + animations ONLY (not a spawn). Red = Trapper spawn. Yellow button = Interact (E) / Use.',
+    tip: 'Place floors with Solid on, then START on that floor, then configure Player Model. Play Test without START feels empty.',
   },
   {
     id: 'anim',
@@ -66,7 +66,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'play',
     title: 'Play Test & publish',
-    body: 'Play Test walks your map instantly (WASD, E interact). When happy, Save then Set as Active Match Map so Deathrun loads your floors as playable platforms.',
+    body: 'Play Test is 3rd-person: you see your body, left stick moves / WASD, right stick looks. Needs a Start spawn on a Solid floor — Player entity alone only sets your look.',
     tip: 'Finish with a clear end pad and test falling into the void. Open HELP anytime for the full guide.',
     tab: 'help',
   },
@@ -97,8 +97,8 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     id: 'building',
     title: 'Building a course',
     paragraphs: [
-      '1) Place a spawn pad near the origin. 2) Lay floor-square / floor-small-square stepping stones with gaps on Floor (level 0). 3) Switch to Props (level 1) for columns and dressing — hide Floor with the eye to check silhouettes. 4) Place Runner + Trapper spawns. 5) Play Test. 6) Save and Set Active Match Map.',
-      'Use Layers / the Level strip: lock Floor when dressing Props. Solo a level to inspect it alone. Snap size 1 is great for modular floors; 0.5 for fine work.',
+      '1) Lay floor-square / floor-small-square on Floor (level 0) and keep Solid checked. 2) Place green START on that floor (this is where Play Test puts you). 3) Open Player Model to pick your avatar — the Player entity is look/animations only, not spawn. 4) Add Finish, traps, Trapper spawn. 5) Play Test (3rd person). 6) Save and Set Active Match Map.',
+      'If Play Test looks empty: you probably only placed a Player figurine with no Start, or floors are not Solid. Use Layers / Level strip; snap size 1 for modular floors.',
     ],
   },
   {

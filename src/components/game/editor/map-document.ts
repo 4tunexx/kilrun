@@ -553,7 +553,7 @@ export function entityKindLabel(kind: EditorEntityKind): string {
     case 'prop':
       return 'Prop';
     case 'start':
-      return 'Start (spawn)';
+      return 'Start (spawn point)';
     case 'finish':
       return 'Finish';
     case 'trap':
@@ -563,11 +563,11 @@ export function entityKindLabel(kind: EditorEntityKind): string {
     case 'light':
       return 'Light';
     case 'player':
-      return 'Player';
+      return 'Player (avatar only)';
     case 'button':
       return 'Button';
     case 'spawn_runner':
-      return 'Spawn Runner';
+      return 'Spawn Runner (= Start)';
     case 'spawn_trapper':
       return 'Spawn Trapper';
     case 'checkpoint':
@@ -590,6 +590,33 @@ export function entityKindLabel(kind: EditorEntityKind): string {
       return 'Team B spawn';
     default:
       return kind;
+  }
+}
+
+/** Short hint under the Kind dropdown — what this entity actually does. */
+export function entityKindHint(kind: EditorEntityKind): string | null {
+  switch (kind) {
+    case 'player':
+      return 'Sets how you LOOK (model + animations). Does NOT place your spawn — use Start for that.';
+    case 'start':
+      return 'Where you appear in Play Test and as Runner in Deathrun. Place this on a solid floor.';
+    case 'spawn_runner':
+      return 'Same job as Start (older name). Prefer Start.';
+    case 'spawn_trapper':
+      return 'Where the Trapper role starts in Deathrun matches.';
+    case 'prop':
+      return 'Floors / walls / decoration. Tick Solid so you can stand on it in Play Test.';
+    case 'finish':
+      return 'Touch to clear the course in Play Test / Deathrun.';
+    case 'checkpoint':
+      return 'Saves a soft-respawn if you fall into the void.';
+    case 'hazard':
+    case 'trap':
+      return 'Damages or kills on touch (see Properties).';
+    case 'button':
+      return 'Press Use / E nearby to trigger linked doors or traps.';
+    default:
+      return null;
   }
 }
 
