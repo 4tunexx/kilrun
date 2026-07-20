@@ -39,7 +39,8 @@ export class PlayerState extends Schema {
 /** Solid walkable surface for the shared platformer physics. */
 export class PlatformState extends Schema {
   @type('string') id = '';
-  @type('string') kind: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' = 'solid';
+  @type('string') kind: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor' =
+    'solid';
   @type('number') x = 0;
   @type('number') y = 0;
   /** Top surface height. */
@@ -53,6 +54,10 @@ export class PlatformState extends Schema {
   @type('number') height = 0.2;
   /** Jump-pad vertical boost (sim vz). 0 = use default. */
   @type('number') boost = 0;
+  /** Conveyor push speed (units/sec). */
+  @type('number') conveyorSpeed = 0;
+  @type('number') conveyorDirX = 1;
+  @type('number') conveyorDirY = 0;
 }
 
 /** A hazard that toggles on/off on a fixed interval (or stays on when alwaysActive). */
@@ -71,6 +76,8 @@ export class ObstacleState extends Schema {
   @type('number') damage = 0;
   /** When true, stays active (editor death zones). */
   @type('boolean') alwaysActive = false;
+  /** When true, only buttons arm this obstacle (no auto pulse). */
+  @type('boolean') buttonControlled = false;
 }
 
 export class RoomState extends Schema {

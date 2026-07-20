@@ -10,8 +10,11 @@ export interface SimPad {
   width: number;
   depth: number;
   height?: number;
-  kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish';
+  kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor';
   boost?: number;
+  conveyorSpeed?: number;
+  conveyorDirX?: number;
+  conveyorDirY?: number;
 }
 
 export interface SimBounds {
@@ -199,9 +202,12 @@ export function stepPlatformer(
   }
 
   if (grounded) {
+    const onIce = support?.pad.kind === 'ice';
+    const friction = onIce ? GROUND_FRICTION * 0.18 : GROUND_FRICTION;
+    const accel = onIce ? GROUND_ACCEL * 0.45 : GROUND_ACCEL;
     const speed = Math.hypot(scratch.velX, scratch.velY);
     if (speed > 0.01) {
-      const drop = Math.min(speed, GROUND_FRICTION * dt);
+      const drop = Math.min(speed, friction * dt);
       const scale = (speed - drop) / speed;
       scratch.velX *= scale;
       scratch.velY *= scale;
@@ -209,12 +215,18 @@ export function stepPlatformer(
       scratch.velX = 0;
       scratch.velY = 0;
     }
-    scratch.velX += wishX * GROUND_ACCEL * dt;
-    scratch.velY += wishY * GROUND_ACCEL * dt;
+    scratch.velX += wishX * accel * dt;
+    scratch.velY += wishY * accel * dt;
+    if (support?.pad.kind === 'conveyor' && (support.pad.conveyorSpeed ?? 0) > 0) {
+      const spd = support.pad.conveyorSpeed ?? 4;
+      scratch.velX += (support.pad.conveyorDirX ?? 1) * spd * dt * 2.2;
+      scratch.velY += (support.pad.conveyorDirY ?? 0) * spd * dt * 2.2;
+    }
     const ns = Math.hypot(scratch.velX, scratch.velY);
-    if (ns > maxSpeed && ns > 0) {
-      scratch.velX *= maxSpeed / ns;
-      scratch.velY *= maxSpeed / ns;
+    const cap = onIce ? maxSpeed * 1.35 : maxSpeed;
+    if (ns > cap && ns > 0) {
+      scratch.velX *= cap / ns;
+      scratch.velY *= cap / ns;
     }
   } else {
     scratch.velX += wishX * AIR_ACCEL * AIR_CONTROL * dt;

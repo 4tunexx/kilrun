@@ -115,10 +115,23 @@ export interface EntityHazard {
   enabled: boolean;
   /** HP removed each interval while touching */
   damage: number;
-  /** Milliseconds between damage ticks */
+  /**
+   * Always-on: cooldown between damage ticks.
+   * Timed: ms the trap stays OFF before next pulse.
+   */
   intervalMs: number;
   /** If true, touching instantly kills / max damage */
   instantKill: boolean;
+  /**
+   * always = permanent damage volume
+   * timed = auto pulse on/off
+   * button = starts off; activated by a wired Button
+   */
+  mode?: 'always' | 'timed' | 'button';
+  /** Timed / button: how long the trap stays ON (ms). */
+  activeMs?: number;
+  /** Visual / net obstacle kind */
+  obstacleKind?: 'spike' | 'saw' | 'laser' | 'crusher' | 'damage';
 }
 
 /** Launch player upward when they land / stand on this pad. */
@@ -126,6 +139,24 @@ export interface EntityJumpPad {
   enabled: boolean;
   /** Vertical launch speed (sim vz). Default ~14. */
   boost: number;
+}
+
+/** Walkable surface modifiers (ice / conveyor). */
+export interface EntitySurface {
+  /** Low friction — slippery. */
+  ice?: boolean;
+  /** Push the player while standing on this pad. */
+  conveyor?: boolean;
+  /** Push speed in world units / second. */
+  conveyorSpeed?: number;
+}
+
+/** Teleport pad — touching sends the player to the linked target. */
+export interface EntityTeleport {
+  enabled: boolean;
+  /** Other entity id (teleporter exit / marker). */
+  targetEntityId?: string;
+  cooldownMs?: number;
 }
 
 /** Point light for map atmosphere (client visual; not simulated). */
@@ -165,6 +196,10 @@ export interface EditorEntity {
   solid?: boolean;
   /** Bounce / launch pad gameplay */
   jumpPad?: EntityJumpPad;
+  /** Ice / conveyor surface */
+  surface?: EntitySurface;
+  /** Teleport pad */
+  teleport?: EntityTeleport;
   /** kind === 'light' settings */
   light?: EntityLight;
 }
@@ -223,16 +258,37 @@ export function defaultHazard(): EntityHazard {
     damage: 25,
     intervalMs: 500,
     instantKill: false,
+    mode: 'always',
+    activeMs: 1000,
+    obstacleKind: 'damage',
   };
 }
 
 export function ensureHazard(ent: EditorEntity): EntityHazard {
-  if (ent.kind === 'hazard' && !ent.hazard) return defaultHazard();
+  const base =
+    ent.kind === 'hazard' && !ent.hazard
+      ? defaultHazard()
+      : ent.kind === 'trap' && !ent.hazard
+        ? {
+            enabled: true,
+            damage: 40,
+            intervalMs: 2000,
+            instantKill: false,
+            mode: 'timed' as const,
+            activeMs: 900,
+            obstacleKind: 'spike' as const,
+          }
+        : {
+            enabled: false,
+            damage: 25,
+            intervalMs: 500,
+            instantKill: false,
+            mode: 'always' as const,
+            activeMs: 1000,
+            obstacleKind: 'damage' as const,
+          };
   return {
-    enabled: false,
-    damage: 25,
-    intervalMs: 500,
-    instantKill: false,
+    ...base,
     ...ent.hazard,
   };
 }
@@ -246,6 +302,26 @@ export function ensureJumpPad(ent: EditorEntity): EntityJumpPad {
     enabled: false,
     boost: 14,
     ...ent.jumpPad,
+  };
+}
+
+export function defaultSurface(): EntitySurface {
+  return { ice: false, conveyor: false, conveyorSpeed: 4 };
+}
+
+export function ensureSurface(ent: EditorEntity): EntitySurface {
+  return { ...defaultSurface(), ...ent.surface };
+}
+
+export function defaultTeleport(): EntityTeleport {
+  return { enabled: true, cooldownMs: 800 };
+}
+
+export function ensureTeleport(ent: EditorEntity): EntityTeleport {
+  return {
+    enabled: false,
+    cooldownMs: 800,
+    ...ent.teleport,
   };
 }
 
@@ -272,14 +348,19 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
     ent.kind === 'light' ||
     ent.kind === 'spawn_runner' ||
     ent.kind === 'spawn_trapper' ||
-    ent.kind === 'start'
+    ent.kind === 'start' ||
+    ent.kind === 'button' ||
+    ent.kind === 'hazard' ||
+    ent.kind === 'trap'
   ) {
     return false;
   }
   // Finish pads are standable trigger volumes.
   if (ent.kind === 'finish') return true;
-  // Jump pads always export (need a pad to launch from).
+  // Jump pads / ice / conveyor always export (need a pad).
   if (ent.jumpPad?.enabled) return true;
+  if (ent.surface?.ice || ent.surface?.conveyor) return true;
+  if (ent.teleport?.enabled) return true;
   // Explicit authoring wins over name heuristics.
   if (ent.solid === false) return false;
   if (ent.solid === true) return true;
@@ -408,6 +489,8 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
     playerAnims: ent.playerAnims ? { ...ent.playerAnims } : undefined,
     hazard: ent.hazard ? { ...ent.hazard } : undefined,
     jumpPad: ent.jumpPad ? { ...ent.jumpPad } : undefined,
+    surface: ent.surface ? { ...ent.surface } : undefined,
+    teleport: ent.teleport ? { ...ent.teleport } : undefined,
     light: ent.light ? { ...ent.light } : undefined,
   };
 }

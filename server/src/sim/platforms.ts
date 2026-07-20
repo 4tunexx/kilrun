@@ -15,6 +15,9 @@ export interface PlatformBlueprint {
   boost?: number;
   /** Vertical thickness below top. */
   height?: number;
+  conveyorSpeed?: number;
+  conveyorDirX?: number;
+  conveyorDirY?: number;
 }
 
 export interface ObstacleBlueprint {
@@ -29,6 +32,7 @@ export interface ObstacleBlueprint {
   activeMs?: number;
   damage?: number;
   alwaysActive?: boolean;
+  buttonControlled?: boolean;
   instantKill?: boolean;
 }
 
@@ -63,6 +67,9 @@ export function createFromBlueprints(blueprints: PlatformBlueprint[]): PlatformS
     platform.depth = bp.depth;
     platform.height = bp.height ?? 0.2;
     platform.boost = bp.boost ?? 0;
+    platform.conveyorSpeed = bp.conveyorSpeed ?? 0;
+    platform.conveyorDirX = bp.conveyorDirX ?? 1;
+    platform.conveyorDirY = bp.conveyorDirY ?? 0;
     return platform;
   });
 }
@@ -80,7 +87,8 @@ export function createObstaclesFromBlueprints(blueprints: ObstacleBlueprint[]): 
     obstacle.intervalMs = bp.intervalMs ?? 500;
     obstacle.activeMs = bp.activeMs ?? 999999;
     obstacle.damage = bp.instantKill ? 999 : bp.damage ?? 25;
-    obstacle.alwaysActive = bp.alwaysActive !== false;
+    obstacle.buttonControlled = !!bp.buttonControlled;
+    obstacle.alwaysActive = bp.buttonControlled ? false : bp.alwaysActive !== false;
     obstacle.active = obstacle.alwaysActive;
     return obstacle;
   });

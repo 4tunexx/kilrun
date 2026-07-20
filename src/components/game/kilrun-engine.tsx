@@ -38,6 +38,8 @@ import {
   mapDocToSimFinishes,
   mapDocToSimHazards,
   mapDocToSimPlatforms,
+  mapDocToSimButtons,
+  mapDocToSimTeleports,
   mapDocToWorldBounds,
 } from './editor/prefab-storage';
 import { loadMapPlayable } from './editor/map-storage';
@@ -105,6 +107,8 @@ export default function KilrunEngine({
 
     const obstacles = mapDocToSimHazards(doc);
     const finishes = mapDocToSimFinishes(doc);
+    const buttons = mapDocToSimButtons(doc);
+    const teleports = mapDocToSimTeleports(doc);
     const spawns = mapDocSpawnPoints(doc);
     const worldBounds = mapDocToWorldBounds(doc, platforms, finishes);
     customDocRef.current = doc;
@@ -113,6 +117,8 @@ export default function KilrunEngine({
       platforms,
       obstacles,
       finishes,
+      buttons,
+      teleports,
       spawn: spawns.runner ?? undefined,
       trapperSpawn: spawns.trapper ?? undefined,
       worldBounds,

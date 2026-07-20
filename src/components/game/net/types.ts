@@ -30,7 +30,7 @@ export interface NetPlayerState {
 
 export interface NetPlatformState {
   id: string;
-  kind: 'solid' | 'checkpoint' | 'jumpPad' | 'finish';
+  kind: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor';
   x: number;
   y: number;
   z: number;
@@ -38,6 +38,9 @@ export interface NetPlatformState {
   depth: number;
   height?: number;
   boost?: number;
+  conveyorSpeed?: number;
+  conveyorDirX?: number;
+  conveyorDirY?: number;
 }
 
 export interface NetObstacleState {

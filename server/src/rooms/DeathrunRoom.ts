@@ -62,6 +62,31 @@ interface SpawnPoint {
   z: number;
 }
 
+interface ButtonZone {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  activatesObstacleIds: string[];
+  holdMs: number;
+  cooldownMs: number;
+}
+
+interface TeleportZone {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  depth: number;
+  height: number;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+  cooldownMs: number;
+}
+
 const RESULTS_DISPLAY_MS = 8000;
 
 /**
@@ -83,6 +108,14 @@ export class DeathrunRoom extends Room<RoomState> {
   private customTrapperSpawn: SpawnPoint | null = null;
   /** Editor finish trigger volumes. When set, replaces FINISH_X line. */
   private customFinishes: FinishZone[] = [];
+  /** Interact buttons that arm linked obstacles. */
+  private customButtons: ButtonZone[] = [];
+  /** Teleporter volumes. */
+  private customTeleports: TeleportZone[] = [];
+  /** Button-armed obstacle remaining active ms (obstacle id → ms left). */
+  private buttonArmRemaining = new Map<string, number>();
+  private lastButtonPressAt = new Map<string, number>();
+  private lastTeleportAt = new Map<string, number>();
   /** Clamp box — expanded from custom map AABB when loaded. */
   private worldBounds: WorldBounds = { ...DEFAULT_WORLD_BOUNDS };
   /** First joiner — may load MAIN map; admins always may. */
@@ -115,6 +148,8 @@ export class DeathrunRoom extends Room<RoomState> {
           platforms?: PlatformBlueprint[];
           obstacles?: ObstacleBlueprint[];
           finishes?: FinishZone[];
+          buttons?: ButtonZone[];
+          teleports?: TeleportZone[];
           spawn?: SpawnPoint;
           trapperSpawn?: SpawnPoint;
           worldBounds?: WorldBounds;
@@ -133,20 +168,20 @@ export class DeathrunRoom extends Room<RoomState> {
         const platforms = data?.platforms;
         if (!Array.isArray(platforms) || platforms.length === 0) return;
 
-        // Replace course with MAIN map platforms
         while (this.state.platforms.length > 0) this.state.platforms.pop();
         this.state.platforms.push(...createFromBlueprints(platforms));
 
-        // Default deathrun obstacles don't match custom geometry — replace with
-        // editor hazard volumes when provided (otherwise clear).
         while (this.state.obstacles.length > 0) this.state.obstacles.pop();
         const hazards = Array.isArray(data?.obstacles) ? data.obstacles : [];
         if (hazards.length > 0) {
           this.state.obstacles.push(...createObstaclesFromBlueprints(hazards));
         }
         this.obstacleTimers = this.state.obstacles.map(() => 0);
+        this.buttonArmRemaining.clear();
 
         this.customFinishes = Array.isArray(data?.finishes) ? data.finishes : [];
+        this.customButtons = Array.isArray(data?.buttons) ? data.buttons : [];
+        this.customTeleports = Array.isArray(data?.teleports) ? data.teleports : [];
         if (data.spawn) this.customRunnerSpawn = { ...data.spawn };
         if (data.trapperSpawn) this.customTrapperSpawn = { ...data.trapperSpawn };
         if (data.worldBounds) {
@@ -155,7 +190,6 @@ export class DeathrunRoom extends Room<RoomState> {
           this.worldBounds = { ...DEFAULT_WORLD_BOUNDS };
         }
 
-        // HUD progress anchors
         this.state.courseStartX = data.spawn?.x ?? SPAWN_X;
         if (this.customFinishes.length > 0) {
           this.state.courseFinishX = this.customFinishes[this.customFinishes.length - 1].x;
@@ -172,7 +206,7 @@ export class DeathrunRoom extends Room<RoomState> {
         });
 
         console.log(
-          `[DeathrunRoom] MAIN map loaded by ${client.sessionId}: ${platforms.length} platforms, ${hazards.length} hazards, ${this.customFinishes.length} finishes`
+          `[DeathrunRoom] MAIN map loaded by ${client.sessionId}: ${platforms.length} platforms, ${hazards.length} hazards, ${this.customButtons.length} buttons, ${this.customTeleports.length} teles`
         );
       }
     );
@@ -353,9 +387,26 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private tickObstacles(dtMs: number) {
+    for (const [id, remaining] of Array.from(this.buttonArmRemaining.entries())) {
+      const next = remaining - dtMs;
+      if (next <= 0) {
+        this.buttonArmRemaining.delete(id);
+        const obs = this.state.obstacles.find((o) => o.id === id);
+        if (obs?.buttonControlled) obs.active = false;
+      } else {
+        this.buttonArmRemaining.set(id, next);
+      }
+    }
+
     this.state.obstacles.forEach((obstacle, index) => {
       if (obstacle.alwaysActive) {
         obstacle.active = true;
+        return;
+      }
+      if (obstacle.buttonControlled) {
+        if (this.buttonArmRemaining.has(obstacle.id)) {
+          obstacle.active = true;
+        }
         return;
       }
       this.obstacleTimers[index] += dtMs;
@@ -427,6 +478,11 @@ export class DeathrunRoom extends Room<RoomState> {
         if (this.isTouchingFinish(player)) {
           player.hasFinished = true;
         }
+
+        if (input.interactPressed) {
+          this.tryPressButtons(player, sessionId, now);
+        }
+        this.tryTeleport(player, sessionId, now);
       }
 
       if (player.isAlive && player.z < VOID_Z) {
@@ -467,6 +523,49 @@ export class DeathrunRoom extends Room<RoomState> {
     player.isAlive = true;
     player.isGrounded = true;
     player.hasFinished = false;
+  }
+
+  private tryPressButtons(player: PlayerState, sessionId: string, now: number) {
+    for (const btn of this.customButtons) {
+      const dx = player.x - btn.x;
+      const dy = player.y - btn.y;
+      const dz = player.z - btn.z;
+      if (Math.hypot(dx, dy) > btn.radius + PLAYER_RADIUS) continue;
+      if (Math.abs(dz) > 2.2) continue;
+      const key = `${sessionId}:${btn.id}`;
+      const last = this.lastButtonPressAt.get(key) ?? 0;
+      if (now - last < btn.cooldownMs) continue;
+      this.lastButtonPressAt.set(key, now);
+      for (const oid of btn.activatesObstacleIds) {
+        const obs = this.state.obstacles.find((o) => o.id === oid);
+        if (!obs) continue;
+        obs.active = true;
+        const hold = btn.holdMs > 0 ? btn.holdMs : obs.activeMs || 1500;
+        this.buttonArmRemaining.set(oid, hold);
+      }
+    }
+  }
+
+  private tryTeleport(player: PlayerState, sessionId: string, now: number) {
+    for (const portal of this.customTeleports) {
+      const halfW = portal.width / 2 + PLAYER_RADIUS;
+      const halfD = portal.depth / 2 + PLAYER_RADIUS;
+      if (Math.abs(player.x - portal.x) > halfW || Math.abs(player.y - portal.y) > halfD) {
+        continue;
+      }
+      if (player.z < portal.z - 0.4 || player.z > portal.z + Math.max(portal.height, 1.2)) {
+        continue;
+      }
+      const key = `${sessionId}:${portal.id}`;
+      const last = this.lastTeleportAt.get(key) ?? 0;
+      if (now - last < portal.cooldownMs) continue;
+      this.lastTeleportAt.set(key, now);
+      player.x = portal.targetX;
+      player.y = portal.targetY;
+      player.z = portal.targetZ;
+      player.vz = 0;
+      break;
+    }
   }
 
   private damagePlayer(player: PlayerState, amount: number) {

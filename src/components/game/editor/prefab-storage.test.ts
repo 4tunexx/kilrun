@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { MapDocument } from './map-document';
 import {
+  bakeStairsToPads,
   mapDocSpawnPoints,
+  mapDocToSimButtons,
   mapDocToSimFinishes,
   mapDocToSimHazards,
   mapDocToSimPlatforms,
+  mapDocToSimTeleports,
   mapDocToWorldBounds,
 } from './prefab-storage';
 
@@ -146,5 +149,149 @@ describe('mapDoc spawn / finish / hazards / bounds', () => {
     expect(hazards).toHaveLength(1);
     expect(hazards[0].damage).toBe(30);
     expect(hazards[0].alwaysActive).toBe(true);
+  });
+
+  it('exports timed traps and button-armed hazards', () => {
+    const doc = baseDoc([
+      {
+        id: 't',
+        name: 'Spikes',
+        kind: 'trap',
+        layerId: 'l1',
+        position: [0, 0, 8],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        hazard: {
+          enabled: true,
+          damage: 50,
+          intervalMs: 2000,
+          activeMs: 800,
+          mode: 'timed',
+          obstacleKind: 'spike',
+          instantKill: false,
+        },
+      },
+      {
+        id: 'b',
+        name: 'Btn',
+        kind: 'button',
+        layerId: 'l1',
+        position: [0, 0, 2],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        animation: {
+          availableClips: [],
+          trigger: 'interact',
+          radius: 2,
+          loopActive: false,
+          loopDefault: true,
+          activatesEntityIds: ['armed'],
+        },
+      },
+      {
+        id: 'armed',
+        name: 'Armed',
+        kind: 'hazard',
+        layerId: 'l1',
+        position: [0, 0, 10],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        hazard: {
+          enabled: true,
+          damage: 40,
+          intervalMs: 500,
+          mode: 'button',
+          activeMs: 1500,
+          instantKill: false,
+        },
+      },
+    ]);
+    const hazards = mapDocToSimHazards(doc);
+    const timed = hazards.find((h) => h.id === 't');
+    const armed = hazards.find((h) => h.id === 'armed');
+    expect(timed?.alwaysActive).toBe(false);
+    expect(timed?.buttonControlled).toBe(false);
+    expect(timed?.kind).toBe('spike');
+    expect(timed?.activeMs).toBe(800);
+    expect(armed?.buttonControlled).toBe(true);
+    expect(armed?.alwaysActive).toBe(false);
+
+    const buttons = mapDocToSimButtons(doc);
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].activatesObstacleIds).toContain('armed');
+  });
+
+  it('exports ice / conveyor pads and teleports', () => {
+    const doc = baseDoc([
+      {
+        id: 'ice',
+        name: 'Ice',
+        kind: 'prop',
+        model: 'floor-square',
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [2, 1, 2],
+        solid: true,
+        surface: { ice: true },
+      },
+      {
+        id: 'conv',
+        name: 'Belt',
+        kind: 'prop',
+        model: 'floor-square',
+        layerId: 'l1',
+        position: [0, 0, 4],
+        rotation: [0, 90, 0],
+        scale: [2, 1, 2],
+        solid: true,
+        surface: { conveyor: true, conveyorSpeed: 6 },
+      },
+      {
+        id: 'a',
+        name: 'Portal A',
+        kind: 'prop',
+        model: 'floor-square',
+        layerId: 'l1',
+        position: [0, 0, 12],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        teleport: { enabled: true, targetEntityId: 'b', cooldownMs: 500 },
+      },
+      {
+        id: 'b',
+        name: 'Portal B',
+        kind: 'prop',
+        model: 'floor-square',
+        layerId: 'l1',
+        position: [3, 1, 20],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads.find((p) => p.kind === 'ice')).toBeTruthy();
+    const belt = pads.find((p) => p.kind === 'conveyor');
+    expect(belt?.conveyorSpeed).toBe(6);
+
+    const teles = mapDocToSimTeleports(doc);
+    expect(teles).toHaveLength(1);
+    expect(teles[0].targetX).toBe(20);
+
+    const stairs = bakeStairsToPads(
+      {
+        id: 's',
+        name: 'Stairs',
+        kind: 'prop',
+        model: 'stairs',
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 2],
+      },
+      4
+    );
+    expect(stairs).toHaveLength(4);
+    expect(stairs.every((s) => s.solid)).toBe(true);
   });
 });

@@ -191,10 +191,13 @@ export function applyMovement(
 
   // Horizontal accel
   if (grounded) {
+    const onIce = support!.platform.kind === 'ice';
+    const friction = onIce ? GROUND_FRICTION * 0.18 : GROUND_FRICTION;
+    const accel = onIce ? GROUND_ACCEL * 0.45 : GROUND_ACCEL;
     // Friction
     const speed = Math.hypot(scratch.velX, scratch.velY);
     if (speed > 0.01) {
-      const drop = Math.min(speed, GROUND_FRICTION * dtSeconds);
+      const drop = Math.min(speed, friction * dtSeconds);
       const scale = (speed - drop) / speed;
       scratch.velX *= scale;
       scratch.velY *= scale;
@@ -203,11 +206,20 @@ export function applyMovement(
       scratch.velY = 0;
     }
     // Accel toward wish
-    scratch.velX += wishX * GROUND_ACCEL * dtSeconds;
-    scratch.velY += wishY * GROUND_ACCEL * dtSeconds;
+    scratch.velX += wishX * accel * dtSeconds;
+    scratch.velY += wishY * accel * dtSeconds;
+
+    // Conveyor belt push
+    if (support!.platform.kind === 'conveyor' && support!.platform.conveyorSpeed > 0) {
+      const spd = support!.platform.conveyorSpeed;
+      scratch.velX += support!.platform.conveyorDirX * spd * dtSeconds * 2.2;
+      scratch.velY += support!.platform.conveyorDirY * spd * dtSeconds * 2.2;
+    }
+
     const newSpeed = Math.hypot(scratch.velX, scratch.velY);
-    if (newSpeed > maxSpeed && newSpeed > 0) {
-      const s = maxSpeed / newSpeed;
+    const speedCap = onIce ? maxSpeed * 1.35 : maxSpeed;
+    if (newSpeed > speedCap && newSpeed > 0) {
+      const s = speedCap / newSpeed;
       scratch.velX *= s;
       scratch.velY *= s;
     }

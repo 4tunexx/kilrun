@@ -54,6 +54,8 @@ import {
   ensureHazard,
   ensureJumpPad,
   ensureLight,
+  ensureSurface,
+  ensureTeleport,
   entityExportsAsPlatform,
   findPlayerEntity,
   generateId,
@@ -87,6 +89,7 @@ import {
   type TutorialStep,
 } from './editor-help';
 import {
+  bakeStairsToPads,
   deletePrefab,
   getActivePlayMapId,
   instantiatePrefab,
@@ -1703,6 +1706,118 @@ export function MapEditor({
                       />
                     </label>
                   )}
+
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={!!ensureSurface(selected).ice}
+                      onChange={(e) =>
+                        patchSelected({
+                          surface: { ...ensureSurface(selected), ice: e.target.checked },
+                          solid: true,
+                        })
+                      }
+                    />
+                    Ice (slippery)
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={!!ensureSurface(selected).conveyor}
+                      onChange={(e) =>
+                        patchSelected({
+                          surface: { ...ensureSurface(selected), conveyor: e.target.checked },
+                          solid: true,
+                        })
+                      }
+                    />
+                    Conveyor (push along facing)
+                  </label>
+                  {ensureSurface(selected).conveyor && (
+                    <label className="block text-xs text-white/60">
+                      Conveyor speed ({ensureSurface(selected).conveyorSpeed ?? 4})
+                      <input
+                        type="range"
+                        min={1}
+                        max={12}
+                        step={0.5}
+                        className="w-full"
+                        value={ensureSurface(selected).conveyorSpeed ?? 4}
+                        onChange={(e) =>
+                          patchSelected({
+                            surface: {
+                              ...ensureSurface(selected),
+                              conveyor: true,
+                              conveyorSpeed: Number(e.target.value),
+                            },
+                            solid: true,
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={!!ensureTeleport(selected).enabled}
+                      onChange={(e) =>
+                        patchSelected({
+                          teleport: { ...ensureTeleport(selected), enabled: e.target.checked },
+                        })
+                      }
+                    />
+                    Teleporter
+                  </label>
+                  {ensureTeleport(selected).enabled && (
+                    <label className="block text-xs text-white/60">
+                      Target entity
+                      <select
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                        value={ensureTeleport(selected).targetEntityId ?? ''}
+                        onChange={(e) =>
+                          patchSelected({
+                            teleport: {
+                              ...ensureTeleport(selected),
+                              enabled: true,
+                              targetEntityId: e.target.value || undefined,
+                            },
+                          })
+                        }
+                      >
+                        <option value="">— pick exit —</option>
+                        {doc.entities
+                          .filter((e) => e.id !== selected.id)
+                          .map((e) => (
+                            <option key={e.id} value={e.id}>
+                              {e.name} ({e.kind})
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  )}
+
+                  {(selected.model?.includes('stair') || selected.model?.includes('ramp')) && (
+                    <button
+                      type="button"
+                      className="w-full text-xs py-2 rounded-lg bg-violet-600/35 hover:bg-violet-500/45 font-semibold"
+                      onClick={() => {
+                        const pads = bakeStairsToPads(selected, 8);
+                        scheduleHistory();
+                        setDoc((d) => {
+                          const next = { ...d, entities: [...d.entities, ...pads] };
+                          apiRef.current?.setDoc(next);
+                          return next;
+                        });
+                        toast({
+                          title: `Baked ${pads.length} stair pads`,
+                          description: 'Thin solid steps added for climbable collision.',
+                        });
+                      }}
+                    >
+                      Bake stairs → solid steps
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -1775,80 +1890,167 @@ export function MapEditor({
                 selected.kind !== 'spawn_runner' &&
                 selected.kind !== 'spawn_trapper' && (
               <div className="space-y-2 border-t border-white/10 pt-2">
-                <p className="text-[10px] tracking-widest text-white/50 uppercase">Death zone</p>
+                <p className="text-[10px] tracking-widest text-white/50 uppercase">
+                  {selected.kind === 'trap' ? 'Trap / timed hazard' : 'Death zone'}
+                </p>
                 <label className="flex items-center gap-2 text-xs text-white/70">
                   <input
                     type="checkbox"
-                    checked={ensureHazard(selected).enabled || selected.kind === 'hazard'}
+                    checked={
+                      ensureHazard(selected).enabled ||
+                      selected.kind === 'hazard' ||
+                      selected.kind === 'trap'
+                    }
                     onChange={(e) => {
                       const hz = ensureHazard(selected);
                       patchSelected({
-                        kind: e.target.checked && selected.kind === 'prop' ? 'hazard' : selected.kind,
+                        kind:
+                          e.target.checked && selected.kind === 'prop' ? 'hazard' : selected.kind,
                         hazard: { ...hz, enabled: e.target.checked },
                       });
                     }}
                   />
                   Damages player on touch
                 </label>
-                {(ensureHazard(selected).enabled || selected.kind === 'hazard') && (
+                {(ensureHazard(selected).enabled ||
+                  selected.kind === 'hazard' ||
+                  selected.kind === 'trap') && (
                   <>
+                    <label className="block text-xs text-white/60">
+                      Mode
+                      <select
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                        value={
+                          ensureHazard(selected).mode ??
+                          (selected.kind === 'trap' ? 'timed' : 'always')
+                        }
+                        onChange={(e) =>
+                          patchSelected({
+                            hazard: {
+                              ...ensureHazard(selected),
+                              enabled: true,
+                              mode: e.target.value as 'always' | 'timed' | 'button',
+                            },
+                          })
+                        }
+                      >
+                        <option value="always">Always on</option>
+                        <option value="timed">Timed pulse (auto)</option>
+                        <option value="button">Button-armed (starts off)</option>
+                      </select>
+                    </label>
+                    <label className="block text-xs text-white/60">
+                      Obstacle style
+                      <select
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                        value={ensureHazard(selected).obstacleKind ?? 'damage'}
+                        onChange={(e) =>
+                          patchSelected({
+                            hazard: {
+                              ...ensureHazard(selected),
+                              enabled: true,
+                              obstacleKind: e.target.value as
+                                | 'spike'
+                                | 'saw'
+                                | 'laser'
+                                | 'crusher'
+                                | 'damage',
+                            },
+                          })
+                        }
+                      >
+                        <option value="damage">Damage volume</option>
+                        <option value="spike">Spike</option>
+                        <option value="saw">Saw</option>
+                        <option value="laser">Laser</option>
+                        <option value="crusher">Crusher</option>
+                      </select>
+                    </label>
                     <label className="flex items-center gap-2 text-xs text-white/70">
                       <input
                         type="checkbox"
                         checked={ensureHazard(selected).instantKill}
                         onChange={(e) =>
                           patchSelected({
-                            hazard: { ...ensureHazard(selected), instantKill: e.target.checked, enabled: true },
+                            hazard: {
+                              ...ensureHazard(selected),
+                              instantKill: e.target.checked,
+                              enabled: true,
+                            },
                           })
                         }
                       />
                       Instant kill
                     </label>
                     {!ensureHazard(selected).instantKill && (
-                      <>
-                        <label className="block text-xs text-white/60">
-                          Damage per tick ({ensureHazard(selected).damage})
-                          <input
-                            type="range"
-                            min={1}
-                            max={100}
-                            className="w-full"
-                            value={ensureHazard(selected).damage}
-                            onChange={(e) =>
-                              patchSelected({
-                                hazard: {
-                                  ...ensureHazard(selected),
-                                  damage: Number(e.target.value),
-                                  enabled: true,
-                                },
-                              })
-                            }
-                          />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Interval ms ({ensureHazard(selected).intervalMs})
-                          <input
-                            type="range"
-                            min={100}
-                            max={2000}
-                            step={50}
-                            className="w-full"
-                            value={ensureHazard(selected).intervalMs}
-                            onChange={(e) =>
-                              patchSelected({
-                                hazard: {
-                                  ...ensureHazard(selected),
-                                  intervalMs: Number(e.target.value),
-                                  enabled: true,
-                                },
-                              })
-                            }
-                          />
-                        </label>
-                      </>
+                      <label className="block text-xs text-white/60">
+                        Damage ({ensureHazard(selected).damage})
+                        <input
+                          type="range"
+                          min={1}
+                          max={100}
+                          className="w-full"
+                          value={ensureHazard(selected).damage}
+                          onChange={(e) =>
+                            patchSelected({
+                              hazard: {
+                                ...ensureHazard(selected),
+                                damage: Number(e.target.value),
+                                enabled: true,
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    )}
+                    <label className="block text-xs text-white/60">
+                      {(ensureHazard(selected).mode ?? 'always') === 'always'
+                        ? `Tick cooldown ms (${ensureHazard(selected).intervalMs})`
+                        : `Off time ms (${ensureHazard(selected).intervalMs})`}
+                      <input
+                        type="range"
+                        min={100}
+                        max={5000}
+                        step={50}
+                        className="w-full"
+                        value={ensureHazard(selected).intervalMs}
+                        onChange={(e) =>
+                          patchSelected({
+                            hazard: {
+                              ...ensureHazard(selected),
+                              intervalMs: Number(e.target.value),
+                              enabled: true,
+                            },
+                          })
+                        }
+                      />
+                    </label>
+                    {(ensureHazard(selected).mode === 'timed' ||
+                      ensureHazard(selected).mode === 'button' ||
+                      (selected.kind === 'trap' && !ensureHazard(selected).mode)) && (
+                      <label className="block text-xs text-white/60">
+                        Active / on time ms ({ensureHazard(selected).activeMs ?? 900})
+                        <input
+                          type="range"
+                          min={200}
+                          max={5000}
+                          step={50}
+                          className="w-full"
+                          value={ensureHazard(selected).activeMs ?? 900}
+                          onChange={(e) =>
+                            patchSelected({
+                              hazard: {
+                                ...ensureHazard(selected),
+                                activeMs: Number(e.target.value),
+                                enabled: true,
+                              },
+                            })
+                          }
+                        />
+                      </label>
                     )}
                     <p className="text-[10px] text-white/40">
-                      Damage volumes export into Deathrun matches (authoritative).
+                      Timed = auto pulse. Button = wire Button → Activates this trap, press E in match.
                     </p>
                   </>
                 )}

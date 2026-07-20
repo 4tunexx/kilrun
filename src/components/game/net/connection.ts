@@ -127,9 +127,12 @@ export class GameConnection {
       z: number;
       width: number;
       depth: number;
-      kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish';
+      kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor';
       boost?: number;
       height?: number;
+      conveyorSpeed?: number;
+      conveyorDirX?: number;
+      conveyorDirY?: number;
     }[];
     obstacles?: {
       id?: string;
@@ -143,6 +146,7 @@ export class GameConnection {
       activeMs?: number;
       damage?: number;
       alwaysActive?: boolean;
+      buttonControlled?: boolean;
       instantKill?: boolean;
     }[];
     finishes?: {
@@ -153,6 +157,29 @@ export class GameConnection {
       width: number;
       depth: number;
       height: number;
+    }[];
+    buttons?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      radius: number;
+      activatesObstacleIds: string[];
+      holdMs: number;
+      cooldownMs: number;
+    }[];
+    teleports?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      width: number;
+      depth: number;
+      height: number;
+      targetX: number;
+      targetY: number;
+      targetZ: number;
+      cooldownMs: number;
     }[];
     spawn?: { x: number; y: number; z: number };
     trapperSpawn?: { x: number; y: number; z: number };
