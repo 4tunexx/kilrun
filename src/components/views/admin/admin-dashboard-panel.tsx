@@ -153,7 +153,7 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
   const handleSchemaSync = async () => {
     if (
       !window.confirm(
-        'Sync Prisma schema to MongoDB now? This runs prisma db push and verifies KP ranks (User.kp), MatchResult fields, and skin fields. Safe for Mongo — does not wipe player data.'
+        'Sync Prisma schema to MongoDB now? This runs prisma db push and verifies KP, peak ranks, Premium expiry, premiumConfigJson, MatchResult fields, and skins. Safe for Mongo — does not wipe player data.'
       )
     ) {
       return;
@@ -392,7 +392,9 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-slate-400">
-              After deploying schema changes (KP ranks, MatchResult stats, skins), press this once
+              After deploying schema changes (KP, peak ranks, Premium, MatchResult, skins), press this once
+              so Mongo gets the new fields. Also run <strong>Seed progression</strong> below for Horde /
+              Competitive missions &amp; badges.
               so Mongo gets the latest Prisma fields (
               <code className="text-slate-300">User.kp</code>,{' '}
               <code className="text-slate-300">MatchResult.kpDelta</code>,{' '}

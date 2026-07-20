@@ -27,6 +27,13 @@ import {
   isPremiumActive,
   premiumMsRemaining,
 } from '@/lib/premium';
+import {
+  DEFAULT_PREMIUM_CONFIG,
+  isFreeRankedWeekActive,
+  parsePremiumConfig,
+  type PremiumConfig,
+} from '@/lib/premium-config';
+import { getSiteSettings } from '@/lib/progression-actions';
 import { useToast } from '@/hooks/use-toast';
 
 interface PremiumViewProps {
@@ -34,6 +41,7 @@ interface PremiumViewProps {
   isVip: boolean;
   premiumExpiresAt?: string | null;
   currentRank?: string;
+  peakRank?: string;
   kp?: number;
   onPurchased?: (next: { vpBalance: number; premiumExpiresAt: string }) => void;
   onGoRanked?: () => void;
@@ -67,15 +75,17 @@ export default function PremiumView({
   isVip,
   premiumExpiresAt,
   currentRank,
+  peakRank,
   kp,
   onPurchased,
   onGoRanked,
 }: PremiumViewProps) {
   const { toast } = useToast();
-  const [busy, setBusy] = useState<'vp' | 'card' | null>(null);
+  const [busy, setBusy] = useState<'vp' | 'card' | string | null>(null);
   const [expiresAt, setExpiresAt] = useState(premiumExpiresAt ?? null);
   const [balance, setBalance] = useState(vpBalance);
   const [now, setNow] = useState(Date.now());
+  const [cfg, setCfg] = useState<PremiumConfig>(DEFAULT_PREMIUM_CONFIG);
 
   useEffect(() => {
     setExpiresAt(premiumExpiresAt ?? null);
@@ -86,38 +96,53 @@ export default function PremiumView({
   }, [vpBalance]);
 
   useEffect(() => {
+    getSiteSettings()
+      .then((s) =>
+        setCfg(
+          parsePremiumConfig(
+            (s as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
+          )
+        )
+      )
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(t);
   }, []);
 
   const active = isPremiumActive({ isVip, premiumExpiresAt: expiresAt });
   const remaining = premiumMsRemaining(expiresAt);
-  // re-read now so countdown updates
-  void now;
+  const freeWeek = isFreeRankedWeekActive(cfg, now);
+  const vpCost = cfg.vpCost || PREMIUM_VP_COST;
+  const days = cfg.durationDays || PREMIUM_DURATION_DAYS;
+  const usd = cfg.monthlyUsd || PREMIUM_MONTHLY_USD;
 
-  const buyVp = async () => {
-    setBusy('vp');
+  const buyVp = async (offerId?: string) => {
+    setBusy(offerId ?? 'vp');
     try {
-      const result = await purchasePremiumWithVp();
+      const result = await purchasePremiumWithVp(offerId);
       if (!result.ok) {
         toast({
           title: result.error ?? 'Purchase failed',
-          description: `Premium is ${PREMIUM_VP_COST} VP / ${PREMIUM_DURATION_DAYS} days.`,
+          description: `Premium is ${vpCost} VP / ${days} days.`,
           variant: 'destructive',
         });
         return;
       }
-      setBalance((b) => b - PREMIUM_VP_COST);
+      const spent = result.vpSpent ?? vpCost;
+      setBalance((b) => b - spent);
       if (result.premiumExpiresAt) {
         setExpiresAt(result.premiumExpiresAt);
         onPurchased?.({
-          vpBalance: balance - PREMIUM_VP_COST,
+          vpBalance: balance - spent,
           premiumExpiresAt: result.premiumExpiresAt,
         });
       }
       toast({
         title: 'Premium activated',
-        description: `${PREMIUM_DURATION_DAYS} days of Ranked Competitive unlocked.`,
+        description: `${days} days of Ranked Competitive unlocked.`,
       });
     } finally {
       setBusy(null);
@@ -130,13 +155,14 @@ export default function PremiumView({
       await requestPremiumCardCheckout();
       toast({
         title: 'Card checkout requested',
-        description:
-          'Stripe billing is finishing setup. Use 5000 VP to start now, or check Support for billing help.',
+        description: `Stripe billing is finishing setup. Use ${vpCost} VP to start now, or check Support for billing help.`,
       });
     } finally {
       setBusy(null);
     }
   };
+
+  const vpOffers = cfg.offers.filter((o) => o.enabled && o.vpCost > 0);
 
   return (
     <div className="px-4 sm:px-8 py-6 space-y-6 max-w-5xl mx-auto">
@@ -154,6 +180,11 @@ export default function PremiumView({
               Compete in Premium Ranked 4v4 with Killrun Points (KP), climb Immortal, and show your
               Premium badge next to Steam & email verification.
             </p>
+            {freeWeek && (
+              <Badge className="mt-3 bg-emerald-500/20 text-emerald-200 border-emerald-400/40">
+                Free Ranked week is live — join Ranked without Premium
+              </Badge>
+            )}
           </div>
           {active ? (
             <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 min-w-[12rem]">
@@ -168,17 +199,25 @@ export default function PremiumView({
                   ? `Expires ${new Date(expiresAt).toLocaleString()}`
                   : 'Legacy Premium (no expiry)'}
               </p>
-              {currentRank && (
+              {(currentRank || peakRank) && (
                 <p className="text-xs text-amber-200 mt-2">
-                  Rank {currentRank}
+                  Rank {currentRank || peakRank}
                   {typeof kp === 'number' ? ` · ${kp} KP` : ''}
+                  {peakRank && peakRank !== currentRank ? ` · Peak ${peakRank}` : ''}
                 </p>
               )}
             </div>
           ) : (
             <div className="rounded-xl border border-slate-600/50 bg-slate-950/50 px-4 py-3 text-sm text-slate-300">
-              Rank shows <span className="text-amber-300 font-semibold">Go Premium</span> until you
-              subscribe.
+              Hub rank shows <span className="text-amber-300 font-semibold">Go Premium</span> until
+              you subscribe
+              {peakRank && peakRank !== 'Unranked' ? (
+                <>
+                  {' '}
+                  — public profile keeps peak <span className="text-amber-200">{peakRank}</span>
+                </>
+              ) : null}
+              .
             </div>
           )}
         </div>
@@ -208,11 +247,11 @@ export default function PremiumView({
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-3xl font-black text-white">
-              {PREMIUM_VP_COST.toLocaleString()}{' '}
+              {vpCost.toLocaleString()}{' '}
               <span className="text-lg text-amber-200">VP</span>
             </p>
             <p className="text-sm text-slate-400">
-              {PREMIUM_DURATION_DAYS} days · stacks if you renew early · balance{' '}
+              {days} days · stacks if you renew early · balance{' '}
               <span className="text-slate-200 font-semibold">{balance.toLocaleString()} VP</span>
             </p>
             <ul className="text-xs text-slate-400 space-y-1">
@@ -224,7 +263,7 @@ export default function PremiumView({
             </ul>
             <Button
               className="w-full bg-amber-600 hover:bg-amber-500 text-black font-bold"
-              disabled={busy !== null || balance < PREMIUM_VP_COST}
+              disabled={busy !== null || balance < vpCost}
               onClick={() => void buyVp()}
             >
               {busy === 'vp' ? (
@@ -234,6 +273,31 @@ export default function PremiumView({
               )}
               {active ? 'Extend Premium' : 'Unlock Premium'}
             </Button>
+            {vpOffers.length > 0 && (
+              <div className="space-y-2 pt-2 border-t border-slate-700/40">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">
+                  Extra offers
+                </p>
+                {vpOffers.map((o) => (
+                  <Button
+                    key={o.id}
+                    variant="secondary"
+                    className="w-full justify-between"
+                    disabled={busy !== null || balance < o.vpCost}
+                    onClick={() => void buyVp(o.id)}
+                  >
+                    <span>{o.label}</span>
+                    <span className="tabular-nums">
+                      {busy === o.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        `${o.vpCost.toLocaleString()} VP · ${o.durationDays}d`
+                      )}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -246,7 +310,7 @@ export default function PremiumView({
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-3xl font-black text-white">
-              ${PREMIUM_MONTHLY_USD.toFixed(2)}
+              ${usd.toFixed(2)}
               <span className="text-lg text-slate-400 font-semibold"> / mo</span>
             </p>
             <p className="text-sm text-slate-400">
@@ -264,13 +328,13 @@ export default function PremiumView({
               ) : (
                 <CreditCard className="h-4 w-4 mr-2" />
               )}
-              Request ${PREMIUM_MONTHLY_USD.toFixed(2)} checkout
+              Request ${usd.toFixed(2)} checkout
             </Button>
           </CardContent>
         </Card>
       </div>
 
-      {active && onGoRanked && (
+      {(active || freeWeek) && onGoRanked && (
         <div className="flex justify-center">
           <Button size="lg" onClick={onGoRanked} className="font-bold uppercase tracking-wide">
             <Swords className="h-4 w-4 mr-2" /> Play Ranked Competitive

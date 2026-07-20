@@ -453,13 +453,20 @@ export async function recordCompetitiveResult(input: {
   const user = await prisma.user.findUnique({ where: { id: input.userId } });
   if (!user) throw new Error('User not found');
 
-  // Ranked KP only for active Premium — non-premium always treated as casual.
+  // Ranked KP when Premium OR free Ranked week is active.
+  const { parsePremiumConfig, isFreeRankedWeekActive } = await import('@/lib/premium-config');
+  const { getSiteSettings } = await import('@/lib/progression-actions');
+  const settings = await getSiteSettings();
+  const premiumCfg = parsePremiumConfig(
+    (settings as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
+  );
+  const freeWeek = isFreeRankedWeekActive(premiumCfg);
   const premium = isPremiumActive({
     isVip: user.isVip,
     premiumExpiresAt: (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt,
   });
   const requested = input.queue ?? 'ranked';
-  const queue = requested === 'ranked' && premium ? 'ranked' : 'casual';
+  const queue = requested === 'ranked' && (premium || freeWeek) ? 'ranked' : 'casual';
 
   const playerKp =
     typeof (user as { kp?: number }).kp === 'number'

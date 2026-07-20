@@ -479,10 +479,20 @@ export default function PublicProfileView({
                 percent={profile.levelProgressPercent}
               />
               <div className="rounded-lg bg-slate-900/40 border border-slate-700/30 p-3 text-center">
-                <p className="text-xs text-slate-400">Rank</p>
-                <p className="text-lg font-bold text-yellow-400 flex items-center justify-center gap-1">
-                  <Crown className="h-4 w-4" /> {profile.currentRank}
+                <p className="text-xs text-slate-400">
+                  {profile.isPremium ? 'Ranked rank' : 'Highest Ranked rank'}
                 </p>
+                <p className="text-lg font-bold text-yellow-400 flex items-center justify-center gap-1">
+                  <Crown className="h-4 w-4" /> {profile.peakRank || profile.currentRank}
+                </p>
+                {typeof profile.peakKp === 'number' && (
+                  <p className="text-[10px] text-slate-500 mt-1 tabular-nums">
+                    Peak {profile.peakKp.toLocaleString()} KP
+                    {profile.isPremium && typeof profile.kp === 'number'
+                      ? ` · Live ${profile.kp.toLocaleString()} KP`
+                      : ''}
+                  </p>
+                )}
               </div>
               <div className="rounded-lg bg-slate-900/40 border border-slate-700/30 p-3 text-center">
                 <p className="text-xs text-slate-400">Leaderboard</p>

@@ -35,6 +35,14 @@ export default async function Page() {
     typeof (user as { kp?: number }).kp === 'number'
       ? (user as { kp: number }).kp
       : KP_DEFAULT;
+  const peakKp = Math.max(
+    typeof (user as { peakKp?: number }).peakKp === 'number'
+      ? (user as { peakKp: number }).peakKp
+      : kp,
+    kp
+  );
+  const peakRank =
+    (user as { peakRank?: string }).peakRank || getRankForKp(peakKp);
   const premiumExpiresAt =
     (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt ?? null;
   const premium = isPremiumActive({

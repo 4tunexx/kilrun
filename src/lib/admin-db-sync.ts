@@ -16,7 +16,7 @@ import { writeAuditLog } from '@/lib/audit';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-20-premium-ranked';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-20-premium-peak-config';
 
 async function requireAdmin() {
   const session = await auth();
@@ -50,11 +50,11 @@ export type AdminDbSyncResult = {
 };
 
 /**
- * Push Prisma schema to Mongo and verify KP / skin fields are writable.
- * Call from Admin → Dashboard → Sync database schema.
+ * Push Prisma schema to Mongo and verify all gameplay fields are writable.
+ * Call from Admin → Dashboard → Sync database schema (once after this deploy).
  *
- * Needed after deploying: User.kp, User.premiumExpiresAt, MatchResult.kpDelta / stats,
- * and any new mission / achievement / badge seed keys.
+ * Verifies: equippedSkins, kp, peakKp/peakRank, premiumExpiresAt,
+ * MatchResult.kpDelta/stats, SiteSettings.premiumConfigJson.
  */
 export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
   const staff = await requireAdmin();
@@ -194,6 +194,59 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`premiumExpiresAt verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — User.premiumExpiresAt not writable. Run Sync again after deploy. (${msg})`
+    );
+  }
+
+  // Runtime verify: peak KP / peak rank (kept after Premium expires)
+  try {
+    const current = await prisma.user.findUnique({
+      where: { id: staff.id },
+      select: { kp: true, peakKp: true, peakRank: true },
+    });
+    const kp = typeof current?.kp === 'number' ? current.kp : 1000;
+    const peakKp = Math.max(
+      typeof current?.peakKp === 'number' ? current.peakKp : kp,
+      kp
+    );
+    const peakRank = current?.peakRank || 'Unranked';
+    await prisma.user.update({
+      where: { id: staff.id },
+      data: { peakKp, peakRank },
+    });
+    steps.push(
+      `peakKp/peakRank verified (read/write OK, peakKp=${peakKp}, peakRank=${peakRank})`
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`peakKp/peakRank verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — User.peakKp/peakRank not writable. Run Sync again after deploy. (${msg})`
+    );
+  }
+
+  // Runtime verify: SiteSettings.premiumConfigJson (admin Premium editor)
+  try {
+    const settings = await prisma.siteSettings.findUnique({
+      where: { singletonKey: 'default' },
+    });
+    const raw =
+      (settings as { premiumConfigJson?: string } | null)?.premiumConfigJson ?? '{}';
+    if (settings) {
+      await prisma.siteSettings.update({
+        where: { singletonKey: 'default' },
+        data: { premiumConfigJson: raw },
+      });
+    } else {
+      await prisma.siteSettings.create({
+        data: { singletonKey: 'default', premiumConfigJson: '{}' },
+      });
+    }
+    steps.push('premiumConfigJson field verified (read/write OK)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`premiumConfigJson verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — SiteSettings.premiumConfigJson not writable. (${msg})`
     );
   }
 

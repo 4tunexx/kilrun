@@ -33,14 +33,20 @@ const modes: ModeDefinition[] = [
 interface PlayViewProps {
   onPlay: (mode: KilrunMode, opts?: { competitiveQueue?: CompetitiveQueue }) => void;
   isPremium?: boolean;
+  /** Premium or free Ranked week — can enter Ranked queue. */
+  rankedAccess?: boolean;
+  freeRankedWeek?: boolean;
   onOpenPremium?: () => void;
 }
 
 export default function PlayView({
   onPlay,
   isPremium = false,
+  rankedAccess,
+  freeRankedWeek = false,
   onOpenPremium,
 }: PlayViewProps) {
+  const canRanked = rankedAccess ?? isPremium;
   const [gameDisabled, setGameDisabled] = useState(false);
   const [disabledMsg, setDisabledMsg] = useState('');
 
@@ -108,7 +114,7 @@ export default function PlayView({
                     className="w-full bg-amber-600 hover:bg-amber-500 text-black font-bold"
                     disabled={!canPlay}
                     onClick={() => {
-                      if (!isPremium) {
+                      if (!canRanked) {
                         onOpenPremium?.();
                         return;
                       }
@@ -116,12 +122,17 @@ export default function PlayView({
                     }}
                   >
                     <Gem className="h-4 w-4 mr-1" />
-                    {isPremium ? 'Ranked Premium' : 'Ranked · Go Premium'}
+                    {canRanked
+                      ? freeRankedWeek && !isPremium
+                        ? 'Ranked · Free Week'
+                        : 'Ranked Premium'
+                      : 'Ranked · Go Premium'}
                     <ArrowRight className="h-4 w-4 ml-auto" />
                   </Button>
                   <p className="text-[11px] text-slate-500">
                     Casual: XP, VP, achievements — no rank change. Ranked: KP moves your ladder
-                    rank.
+                    rank
+                    {freeRankedWeek ? ' (free week open)' : ''}.
                   </p>
                 </CardContent>
               </Card>

@@ -17,6 +17,8 @@ export interface JoinOptions {
   kp?: number;
   /** Premium membership — required for Ranked Competitive. */
   isPremium?: boolean;
+  /** Premium or free Ranked week. */
+  rankedAccess?: boolean;
 }
 
 export type GameRoomName = 'deathrun' | 'horde' | 'competitive' | 'competitive_ranked';

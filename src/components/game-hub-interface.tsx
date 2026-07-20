@@ -227,6 +227,15 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [premiumExpiresAt, setPremiumExpiresAt] = useState<string | null>(
     user.premiumExpiresAt ?? null
   );
+  const [rankedAccess, setRankedAccess] = useState(
+    !!(
+      user.isPremium ??
+      isPremiumActive({ isVip: user.isVip, premiumExpiresAt: user.premiumExpiresAt })
+    )
+  );
+  const [freeRankedWeek, setFreeRankedWeek] = useState(false);
+  const [peakRank, setPeakRank] = useState('Unranked');
+  const [peakKp, setPeakKp] = useState(user.kp ?? 1000);
   const [equippedFrameConfig, setEquippedFrameConfig] = useState<unknown | null>(
     user.equippedFrameConfig ?? null
   );
@@ -283,6 +292,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
         setIsVip(live.isVip);
         setIsPremium(!!live.isPremium);
         setPremiumExpiresAt(live.premiumExpiresAt ?? null);
+        setRankedAccess(!!(live.rankedAccess ?? live.isPremium));
+        setFreeRankedWeek(!!live.freeRankedWeek);
+        if (typeof live.peakKp === 'number') setPeakKp(live.peakKp);
+        if (typeof live.peakRank === 'string') setPeakRank(live.peakRank);
         setEmailVerified(live.emailVerified);
       })
       .catch(() => {});
@@ -318,6 +331,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       setIsVip(live.isVip);
       setIsPremium(!!live.isPremium);
       setPremiumExpiresAt(live.premiumExpiresAt ?? null);
+      setRankedAccess(!!(live.rankedAccess ?? live.isPremium));
+      setFreeRankedWeek(!!live.freeRankedWeek);
+      if (typeof live.peakKp === 'number') setPeakKp(live.peakKp);
+      if (typeof live.peakRank === 'string') setPeakRank(live.peakRank);
       setEmailVerified(live.emailVerified);
       setUnreadCount(live.unreadNotifications);
       if (typeof live.unreadMessages === 'number') {
@@ -449,7 +466,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   ) => {
     if (mode === 'competitive') {
       const queue = opts?.competitiveQueue ?? 'casual';
-      if (queue === 'ranked' && !isPremium) {
+      if (queue === 'ranked' && !rankedAccess) {
         navigate('premium');
         return;
       }
@@ -494,8 +511,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     }
     setIsVip(true);
     setIsPremium(true);
+    setRankedAccess(true);
     if (result.premiumExpiresAt) setPremiumExpiresAt(result.premiumExpiresAt);
-    setVpBalance((v) => v - PREMIUM_VP_COST);
+    setVpBalance((v) => v - (result.vpSpent ?? PREMIUM_VP_COST));
     setIsVipDialogOpen(false);
     toast({
       title: 'Premium activated',
@@ -543,22 +561,28 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       if (currentPage === 'play') {
         props.onPlay = handlePlay;
         props.isPremium = isPremium;
+        props.rankedAccess = rankedAccess;
+        props.freeRankedWeek = freeRankedWeek;
         props.onOpenPremium = () => navigate('premium');
       } else if (currentPage === 'premium') {
         props.vpBalance = vpBalance;
         props.isVip = isVip;
         props.premiumExpiresAt = premiumExpiresAt;
         props.currentRank = isPremium ? currentRank : undefined;
+        props.peakRank = peakRank;
         props.kp = kp;
         props.onPurchased = (next: { vpBalance: number; premiumExpiresAt: string }) => {
           setVpBalance(next.vpBalance);
           setPremiumExpiresAt(next.premiumExpiresAt);
           setIsPremium(true);
           setIsVip(true);
+          setRankedAccess(true);
           getLivePlayerState(user.id)
             .then((live) => {
               setCurrentRank(live.currentRank);
               if (typeof live.kp === 'number') setKp(live.kp);
+              if (typeof live.peakRank === 'string') setPeakRank(live.peakRank);
+              if (typeof live.peakKp === 'number') setPeakKp(live.peakKp);
             })
             .catch(() => {});
         };
@@ -582,7 +606,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           xpProgress,
           isAdmin: showAdmin,
           kp,
-          isPremium,
+          isPremium: rankedAccess,
           competitiveQueue: lobbyMode === 'competitive' ? competitiveQueue : 'casual',
         };
       } else if (currentPage === 'messages') {
@@ -611,6 +635,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           <PlayView
             onPlay={handlePlay}
             isPremium={isPremium}
+            rankedAccess={rankedAccess}
+            freeRankedWeek={freeRankedWeek}
             onOpenPremium={() => navigate('premium')}
           />
         );
@@ -1078,11 +1104,19 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                         >
                           {isPremium ? currentRank : 'Go Premium'}
                         </div>
-                        {isPremium && (
+                        {isPremium ? (
                           <div className="text-[10px] text-slate-500 mt-0.5 tabular-nums">
                             {kp.toLocaleString()} KP
+                            {peakRank && peakRank !== currentRank
+                              ? ` · Peak ${peakRank}`
+                              : ''}
                           </div>
-                        )}
+                        ) : peakRank && peakRank !== 'Unranked' ? (
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Peak {peakRank}
+                            {peakKp ? ` · ${peakKp.toLocaleString()} KP` : ''}
+                          </div>
+                        ) : null}
                       </button>
                       <div className="mt-2 text-sm text-slate-300">{vpBalance} VP</div>
                     </div>

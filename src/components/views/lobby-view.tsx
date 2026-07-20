@@ -35,7 +35,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   competitiveQueue = 'casual',
 }) => {
   const joinOptions = useMemo(
-    () => ({ userId, username, avatarUrl, isAdmin, kp, isPremium }),
+    () => ({ userId, username, avatarUrl, isAdmin, kp, isPremium, rankedAccess: isPremium }),
     [userId, username, avatarUrl, isAdmin, kp, isPremium]
   );
   const [equippedSkins, setEquippedSkins] = useState<SkinAttachment[]>([]);

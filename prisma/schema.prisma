@@ -22,6 +22,10 @@ model User {
   /// Profile `currentRank` is derived from KP via getRankForKp().
   kp          Int      @default(1000)
   currentRank String   @default("Unranked")
+  /// Highest KP ever reached in Ranked Competitive (never decreases).
+  peakKp      Int      @default(1000)
+  /// Highest KP rank tier ever reached (e.g. Gold) — kept after Premium expires.
+  peakRank    String   @default("Unranked")
   role        String   @default("player")
   bio         String   @default("")
   /// ISO 3166-1 alpha-2 country code (e.g. "us", "gb") for public flag.
@@ -290,6 +294,8 @@ model SiteSettings {
   hubNavJson         String  @default("{}")
   /// JSON: { showHeader, showFooter, showLandingSlider }.
   hubChromeJson      String  @default("{}")
+  /// JSON: Premium pricing, offers, free Ranked week — see premium-config.ts.
+  premiumConfigJson  String  @default("{}")
 }
 
 model GlobalChatMessage {

@@ -306,14 +306,36 @@ export async function unlockVipWithVp() {
 }
 
 /**
- * Extend Kilrun Premium by 30 days for PREMIUM_VP_COST VP.
+ * Extend Kilrun Premium using admin-configured VP price / duration (or a named offer).
  * Stacks from current expiry if still active.
  */
-export async function purchasePremiumWithVp() {
-  const { PREMIUM_VP_COST, addPremiumDays, isPremiumActive } = await import('@/lib/premium');
+export async function purchasePremiumWithVp(offerId?: string) {
+  const { addPremiumDays, isPremiumActive } = await import('@/lib/premium');
+  const { parsePremiumConfig } = await import('@/lib/premium-config');
+  const { getSiteSettings } = await import('@/lib/progression-actions');
   const user = await requireSessionUser();
-  if (user.vpCurrency < PREMIUM_VP_COST) {
-    return { ok: false as const, error: `Need ${PREMIUM_VP_COST} VP` };
+  const settings = await getSiteSettings();
+  const cfg = parsePremiumConfig(
+    (settings as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
+  );
+
+  let vpCost = cfg.vpCost;
+  let durationDays = cfg.durationDays;
+  let label = `${durationDays} days`;
+
+  if (offerId) {
+    const offer = cfg.offers.find((o) => o.id === offerId && o.enabled);
+    if (!offer) return { ok: false as const, error: 'Offer not available' };
+    if (offer.usd != null && offer.vpCost <= 0) {
+      return { ok: false as const, error: 'Use card checkout for this offer' };
+    }
+    vpCost = offer.vpCost;
+    durationDays = offer.durationDays;
+    label = offer.label;
+  }
+
+  if (vpCost > 0 && user.vpCurrency < vpCost) {
+    return { ok: false as const, error: `Need ${vpCost} VP` };
   }
 
   const currentExpires =
@@ -323,13 +345,14 @@ export async function purchasePremiumWithVp() {
   const nextExpires = addPremiumDays(
     currentExpires && isPremiumActive({ isVip: user.isVip, premiumExpiresAt: currentExpires })
       ? new Date(currentExpires)
-      : new Date()
+      : new Date(),
+    durationDays
   );
 
   await prisma.user.update({
     where: { id: user.id },
     data: {
-      vpCurrency: { decrement: PREMIUM_VP_COST },
+      ...(vpCost > 0 ? { vpCurrency: { decrement: vpCost } } : {}),
       isVip: true,
       premiumExpiresAt: nextExpires,
       role: user.role === 'player' ? 'vip' : user.role,
@@ -344,7 +367,7 @@ export async function purchasePremiumWithVp() {
     data: {
       userId: user.id,
       title: 'Premium activated',
-      body: `Kilrun Premium is active until ${nextExpires.toLocaleDateString()}. Ranked Competitive (KP) and hub perks unlocked.`,
+      body: `Kilrun Premium (${label}) is active until ${nextExpires.toLocaleDateString()}. Ranked Competitive (KP) and hub perks unlocked.`,
       type: 'vip',
     },
   });
@@ -352,6 +375,7 @@ export async function purchasePremiumWithVp() {
   return {
     ok: true as const,
     already: false,
+    vpSpent: vpCost,
     premiumExpiresAt: nextExpires.toISOString(),
   };
 }
@@ -361,12 +385,19 @@ export async function purchasePremiumWithVp() {
  * Returns a support-ticket style confirmation; does not grant Premium yet.
  */
 export async function requestPremiumCardCheckout() {
+  const { parsePremiumConfig } = await import('@/lib/premium-config');
+  const { getSiteSettings } = await import('@/lib/progression-actions');
   const user = await requireSessionUser();
+  const settings = await getSiteSettings();
+  const cfg = parsePremiumConfig(
+    (settings as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
+  );
+  const usd = cfg.monthlyUsd;
   await prisma.notification.create({
     data: {
       userId: user.id,
       title: 'Premium card checkout',
-      body: 'Card billing ($2.99/mo) is almost ready. You can unlock Premium now with 5000 VP, or open Support for billing help.',
+      body: `Card billing ($${usd.toFixed(2)}/mo) is almost ready. You can unlock Premium now with ${cfg.vpCost} VP, or open Support for billing help.`,
       type: 'system',
     },
   });
@@ -374,9 +405,9 @@ export async function requestPremiumCardCheckout() {
     await prisma.supportTicket.create({
       data: {
         userId: user.id,
-        subject: 'Premium $2.99/mo checkout request',
+        subject: `Premium $${usd.toFixed(2)}/mo checkout request`,
         category: 'Billing / VP',
-        body: 'Player requested Kilrun Premium monthly card checkout ($2.99). Wire Stripe or manually grant 30 days.',
+        body: `Player requested Kilrun Premium monthly card checkout ($${usd.toFixed(2)}). Wire Stripe or manually grant ${cfg.durationDays} days.`,
         status: 'open',
       },
     });

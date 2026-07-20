@@ -39,8 +39,10 @@ interface JoinOptions {
   avatarUrl?: string;
   isAdmin?: boolean;
   kp?: number;
-  /** Premium / VIP — required for competitive_ranked. */
+  /** Premium / VIP — required for competitive_ranked (unless free week client flag). */
   isPremium?: boolean;
+  /** Hub-granted Ranked access (Premium or free Ranked week). */
+  rankedAccess?: boolean;
 }
 
 interface SpawnPoint {
@@ -153,7 +155,8 @@ export class CompetitiveRoom extends Room<RoomState> {
 
   onJoin(client: Client, options: JoinOptions) {
     const ranked = this.state.modeTag === 'competitive_ranked';
-    if (ranked && !options.isPremium && !options.isAdmin) {
+    const allowed = !!(options.isPremium || options.rankedAccess || options.isAdmin);
+    if (ranked && !allowed) {
       throw new Error('Premium required for Ranked Competitive');
     }
 
