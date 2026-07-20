@@ -126,7 +126,12 @@ export function MapEditor({
   const [playTest, setPlayTest] = useState(false);
   const [customTextures, setCustomTextures] = useState<CustomTexture[]>([]);
   const [snapY, setSnapY] = useState(false);
-  const [showHelp, setShowHelp] = useState(true);
+  const isMobile = useIsMobile();
+  const isTouch = typeof window !== 'undefined' && detectTouchDevice();
+  const mobileFirst =
+    typeof window !== 'undefined' &&
+    (window.innerWidth < 768 || detectTouchDevice());
+  const [showHelp, setShowHelp] = useState(!mobileFirst);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -137,15 +142,13 @@ export function MapEditor({
   const [measureMode, setMeasureMode] = useState(false);
   const [measureDist, setMeasureDist] = useState<number | null>(null);
   /** Master hide: collapses top bar, side menus, tools, and properties for a clear canvas. */
-  const [uiCollapsed, setUiCollapsed] = useState(false);
+  const [uiCollapsed, setUiCollapsed] = useState(mobileFirst);
   /** Mobile left asset/library drawer (overlay). Desktop keeps the panel in-flow. */
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(!mobileFirst);
   /** Mobile/desktop properties inspector visibility when something is selected. */
-  const [propsOpen, setPropsOpen] = useState(true);
+  const [propsOpen, setPropsOpen] = useState(!mobileFirst);
   /** Bottom transform/place toolbar. */
-  const [toolsOpen, setToolsOpen] = useState(true);
-  const isMobile = useIsMobile();
-  const isTouch = typeof window !== 'undefined' && detectTouchDevice();
+  const [toolsOpen, setToolsOpen] = useState(!mobileFirst);
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
 
