@@ -7,11 +7,13 @@ import {
   isPremiumActive,
   premiumMsRemaining,
 } from './premium';
+import { VIP_UNLOCK_VP_COST } from './vip';
 
 describe('premium', () => {
   it('prices match product specs', () => {
     expect(PREMIUM_VP_COST).toBe(5000);
     expect(PREMIUM_MONTHLY_USD).toBe(2.99);
+    expect(VIP_UNLOCK_VP_COST).toBe(2500);
   });
 
   it('treats future expiry as active', () => {
@@ -24,8 +26,9 @@ describe('premium', () => {
     expect(isPremiumActive({ isVip: true, premiumExpiresAt: past })).toBe(false);
   });
 
-  it('keeps legacy permanent VIP (no expiry) as Premium', () => {
-    expect(isPremiumActive({ isVip: true, premiumExpiresAt: null })).toBe(true);
+  it('does not treat platform VIP alone as Premium', () => {
+    expect(isPremiumActive({ isVip: true, premiumExpiresAt: null })).toBe(false);
+    expect(isPremiumActive({ isVip: true, premiumExpiresAt: undefined })).toBe(false);
   });
 
   it('stacks renewal from current expiry', () => {

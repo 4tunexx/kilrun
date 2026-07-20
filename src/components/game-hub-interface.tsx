@@ -24,6 +24,8 @@ import {
   CheckCircle2,
   Package,
   Gem,
+  Crown,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
 import HomeView from '@/components/views/home-view';
@@ -45,8 +47,9 @@ import LobbyView from '@/components/views/lobby-view';
 import AdminView from '@/components/views/admin-view';
 import PremiumView from '@/components/views/premium-view';
 import type { KilrunMode, CompetitiveQueue } from '@/components/views/play-view';
-import { canAccessAdmin, PREMIUM_VP_COST, isPremiumActive } from '@/lib/roles';
-import { purchasePremiumWithVp } from '@/lib/social-actions';
+import { canAccessAdmin, VIP_UNLOCK_VP_COST, isPremiumActive } from '@/lib/roles';
+import { unlockVipWithVp } from '@/lib/social-actions';
+import { isPulsarActive, setPulsarActive } from '@/lib/pulsar-anticheat';
 import {
   bootstrapHubProgression,
   getLivePlayerState,
@@ -196,6 +199,8 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [isLeftMenuOpen, setIsLeftMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState('home');
   const [isVipDialogOpen, setIsVipDialogOpen] = useState(false);
+  const [pulsarOn, setPulsarOn] = useState(false);
+  const [pulsarBanner, setPulsarBanner] = useState(false);
   const [isFriendsSheetOpen, setIsFriendsSheetOpen] = useState(false);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
@@ -279,6 +284,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       setIsLeftMenuOpen(false);
     }
   }, [isMobile]);
+
+  useEffect(() => {
+    setPulsarOn(isPulsarActive());
+  }, []);
 
   // Refresh equipped cosmetics when opening the right profile rail
   useEffect(() => {
@@ -500,25 +509,40 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   };
 
   const handleUnlockVip = async () => {
-    const result = await purchasePremiumWithVp();
+    const result = await unlockVipWithVp();
     if (!result.ok) {
       toast({
         title: 'Not enough VP',
-        description: `Premium costs ${PREMIUM_VP_COST} VP for 30 days. Play matches to earn more.`,
+        description: `VIP costs ${VIP_UNLOCK_VP_COST} VP. Play matches to earn more.`,
         variant: 'destructive',
       });
       return;
     }
     setIsVip(true);
-    setIsPremium(true);
-    setRankedAccess(true);
-    if (result.premiumExpiresAt) setPremiumExpiresAt(result.premiumExpiresAt);
-    setVpBalance((v) => v - (result.vpSpent ?? PREMIUM_VP_COST));
+    if (!result.already) {
+      setVpBalance((v) => v - VIP_UNLOCK_VP_COST);
+    }
     setIsVipDialogOpen(false);
-    toast({
-      title: 'Premium activated',
-      description: 'Ranked Competitive and hub perks unlocked.',
-    });
+    toast({ title: 'VIP unlocked', description: 'Welcome to VIP.' });
+  };
+
+  const handleTogglePulsar = () => {
+    const next = !pulsarOn;
+    setPulsarOn(next);
+    setPulsarActive(next);
+    if (next) {
+      setPulsarBanner(true);
+      window.setTimeout(() => setPulsarBanner(false), 2200);
+      toast({
+        title: 'Anticheat Online',
+        description: 'Pulsar is active on your session.',
+      });
+    } else {
+      toast({
+        title: 'Pulsar offline',
+        description: 'Anticheat deactivated.',
+      });
+    }
   };
 
   const handleLogout = () => {
@@ -575,7 +599,6 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           setVpBalance(next.vpBalance);
           setPremiumExpiresAt(next.premiumExpiresAt);
           setIsPremium(true);
-          setIsVip(true);
           setRankedAccess(true);
           getLivePlayerState(user.id)
             .then((live) => {
@@ -762,6 +785,78 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
 
               <div className="my-2 w-3/4 h-px bg-slate-700/50 shrink-0" />
 
+              <Dialog open={isVipDialogOpen} onOpenChange={setIsVipDialogOpen}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setIsVipDialogOpen(true)}
+                      className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 shrink-0 group relative ${
+                        isVip
+                          ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.15)]'
+                          : 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 shadow-[0_0_10px_rgba(239,68,68,0.1)]'
+                      }`}
+                    >
+                      <Crown className="w-6 h-6 transition-transform group-hover:rotate-12" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    <p>{isVip ? 'VIP Active' : 'Unlock VIP'}</p>
+                  </TooltipContent>
+                </Tooltip>
+                <DialogContent className="bg-slate-900/60 backdrop-blur-md border-slate-700/30 text-white max-w-md mx-4">
+                  <DialogHeader>
+                    <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+                      <Crown className="w-6 h-6 text-primary" />
+                      {isVip ? 'VIP Active' : 'Unlock VIP Access'}
+                    </DialogTitle>
+                    <DialogDescription className="text-slate-400">
+                      {isVip
+                        ? 'Your VIP perks are active across the hub.'
+                        : `Spend ${VIP_UNLOCK_VP_COST} VP (balance: ${vpBalance}) for exclusive hub + future in-game perks.`}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="py-2 space-y-2 text-sm">
+                    {[
+                      {
+                        title: 'VIP name color',
+                        body: 'Your username appears in orange across the hub.',
+                      },
+                      {
+                        title: 'Crown on your avatar',
+                        body: 'A crown badge on your profile picture.',
+                      },
+                      {
+                        title: 'Exclusive cosmetics',
+                        body: 'VIP banner, avatar frame, and nickname effect auto-equipped.',
+                      },
+                      {
+                        title: 'In-game VIP (coming soon)',
+                        body: 'More competitive perks planned for VIP members.',
+                      },
+                    ].map((perk) => (
+                      <div
+                        key={perk.title}
+                        className="flex items-start gap-3 rounded-lg border border-slate-700/30 bg-slate-900/40 px-3 py-2.5"
+                      >
+                        <div className="p-2 rounded-lg bg-primary/10 border border-primary/20 shrink-0">
+                          <Star className="w-4 h-4 text-primary" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-white">{perk.title}</h4>
+                          <p className="text-xs text-slate-400">{perk.body}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {!isVip && (
+                    <Button size="lg" className="w-full text-lg" onClick={handleUnlockVip}>
+                      Unlock for {VIP_UNLOCK_VP_COST} VP
+                    </Button>
+                  )}
+                </DialogContent>
+              </Dialog>
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -770,7 +865,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                     className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 shrink-0 group relative ${
                       isPremium
                         ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.15)]'
-                        : 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 shadow-[0_0_10px_rgba(239,68,68,0.1)]'
+                        : 'bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/20'
                     }`}
                   >
                     <Gem className="w-6 h-6 transition-transform group-hover:rotate-12" />
@@ -780,72 +875,6 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                   <p>{isPremium ? 'Premium Active' : 'Go Premium'}</p>
                 </TooltipContent>
               </Tooltip>
-
-              <Dialog open={isVipDialogOpen} onOpenChange={setIsVipDialogOpen}>
-                <DialogContent className="bg-slate-900/60 backdrop-blur-md border-slate-700/30 text-white max-w-md mx-4">
-                  <DialogHeader>
-                    <DialogTitle className="text-2xl font-bold flex items-center gap-2">
-                      <Gem className="w-6 h-6 text-amber-300" />
-                      {isPremium ? 'Premium Active' : 'Unlock Premium'}
-                    </DialogTitle>
-                    <DialogDescription className="text-slate-400">
-                      {isPremium
-                        ? 'Your Premium perks and Ranked Competitive access are active.'
-                        : `Spend ${PREMIUM_VP_COST} VP (balance: ${vpBalance}) for 30 days of Ranked Competitive + hub perks.`}
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="py-2 space-y-2 text-sm">
-                    {[
-                      {
-                        title: 'Ranked Competitive',
-                        body: 'KP Elo ranks in a Premium-only anti-cheat lobby.',
-                      },
-                      {
-                        title: 'Premium badge',
-                        body: 'Small gem next to Steam & email confirmation icons.',
-                      },
-                      {
-                        title: 'Exclusive cosmetics',
-                        body: 'Premium banner, avatar frame, and nickname effect.',
-                      },
-                      {
-                        title: 'Ranked leaderboard',
-                        body: 'Appear on the Ranked (KP) ladder like COD ranked.',
-                      },
-                    ].map((perk) => (
-                      <div
-                        key={perk.title}
-                        className="flex items-start gap-3 rounded-lg border border-slate-700/30 bg-slate-900/40 px-3 py-2.5"
-                      >
-                        <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 shrink-0">
-                          <Star className="w-4 h-4 text-amber-300" />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-white">{perk.title}</h4>
-                          <p className="text-xs text-slate-400">{perk.body}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {!isPremium && (
-                      <Button size="lg" className="w-full text-lg" onClick={handleUnlockVip}>
-                        Unlock for {PREMIUM_VP_COST} VP
-                      </Button>
-                    )}
-                    <Button
-                      variant="secondary"
-                      className="w-full"
-                      onClick={() => {
-                        setIsVipDialogOpen(false);
-                        navigate('premium');
-                      }}
-                    >
-                      Open Premium page
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
 
               <div className="flex-1 shrink-0" />
 
@@ -992,11 +1021,23 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                   <div className={isMenuOpen ? 'block' : 'hidden'}>
                     <div className="flex flex-col items-center mb-8 animate-in fade-in duration-500">
                       <div className="relative">
+                        {pulsarOn && (
+                          <>
+                            <span
+                              className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-32 w-32 rounded-full border-2 border-emerald-400/50 animate-ping"
+                              aria-hidden
+                            />
+                            <span
+                              className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-28 w-28 rounded-full border border-emerald-300/40 animate-pulse"
+                              aria-hidden
+                            />
+                          </>
+                        )}
                         <CircularProgress
                           progress={levelProgressPercent}
                           level={level}
                         >
-                          <div className="h-24 w-24 overflow-visible">
+                          <div className="h-24 w-24 overflow-visible relative">
                             <PlayerAvatar
                               src={user.avatarUrl}
                               name={user.username}
@@ -1006,9 +1047,25 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                               borderClassName="border-2 border-slate-900"
                               crownClassName="h-7 w-7 -top-1 -right-1"
                             />
+                            {pulsarOn && (
+                              <span
+                                className="absolute -bottom-1 -left-1 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-black shadow-md ring-2 ring-slate-900"
+                                title="Pulsar anticheat online"
+                              >
+                                <ShieldCheck className="h-3.5 w-3.5" />
+                              </span>
+                            )}
                           </div>
                         </CircularProgress>
                       </div>
+                      {pulsarBanner && (
+                        <div className="mt-3 w-full rounded-lg border border-emerald-400/50 bg-emerald-500/15 px-3 py-2 text-center animate-in fade-in zoom-in duration-300">
+                          <p className="text-xs font-black uppercase tracking-wider text-emerald-300">
+                            Anticheat Online
+                          </p>
+                          <p className="text-[10px] text-emerald-200/80">Pulsar active</p>
+                        </div>
+                      )}
                       <h3
                         className={`text-xl font-bold mt-2 flex items-center justify-center gap-1.5 flex-wrap ${
                           !equippedNicknameConfig
@@ -1027,6 +1084,11 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                             effect={equippedNicknameConfig}
                           />
                         </button>
+                        {isVip && (
+                          <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px]">
+                            VIP
+                          </Badge>
+                        )}
                         {isPremium && (
                           <Badge className="bg-amber-500 text-black h-5 px-1.5 text-[10px]">
                             Premium
@@ -1062,11 +1124,52 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                             <TooltipContent>Kilrun Premium</TooltipContent>
                           </Tooltip>
                         )}
+                        {pulsarOn && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="relative inline-flex w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-400/70 items-center justify-center shrink-0 align-middle">
+                                <span className="absolute inset-0 rounded-full bg-emerald-400/30 animate-ping" />
+                                <ShieldCheck className="w-3 h-3 text-emerald-300 relative" />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Pulsar anticheat online</TooltipContent>
+                          </Tooltip>
+                        )}
                       </h3>
                       <p className="text-xs uppercase tracking-wide text-slate-400 mt-1">
                         {user.role} · Lv {level} · {xpIntoLevel.toLocaleString()}/
                         {xpForNextLevel.toLocaleString()} XP
                       </p>
+                      <button
+                        type="button"
+                        onClick={handleTogglePulsar}
+                        className={`mt-3 w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                          pulsarOn
+                            ? 'border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/15'
+                            : 'border-slate-700/50 bg-slate-800/40 hover:bg-slate-800/70'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-2 text-sm font-semibold text-white">
+                            <ShieldCheck
+                              className={`h-4 w-4 ${pulsarOn ? 'text-emerald-300' : 'text-slate-400'}`}
+                            />
+                            Pulsar
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold uppercase tracking-wide ${
+                              pulsarOn ? 'text-emerald-300' : 'text-slate-500'
+                            }`}
+                          >
+                            {pulsarOn ? 'Online' : 'Offline'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {pulsarOn
+                            ? 'Anticheat active — press to turn off'
+                            : 'Press to activate anticheat'}
+                        </p>
+                      </button>
                       <button
                         type="button"
                         onClick={() => setCurrentPage('missions')}

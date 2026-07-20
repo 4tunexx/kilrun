@@ -13,6 +13,9 @@ import {
   Gem,
   Zap,
   MailX,
+  Swords,
+  Crown,
+  Trophy,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -46,7 +49,8 @@ import {
 } from '@/components/ui/select';
 import { AvatarWithFrame } from '@/components/avatar-with-frame';
 import { NicknameEffectText } from '@/components/nickname-effect';
-import { getMatchStats, getSessionUser, getStatsSummary, type StatsSummary } from '@/lib/actions';
+import { getMatchStats, getMyRankedStats, getSessionUser, getStatsSummary, type RankedStatsSummary, type StatsSummary } from '@/lib/actions';
+import { RankBadge } from '@/components/ui/rank-badge';
 import {
   deactivateOwnEmail,
   equipInventoryItem,
@@ -72,6 +76,7 @@ type ProfileActivity = Awaited<ReturnType<typeof getMyProfileActivity>>;
 export default function ProfileView({ userId }: { userId: string }) {
   const [user, setUser] = useState<UserModel | null>(null);
   const [summary, setSummary] = useState<StatsSummary | null>(null);
+  const [ranked, setRanked] = useState<RankedStatsSummary | null>(null);
   const [history, setHistory] = useState<MatchStat[]>([]);
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
   const [activity, setActivity] = useState<ProfileActivity | null>(null);
@@ -104,7 +109,8 @@ export default function ProfileView({ userId }: { userId: string }) {
       getMatchStats(userId, 5),
       getMyInventory(),
       getMyProfileActivity(),
-    ]).then(([u, s, h, inv, act]) => {
+      getMyRankedStats(userId),
+    ]).then(([u, s, h, inv, act, rk]) => {
       if (!isMounted) return;
       setUser(u);
       setBio(u?.bio ?? '');
@@ -116,6 +122,7 @@ export default function ProfileView({ userId }: { userId: string }) {
       setHistory(h);
       setInventory(inv);
       setActivity(act);
+      setRanked(rk);
       setIsLoading(false);
       if (u && !u.emailVerified) setShowEmailForm(true);
     });
@@ -259,6 +266,9 @@ export default function ProfileView({ userId }: { userId: string }) {
           </TabsTrigger>
           <TabsTrigger value="statistics" className="flex-none">
             Statistics
+          </TabsTrigger>
+          <TabsTrigger value="ranked" className="flex-none">
+            Ranked
           </TabsTrigger>
           <TabsTrigger value="activity" className="flex-none">
             Activity
@@ -444,6 +454,92 @@ export default function ProfileView({ userId }: { userId: string }) {
                 <p className="text-4xl font-black text-primary">{summary?.avgScore ?? 0}</p>
                 <p className="text-slate-400">Avg Score</p>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="ranked" className="mt-0 space-y-4">
+          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Swords className="h-5 w-5 text-amber-300" /> Ranked Competitive
+              </CardTitle>
+              <CardDescription>
+                Killrun Points (KP), peak rank, and Competitive win / loss record.
+                {ranked?.isPremium
+                  ? ' Premium Ranked is active.'
+                  : ' Unlock Premium to play Ranked and move KP.'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
+                  <div className="flex items-center justify-center gap-1.5 mb-1">
+                    <RankBadge
+                      rank={ranked?.currentRank || 'Unranked'}
+                      size={22}
+                    />
+                    <Crown className="h-4 w-4 text-yellow-400" />
+                  </div>
+                  <p className="text-xl font-black text-yellow-400">
+                    {ranked?.currentRank || 'Unranked'}
+                  </p>
+                  <p className="text-xs text-slate-400">Current rank</p>
+                </div>
+                <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
+                  <Trophy className="w-5 h-5 mx-auto mb-1 text-amber-300" />
+                  <p className="text-2xl font-black tabular-nums">
+                    {(ranked?.kp ?? 1000).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-slate-400">Live KP</p>
+                </div>
+                <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
+                  <p className="text-xl font-black text-amber-200">
+                    {ranked?.peakRank || 'Unranked'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Peak · {(ranked?.peakKp ?? 1000).toLocaleString()} KP
+                  </p>
+                </div>
+                <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
+                  <p className="text-2xl font-black tabular-nums">
+                    {ranked?.matchesPlayed ?? 0}
+                  </p>
+                  <p className="text-xs text-slate-400">Comp matches</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-slate-900/40 border border-slate-700/30 p-4">
+                  <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">
+                    Ranked (KP)
+                  </p>
+                  <p className="text-2xl font-black">
+                    <span className="text-emerald-400">{ranked?.rankedWins ?? 0}W</span>
+                    <span className="text-slate-600 mx-1">·</span>
+                    <span className="text-rose-400">{ranked?.rankedLosses ?? 0}L</span>
+                  </p>
+                </div>
+                <div className="rounded-lg bg-slate-900/40 border border-slate-700/30 p-4">
+                  <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">
+                    Casual (no KP)
+                  </p>
+                  <p className="text-2xl font-black">
+                    <span className="text-emerald-400">{ranked?.casualWins ?? 0}W</span>
+                    <span className="text-slate-600 mx-1">·</span>
+                    <span className="text-rose-400">{ranked?.casualLosses ?? 0}L</span>
+                  </p>
+                </div>
+              </div>
+              {user && (
+                <p className="text-[11px] text-slate-500">
+                  Platform VIP ({user.isVip ? 'active' : 'inactive'}) is separate from Premium
+                  Ranked
+                  {ranked?.premiumExpiresAt
+                    ? ` · Premium until ${new Date(ranked.premiumExpiresAt).toLocaleDateString()}`
+                    : ''}
+                  .
+                </p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

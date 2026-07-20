@@ -50,7 +50,8 @@ _Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6
 | Item | Status | Explanation |
 |------|--------|-------------|
 | **Stripe $2.99 checkout** | Placeholder | Card button creates support ticket + notification; VP path is real |
-| **Deep anti-cheat** | Light | Ranked = Premium-only (or free week) lobby; no replay/VAC-style system yet |
+| **Deep anti-cheat** | Light | Client Pulsar activate (hub pulsar + “Anticheat Online”); Ranked = Premium-only (or free week); no replay/VAC-style system yet |
+| **Colyseus restart** | Yes | Admin Dashboard → Restart Colyseus (`POST /admin/restart` + `GAME_SERVER_ADMIN_SECRET`) |
 | **Party / party queue** | Not built | Solo joinOrCreate only |
 | **Dedicated Ranked season resets** | Not built | Peak ranks persist; no soft reset seasons |
 | **Rank images on every surface** | Partial | Public profile + admin; hub/leaderboard can reuse `RankBadge` more widely |

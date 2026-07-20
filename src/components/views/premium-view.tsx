@@ -51,17 +51,17 @@ const PERKS = [
   {
     icon: Swords,
     title: 'Ranked Competitive',
-    body: 'Enter the Premium Ranked queue — KP Elo, Faceit-style ranks, anti-cheat lobby.',
+    body: 'Enter the Premium Ranked queue — KP Elo, Faceit-style ranks, Pulsar anti-cheat lobby.',
   },
   {
     icon: Shield,
-    title: 'Safe ranked environment',
-    body: 'Premium-only matches with tighter lobby rules and ranked integrity.',
+    title: 'Pulsar ranked integrity',
+    body: 'Premium-only matches with Pulsar anti-cheat online and tighter lobby rules.',
   },
   {
     icon: Crown,
-    title: 'Premium badge & cosmetics',
-    body: 'Hub badge, orange name styling, exclusive banner / frame / nickname effects.',
+    title: 'Premium hub badge',
+    body: 'Gem badge next to Steam & email confirmation — separate from platform VIP crown.',
   },
   {
     icon: Gem,
@@ -197,7 +197,7 @@ export default function PremiumView({
               <p className="text-[11px] text-slate-400 mt-1">
                 {expiresAt
                   ? `Expires ${new Date(expiresAt).toLocaleString()}`
-                  : 'Legacy Premium (no expiry)'}
+                  : 'No active Premium window'}
               </p>
               {(currentRank || peakRank) && (
                 <p className="text-xs text-amber-200 mt-2">
@@ -255,7 +255,7 @@ export default function PremiumView({
               <span className="text-slate-200 font-semibold">{balance.toLocaleString()} VP</span>
             </p>
             <ul className="text-xs text-slate-400 space-y-1">
-              {['Ranked Competitive queue', 'KP Elo ranks', 'Premium hub badge'].map((t) => (
+              {['Ranked Competitive queue', 'KP Elo ranks', 'Premium hub badge', 'Pulsar anti-cheat'].map((t) => (
                 <li key={t} className="flex items-center gap-2">
                   <Check className="h-3.5 w-3.5 text-emerald-400" /> {t}
                 </li>

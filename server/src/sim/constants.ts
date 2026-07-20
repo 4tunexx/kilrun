@@ -4,6 +4,8 @@ export const TICK_RATE_HZ = 30;
 export const TICK_DT_MS = 1000 / TICK_RATE_HZ;
 
 export const MIN_PLAYERS_TO_START = 1;
+/** Competitive auto-starts when this many players are connected (admin can force sooner). */
+export const COMPETITIVE_MIN_PLAYERS_TO_START = 2;
 export const LOBBY_COUNTDOWN_MS = 5000;
 export const MATCH_DURATION_MS = 180_000;
 

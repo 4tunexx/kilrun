@@ -215,6 +215,11 @@ export class GameConnection {
     this.room?.send('input', input);
   }
 
+  /** Admin-only: start competitive matchmaking countdown even with 1 player. */
+  public sendForceStart(): void {
+    this.room?.send('forceStart', {});
+  }
+
   public sendLoadCustomMap(payload: {
     platforms: {
       x: number;
