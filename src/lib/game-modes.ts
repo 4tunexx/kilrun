@@ -46,7 +46,7 @@ export const KILRUN_MODE_INFO: Record<KilrunMode, KilrunModeInfo> = {
     title: 'Competitive 4v4',
     shortTitle: 'Competitive',
     description:
-      '4v4 team elimination across 6 rounds. Wins and losses move your Killrun Points (KP) and competitive rank.',
+      '4v4 · six rounds. Casual keeps XP/KD only. Ranked (Premium) moves Killrun Points (KP) Elo.',
     players: '4v4 · 6 rounds',
     editorBlurb: 'Team A / Team B spawns, arena solids, cover props.',
     accentClass: 'from-sky-500/20 to-indigo-500/20 border-sky-500/40',

@@ -16,7 +16,6 @@ import {
   CheckSquare,
   Trophy,
   BarChart3,
-  Crown,
   Star,
   Mail,
   Bell,
@@ -24,6 +23,7 @@ import {
   Shield,
   CheckCircle2,
   Package,
+  Gem,
   type LucideIcon,
 } from 'lucide-react';
 import HomeView from '@/components/views/home-view';
@@ -43,9 +43,10 @@ import PublicProfileView from '@/components/views/public-profile-view';
 import FriendsList from '@/components/views/friends-list';
 import LobbyView from '@/components/views/lobby-view';
 import AdminView from '@/components/views/admin-view';
-import type { KilrunMode } from '@/components/views/play-view';
-import { canAccessAdmin, VIP_UNLOCK_VP_COST } from '@/lib/roles';
-import { unlockVipWithVp } from '@/lib/social-actions';
+import PremiumView from '@/components/views/premium-view';
+import type { KilrunMode, CompetitiveQueue } from '@/components/views/play-view';
+import { canAccessAdmin, PREMIUM_VP_COST, isPremiumActive } from '@/lib/roles';
+import { purchasePremiumWithVp } from '@/lib/social-actions';
 import {
   bootstrapHubProgression,
   getLivePlayerState,
@@ -94,7 +95,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import {
   Sheet,
@@ -125,8 +125,12 @@ export interface SessionPlayer {
   vpCurrency: number;
   xpProgress: number;
   currentRank: string;
+  /** Killrun Points — competitive Elo. */
+  kp?: number;
   role: string;
   isVip: boolean;
+  isPremium?: boolean;
+  premiumExpiresAt?: string | null;
   bio: string;
   email: string | null;
   emailVerified: boolean;
@@ -141,6 +145,7 @@ const HUB_PAGE_ICONS: Record<HubPageId, LucideIcon> = {
   leaderboard: Trophy,
   stats: BarChart3,
   store: Store,
+  premium: Gem,
   badges: Award,
   community: Users,
   guides: BookOpen,
@@ -164,6 +169,7 @@ const pageComponents: { [key: string]: React.ComponentType<any> } = {
   badges: BadgesView,
   notifications: NotificationsView,
   messages: MessagesView,
+  premium: PremiumView,
   lobby: LobbyView,
   admin: AdminView,
   'public-profile': PublicProfileView,
@@ -195,6 +201,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
   const [previousPage, setPreviousPage] = useState('home');
   const [lobbyMode, setLobbyMode] = useState<KilrunMode | null>(null);
+  const [competitiveQueue, setCompetitiveQueue] = useState<CompetitiveQueue>('casual');
   const [isCompetitiveDialogOpen, setIsCompetitiveDialogOpen] = useState(false);
   const [pendingCompetitiveMode, setPendingCompetitiveMode] = useState<KilrunMode | null>(null);
   const [vpBalance, setVpBalance] = useState(user.vpCurrency);
@@ -202,6 +209,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [dailyDone, setDailyDone] = useState(0);
   const [dailyTotal, setDailyTotal] = useState(5);
   const [currentRank, setCurrentRank] = useState(user.currentRank);
+  const [kp, setKp] = useState(user.kp ?? 1000);
   const [emailVerified, setEmailVerified] = useState(user.emailVerified);
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
@@ -212,6 +220,22 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [headerLogoStyle, setHeaderLogoStyle] = useState('');
   const [homeHeroImage, setHomeHeroImage] = useState('');
   const [isVip, setIsVip] = useState(user.isVip);
+  const [isPremium, setIsPremium] = useState(
+    user.isPremium ??
+      isPremiumActive({ isVip: user.isVip, premiumExpiresAt: user.premiumExpiresAt })
+  );
+  const [premiumExpiresAt, setPremiumExpiresAt] = useState<string | null>(
+    user.premiumExpiresAt ?? null
+  );
+  const [rankedAccess, setRankedAccess] = useState(
+    !!(
+      user.isPremium ??
+      isPremiumActive({ isVip: user.isVip, premiumExpiresAt: user.premiumExpiresAt })
+    )
+  );
+  const [freeRankedWeek, setFreeRankedWeek] = useState(false);
+  const [peakRank, setPeakRank] = useState('Unranked');
+  const [peakKp, setPeakKp] = useState(user.kp ?? 1000);
   const [equippedFrameConfig, setEquippedFrameConfig] = useState<unknown | null>(
     user.equippedFrameConfig ?? null
   );
@@ -259,17 +283,29 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   // Refresh equipped cosmetics when opening the right profile rail
   useEffect(() => {
     if (!isMenuOpen) return;
+    getLivePlayerState(user.id)
+      .then((live) => {
+        setVpBalance(live.vpCurrency);
+        setXpProgress(live.xpProgress);
+        setCurrentRank(live.currentRank);
+        if (typeof live.kp === 'number') setKp(live.kp);
+        setIsVip(live.isVip);
+        setIsPremium(!!live.isPremium);
+        setPremiumExpiresAt(live.premiumExpiresAt ?? null);
+        setRankedAccess(!!(live.rankedAccess ?? live.isPremium));
+        setFreeRankedWeek(!!live.freeRankedWeek);
+        if (typeof live.peakKp === 'number') setPeakKp(live.peakKp);
+        if (typeof live.peakRank === 'string') setPeakRank(live.peakRank);
+        setEmailVerified(live.emailVerified);
+      })
+      .catch(() => {});
     getCurrentUserProfile()
       .then((u) => {
         setEquippedFrameConfig(u.equippedFrameConfig ?? null);
         setEquippedNicknameConfig(u.equippedNicknameConfig ?? null);
-        setIsVip(u.isVip);
-        setVpBalance(u.vpCurrency);
-        setXpProgress(u.xpProgress);
-        setCurrentRank(u.currentRank);
       })
       .catch(() => {});
-  }, [isMenuOpen]);
+  }, [isMenuOpen, user.id]);
 
   useEffect(() => {
     if (user.emailVerified) return;
@@ -291,7 +327,14 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       setXpProgress(live.xpProgress);
       setVpBalance(live.vpCurrency);
       setCurrentRank(live.currentRank);
+      if (typeof live.kp === 'number') setKp(live.kp);
       setIsVip(live.isVip);
+      setIsPremium(!!live.isPremium);
+      setPremiumExpiresAt(live.premiumExpiresAt ?? null);
+      setRankedAccess(!!(live.rankedAccess ?? live.isPremium));
+      setFreeRankedWeek(!!live.freeRankedWeek);
+      if (typeof live.peakKp === 'number') setPeakKp(live.peakKp);
+      if (typeof live.peakRank === 'string') setPeakRank(live.peakRank);
       setEmailVerified(live.emailVerified);
       setUnreadCount(live.unreadNotifications);
       if (typeof live.unreadMessages === 'number') {
@@ -417,11 +460,21 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     }
   };
 
-  const handlePlay = (mode: KilrunMode) => {
+  const handlePlay = (
+    mode: KilrunMode,
+    opts?: { competitiveQueue?: CompetitiveQueue }
+  ) => {
     if (mode === 'competitive') {
+      const queue = opts?.competitiveQueue ?? 'casual';
+      if (queue === 'ranked' && !rankedAccess) {
+        navigate('premium');
+        return;
+      }
+      setCompetitiveQueue(queue);
       setPendingCompetitiveMode(mode);
       setIsCompetitiveDialogOpen(true);
     } else {
+      setCompetitiveQueue('casual');
       setLobbyMode(mode);
       navigate('lobby');
     }
@@ -438,6 +491,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
 
   const handleCancelLobby = () => {
     setLobbyMode(null);
+    setCompetitiveQueue('casual');
     navigate('play');
   };
 
@@ -446,21 +500,25 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   };
 
   const handleUnlockVip = async () => {
-    const result = await unlockVipWithVp();
+    const result = await purchasePremiumWithVp();
     if (!result.ok) {
       toast({
         title: 'Not enough VP',
-        description: `VIP costs ${VIP_UNLOCK_VP_COST} VP. Play matches to earn more.`,
+        description: `Premium costs ${PREMIUM_VP_COST} VP for 30 days. Play matches to earn more.`,
         variant: 'destructive',
       });
       return;
     }
     setIsVip(true);
-    if (!result.already) {
-      setVpBalance((v) => v - VIP_UNLOCK_VP_COST);
-    }
+    setIsPremium(true);
+    setRankedAccess(true);
+    if (result.premiumExpiresAt) setPremiumExpiresAt(result.premiumExpiresAt);
+    setVpBalance((v) => v - (result.vpSpent ?? PREMIUM_VP_COST));
     setIsVipDialogOpen(false);
-    toast({ title: 'VIP unlocked', description: 'Welcome to VIP.' });
+    toast({
+      title: 'Premium activated',
+      description: 'Ranked Competitive and hub perks unlocked.',
+    });
   };
 
   const handleLogout = () => {
@@ -502,6 +560,34 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       let props: any = {};
       if (currentPage === 'play') {
         props.onPlay = handlePlay;
+        props.isPremium = isPremium;
+        props.rankedAccess = rankedAccess;
+        props.freeRankedWeek = freeRankedWeek;
+        props.onOpenPremium = () => navigate('premium');
+      } else if (currentPage === 'premium') {
+        props.vpBalance = vpBalance;
+        props.isVip = isVip;
+        props.premiumExpiresAt = premiumExpiresAt;
+        props.currentRank = isPremium ? currentRank : undefined;
+        props.peakRank = peakRank;
+        props.kp = kp;
+        props.onPurchased = (next: { vpBalance: number; premiumExpiresAt: string }) => {
+          setVpBalance(next.vpBalance);
+          setPremiumExpiresAt(next.premiumExpiresAt);
+          setIsPremium(true);
+          setIsVip(true);
+          setRankedAccess(true);
+          getLivePlayerState(user.id)
+            .then((live) => {
+              setCurrentRank(live.currentRank);
+              if (typeof live.kp === 'number') setKp(live.kp);
+              if (typeof live.peakRank === 'string') setPeakRank(live.peakRank);
+              if (typeof live.peakKp === 'number') setPeakKp(live.peakKp);
+            })
+            .catch(() => {});
+        };
+        props.onGoRanked = () =>
+          handlePlay('competitive', { competitiveQueue: 'ranked' });
       } else if (currentPage === 'home') {
         props.onLaunchGame = handleLaunchGame;
         props.onNavigate = navigate;
@@ -518,6 +604,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           username: user.username,
           avatarUrl: user.avatarUrl,
           xpProgress,
+          isAdmin: showAdmin,
+          kp,
+          isPremium: rankedAccess,
+          competitiveQueue: lobbyMode === 'competitive' ? competitiveQueue : 'casual',
         };
       } else if (currentPage === 'messages') {
         props.userId = user.id;
@@ -541,7 +631,15 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
 
       if (currentPage === 'lobby' && !lobbyMode) {
         navigate('play');
-        return <PlayView onPlay={handlePlay} />;
+        return (
+          <PlayView
+            onPlay={handlePlay}
+            isPremium={isPremium}
+            rankedAccess={rankedAccess}
+            freeRankedWeek={freeRankedWeek}
+            onOpenPremium={() => navigate('premium')}
+          />
+        );
       }
 
       return <PageComponent {...props} />;
@@ -604,7 +702,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           username={user.username}
           avatarUrl={user.avatarUrl}
           xpProgress={xpProgress}
-          isAdmin={user.role === 'admin'}
+          isAdmin={showAdmin}
+          kp={kp}
+          isPremium={rankedAccess}
+          competitiveQueue={lobbyMode === 'competitive' ? competitiveQueue : 'casual'}
         />
       </ProfileNavigationProvider>
     );
@@ -661,56 +762,63 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
 
               <div className="my-2 w-3/4 h-px bg-slate-700/50 shrink-0" />
 
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => navigate('premium')}
+                    className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 shrink-0 group relative ${
+                      isPremium
+                        ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.15)]'
+                        : 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 shadow-[0_0_10px_rgba(239,68,68,0.1)]'
+                    }`}
+                  >
+                    <Gem className="w-6 h-6 transition-transform group-hover:rotate-12" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>{isPremium ? 'Premium Active' : 'Go Premium'}</p>
+                </TooltipContent>
+              </Tooltip>
+
               <Dialog open={isVipDialogOpen} onOpenChange={setIsVipDialogOpen}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DialogTrigger asChild>
-                      <button className="w-12 h-12 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-all duration-300 hover:scale-110 hover:-translate-y-1 flex items-center justify-center relative shrink-0 shadow-[0_0_10px_rgba(239,68,68,0.1)] group">
-                        <Crown className="w-6 h-6 transition-transform group-hover:rotate-12" />
-                      </button>
-                    </DialogTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    <p>{isVip ? 'VIP Active' : 'Unlock VIP'}</p>
-                  </TooltipContent>
-                </Tooltip>
                 <DialogContent className="bg-slate-900/60 backdrop-blur-md border-slate-700/30 text-white max-w-md mx-4">
                   <DialogHeader>
                     <DialogTitle className="text-2xl font-bold flex items-center gap-2">
-                      <Crown className="w-6 h-6 text-primary" />
-                      {isVip ? 'VIP Active' : 'Unlock VIP Access'}
+                      <Gem className="w-6 h-6 text-amber-300" />
+                      {isPremium ? 'Premium Active' : 'Unlock Premium'}
                     </DialogTitle>
                     <DialogDescription className="text-slate-400">
-                      {isVip
-                        ? 'Your VIP perks are active across the hub.'
-                        : `Spend ${VIP_UNLOCK_VP_COST} VP (balance: ${vpBalance}) for exclusive hub + future in-game perks.`}
+                      {isPremium
+                        ? 'Your Premium perks and Ranked Competitive access are active.'
+                        : `Spend ${PREMIUM_VP_COST} VP (balance: ${vpBalance}) for 30 days of Ranked Competitive + hub perks.`}
                     </DialogDescription>
                   </DialogHeader>
                   <div className="py-2 space-y-2 text-sm">
                     {[
                       {
-                        title: 'VIP name color',
-                        body: 'Recognized everywhere — chat, forums, leaderboard.',
+                        title: 'Ranked Competitive',
+                        body: 'KP Elo ranks in a Premium-only anti-cheat lobby.',
                       },
                       {
-                        title: 'Crown on your avatar',
-                        body: 'A crown badge on your profile picture.',
+                        title: 'Premium badge',
+                        body: 'Small gem next to Steam & email confirmation icons.',
                       },
                       {
                         title: 'Exclusive cosmetics',
-                        body: 'VIP banner, avatar frame, and nickname effect auto-equipped.',
+                        body: 'Premium banner, avatar frame, and nickname effect.',
                       },
                       {
-                        title: 'In-game VIP (coming soon)',
-                        body: 'Priority queue and lobby flair planned for Deathrun.',
+                        title: 'Ranked leaderboard',
+                        body: 'Appear on the Ranked (KP) ladder like COD ranked.',
                       },
                     ].map((perk) => (
                       <div
                         key={perk.title}
                         className="flex items-start gap-3 rounded-lg border border-slate-700/30 bg-slate-900/40 px-3 py-2.5"
                       >
-                        <div className="p-2 rounded-lg bg-primary/10 border border-primary/20 shrink-0">
-                          <Star className="w-4 h-4 text-primary" />
+                        <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 shrink-0">
+                          <Star className="w-4 h-4 text-amber-300" />
                         </div>
                         <div>
                           <h4 className="font-bold text-white">{perk.title}</h4>
@@ -719,15 +827,23 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                       </div>
                     ))}
                   </div>
-                  {!isVip && (
+                  <div className="flex flex-col gap-2">
+                    {!isPremium && (
+                      <Button size="lg" className="w-full text-lg" onClick={handleUnlockVip}>
+                        Unlock for {PREMIUM_VP_COST} VP
+                      </Button>
+                    )}
                     <Button
-                      size="lg"
-                      className="w-full text-lg"
-                      onClick={handleUnlockVip}
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => {
+                        setIsVipDialogOpen(false);
+                        navigate('premium');
+                      }}
                     >
-                      Unlock for {VIP_UNLOCK_VP_COST} VP
+                      Open Premium page
                     </Button>
-                  )}
+                  </div>
                 </DialogContent>
               </Dialog>
 
@@ -762,6 +878,19 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                       setEquippedNicknameConfig(u.equippedNicknameConfig ?? null);
                       setIsVip(u.isVip);
                       setVpBalance(u.vpCurrency);
+                      const expires =
+                        (u as { premiumExpiresAt?: Date | string | null }).premiumExpiresAt ??
+                        null;
+                      const iso =
+                        expires instanceof Date
+                          ? expires.toISOString()
+                          : typeof expires === 'string'
+                            ? expires
+                            : null;
+                      setPremiumExpiresAt(iso);
+                      setIsPremium(
+                        isPremiumActive({ isVip: u.isVip, premiumExpiresAt: iso })
+                      );
                     })
                     .catch(() => {});
                 }}
@@ -898,9 +1027,9 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                             effect={equippedNicknameConfig}
                           />
                         </button>
-                        {isVip && (
-                          <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px]">
-                            VIP
+                        {isPremium && (
+                          <Badge className="bg-amber-500 text-black h-5 px-1.5 text-[10px]">
+                            Premium
                           </Badge>
                         )}
                         <Tooltip>
@@ -921,6 +1050,16 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                               </span>
                             </TooltipTrigger>
                             <TooltipContent>Email confirmed</TooltipContent>
+                          </Tooltip>
+                        )}
+                        {isPremium && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex w-5 h-5 rounded-full bg-amber-500/20 border border-amber-400/60 items-center justify-center shrink-0 align-middle">
+                                <Gem className="w-3 h-3 text-amber-300" />
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Kilrun Premium</TooltipContent>
                           </Tooltip>
                         )}
                       </h3>
@@ -947,12 +1086,40 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                           {dailyDone}/{dailyTotal}
                         </span>
                       </button>
-                      <div className="mt-4 bg-slate-800/50 px-4 py-2 rounded-lg text-center w-full">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!isPremium) navigate('premium');
+                        }}
+                        className={`mt-4 bg-slate-800/50 px-4 py-2 rounded-lg text-center w-full transition-colors ${
+                          !isPremium
+                            ? 'hover:bg-amber-500/10 hover:ring-1 hover:ring-amber-500/40 cursor-pointer'
+                            : 'cursor-default'
+                        }`}
+                        title={isPremium ? undefined : 'Unlock Premium to show your KP rank'}
+                      >
                         <div className="text-xs text-slate-400">Rank</div>
-                        <div className="text-lg font-bold text-yellow-400">
-                          {currentRank}
+                        <div
+                          className={`text-lg font-bold ${
+                            isPremium ? 'text-yellow-400' : 'text-amber-300'
+                          }`}
+                        >
+                          {isPremium ? currentRank : 'Go Premium'}
                         </div>
-                      </div>
+                        {isPremium ? (
+                          <div className="text-[10px] text-slate-500 mt-0.5 tabular-nums">
+                            {kp.toLocaleString()} KP
+                            {peakRank && peakRank !== currentRank
+                              ? ` · Peak ${peakRank}`
+                              : ''}
+                          </div>
+                        ) : peakRank && peakRank !== 'Unranked' ? (
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Peak {peakRank}
+                            {peakKp ? ` · ${peakKp.toLocaleString()} KP` : ''}
+                          </div>
+                        ) : null}
+                      </button>
                       <div className="mt-2 text-sm text-slate-300">{vpBalance} VP</div>
                     </div>
 
@@ -1037,11 +1204,28 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-2xl">
               <ShieldAlert className="w-6 h-6 text-primary" />
-              Competitive Play Agreement
+              {competitiveQueue === 'ranked'
+                ? 'Ranked Competitive Agreement'
+                : 'Competitive Casual Agreement'}
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <div className="text-slate-300">
-                You are about to enter a competitive match.
+              <div className="text-slate-300 space-y-2 text-sm">
+                {competitiveQueue === 'ranked' ? (
+                  <>
+                    <p>
+                      You are joining <span className="text-amber-300 font-semibold">Premium Ranked</span>{' '}
+                      — KP Elo will move, and this lobby is Premium-only.
+                    </p>
+                    <p className="text-slate-400 text-xs">
+                      Fair play required. Cheating or boosting may result in bans.
+                    </p>
+                  </>
+                ) : (
+                  <p>
+                    Casual Competitive awards XP, VP, KD and achievements —{' '}
+                    <span className="font-semibold text-slate-200">your KP rank will not change</span>.
+                  </p>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>

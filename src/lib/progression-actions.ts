@@ -127,11 +127,20 @@ export async function applyKpDelta(
   const prevRank = before.currentRank || getRankForKp(prevKp);
   const nextRank = getRankForKp(nextKp);
 
+  const prevPeakKp =
+    typeof (before as { peakKp?: number }).peakKp === 'number'
+      ? (before as { peakKp: number }).peakKp
+      : prevKp;
+  const peakKp = Math.max(prevPeakKp, nextKp);
+  const peakRank = getRankForKp(peakKp);
+
   await prisma.user.update({
     where: { id: userId },
     data: {
       kp: nextKp,
       currentRank: nextRank,
+      peakKp,
+      peakRank,
     },
   });
 
@@ -159,13 +168,24 @@ export async function syncRankFromKp(userId: string) {
       ? (user as { kp: number }).kp
       : KP_DEFAULT;
   const rank = getRankForKp(kp);
-  if (user.currentRank !== rank || (user as { kp?: number }).kp == null) {
+  const prevPeak =
+    typeof (user as { peakKp?: number }).peakKp === 'number'
+      ? (user as { peakKp: number }).peakKp
+      : kp;
+  const peakKp = Math.max(prevPeak, kp);
+  const peakRank = getRankForKp(peakKp);
+  if (
+    user.currentRank !== rank ||
+    (user as { kp?: number }).kp == null ||
+    (user as { peakKp?: number }).peakKp !== peakKp ||
+    (user as { peakRank?: string }).peakRank !== peakRank
+  ) {
     await prisma.user.update({
       where: { id: userId },
-      data: { kp, currentRank: rank },
+      data: { kp, currentRank: rank, peakKp, peakRank },
     });
   }
-  return { kp, rank };
+  return { kp, rank, peakKp, peakRank };
 }
 
 /** Ensure the 5 built-in daily templates exist (won't overwrite admin edits). */
@@ -863,11 +883,25 @@ export async function getLivePlayerState(userId?: string) {
       : KP_DEFAULT;
   // Keep profile rank aligned with KP (ranks are competitive, not XP level).
   const kpRank = getRankForKp(userKp);
-  if (user.currentRank !== kpRank || (user as { kp?: number }).kp == null) {
+  const prevPeakKp =
+    typeof (user as { peakKp?: number }).peakKp === 'number'
+      ? (user as { peakKp: number }).peakKp
+      : userKp;
+  const peakKp = Math.max(prevPeakKp, userKp);
+  const peakRank =
+    (user as { peakRank?: string }).peakRank &&
+    prevPeakKp >= userKp
+      ? (user as { peakRank: string }).peakRank
+      : getRankForKp(peakKp);
+  if (
+    user.currentRank !== kpRank ||
+    (user as { kp?: number }).kp == null ||
+    (user as { peakKp?: number }).peakKp !== peakKp
+  ) {
     await prisma.user
       .update({
         where: { id: user.id },
-        data: { kp: userKp, currentRank: kpRank },
+        data: { kp: userKp, currentRank: kpRank, peakKp, peakRank },
       })
       .catch(() => {});
   }
@@ -893,14 +927,38 @@ export async function getLivePlayerState(userId?: string) {
   const dailyCompleted = dailyBoard.filter((m) => m.isCompleted).length;
   const dailyTotal = Math.max(dailyBoard.length, 5);
 
+  const { isPremiumActive, canAccessRankedCompetitive } = await import('@/lib/premium');
+  const { parsePremiumConfig, isFreeRankedWeekActive } = await import('@/lib/premium-config');
+  const premiumExpiresAt = (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt ?? null;
+  const premiumActive = isPremiumActive({
+    isVip: user.isVip,
+    premiumExpiresAt,
+  });
+  const settings = await getSiteSettings();
+  const premiumConfig = parsePremiumConfig(
+    (settings as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
+  );
+  const freeRankedWeek = isFreeRankedWeekActive(premiumConfig);
+  const rankedAccess = canAccessRankedCompetitive({
+    isPremium: premiumActive,
+    config: premiumConfig,
+  });
+
   return {
     id: user.id,
     xpProgress: user.xpProgress,
     vpCurrency: user.vpCurrency,
     kp: userKp,
-    currentRank: kpRank,
+    peakKp,
+    peakRank,
+    currentRank: premiumActive ? kpRank : 'Go Premium',
     role: user.role,
     isVip: user.isVip,
+    isPremium: premiumActive,
+    rankedAccess,
+    freeRankedWeek,
+    premiumExpiresAt: premiumExpiresAt ? new Date(premiumExpiresAt).toISOString() : null,
+    premiumConfig,
     emailVerified: user.emailVerified,
     avatarUrl: user.avatarUrl,
     username: user.username,
@@ -1026,6 +1084,16 @@ export async function getSiteSettings() {
             (settings as { hubChromeJson?: string }).hubChromeJson ??
             '{}'
         ),
+        premiumConfigJson: String(
+          doc.premiumConfigJson ??
+            (settings as { premiumConfigJson?: string }).premiumConfigJson ??
+            '{}'
+        ),
+        rankConfigJson: String(
+          doc.rankConfigJson ??
+            (settings as { rankConfigJson?: string }).rankConfigJson ??
+            '{}'
+        ),
       };
     }
   } catch {
@@ -1049,6 +1117,12 @@ export async function getSiteSettings() {
     hubChromeJson: String(
       (settings as { hubChromeJson?: string }).hubChromeJson ?? '{}'
     ),
+    premiumConfigJson: String(
+      (settings as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
+    ),
+    rankConfigJson: String(
+      (settings as { rankConfigJson?: string }).rankConfigJson ?? '{}'
+    ),
   };
 }
 
@@ -1069,6 +1143,8 @@ export async function updateSiteSettings(data: {
   hubPagesJson?: string;
   hubNavJson?: string;
   hubChromeJson?: string;
+  premiumConfigJson?: string;
+  rankConfigJson?: string;
 }) {
   const staff = await requireStaff();
   await getSiteSettings();
@@ -1087,6 +1163,10 @@ export async function updateSiteSettings(data: {
     parseHubNav,
     parseHubChrome,
   } = await import('@/lib/hub-layout');
+  const { serializePremiumConfig, parsePremiumConfig } = await import(
+    '@/lib/premium-config'
+  );
+  const { serializeRankConfig, parseRankConfig } = await import('@/lib/rank-config');
   const payload: Record<string, string | boolean | Date | null> = {};
 
   if (typeof data.logoUrl === 'string') {
@@ -1155,6 +1235,14 @@ export async function updateSiteSettings(data: {
   }
   if (typeof data.hubChromeJson === 'string') {
     payload.hubChromeJson = JSON.stringify(parseHubChrome(data.hubChromeJson));
+  }
+  if (typeof data.premiumConfigJson === 'string') {
+    payload.premiumConfigJson = serializePremiumConfig(
+      parsePremiumConfig(data.premiumConfigJson)
+    );
+  }
+  if (typeof data.rankConfigJson === 'string') {
+    payload.rankConfigJson = serializeRankConfig(parseRankConfig(data.rankConfigJson));
   }
 
   let saved;

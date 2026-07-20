@@ -2,7 +2,7 @@
 
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import { getLevelProgress, getRankForLevel } from '@/lib/progression';
+import { getLevelProgress } from '@/lib/progression';
 import { getPlayerAchievements, getPlayerBadges } from '@/lib/progression-actions';
 import { getMyReputationVote } from '@/lib/social-actions';
 import { normalizeBannerConfig, type BannerConfig } from '@/lib/banner';
@@ -31,7 +31,14 @@ export type PublicProfile = {
   countryCode: string;
   role: string;
   isVip: boolean;
+  isPremium: boolean;
+  /** Active KP rank when Premium; otherwise peak kept for showcase. */
   currentRank: string;
+  /** Highest Ranked Competitive tier ever reached (kept after Premium expires). */
+  peakRank: string;
+  peakRankImage?: string | null;
+  kp: number;
+  peakKp: number;
   level: number;
   xpProgress: number;
   xpIntoLevel: number;
@@ -99,6 +106,34 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     });
   }
 
+  const { getRankForKp, KP_DEFAULT } = await import('@/lib/kp');
+  const { isPremiumActive } = await import('@/lib/premium');
+  const { parseRankConfig, findRankTierDef } = await import('@/lib/rank-config');
+  const { getSiteSettings } = await import('@/lib/progression-actions');
+  const settings = await getSiteSettings();
+  const rankCfg = parseRankConfig(
+    (settings as { rankConfigJson?: string }).rankConfigJson ?? '{}'
+  );
+  const kp =
+    typeof (target as { kp?: number }).kp === 'number'
+      ? (target as { kp: number }).kp
+      : KP_DEFAULT;
+  const peakKp = Math.max(
+    typeof (target as { peakKp?: number }).peakKp === 'number'
+      ? (target as { peakKp: number }).peakKp
+      : kp,
+    kp
+  );
+  const peakRank =
+    (target as { peakRank?: string }).peakRank || getRankForKp(peakKp, rankCfg.tiers);
+  const peakDef = findRankTierDef(peakRank, rankCfg.tiers);
+  const premium = isPremiumActive({
+    isVip: target.isVip,
+    premiumExpiresAt: (target as { premiumExpiresAt?: Date | null }).premiumExpiresAt,
+  });
+  // Public showcase: always show highest Ranked tier reached (peak).
+  const displayRank = peakRank && peakRank !== 'Unranked' ? peakRank : getRankForKp(kp, rankCfg.tiers);
+
   const totalRuns = matchStats.length;
   const bestScore = totalRuns > 0 ? Math.max(...matchStats.map((s) => s.score)) : 0;
   const bestDistance = totalRuns > 0 ? Math.max(...matchStats.map((s) => s.distance)) : 0;
@@ -147,7 +182,12 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     countryCode: target.countryCode ?? '',
     role: target.role,
     isVip: target.isVip,
-    currentRank: target.currentRank || getRankForLevel(progress.level),
+    isPremium: premium,
+    currentRank: displayRank,
+    peakRank,
+    peakRankImage: peakDef?.imageUrl || null,
+    kp,
+    peakKp,
     level: progress.level,
     xpProgress: target.xpProgress,
     xpIntoLevel: progress.xpIntoLevel,
@@ -189,6 +229,21 @@ export async function getPublicProfileSummary(userId: string) {
     }),
   ]);
   const reputation = repVotes.reduce((sum, v) => sum + v.value, 0);
+  const { getRankForKp, KP_DEFAULT } = await import('@/lib/kp');
+  const { isPremiumActive } = await import('@/lib/premium');
+  const kp =
+    typeof (target as { kp?: number }).kp === 'number'
+      ? (target as { kp: number }).kp
+      : KP_DEFAULT;
+  const peakKp = Math.max(
+    typeof (target as { peakKp?: number }).peakKp === 'number'
+      ? (target as { peakKp: number }).peakKp
+      : kp,
+    kp
+  );
+  const peakRank =
+    (target as { peakRank?: string }).peakRank || getRankForKp(peakKp);
+  const displayRank = peakRank && peakRank !== 'Unranked' ? peakRank : getRankForKp(kp);
   return {
     id: target.id,
     username: target.username,
@@ -196,7 +251,14 @@ export async function getPublicProfileSummary(userId: string) {
     statusMessage: target.statusMessage ?? '',
     role: target.role,
     isVip: target.isVip,
-    currentRank: target.currentRank || getRankForLevel(progress.level),
+    isPremium: isPremiumActive({
+      isVip: target.isVip,
+      premiumExpiresAt: (target as { premiumExpiresAt?: Date | null }).premiumExpiresAt,
+    }),
+    currentRank: displayRank,
+    peakRank,
+    kp,
+    peakKp,
     level: progress.level,
     xpIntoLevel: progress.xpIntoLevel,
     xpForNextLevel: progress.xpForNextLevel,

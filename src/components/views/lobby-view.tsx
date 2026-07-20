@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Clock, X } from 'lucide-react';
 import KilrunEngine from '@/components/game/kilrun-engine';
 import type { KilrunMode } from './play-view';
 import { getMyEquippedSkinAttachments } from '@/lib/social-actions';
 import type { SkinAttachment } from '@/lib/player-skins';
+import { getSiteSettings } from '@/lib/progression-actions';
+import { getRankForKp, KP_DEFAULT } from '@/lib/kp';
+import { parseRankConfig, RANK_MM_OPEN_KEY } from '@/lib/rank-config';
 
 interface LobbyViewProps {
   mode: KilrunMode;
@@ -17,13 +17,13 @@ interface LobbyViewProps {
   avatarUrl?: string;
   xpProgress?: number;
   isAdmin?: boolean;
+  /** Competitive KP for Elo snapshot at join. */
+  kp?: number;
+  /** Premium active — required for ranked queue. */
+  isPremium?: boolean;
+  /** Casual (no KP) vs Ranked Premium. */
+  competitiveQueue?: 'casual' | 'ranked';
 }
-
-const MODE_LABELS: Record<KilrunMode, string> = {
-  deathrun: 'Deathrun',
-  horde: 'Horde Mode',
-  competitive: 'Competitive 4v4',
-};
 
 const LobbyView: React.FC<LobbyViewProps> = ({
   mode,
@@ -33,13 +33,16 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   avatarUrl,
   xpProgress = 0,
   isAdmin = false,
+  kp,
+  isPremium = false,
+  competitiveQueue = 'casual',
 }) => {
-  const joinOptions = useMemo(
-    () => ({ userId, username, avatarUrl, isAdmin }),
-    [userId, username, avatarUrl, isAdmin]
-  );
   const [equippedSkins, setEquippedSkins] = useState<SkinAttachment[]>([]);
   const [skinsReady, setSkinsReady] = useState(false);
+  const [rankReady, setRankReady] = useState(mode !== 'competitive');
+  const [rankKey, setRankKey] = useState(RANK_MM_OPEN_KEY);
+  const [mmWaitSec, setMmWaitSec] = useState(12);
+  const [minSameRankPlayers, setMinSameRankPlayers] = useState(4);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,42 +64,80 @@ const LobbyView: React.FC<LobbyViewProps> = ({
     };
   }, [userId]);
 
-  if (mode !== 'deathrun') {
-    return (
-      <div className="px-12 py-8 h-full flex flex-col items-center justify-center">
-        <Card className="w-full max-w-lg bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-          <CardHeader className="text-center">
-            <CardTitle className="text-4xl font-black">{MODE_LABELS[mode]}</CardTitle>
-            <CardDescription>This mode is still in development.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center space-y-6">
-            <div className="flex items-center justify-center gap-2 text-slate-400">
-              <Clock className="w-5 h-5" />
-              <span>Check back soon -- built on the same engine as Deathrun.</span>
-            </div>
-            <Button variant="destructive" size="lg" onClick={onCancel}>
-              <X className="mr-2 h-5 w-5" /> Back to Mode Select
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (mode !== 'competitive' || competitiveQueue !== 'ranked') {
+      setRankReady(true);
+      setRankKey(RANK_MM_OPEN_KEY);
+      return;
+    }
+    let cancelled = false;
+    getSiteSettings()
+      .then((s) => {
+        if (cancelled) return;
+        const cfg = parseRankConfig(
+          (s as { rankConfigJson?: string }).rankConfigJson ?? '{}'
+        );
+        const playerKp = typeof kp === 'number' ? kp : KP_DEFAULT;
+        const tier = getRankForKp(playerKp, cfg.tiers);
+        setRankKey(tier);
+        setMmWaitSec(cfg.matchmakingWaitSec);
+        setMinSameRankPlayers(cfg.minSameRankPlayers);
+        setRankReady(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const playerKp = typeof kp === 'number' ? kp : KP_DEFAULT;
+        setRankKey(getRankForKp(playerKp));
+        setRankReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, competitiveQueue, kp]);
+
+  const joinOptions = useMemo(
+    () => ({
+      userId,
+      username,
+      avatarUrl,
+      isAdmin,
+      kp,
+      isPremium,
+      rankedAccess: isPremium,
+      ...(mode === 'competitive' && competitiveQueue === 'ranked'
+        ? { rankKey, mmWaitSec, minSameRankPlayers }
+        : {}),
+    }),
+    [
+      userId,
+      username,
+      avatarUrl,
+      isAdmin,
+      kp,
+      isPremium,
+      mode,
+      competitiveQueue,
+      rankKey,
+      mmWaitSec,
+      minSameRankPlayers,
+    ]
+  );
 
   // Wait for equipped skins so the local avatar spawns with shop gear once.
-  if (!skinsReady) {
+  if (!skinsReady || !rankReady) {
     return (
       <div className="fixed inset-0 z-[200] bg-[#0a1220] flex items-center justify-center text-white/60 text-sm">
-        Loading avatar skins…
+        {mode === 'competitive' && competitiveQueue === 'ranked'
+          ? 'Finding Ranked match…'
+          : 'Loading avatar skins…'}
       </div>
     );
   }
 
-  // Deathrun owns the full-screen game engine for its entire lifecycle
-  // (lobby wait -> countdown -> playing -> results), so it renders itself
-  // instead of sitting inside the hub's page chrome.
   return (
     <KilrunEngine
+      mode={mode}
+      competitiveQueue={competitiveQueue}
       joinOptions={joinOptions}
       onExit={onCancel}
       xpProgress={xpProgress}

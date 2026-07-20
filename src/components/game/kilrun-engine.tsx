@@ -39,8 +39,14 @@ import {
 } from '@/lib/weapons';
 import type { SkinAttachment } from '@/lib/player-skins';
 import {
-  getActivePlayMapId,
+  getActivePlayMapIdForMode,
   mapDocSpawnPoints,
+  mapDocPlayerSpawns,
+  mapDocMonsterSpawns,
+  mapDocTeamSpawns,
+  mapDocHealthFloors,
+  mapDocRedZones,
+  mapDocRevivePads,
   mapDocToSimFinishes,
   mapDocToSimHazards,
   mapDocToSimPlatforms,
@@ -50,6 +56,13 @@ import {
 } from './editor/prefab-storage';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
+import type { KilrunMode } from '@/lib/game-modes';
+import { HordeLobbyOverlay } from './modes/horde/lobby-overlay';
+import { HordeResultsScreen } from './modes/horde/results-screen';
+import { CompetitiveLobbyOverlay } from './modes/competitive/lobby-overlay';
+import { CompetitiveResultsScreen } from './modes/competitive/results-screen';
+import { ModeStatusHud } from './ui/mode-status-hud';
+import type { GameRoomName } from './net/connection';
 
 const MapEditor = dynamic(() => import('./editor/map-editor'), { ssr: false });
 
@@ -63,6 +76,10 @@ interface KilrunEngineProps {
   isAdmin?: boolean;
   /** Shop-equipped skin attachments for the local player avatar. */
   equippedSkins?: SkinAttachment[] | null;
+  /** Which game mode room to join. */
+  mode?: KilrunMode;
+  /** Competitive only — casual skips KP; ranked requires Premium. */
+  competitiveQueue?: 'casual' | 'ranked';
 }
 
 export default function KilrunEngine({
@@ -71,11 +88,19 @@ export default function KilrunEngine({
   xpProgress = 0,
   isAdmin = false,
   equippedSkins = null,
+  mode = 'deathrun',
+  competitiveQueue = 'casual',
 }: KilrunEngineProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const pausedRef = useRef(false);
+  const roomName: GameRoomName =
+    mode === 'competitive'
+      ? competitiveQueue === 'ranked'
+        ? 'competitive_ranked'
+        : 'competitive'
+      : mode;
   const {
     connectionRef,
     playersRef,
@@ -86,7 +111,7 @@ export default function KilrunEngine({
     localPlayer,
     playerCount,
     connectionError,
-  } = useRoomState(joinOptions);
+  } = useRoomState(joinOptions, roomName);
 
   const isMobile = detectTouchDevice();
   const [assetsReady, setAssetsReady] = useState(false);
@@ -100,7 +125,7 @@ export default function KilrunEngine({
   const equippedSkinsRef = useRef<SkinAttachment[] | null>(equippedSkins ?? null);
   equippedSkinsRef.current = equippedSkins ?? null;
 
-  // Push MAIN editor map to server when lobby is ready
+  // Push Active editor map for this mode to the server when lobby is ready
   useEffect(() => {
     if (room.phase === 'results') {
       customLoadedRef.current = false;
@@ -110,7 +135,7 @@ export default function KilrunEngine({
     if (customLoadedRef.current) return;
     if (!connectionRef.current?.sessionId) return;
 
-    const mapId = getActivePlayMapId();
+    const mapId = getActivePlayMapIdForMode(mode);
     if (!mapId) return;
     const doc = loadMapPlayable(mapId);
     if (!doc) return;
@@ -123,6 +148,12 @@ export default function KilrunEngine({
     const buttons = mapDocToSimButtons(doc);
     const teleports = mapDocToSimTeleports(doc);
     const spawns = mapDocSpawnPoints(doc);
+    const playerSpawns = mapDocPlayerSpawns(doc);
+    const monsterSpawns = mapDocMonsterSpawns(doc);
+    const teams = mapDocTeamSpawns(doc);
+    const healthFloors = mapDocHealthFloors(doc);
+    const redZones = mapDocRedZones(doc);
+    const revivePads = mapDocRevivePads(doc);
     const worldBounds = mapDocToWorldBounds(doc, platforms, finishes);
     customDocRef.current = doc;
     customLoadedRef.current = true;
@@ -132,11 +163,18 @@ export default function KilrunEngine({
       finishes,
       buttons,
       teleports,
-      spawn: spawns.runner ?? undefined,
+      spawn: spawns.runner ?? playerSpawns[0] ?? undefined,
       trapperSpawn: spawns.trapper ?? undefined,
+      playerSpawns,
+      monsterSpawns,
+      teamASpawns: teams.teamA,
+      teamBSpawns: teams.teamB,
+      healthFloors,
+      redZones,
+      revivePads,
       worldBounds,
     });
-  }, [room.phase, connectionRef, playerCount, connectionError]);
+  }, [room.phase, connectionRef, playerCount, connectionError, mode]);
 
   useEffect(() => {
     pausedRef.current = paused || editorOpen;
@@ -178,7 +216,7 @@ export default function KilrunEngine({
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
 
-    const activeId = getActivePlayMapId();
+    const activeId = getActivePlayMapIdForMode(mode);
     if (activeId) {
       const doc = loadMapPlayable(activeId);
       if (doc) {
@@ -371,11 +409,17 @@ export default function KilrunEngine({
   const runnersLeft = useMemo(() => {
     let n = 0;
     playersRef.current.forEach((p) => {
-      if (p.role === 'runner' && p.isAlive) n += 1;
+      if (mode === 'competitive') {
+        if (p.isAlive) n += 1;
+      } else if (mode === 'horde') {
+        if ((p.role === 'survivor' || p.role === 'runner') && p.isAlive) n += 1;
+      } else if (p.role === 'runner' && p.isAlive) {
+        n += 1;
+      }
     });
-    if (n === 0 && localPlayer?.role === 'runner' && localPlayer.isAlive) return 1;
+    if (n === 0 && localPlayer?.isAlive) return 1;
     return n;
-  }, [localPlayer, playerCount, room.phase, playersRef]);
+  }, [localPlayer, playerCount, room.phase, playersRef, mode]);
 
   const resume = () => {
     setPaused(false);
@@ -399,18 +443,40 @@ export default function KilrunEngine({
         )}
 
         {room.phase === 'playing' && localPlayer && !editorOpen && (
-          <HUD
-            player={localPlayer}
-            room={room}
-            xpProgress={xpProgress}
-            runnersLeft={runnersLeft}
-            coins={Math.floor(xpProgress / 10)}
-          />
+          <>
+            <HUD
+              player={localPlayer}
+              room={room}
+              xpProgress={xpProgress}
+              runnersLeft={runnersLeft}
+              coins={Math.floor(xpProgress / 10)}
+            />
+            <ModeStatusHud mode={mode} room={room} />
+          </>
         )}
-        {room.phase === 'lobby' && <LobbyOverlay playerCount={playerCount} />}
+        {room.phase === 'lobby' &&
+          (mode === 'horde' ? (
+            <HordeLobbyOverlay playerCount={playerCount} />
+          ) : mode === 'competitive' ? (
+            <CompetitiveLobbyOverlay playerCount={playerCount} />
+          ) : (
+            <LobbyOverlay playerCount={playerCount} />
+          ))}
         {room.phase === 'countdown' && <CountdownOverlay countdownMs={room.countdownMs} />}
         {room.phase === 'results' && localPlayer && (
-          <ResultsScreen room={room} player={localPlayer} onContinue={onExit} />
+          mode === 'horde' ? (
+            <HordeResultsScreen room={room} player={localPlayer} onContinue={onExit} />
+          ) : mode === 'competitive' ? (
+            <CompetitiveResultsScreen
+              room={room}
+              player={localPlayer}
+              players={playersRef.current}
+              queue={competitiveQueue}
+              onContinue={onExit}
+            />
+          ) : (
+            <ResultsScreen room={room} player={localPlayer} onContinue={onExit} />
+          )
         )}
 
         <JoystickOverlay joystickRef={joystickRef} enabled={isMobile && !paused} />

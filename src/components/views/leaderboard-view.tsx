@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, Medal, Trophy } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Gem, Loader2, Medal, Trophy } from 'lucide-react';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,11 @@ const SORT_TABS: { id: LeaderboardSort; label: string; hint: string }[] = [
   { id: 'xp', label: 'Top XP', hint: 'Highest account experience' },
   { id: 'vp', label: 'Top Vault Points', hint: 'Richest players by VP' },
   { id: 'stats', label: 'Top Combat', hint: 'Wins · Kills · K/D from Deathrun' },
+  {
+    id: 'ranked',
+    label: 'Ranked',
+    hint: 'Premium Ranked ladder — Killrun Points (KP) Elo, Call of Duty style',
+  },
 ];
 
 export default function LeaderboardView({ userId }: { userId?: string }) {
@@ -95,7 +100,11 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
           <Loader2 className="w-5 h-5 animate-spin" /> Loading rankings...
         </div>
       ) : podium.length === 0 ? (
-        <p className="text-slate-400 text-center py-12">No players yet.</p>
+        <p className="text-slate-400 text-center py-12">
+          {sort === 'ranked'
+            ? 'No Premium Ranked players yet — unlock Premium and play Ranked Competitive.'
+            : 'No players yet.'}
+        </p>
       ) : (
         <>
           {/* Olympic podium: 2nd · 1st · 3rd */}
@@ -186,6 +195,8 @@ function metricLine(row: LeaderboardRow, sort: LeaderboardSort) {
   if (sort === 'vp') return `${(row.vpCurrency ?? 0).toLocaleString()} VP`;
   if (sort === 'stats')
     return `${row.wins} W · ${row.kills} K · ${row.kd.toFixed(2)} K/D`;
+  if (sort === 'ranked')
+    return `${(row.kp ?? 0).toLocaleString()} KP · ${row.currentRank || 'Unranked'}`;
   return `Lv ${getLevelFromXp(row.xpProgress)} · ${row.xpProgress.toLocaleString()} XP`;
 }
 
@@ -328,10 +339,19 @@ function RankRow({
                 You
               </Badge>
             )}
-            {row.isVip && <Badge className="bg-yellow-500 text-black">VIP</Badge>}
+            {(row.isPremium || row.isVip) && (
+              <span
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500/20 border border-amber-400/50 shrink-0"
+                title="Premium"
+              >
+                <Gem className="h-2.5 w-2.5 text-amber-300" />
+              </span>
+            )}
           </p>
           <p className="text-xs text-slate-400">
-            {row.currentRank || 'Unranked'} · {metricLine(row, sort)}
+            {sort === 'ranked'
+              ? metricLine(row, sort)
+              : `${row.currentRank || 'Unranked'} · ${metricLine(row, sort)}`}
           </p>
         </div>
         <div className="flex gap-2 w-full sm:w-auto">

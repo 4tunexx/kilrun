@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ArrowRight, Skull, Swords, Users, Lock, Ban } from 'lucide-react';
+import { ArrowRight, Skull, Swords, Users, Lock, Ban, Gem, Zap } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -16,6 +16,7 @@ import { resolveGameDisabled } from '@/lib/branding';
 import { KILRUN_MODE_INFO, type KilrunMode } from '@/lib/game-modes';
 
 export type { KilrunMode };
+export type CompetitiveQueue = 'casual' | 'ranked';
 
 interface ModeDefinition {
   id: KilrunMode;
@@ -25,15 +26,27 @@ interface ModeDefinition {
 
 const modes: ModeDefinition[] = [
   { id: 'deathrun', icon: Skull, isLive: true },
-  { id: 'horde', icon: Users, isLive: false },
-  { id: 'competitive', icon: Swords, isLive: false },
+  { id: 'horde', icon: Users, isLive: true },
+  { id: 'competitive', icon: Swords, isLive: true },
 ];
 
 interface PlayViewProps {
-  onPlay: (mode: KilrunMode) => void;
+  onPlay: (mode: KilrunMode, opts?: { competitiveQueue?: CompetitiveQueue }) => void;
+  isPremium?: boolean;
+  /** Premium or free Ranked week — can enter Ranked queue. */
+  rankedAccess?: boolean;
+  freeRankedWeek?: boolean;
+  onOpenPremium?: () => void;
 }
 
-export default function PlayView({ onPlay }: PlayViewProps) {
+export default function PlayView({
+  onPlay,
+  isPremium = false,
+  rankedAccess,
+  freeRankedWeek = false,
+  onOpenPremium,
+}: PlayViewProps) {
+  const canRanked = rankedAccess ?? isPremium;
   const [gameDisabled, setGameDisabled] = useState(false);
   const [disabledMsg, setDisabledMsg] = useState('');
 
@@ -54,8 +67,8 @@ export default function PlayView({ onPlay }: PlayViewProps) {
       <div>
         <h2 className="text-2xl font-bold tracking-tight text-slate-100">Play</h2>
         <p className="text-sm text-slate-400 mt-1">
-          Pick a mode. Deathrun is live — Horde and Competitive maps can already be authored in
-          Admin → Map Editor.
+          Casual Competitive never touches KP. Ranked Competitive requires Premium and moves your
+          Elo rank.
         </p>
       </div>
 
@@ -71,6 +84,61 @@ export default function PlayView({ onPlay }: PlayViewProps) {
           const info = KILRUN_MODE_INFO[mode.id];
           const Icon = mode.icon;
           const canPlay = mode.isLive && !gameDisabled;
+
+          if (mode.id === 'competitive') {
+            return (
+              <Card
+                key={mode.id}
+                className={`bg-gradient-to-br border ${info.accentClass} bg-slate-900/60 md:col-span-1`}
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Icon className="h-5 w-5" />
+                    {info.title}
+                  </CardTitle>
+                  <CardDescription className="text-slate-300/90">
+                    4v4 · 6 rounds. Pick Casual (XP / KD only) or Premium Ranked (KP Elo).
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Button
+                    className="w-full"
+                    variant="secondary"
+                    disabled={!canPlay}
+                    onClick={() => onPlay('competitive', { competitiveQueue: 'casual' })}
+                  >
+                    <Zap className="h-4 w-4 mr-1" /> Casual
+                    <ArrowRight className="h-4 w-4 ml-auto" />
+                  </Button>
+                  <Button
+                    className="w-full bg-amber-600 hover:bg-amber-500 text-black font-bold"
+                    disabled={!canPlay}
+                    onClick={() => {
+                      if (!canRanked) {
+                        onOpenPremium?.();
+                        return;
+                      }
+                      onPlay('competitive', { competitiveQueue: 'ranked' });
+                    }}
+                  >
+                    <Gem className="h-4 w-4 mr-1" />
+                    {canRanked
+                      ? freeRankedWeek && !isPremium
+                        ? 'Ranked · Free Week'
+                        : 'Ranked Premium'
+                      : 'Ranked · Go Premium'}
+                    <ArrowRight className="h-4 w-4 ml-auto" />
+                  </Button>
+                  <p className="text-[11px] text-slate-500">
+                    Casual: XP, VP, achievements — no rank change. Ranked: KP moves your ladder
+                    rank
+                    {freeRankedWeek ? ' (free week open)' : ''}.
+                  </p>
+                </CardContent>
+              </Card>
+            );
+          }
+
           return (
             <Card
               key={mode.id}

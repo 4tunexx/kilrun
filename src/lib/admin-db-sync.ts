@@ -16,7 +16,7 @@ import { writeAuditLog } from '@/lib/audit';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-20-equipped-skins';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-20-rank-config-mm';
 
 async function requireAdmin() {
   const session = await auth();
@@ -50,8 +50,11 @@ export type AdminDbSyncResult = {
 };
 
 /**
- * Push Prisma schema to Mongo and verify skin / cosmetic fields are writable.
- * Call from Admin → Dashboard → Sync database schema.
+ * Push Prisma schema to Mongo and verify all gameplay fields are writable.
+ * Call from Admin → Dashboard → Sync database schema (once after this deploy).
+ *
+ * Verifies: equippedSkins, kp, peakKp/peakRank, premiumExpiresAt,
+ * MatchResult.kpDelta/stats, SiteSettings.premiumConfigJson, rankConfigJson.
  */
 export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
   const staff = await requireAdmin();
@@ -126,6 +129,150 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`equippedSkins verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — equippedSkins not writable. Redeploy with latest Prisma schema, then retry. (${msg})`
+    );
+  }
+
+  // Runtime verify: Killrun Points (KP) + rank for Competitive ladder
+  try {
+    const current = await prisma.user.findUnique({
+      where: { id: staff.id },
+      select: { kp: true, currentRank: true },
+    });
+    const kp = typeof current?.kp === 'number' ? current.kp : 1000;
+    await prisma.user.update({
+      where: { id: staff.id },
+      data: { kp },
+    });
+    steps.push(`kp field verified (read/write OK, value=${kp})`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`kp verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — User.kp not writable. Run Sync again after deploy. (${msg})`
+    );
+  }
+
+  // Runtime verify: MatchResult.kpDelta / stats for Competitive + Horde
+  try {
+    const probe = await prisma.matchResult.create({
+      data: {
+        userId: staff.id,
+        mode: 'schema_probe',
+        outcome: 'probe',
+        xpEarned: 0,
+        vpEarned: 0,
+        kpDelta: 0,
+        stats: { probe: true },
+      },
+    });
+    await prisma.matchResult.delete({ where: { id: probe.id } });
+    steps.push('MatchResult.kpDelta + stats verified');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`MatchResult verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — MatchResult.kpDelta/stats not writable. (${msg})`
+    );
+  }
+
+  // Runtime verify: Premium membership expiry (Ranked Competitive gate)
+  try {
+    const current = await prisma.user.findUnique({
+      where: { id: staff.id },
+      select: { premiumExpiresAt: true },
+    });
+    const existing = current?.premiumExpiresAt ?? null;
+    await prisma.user.update({
+      where: { id: staff.id },
+      data: { premiumExpiresAt: existing },
+    });
+    steps.push(
+      `premiumExpiresAt field verified (read/write OK, value=${existing ? existing.toISOString() : 'null'})`
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`premiumExpiresAt verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — User.premiumExpiresAt not writable. Run Sync again after deploy. (${msg})`
+    );
+  }
+
+  // Runtime verify: peak KP / peak rank (kept after Premium expires)
+  try {
+    const current = await prisma.user.findUnique({
+      where: { id: staff.id },
+      select: { kp: true, peakKp: true, peakRank: true },
+    });
+    const kp = typeof current?.kp === 'number' ? current.kp : 1000;
+    const peakKp = Math.max(
+      typeof current?.peakKp === 'number' ? current.peakKp : kp,
+      kp
+    );
+    const peakRank = current?.peakRank || 'Unranked';
+    await prisma.user.update({
+      where: { id: staff.id },
+      data: { peakKp, peakRank },
+    });
+    steps.push(
+      `peakKp/peakRank verified (read/write OK, peakKp=${peakKp}, peakRank=${peakRank})`
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`peakKp/peakRank verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — User.peakKp/peakRank not writable. Run Sync again after deploy. (${msg})`
+    );
+  }
+
+  // Runtime verify: SiteSettings.premiumConfigJson (admin Premium editor)
+  try {
+    const settings = await prisma.siteSettings.findUnique({
+      where: { singletonKey: 'default' },
+    });
+    const raw =
+      (settings as { premiumConfigJson?: string } | null)?.premiumConfigJson ?? '{}';
+    if (settings) {
+      await prisma.siteSettings.update({
+        where: { singletonKey: 'default' },
+        data: { premiumConfigJson: raw },
+      });
+    } else {
+      await prisma.siteSettings.create({
+        data: { singletonKey: 'default', premiumConfigJson: '{}' },
+      });
+    }
+    steps.push('premiumConfigJson field verified (read/write OK)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`premiumConfigJson verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — SiteSettings.premiumConfigJson not writable. (${msg})`
+    );
+  }
+
+  // Runtime verify: SiteSettings.rankConfigJson (admin Ranks editor)
+  try {
+    const settings = await prisma.siteSettings.findUnique({
+      where: { singletonKey: 'default' },
+    });
+    const raw =
+      (settings as { rankConfigJson?: string } | null)?.rankConfigJson ?? '{}';
+    if (settings) {
+      await prisma.siteSettings.update({
+        where: { singletonKey: 'default' },
+        data: { rankConfigJson: raw },
+      });
+    } else {
+      await prisma.siteSettings.create({
+        data: { singletonKey: 'default', rankConfigJson: '{}' },
+      });
+    }
+    steps.push('rankConfigJson field verified (read/write OK)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`rankConfigJson verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — SiteSettings.rankConfigJson not writable. (${msg})`
     );
   }
 

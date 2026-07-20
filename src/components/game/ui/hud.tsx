@@ -206,7 +206,13 @@ export const HUD: React.FC<{
         </div>
         <div className="mt-2.5 w-[150px] h-10 flex items-center justify-center">
           <span className="text-white text-[16px] font-black tracking-wide">
-            {isTrapper ? 'HUNT' : `RUNNERS LEFT: ${runnersLeft}`}
+            {isTrapper
+              ? 'HUNT'
+              : player.role === 'survivor'
+                ? `SURVIVORS: ${runnersLeft}`
+                : player.role === 'team_a' || player.role === 'team_b'
+                  ? `ALIVE: ${runnersLeft}`
+                  : `RUNNERS LEFT: ${runnersLeft}`}
           </span>
         </div>
       </div>

@@ -5,6 +5,8 @@ import { Server } from 'colyseus';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { monitor } from '@colyseus/monitor';
 import { DeathrunRoom } from './rooms/DeathrunRoom.js';
+import { HordeRoom } from './rooms/HordeRoom.js';
+import { CompetitiveRoom } from './rooms/CompetitiveRoom.js';
 
 const PORT = Number(process.env.PORT ?? 2567);
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*';
@@ -27,6 +29,11 @@ const gameServer = new Server({
 });
 
 gameServer.define('deathrun', DeathrunRoom);
+gameServer.define('horde', HordeRoom);
+gameServer.define('competitive', CompetitiveRoom);
+gameServer
+  .define('competitive_ranked', CompetitiveRoom)
+  .filterBy(['rankKey']);
 
 httpServer.listen(PORT, () => {
   // eslint-disable-next-line no-console

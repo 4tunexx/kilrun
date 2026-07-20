@@ -24,6 +24,7 @@ import {
   Trash2,
   Trophy,
   Users,
+  Gem,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -50,6 +51,8 @@ import { AdminDashboardPanel } from '@/components/views/admin/admin-dashboard-pa
 import { AdminMapEditorPanel } from '@/components/views/admin/admin-map-editor-panel';
 import { AdminSiteLayoutPanel } from '@/components/views/admin/admin-site-layout-panel';
 import { AdminNewsPanel } from '@/components/views/admin/admin-news-panel';
+import { AdminPremiumPanel } from '@/components/views/admin/admin-premium-panel';
+import { AdminRanksPanel } from '@/components/views/admin/admin-ranks-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -124,6 +127,8 @@ const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   badges: { label: 'Badges', icon: <Medal className="h-3.5 w-3.5" /> },
   support: { label: 'Support', icon: <Ticket className="h-3.5 w-3.5" /> },
   shop: { label: 'Shop', icon: <ShoppingBag className="h-3.5 w-3.5" /> },
+  premium: { label: 'Premium', icon: <Gem className="h-3.5 w-3.5" /> },
+  ranks: { label: 'Ranks', icon: <Trophy className="h-3.5 w-3.5" /> },
   maps: { label: 'Map Editor', icon: <MapIcon className="h-3.5 w-3.5" /> },
   content: { label: 'Content', icon: <FileText className="h-3.5 w-3.5" /> },
 };
@@ -141,6 +146,8 @@ const ADMIN_TABS = [
   'badges',
   'support',
   'shop',
+  'premium',
+  'ranks',
   'maps',
   'content',
 ] as const;
@@ -2294,6 +2301,18 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                 );
               })}
             </div>
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="premium" className="mt-4">
+            <AdminPremiumPanel />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="ranks" className="mt-4">
+            <AdminRanksPanel />
           </TabsContent>
         )}
 

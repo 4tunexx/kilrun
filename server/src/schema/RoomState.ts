@@ -1,6 +1,6 @@
 import { Schema, type, MapSchema, ArraySchema } from '@colyseus/schema';
 
-export type PlayerRole = 'trapper' | 'runner';
+export type PlayerRole = 'trapper' | 'runner' | 'survivor' | 'team_a' | 'team_b';
 export type MatchPhase = 'lobby' | 'countdown' | 'playing' | 'results';
 export type MatchOutcome = 'win' | 'loss' | 'survived' | 'eliminated';
 
@@ -34,6 +34,8 @@ export class PlayerState extends Schema {
   @type('number') checkpointY = 0;
   @type('number') checkpointZ = 0;
   @type('boolean') hasCheckpoint = false;
+  /** Competitive KP snapshot at join (optional). */
+  @type('number') kp = 1000;
 }
 
 /** Solid walkable surface for the shared platformer physics. */
@@ -93,4 +95,19 @@ export class RoomState extends Schema {
   /** Course progress HUD anchors (sim X). */
   @type('number') courseStartX = 2;
   @type('number') courseFinishX = 46;
+
+  /** deathrun | horde | competitive — informational for clients. */
+  @type('string') modeTag = 'deathrun';
+  /** Horde: current wave number (1-based). */
+  @type('number') wave = 0;
+  /** Horde: monsters still alive this wave. */
+  @type('number') monstersAlive = 0;
+  /** Horde: team kill count this match. */
+  @type('number') teamKills = 0;
+  /** Competitive: current round (1–6). */
+  @type('number') roundIndex = 0;
+  /** Competitive: Team A rounds won. */
+  @type('number') scoreA = 0;
+  /** Competitive: Team B rounds won. */
+  @type('number') scoreB = 0;
 }

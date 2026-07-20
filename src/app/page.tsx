@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { withPrismaRetry } from '@/lib/prisma';
 import GameHubInterface from '@/components/game-hub-interface';
+import { isPremiumActive } from '@/lib/premium';
+import { getRankForKp, KP_DEFAULT } from '@/lib/kp';
 
 export default async function Page() {
   const session = await auth();
@@ -29,6 +31,26 @@ export default async function Page() {
     redirect('/landing?error=banned');
   }
 
+  const kp =
+    typeof (user as { kp?: number }).kp === 'number'
+      ? (user as { kp: number }).kp
+      : KP_DEFAULT;
+  const peakKp = Math.max(
+    typeof (user as { peakKp?: number }).peakKp === 'number'
+      ? (user as { peakKp: number }).peakKp
+      : kp,
+    kp
+  );
+  const peakRank =
+    (user as { peakRank?: string }).peakRank || getRankForKp(peakKp);
+  const premiumExpiresAt =
+    (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt ?? null;
+  const premium = isPremiumActive({
+    isVip: user.isVip,
+    premiumExpiresAt,
+  });
+  const kpRank = getRankForKp(kp);
+
   return (
     <GameHubInterface
       user={{
@@ -38,9 +60,14 @@ export default async function Page() {
         avatarUrl: user.avatarUrl,
         vpCurrency: user.vpCurrency,
         xpProgress: user.xpProgress,
-        currentRank: user.currentRank,
+        currentRank: premium ? kpRank : 'Go Premium',
+        kp,
         role: user.role,
         isVip: user.isVip,
+        isPremium: premium,
+        premiumExpiresAt: premiumExpiresAt
+          ? new Date(premiumExpiresAt).toISOString()
+          : null,
         bio: user.bio,
         email: user.email,
         emailVerified: user.emailVerified,
