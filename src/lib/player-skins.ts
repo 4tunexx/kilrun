@@ -442,20 +442,58 @@ export function skinConfigToJson(preset: PlayerSkinPreset): Record<string, unkno
 export function parseSkinConfig(raw: unknown): PlayerSkinPreset | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
-  if (o.kind !== 'player_skin') return null;
-  const attachments = Array.isArray(o.attachments) ? (o.attachments as SkinAttachment[]) : [];
-  if (!attachments.length) return null;
-  const primarySlot = (o.primarySlot as SkinAttachSlot) || attachments[0]?.slot || 'hat';
-  return {
-    id: String(o.id || 'skin'),
-    name: String(o.name || 'Skin'),
-    baseModelKey: String(o.baseModelKey || 'default-mannequin'),
-    primarySlot,
-    attachments,
-    thumbnail: typeof o.thumbnail === 'string' ? o.thumbnail : undefined,
-    createdAt: String(o.createdAt || new Date().toISOString()),
-    updatedAt: String(o.updatedAt || new Date().toISOString()),
-  };
+  // Full preset from Model Editor publish
+  if (o.kind === 'player_skin') {
+    const attachments = Array.isArray(o.attachments) ? (o.attachments as SkinAttachment[]) : [];
+    if (!attachments.length) return null;
+    const primarySlot = (o.primarySlot as SkinAttachSlot) || attachments[0]?.slot || 'hat';
+    return {
+      id: String(o.id || 'skin'),
+      name: String(o.name || 'Skin'),
+      baseModelKey: String(o.baseModelKey || 'default-mannequin'),
+      primarySlot,
+      attachments,
+      thumbnail: typeof o.thumbnail === 'string' ? o.thumbnail : undefined,
+      createdAt: String(o.createdAt || new Date().toISOString()),
+      updatedAt: String(o.updatedAt || new Date().toISOString()),
+    };
+  }
+  // Inventory equip sometimes stores { attachments, primarySlot } without kind
+  if (Array.isArray(o.attachments) && o.attachments.length) {
+    const attachments = o.attachments as SkinAttachment[];
+    const primarySlot = (o.primarySlot as SkinAttachSlot) || attachments[0]?.slot || 'hat';
+    return {
+      id: String(o.id || 'skin'),
+      name: String(o.name || 'Skin'),
+      baseModelKey: String(o.baseModelKey || 'default-mannequin'),
+      primarySlot,
+      attachments,
+      thumbnail: typeof o.thumbnail === 'string' ? o.thumbnail : undefined,
+      createdAt: String(o.createdAt || new Date().toISOString()),
+      updatedAt: String(o.updatedAt || new Date().toISOString()),
+    };
+  }
+  return null;
+}
+
+/**
+ * Flatten User.equippedSkins map (cosmeticSlot → cosmeticConfig) into
+ * SkinAttachment[] for ThreeCharacter / play preview.
+ */
+export function flattenEquippedSkinsMap(
+  equipped: Record<string, unknown> | null | undefined
+): SkinAttachment[] {
+  if (!equipped || typeof equipped !== 'object') return [];
+  const byKey = new Map<string, SkinAttachment>();
+  for (const [slotKey, cfg] of Object.entries(equipped)) {
+    if (!isSkinCosmeticSlot(slotKey)) continue;
+    const preset = parseSkinConfig(cfg);
+    if (!preset?.attachments?.length) continue;
+    for (const att of preset.attachments) {
+      byKey.set(attachmentKey(att), att);
+    }
+  }
+  return Array.from(byKey.values());
 }
 
 export function baseModelKeyFromEntity(entity: {

@@ -501,7 +501,25 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
       : undefined,
     playerAnims: ent.playerAnims ? { ...ent.playerAnims } : undefined,
     playerSkins: ent.playerSkins
-      ? ent.playerSkins.map((a) => ({ ...a, shape: a.shape ? { ...a.shape } : undefined }))
+      ? ent.playerSkins.map((a) => ({
+          ...a,
+          shape: a.shape ? { ...a.shape } : undefined,
+          material: a.material ? { ...a.material } : undefined,
+          weapon: a.weapon
+            ? {
+                ...a.weapon,
+                muzzleOffset: a.weapon.muzzleOffset
+                  ? ([...a.weapon.muzzleOffset] as [number, number, number])
+                  : undefined,
+              }
+            : undefined,
+          sculpt: a.sculpt
+            ? { positions: [...a.sculpt.positions], count: a.sculpt.count }
+            : undefined,
+          position: [...a.position] as [number, number, number],
+          rotation: [...a.rotation] as [number, number, number],
+          scale: [...a.scale] as [number, number, number],
+        }))
       : undefined,
     hazard: ent.hazard ? { ...ent.hazard } : undefined,
     jumpPad: ent.jumpPad ? { ...ent.jumpPad } : undefined,

@@ -96,7 +96,6 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     let interactPulse = false;
     let attackPulse = false;
     let lastAttackAt = 0;
-    let attackAnimUntil = 0;
     let raf = 0;
     const pads = mapDocToSimPlatforms(doc);
     const finishes = mapDocToSimFinishes(doc);
@@ -416,7 +415,6 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
           attackPulse = false;
           if (now - lastAttackAt >= combat.cooldownMs) {
             lastAttackAt = now;
-            attackAnimUntil = now + Math.min(650, Math.max(380, combat.cooldownMs));
             attackThisFrame = true;
             if (combat.kind !== 'cosmetic') {
               const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));

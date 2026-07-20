@@ -105,10 +105,22 @@ export function ModelSkinEditor({
   const activeKeyRef = useRef<string>('hat');
   const [presets, setPresets] = useState<PlayerSkinPreset[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [attachments, setAttachments] = useState<SkinAttachment[]>([
-    defaultAttachment('hat'),
-  ]);
-  const [activeKey, setActiveKey] = useState<string>('hat');
+  const [attachments, setAttachments] = useState<SkinAttachment[]>(() => {
+    if (entity.playerSkins?.length) {
+      return entity.playerSkins.map((a) => ({
+        ...a,
+        id: a.id || a.slot,
+        position: [...a.position] as [number, number, number],
+        rotation: [...a.rotation] as [number, number, number],
+        scale: [...a.scale] as [number, number, number],
+      }));
+    }
+    return [defaultAttachment('hat')];
+  });
+  const [activeKey, setActiveKey] = useState<string>(() => {
+    const first = entity.playerSkins?.[0];
+    return first ? attachmentKey(first) : 'hat';
+  });
   activeKeyRef.current = activeKey;
   const [name, setName] = useState('New Hat Skin');
   const [price, setPrice] = useState(250);
@@ -1318,6 +1330,10 @@ function WeaponCombatPanel({
       </div>
       {combat.kind !== 'cosmetic' && (
         <>
+          <p className="text-[9px] text-white/35 leading-snug">
+            Range / cooldown drive Play Test swing reach. Damage numbers are stored for a later
+            server combat pass (live match still uses room hitscan constants for trappers).
+          </p>
           <SliderField
             label="Range"
             value={combat.range}
@@ -1327,7 +1343,7 @@ function WeaponCombatPanel({
             onChange={(range) => patch({ range })}
           />
           <SliderField
-            label="Damage"
+            label="Damage (saved · server later)"
             value={combat.damage}
             min={5}
             max={100}

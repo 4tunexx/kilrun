@@ -2148,6 +2148,13 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   disabled={busyKey === 'create-item'}
                   onClick={() =>
                     runAction('create-item', async () => {
+                      if (itemForm.itemCategory === 'Skins') {
+                        toast({
+                          title: 'Skins need Model Editor publish',
+                          description:
+                            'Slot-only items have no mesh. Prefer Model Editor → Publish to shop so cosmeticConfig (attachments) is included.',
+                        });
+                      }
                       await adminUpsertStoreItem({
                         itemName: itemForm.itemName,
                         itemCategory: itemForm.itemCategory,

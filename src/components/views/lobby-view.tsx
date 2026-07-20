@@ -1,11 +1,13 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Clock, X } from 'lucide-react';
 import KilrunEngine from '@/components/game/kilrun-engine';
 import type { KilrunMode } from './play-view';
+import { getMyEquippedSkinAttachments } from '@/lib/social-actions';
+import type { SkinAttachment } from '@/lib/player-skins';
 
 interface LobbyViewProps {
   mode: KilrunMode;
@@ -36,6 +38,28 @@ const LobbyView: React.FC<LobbyViewProps> = ({
     () => ({ userId, username, avatarUrl, isAdmin }),
     [userId, username, avatarUrl, isAdmin]
   );
+  const [equippedSkins, setEquippedSkins] = useState<SkinAttachment[]>([]);
+  const [skinsReady, setSkinsReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getMyEquippedSkinAttachments()
+      .then((atts) => {
+        if (!cancelled) {
+          setEquippedSkins(atts);
+          setSkinsReady(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEquippedSkins([]);
+          setSkinsReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   if (mode !== 'deathrun') {
     return (
@@ -59,10 +83,27 @@ const LobbyView: React.FC<LobbyViewProps> = ({
     );
   }
 
+  // Wait for equipped skins so the local avatar spawns with shop gear once.
+  if (!skinsReady) {
+    return (
+      <div className="fixed inset-0 z-[200] bg-[#0a1220] flex items-center justify-center text-white/60 text-sm">
+        Loading avatar skins…
+      </div>
+    );
+  }
+
   // Deathrun owns the full-screen game engine for its entire lifecycle
   // (lobby wait -> countdown -> playing -> results), so it renders itself
   // instead of sitting inside the hub's page chrome.
-  return <KilrunEngine joinOptions={joinOptions} onExit={onCancel} xpProgress={xpProgress} isAdmin={isAdmin} />;
+  return (
+    <KilrunEngine
+      joinOptions={joinOptions}
+      onExit={onCancel}
+      xpProgress={xpProgress}
+      isAdmin={isAdmin}
+      equippedSkins={equippedSkins}
+    />
+  );
 };
 
 export default LobbyView;

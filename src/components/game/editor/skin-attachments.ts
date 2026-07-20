@@ -28,6 +28,14 @@ const textureCache = new Map<string, THREE.Texture>();
 export function clearSkinAttachments(avatarRoot: THREE.Object3D) {
   const existing = avatarRoot.getObjectByName(ATTACH_ROOT_NAME);
   if (existing) existing.removeFromParent();
+  // Bone-mode holders parent onto bones (not under __skin_attachments) — remove those too
+  const orphaned: THREE.Object3D[] = [];
+  avatarRoot.traverse((o) => {
+    if (o !== avatarRoot && typeof o.name === 'string' && o.name.startsWith('skin_')) {
+      orphaned.push(o);
+    }
+  });
+  for (const o of orphaned) o.removeFromParent();
 }
 
 function findBone(root: THREE.Object3D, hints: string[]): THREE.Object3D | null {
@@ -360,10 +368,9 @@ export async function applySkinAttachments(
 
 /** Soft sway for cloth / cape parts — call each frame from character update. */
 export function tickSkinAttachments(avatarRoot: THREE.Object3D, dt: number, timeSec?: number) {
-  const group = avatarRoot.getObjectByName(ATTACH_ROOT_NAME);
-  if (!group) return;
   const t = timeSec ?? performance.now() * 0.001;
-  group.traverse((o) => {
+  // Walk whole avatar — bone-parented skins live outside __skin_attachments
+  avatarRoot.traverse((o) => {
     const sway = o.userData?.skinSway;
     if (!sway || typeof sway !== 'number' || sway <= 0) return;
     const amp = 0.045 * sway;
