@@ -83,6 +83,7 @@ import { ModelSkinEditor } from './model-skin-editor';
 import { ensureMapPlayerEntity } from './player-avatar';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { adminUpsertStoreItem } from '@/lib/social-actions';
+import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
 import {
   BUILTIN_TEXTURES,
   deleteCustomTexture,
@@ -2292,6 +2293,8 @@ export function MapEditor({
               onApplyToPlayer={applySkinsToPlayer}
               onPublishToShop={async (payload) => {
                 try {
+                  // Ensure Mongo has skin fields before first publish
+                  await adminSyncDatabaseSchema().catch(() => null);
                   await adminUpsertStoreItem({
                     itemName: payload.itemName,
                     itemCategory: payload.itemCategory,

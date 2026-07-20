@@ -6,6 +6,7 @@ import {
   Award,
   ClipboardList,
   FileText,
+  Database,
   Flame,
   LayoutDashboard,
   Loader2,
@@ -99,6 +100,7 @@ import {
   isFireSaleActive,
 } from '@/lib/shop-catalog';
 import { SKIN_ATTACH_SLOTS } from '@/lib/player-skins';
+import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -1875,6 +1877,45 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
 
         {isAdmin && (
           <TabsContent value="shop" className="mt-4 space-y-4">
+            <Card className="bg-slate-800/40 border-cyan-700/30">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Database className="h-4 w-4 text-cyan-300" />
+                  Skins DB ready?
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-wrap items-center gap-3">
+                <p className="text-sm text-slate-400 flex-1 min-w-[200px]">
+                  Before publishing Model Editor skins, sync Prisma → Mongo once so{' '}
+                  <code className="text-slate-300">equippedSkins</code> works. Same
+                  action as Dashboard → Database schema sync.
+                </p>
+                <Button
+                  variant="outline"
+                  disabled={busyKey === 'schema-sync'}
+                  onClick={() =>
+                    runAction('schema-sync', async () => {
+                      const result = await adminSyncDatabaseSchema();
+                      toast({
+                        title: 'Database schema synced',
+                        description:
+                          result.cliPush === 'ok'
+                            ? 'prisma db push OK'
+                            : `Verified · CLI ${result.cliPush}`,
+                      });
+                    })
+                  }
+                >
+                  {busyKey === 'schema-sync' ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Database className="h-4 w-4 mr-2" />
+                  )}
+                  Sync schema now
+                </Button>
+              </CardContent>
+            </Card>
+
             <CosmeticsStudio onCreated={reload} />
 
             <Card className="bg-slate-800/40 border-slate-700/30">
