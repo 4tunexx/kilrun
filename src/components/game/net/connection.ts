@@ -11,6 +11,8 @@ export interface JoinOptions {
   userId: string;
   username: string;
   avatarUrl?: string;
+  /** Allows pushing MAIN custom maps into the room. */
+  isAdmin?: boolean;
 }
 
 export interface RoomCallbacks {
@@ -96,9 +98,19 @@ export class GameConnection {
         matchTimeRemainingMs: s.matchTimeRemainingMs,
         trapperSessionId: s.trapperSessionId,
         winnerRole: s.winnerRole,
+        courseStartX: s.courseStartX,
+        courseFinishX: s.courseFinishX,
       });
     };
-    ['phase', 'countdownMs', 'matchTimeRemainingMs', 'trapperSessionId', 'winnerRole'].forEach((field) => {
+    [
+      'phase',
+      'countdownMs',
+      'matchTimeRemainingMs',
+      'trapperSessionId',
+      'winnerRole',
+      'courseStartX',
+      'courseFinishX',
+    ].forEach((field) => {
       proxy.listen(field, emitRoomChange);
     });
     emitRoomChange();
@@ -117,6 +129,7 @@ export class GameConnection {
       depth: number;
       kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish';
       boost?: number;
+      height?: number;
     }[];
     obstacles?: {
       id?: string;

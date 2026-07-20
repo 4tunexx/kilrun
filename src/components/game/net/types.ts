@@ -36,6 +36,7 @@ export interface NetPlatformState {
   z: number;
   width: number;
   depth: number;
+  height?: number;
   boost?: number;
 }
 
@@ -60,6 +61,8 @@ export interface NetRoomState {
   matchTimeRemainingMs: number;
   trapperSessionId: string;
   winnerRole: string;
+  courseStartX?: number;
+  courseFinishX?: number;
 }
 
 export interface PlayerInputMessage {

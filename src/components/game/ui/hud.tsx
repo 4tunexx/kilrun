@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { NetPlayerState, NetRoomState } from '../net/types';
 import { getLevelFromXp, getLevelProgress } from '@/lib/progression';
+import { RunnerHud } from '../modes/deathrun/runner-hud';
 
 function formatClock(ms: number): string {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
@@ -250,7 +251,13 @@ export const HUD: React.FC<{
         <ChargeBar left={60} top={96} width={144} height={7} value={100} fill="rgba(255,152,55,0.96)" />
       </div>
 
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-center">
+      {!isTrapper && (
+        <div className="absolute top-[88px] left-1/2 -translate-x-1/2 sm:top-24">
+          <RunnerHud player={player} room={room} />
+        </div>
+      )}
+
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-center px-3 hidden sm:block">
         <p className="text-[11px] font-bold tracking-widest text-white/55 uppercase">
           • Space Jump // Shift Sprint // Mouse Look // Esc Menu
         </p>

@@ -24,6 +24,7 @@ import {
   SPAWN_X,
   SPAWN_Z,
   TICK_DT_MS,
+  VOID_Z,
   WORLD_HEIGHT,
 } from '../sim/constants.js';
 import {
@@ -41,6 +42,8 @@ interface JoinOptions {
   userId?: string;
   username?: string;
   avatarUrl?: string;
+  /** Staff / map publisher — allowed to push MAIN custom maps. */
+  isAdmin?: boolean;
 }
 
 interface FinishZone {
@@ -82,12 +85,17 @@ export class DeathrunRoom extends Room<RoomState> {
   private customFinishes: FinishZone[] = [];
   /** Clamp box — expanded from custom map AABB when loaded. */
   private worldBounds: WorldBounds = { ...DEFAULT_WORLD_BOUNDS };
+  /** First joiner — may load MAIN map; admins always may. */
+  private hostSessionId: string | null = null;
+  private adminSessions = new Set<string>();
 
   onCreate() {
     this.setState(new RoomState());
     this.state.platforms.push(...createDeathrunPlatforms());
     this.state.obstacles.push(...createDeathrunObstacles());
     this.obstacleTimers = this.state.obstacles.map(() => 0);
+    this.state.courseStartX = SPAWN_X;
+    this.state.courseFinishX = FINISH_X;
 
     this.onMessage('input', (client, input: Partial<PlayerInput>) => {
       const player = this.state.players.get(client.sessionId);
@@ -113,6 +121,15 @@ export class DeathrunRoom extends Room<RoomState> {
         }
       ) => {
         if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
+        const allowed =
+          this.adminSessions.has(client.sessionId) ||
+          client.sessionId === this.hostSessionId;
+        if (!allowed) {
+          console.warn(
+            `[DeathrunRoom] loadCustomMap rejected for ${client.sessionId} (not host/admin)`
+          );
+          return;
+        }
         const platforms = data?.platforms;
         if (!Array.isArray(platforms) || platforms.length === 0) return;
 
@@ -138,7 +155,18 @@ export class DeathrunRoom extends Room<RoomState> {
           this.worldBounds = { ...DEFAULT_WORLD_BOUNDS };
         }
 
-        this.state.players.forEach((player, index) => {
+        // HUD progress anchors
+        this.state.courseStartX = data.spawn?.x ?? SPAWN_X;
+        if (this.customFinishes.length > 0) {
+          this.state.courseFinishX = this.customFinishes[this.customFinishes.length - 1].x;
+        } else {
+          let maxX = this.state.courseStartX + 10;
+          for (const p of this.state.platforms) maxX = Math.max(maxX, p.x);
+          this.state.courseFinishX = maxX;
+        }
+
+        Array.from(this.state.players.values()).forEach((player, index) => {
+          player.hasCheckpoint = false;
           this.applySpawnPosition(player, index);
           player.vz = 0;
         });
@@ -153,6 +181,9 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   onJoin(client: Client, options: JoinOptions) {
+    if (!this.hostSessionId) this.hostSessionId = client.sessionId;
+    if (options.isAdmin) this.adminSessions.add(client.sessionId);
+
     const player = new PlayerState();
     player.sessionId = client.sessionId;
     player.userId = options.userId ?? client.sessionId;
@@ -173,6 +204,10 @@ export class DeathrunRoom extends Room<RoomState> {
     this.simScratch.delete(client.sessionId);
     this.lastObstacleHitAt.delete(client.sessionId);
     this.lastShotAt.delete(client.sessionId);
+    this.adminSessions.delete(client.sessionId);
+    if (this.hostSessionId === client.sessionId) {
+      this.hostSessionId = this.state.players.keys().next().value ?? null;
+    }
 
     if (this.state.phase === 'playing' && client.sessionId === this.state.trapperSessionId) {
       this.endRound('runner');
@@ -371,8 +406,35 @@ export class DeathrunRoom extends Room<RoomState> {
           this.damagePlayer(player, amount);
         }
 
+        // Checkpoint touch → save respawn
+        for (const platform of this.state.platforms) {
+          if (platform.kind !== 'checkpoint') continue;
+          const halfW = platform.width / 2 + PLAYER_RADIUS;
+          const halfD = platform.depth / 2 + PLAYER_RADIUS;
+          if (
+            Math.abs(player.x - platform.x) <= halfW &&
+            Math.abs(player.y - platform.y) <= halfD &&
+            player.z >= platform.z - 0.4 &&
+            player.z <= platform.z + 0.6
+          ) {
+            player.hasCheckpoint = true;
+            player.checkpointX = platform.x;
+            player.checkpointY = platform.y;
+            player.checkpointZ = platform.z;
+          }
+        }
+
         if (this.isTouchingFinish(player)) {
           player.hasFinished = true;
+        }
+      }
+
+      if (player.isAlive && player.z < VOID_Z) {
+        if (player.hasCheckpoint) {
+          this.respawnAtCheckpoint(player);
+        } else {
+          player.health = 0;
+          player.isAlive = false;
         }
       }
 
@@ -394,6 +456,17 @@ export class DeathrunRoom extends Room<RoomState> {
         break;
       }
     }
+  }
+
+  private respawnAtCheckpoint(player: PlayerState) {
+    player.x = player.checkpointX;
+    player.y = player.checkpointY;
+    player.z = player.checkpointZ + 0.05;
+    player.vz = 0;
+    player.health = Math.max(player.health, 60);
+    player.isAlive = true;
+    player.isGrounded = true;
+    player.hasFinished = false;
   }
 
   private damagePlayer(player: PlayerState, amount: number) {

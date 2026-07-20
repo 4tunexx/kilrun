@@ -29,6 +29,11 @@ export class PlayerState extends Schema {
   @type('boolean') isGrounded = true;
   @type('boolean') isSprinting = false;
   @type('boolean') isReady = false;
+  /** Last checkpoint touch (sim space). 0 = unset. */
+  @type('number') checkpointX = 0;
+  @type('number') checkpointY = 0;
+  @type('number') checkpointZ = 0;
+  @type('boolean') hasCheckpoint = false;
 }
 
 /** Solid walkable surface for the shared platformer physics. */
@@ -41,6 +46,11 @@ export class PlatformState extends Schema {
   @type('number') z = 0;
   @type('number') width = 1;
   @type('number') depth = 1;
+  /**
+   * Vertical thickness below top. Thin pads (~0.2) are top-only;
+   * taller values enable side/wall AABB push-out.
+   */
+  @type('number') height = 0.2;
   /** Jump-pad vertical boost (sim vz). 0 = use default. */
   @type('number') boost = 0;
 }
@@ -73,4 +83,7 @@ export class RoomState extends Schema {
   @type('number') matchTimeRemainingMs = 0;
   @type('string') trapperSessionId = '';
   @type('string') winnerRole = '';
+  /** Course progress HUD anchors (sim X). */
+  @type('number') courseStartX = 2;
+  @type('number') courseFinishX = 46;
 }

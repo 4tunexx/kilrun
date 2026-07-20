@@ -101,6 +101,8 @@ export interface SimPlatformBlueprint {
   kind?: SimPlatformKind;
   /** Jump-pad launch speed (sim vz). */
   boost?: number;
+  /** Vertical thickness below top (tall = wall box). */
+  height?: number;
 }
 
 /** Always-on (or timed) damage volumes exported from editor hazards. */
@@ -147,14 +149,36 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
       : e.kind === 'checkpoint'
         ? 'checkpoint'
         : 'solid';
+  const model = e.model ?? '';
+  const topOnly =
+    e.kind === 'finish' ||
+    e.kind === 'checkpoint' ||
+    jump ||
+    model.includes('floor') ||
+    model.startsWith('platform');
+  const wallLike =
+    !topOnly &&
+    (model.startsWith('wall') ||
+      model.startsWith('column') ||
+      model.includes('door') ||
+      Math.abs(e.scale[1]) >= 1.15 ||
+      e.solid === true);
+  const height = topOnly
+    ? 0.25
+    : wallLike
+      ? Math.max(0.8, Math.abs(e.scale[1]) * 2)
+      : 0.45;
+  // Walls: treat entity Y as center → top = y + height/2. Floors: Y is top.
+  const topZ = topOnly ? ty : ty + height * 0.5;
   return {
     x: tz,
     y: tx,
-    z: ty,
+    z: topZ,
     width: sizeZ,
     depth: sizeX,
     kind,
     boost: jump ? Math.max(4, e.jumpPad?.boost ?? 14) : undefined,
+    height,
   };
 }
 
@@ -182,9 +206,10 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
     );
   }
 
-  const runner = doc.entities.find(
-    (e) => e.kind === 'start' || e.kind === 'spawn_runner' || e.kind === 'player'
-  );
+  const runner =
+    doc.entities.find((e) => e.kind === 'start') ??
+    doc.entities.find((e) => e.kind === 'spawn_runner') ??
+    doc.entities.find((e) => e.kind === 'player');
   const pads = source.map(entityToPad);
 
   if (pads.length === 0 && runner) {
@@ -286,9 +311,10 @@ export function mapDocToWorldBounds(
 }
 
 export function mapDocSpawnPoints(doc: MapDocument) {
-  const runner = doc.entities.find(
-    (e) => e.kind === 'start' || e.kind === 'spawn_runner' || e.kind === 'player'
-  );
+  const runner =
+    doc.entities.find((e) => e.kind === 'start') ??
+    doc.entities.find((e) => e.kind === 'spawn_runner') ??
+    doc.entities.find((e) => e.kind === 'player');
   const trapper = doc.entities.find((e) => e.kind === 'spawn_trapper');
   const toSim = (e?: EditorEntity) =>
     e

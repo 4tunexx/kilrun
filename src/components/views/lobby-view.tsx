@@ -32,7 +32,10 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   xpProgress = 0,
   isAdmin = false,
 }) => {
-  const joinOptions = useMemo(() => ({ userId, username, avatarUrl }), [userId, username, avatarUrl]);
+  const joinOptions = useMemo(
+    () => ({ userId, username, avatarUrl, isAdmin }),
+    [userId, username, avatarUrl, isAdmin]
+  );
 
   if (mode !== 'deathrun') {
     return (

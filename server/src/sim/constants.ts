@@ -31,9 +31,13 @@ export const CROUCH_SPEED_MULTIPLIER = 0.55;
 /** Vertical platformer feel. */
 export const GRAVITY = 28;
 export const JUMP_VELOCITY = 9.4;
+/** Multiply ascending vz when jump is released (variable jump height). */
+export const JUMP_CUT_MULTIPLIER = 0.45;
 export const COYOTE_TIME_MS = 90;
 export const JUMP_BUFFER_MS = 110;
 export const MAX_FALL_SPEED = 22;
+/** Skin width for solid AABB push-out. */
+export const COLLISION_SKIN = 0.02;
 /** Below this height the runner falls into the void and is eliminated. */
 export const VOID_Z = -4;
 

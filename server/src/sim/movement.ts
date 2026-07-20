@@ -12,6 +12,7 @@ import {
   GROUND_ACCEL,
   GROUND_FRICTION,
   JUMP_BUFFER_MS,
+  JUMP_CUT_MULTIPLIER,
   JUMP_ENERGY_COST,
   JUMP_PAD_BOOST,
   JUMP_VELOCITY,
@@ -26,7 +27,7 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
 } from './constants.js';
-import { findSupportPlatform } from './platforms.js';
+import { findSupportPlatform, resolveSolidCollisions } from './platforms.js';
 
 export interface PlayerInput {
   moveX: number; // -1..1, camera-relative forward/back intent (world X after client rotates)
@@ -166,8 +167,12 @@ export function applyMovement(
     scratch.jumpBufferMs = 0;
   }
 
-  // Jump buffer: edge-trigger on press.
+  // Jump buffer: edge-trigger on press; variable height on release.
   const jumpEdge = input.jumpPressed && !scratch.wasJumpHeld;
+  const jumpReleased = !input.jumpPressed && scratch.wasJumpHeld;
+  if (jumpReleased && player.vz > 0) {
+    player.vz *= JUMP_CUT_MULTIPLIER;
+  }
   scratch.wasJumpHeld = input.jumpPressed;
   if (jumpEdge) scratch.jumpBufferMs = JUMP_BUFFER_MS;
   else scratch.jumpBufferMs = Math.max(0, scratch.jumpBufferMs - dtSeconds * 1000);
@@ -230,6 +235,14 @@ export function applyMovement(
     bounds.maxY - PLAYER_RADIUS
   );
 
+  // Side / wall AABB push-out for tall solids
+  const pushed = resolveSolidCollisions(
+    { x: player.x, y: player.y, z: player.z },
+    platforms
+  );
+  player.x = clamp(pushed.x, bounds.minX + PLAYER_RADIUS, bounds.maxX - PLAYER_RADIUS);
+  player.y = clamp(pushed.y, bounds.minY + PLAYER_RADIUS, bounds.maxY - PLAYER_RADIUS);
+
   // Vertical
   if (!player.isGrounded) {
     player.vz = Math.max(-MAX_FALL_SPEED, player.vz - GRAVITY * dtSeconds);
@@ -258,9 +271,8 @@ export function applyMovement(
     }
   }
 
+  // Void fall is handled by the room (checkpoint soft-respawn vs eliminate).
   if (player.z < VOID_Z) {
-    player.health = 0;
-    player.isAlive = false;
     player.vz = 0;
   }
 }

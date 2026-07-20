@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useToast } from '@/hooks/use-toast';
 import type { EditorEntity, FloorPreset, MapDocument, SkyPreset } from './map-document';
 import {
   ensureAnimation,
@@ -138,6 +139,7 @@ export function MapEditor({
   const [customTextures, setCustomTextures] = useState<CustomTexture[]>([]);
   const [snapY, setSnapY] = useState(false);
   const isMobile = useIsMobile();
+  const { toast } = useToast();
   const isTouch = typeof window !== 'undefined' && detectTouchDevice();
   const mobileFirst =
     typeof window !== 'undefined' &&
@@ -338,7 +340,11 @@ export function MapEditor({
     const issues = validateMapForPublish(latest);
     const errs = issues.filter((i) => i.level === 'error');
     if (errs.length) {
-      alert(`Cannot publish:\n\n${formatValidationSummary(issues)}`);
+      toast({
+        title: 'Cannot set MAIN map',
+        description: formatValidationSummary(issues),
+        variant: 'destructive',
+      });
       return;
     }
     if (issues.length) {
@@ -350,9 +356,10 @@ export function MapEditor({
     persist();
     setActivePlayMapId(mapId);
     setActivePlayId(mapId);
-    alert(
-      `“${doc.name}” is now the MAIN Deathrun map.\nPress Play → Deathrun and the match will load this map.`
-    );
+    toast({
+      title: `“${doc.name}” is MAIN`,
+      description: 'Rejoin Deathrun lobby/countdown so platforms reload for the match.',
+    });
   };
 
   const workingDoc = () => {
@@ -606,12 +613,46 @@ export function MapEditor({
             <Menu className="w-4 h-4" />
             Menus
           </button>
+          {(isMobile || isTouch) && (
+            <>
+              <button
+                type="button"
+                onClick={() => apiRef.current?.placeSpawn('start')}
+                className="flex items-center gap-1.5 rounded-xl border border-emerald-400/60 bg-emerald-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
+              >
+                <Flag className="w-4 h-4" />
+                Start
+              </button>
+              <button
+                type="button"
+                onClick={() => apiRef.current?.placeSpawn('finish')}
+                className="flex items-center gap-1.5 rounded-xl border border-amber-400/60 bg-amber-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
+              >
+                <FlagTriangleRight className="w-4 h-4" />
+                Finish
+              </button>
+              {selected && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUiCollapsed(false);
+                    setPropsOpen(true);
+                    setToolsOpen(false);
+                    setSidebarOpen(false);
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-white/30 bg-black/75 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11 backdrop-blur"
+                >
+                  Props
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
 
       {/* Mobile quick access while chrome is visible */}
       {!uiCollapsed && isMobile && (
-        <div className="fixed top-14 left-3 z-[140] flex flex-col gap-2 pointer-events-auto">
+        <div className="fixed top-14 left-3 z-[140] flex flex-col gap-2 pointer-events-auto max-h-[50vh] overflow-y-auto">
           <button
             type="button"
             onClick={() => setSidebarOpen((v) => !v)}
@@ -624,6 +665,28 @@ export function MapEditor({
           >
             {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
             Library
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              apiRef.current?.placeSpawn('start');
+              collapseAllMenus();
+            }}
+            className="flex items-center gap-1.5 rounded-xl border border-emerald-400/50 bg-black/75 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-emerald-100 shadow-lg active:scale-95 min-h-11"
+          >
+            <Flag className="w-4 h-4" />
+            Start
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              apiRef.current?.placeSpawn('finish');
+              collapseAllMenus();
+            }}
+            className="flex items-center gap-1.5 rounded-xl border border-amber-400/50 bg-black/75 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-amber-100 shadow-lg active:scale-95 min-h-11"
+          >
+            <FlagTriangleRight className="w-4 h-4" />
+            Finish
           </button>
         </div>
       )}
@@ -1397,7 +1460,7 @@ export function MapEditor({
             <div
               className={`absolute z-[80] bg-black/80 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm overflow-y-auto ${
                 isMobile
-                  ? 'left-3 right-3 bottom-16 top-auto max-h-[45vh] w-auto'
+                  ? 'left-3 right-3 bottom-[max(4.5rem,calc(env(safe-area-inset-bottom)+3.5rem))] top-auto max-h-[42vh] w-auto overscroll-contain'
                   : 'top-3 right-3 w-72 max-h-[calc(100%-6rem)]'
               }`}
             >
@@ -1529,8 +1592,8 @@ export function MapEditor({
                     Solid (players can stand on it)
                   </label>
                   <p className="text-[10px] text-white/40">
-                    Exports a top-plane collision pad into Deathrun. Floors/checkpoints default on;
-                    turn on for crates/props you want walkable.
+                    Floors/checkpoints are thin top pads. Tall solids (walls/columns) also block
+                    sideways. Turn on for crates/props you want walkable or blocking.
                   </p>
 
                   <label className="flex items-center gap-2 text-xs text-white/70">
