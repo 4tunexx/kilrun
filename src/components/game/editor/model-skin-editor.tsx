@@ -22,6 +22,9 @@ import {
   Undo2,
   Redo2,
   FlipHorizontal,
+  Move3d,
+  Paintbrush,
+  RotateCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { EditorEntity } from './map-document';
@@ -62,6 +65,8 @@ import {
 } from './skin-library';
 
 type SourceMode = 'sculpt' | 'catalog' | 'upload';
+/** Viewport drag: paint clay vs orbit camera around the part. */
+type ViewDragMode = 'sculpt' | 'turn';
 
 /**
  * Self-contained Model Editor — sculpt primitives, paint materials/textures,
@@ -98,6 +103,7 @@ export function ModelSkinEditor({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showAvatar, setShowAvatar] = useState(true);
+  const [viewDragMode, setViewDragMode] = useState<ViewDragMode>('turn');
   const [sourceMode, setSourceMode] = useState<SourceMode>('sculpt');
   const [blobBrush, setBlobBrush] = useState<SkinSculptBrush | null>('add');
   const [brushRadius, setBrushRadius] = useState(0.12);
@@ -156,6 +162,7 @@ export function ModelSkinEditor({
         }
         previewRef.current.setAvatar(loaded.scene);
         previewRef.current.setShowAvatar(showAvatar);
+        previewRef.current.setViewDragMode(viewDragMode);
         await previewRef.current.setAttachments(attachments, slot);
       } catch (err) {
         console.warn('[ModelSkinEditor]', err);
@@ -191,6 +198,10 @@ export function ModelSkinEditor({
         : null
     );
   }, [blobBrush, brushRadius, brushStrength, symmetryX]);
+
+  useEffect(() => {
+    previewRef.current?.setViewDragMode(viewDragMode);
+  }, [viewDragMode]);
 
   useEffect(() => {
     return () => {
@@ -383,6 +394,55 @@ export function ModelSkinEditor({
         {error && (
           <p className="absolute bottom-2 left-2 right-2 text-[10px] text-red-300">{error}</p>
         )}
+        {/* Sculpt vs Turn camera — overlays the live preview */}
+        <div className="absolute top-2 left-2 right-2 flex items-center gap-1.5 z-10 pointer-events-none">
+          <div className="flex rounded-lg overflow-hidden border border-white/20 bg-black/65 pointer-events-auto shadow-lg">
+            <button
+              type="button"
+              onClick={() => {
+                setViewDragMode('sculpt');
+                if (!blobBrush) setBlobBrush('add');
+                setShowAvatar(false);
+              }}
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide ${
+                viewDragMode === 'sculpt'
+                  ? 'bg-fuchsia-500/40 text-fuchsia-50'
+                  : 'text-white/55 hover:bg-white/10'
+              }`}
+              title="Drag to sculpt the mesh"
+            >
+              <Paintbrush className="w-3 h-3" />
+              Sculpt
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewDragMode('turn')}
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide border-l border-white/15 ${
+                viewDragMode === 'turn'
+                  ? 'bg-sky-500/40 text-sky-50'
+                  : 'text-white/55 hover:bg-white/10'
+              }`}
+              title="Drag to orbit · scroll to zoom · shift-drag to pan"
+            >
+              <Move3d className="w-3 h-3" />
+              Turn
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => previewRef.current?.resetCamera()}
+            className="ml-auto w-8 h-8 rounded-lg border border-white/20 bg-black/65 text-white/70 hover:bg-white/10 pointer-events-auto flex items-center justify-center"
+            title="Reset camera"
+            aria-label="Reset camera"
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <p className="absolute bottom-1.5 left-2 right-2 text-[9px] text-white/40 pointer-events-none truncate">
+          {viewDragMode === 'turn'
+            ? 'Turn: drag orbit · scroll zoom · shift-drag pan — flip to Sculpt to paint'
+            : 'Sculpt: drag on mesh · switch to Turn to see underside / sides'}
+        </p>
       </div>
 
       {/* Clear body / skin-only toggle */}
@@ -508,8 +568,10 @@ export function ModelSkinEditor({
                   Blob sculpt (paint on mesh)
                 </p>
                 <p className="text-[10px] text-white/40 leading-snug">
-                  Switch to <span className="text-amber-200/80">Skin only</span> above, then drag on
-                  the hat/part to add or remove clay.
+                  Use <span className="text-amber-200/80">Skin only</span> +{' '}
+                  <span className="text-fuchsia-200/80">Sculpt</span> on the preview to paint.
+                  Switch to <span className="text-sky-200/80">Turn</span> to orbit under the brim,
+                  sides, etc.
                 </p>
                 <div className="flex gap-1.5">
                   {(
@@ -524,11 +586,12 @@ export function ModelSkinEditor({
                       type="button"
                       onClick={() => {
                         setBlobBrush((b) => (b === id ? null : id));
+                        setViewDragMode('sculpt');
                         setShowAvatar(false);
                         setSourceMode('sculpt');
                       }}
                       className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md text-[10px] font-bold border ${
-                        blobBrush === id
+                        blobBrush === id && viewDragMode === 'sculpt'
                           ? 'bg-fuchsia-500/30 border-fuchsia-400/60 text-fuchsia-50'
                           : 'border-white/10 text-white/55'
                       }`}
@@ -606,7 +669,10 @@ export function ModelSkinEditor({
                     type="button"
                     size="sm"
                     variant="secondary"
-                    onClick={() => setBlobBrush(null)}
+                    onClick={() => {
+                      setBlobBrush(null);
+                      setViewDragMode('turn');
+                    }}
                   >
                     Stop brush
                   </Button>
@@ -1207,6 +1273,13 @@ class SkinPreview {
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
   private painting = false;
+  private viewDragMode: ViewDragMode = 'turn';
+  private orbiting = false;
+  private panning = false;
+  private lastPointerX = 0;
+  private lastPointerY = 0;
+  private target = new THREE.Vector3(0, 1.1, 0);
+  private spherical = { theta: 0.35, phi: 1.15, radius: 3.0 };
   private brush: {
     brush: SkinSculptBrush;
     radius: number;
@@ -1216,10 +1289,10 @@ class SkinPreview {
   private onSculptCommit?: (data: { positions: number[]; count: number }) => void;
   private onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void;
   private commitTimer: number | null = null;
-  private spinPaused = false;
   private undoStack: { positions: number[]; count: number }[] = [];
   private redoStack: { positions: number[]; count: number }[] = [];
   private strokeStartSnapshot: { positions: number[]; count: number } | null = null;
+  private lastFramedSlot: SkinAttachSlot | null = null;
 
   constructor(
     host: HTMLElement,
@@ -1231,9 +1304,7 @@ class SkinPreview {
     this.host = host;
     this.onSculptCommit = opts?.onSculptCommit;
     this.onHistoryChange = opts?.onHistoryChange;
-    this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
-    this.camera.position.set(0, 1.35, 3.0);
-    this.camera.lookAt(0, 1.1, 0);
+    this.camera = new THREE.PerspectiveCamera(40, 1, 0.05, 80);
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
@@ -1253,6 +1324,7 @@ class SkinPreview {
     sun.position.set(2, 4, 3);
     this.scene.add(sun);
     this.scene.add(this.soloRoot);
+    this.applyCameraFromSpherical();
     const resize = () => {
       const w = host.clientWidth || 320;
       const h = host.clientHeight || 208;
@@ -1269,17 +1341,42 @@ class SkinPreview {
     el.addEventListener('pointerup', this.onPointerUp);
     el.addEventListener('pointerleave', this.onPointerUp);
     el.addEventListener('pointercancel', this.onPointerUp);
+    el.addEventListener('wheel', this.onWheel, { passive: false });
+    el.addEventListener('contextmenu', this.onContextMenu);
 
     const tick = () => {
       if (this.disposed) return;
       this.raf = requestAnimationFrame(tick);
-      if (!this.spinPaused && !this.painting) {
+      // Gentle spin only in sculpt idle (not while turning camera or painting)
+      if (
+        this.viewDragMode === 'sculpt' &&
+        !this.painting &&
+        !this.orbiting &&
+        !this.panning
+      ) {
         const spin = this.showBody ? this.avatar : this.soloRoot;
-        if (spin) spin.rotation.y += 0.008;
+        if (spin) spin.rotation.y += 0.004;
       }
       this.renderer.render(this.scene, this.camera);
     };
     tick();
+  }
+
+  setViewDragMode(mode: ViewDragMode) {
+    this.viewDragMode = mode;
+    this.painting = false;
+    this.orbiting = false;
+    this.panning = false;
+    this.updateCursor();
+  }
+
+  private updateCursor() {
+    const el = this.renderer.domElement;
+    if (this.viewDragMode === 'turn') {
+      el.style.cursor = this.orbiting || this.panning ? 'grabbing' : 'grab';
+    } else {
+      el.style.cursor = this.brush ? 'crosshair' : 'default';
+    }
   }
 
   setBlobBrush(
@@ -1291,8 +1388,7 @@ class SkinPreview {
     } | null
   ) {
     this.brush = cfg;
-    this.spinPaused = Boolean(cfg);
-    this.renderer.domElement.style.cursor = cfg ? 'crosshair' : 'default';
+    this.updateCursor();
   }
 
   private emitHistory() {
@@ -1327,23 +1423,118 @@ class SkinPreview {
     this.emitHistory();
   }
 
+  private applyCameraFromSpherical() {
+    const { theta, phi, radius } = this.spherical;
+    const sinPhi = Math.sin(phi);
+    this.camera.position.set(
+      this.target.x + radius * sinPhi * Math.sin(theta),
+      this.target.y + radius * Math.cos(phi),
+      this.target.z + radius * sinPhi * Math.cos(theta)
+    );
+    this.camera.lookAt(this.target);
+  }
+
+  resetCamera() {
+    if (this.showBody) {
+      this.target.set(0, 1.1, 0);
+      this.spherical = { theta: 0.35, phi: 1.15, radius: 3.0 };
+    } else {
+      this.frameSoloPart();
+      this.lastFramedSlot =
+        (this.soloRoot.userData.focusSlot as SkinAttachSlot | undefined) ?? this.lastFramedSlot;
+    }
+    this.applyCameraFromSpherical();
+  }
+
+  private frameSoloPart() {
+    this.soloRoot.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(this.soloRoot);
+    if (box.isEmpty()) {
+      this.target.set(0, 0.15, 0);
+      this.spherical = { theta: 0.4, phi: 1.1, radius: 1.35 };
+      return;
+    }
+    const center = new THREE.Vector3();
+    const size = new THREE.Vector3();
+    box.getCenter(center);
+    box.getSize(size);
+    this.target.copy(center);
+    const maxDim = Math.max(size.x, size.y, size.z, 0.15);
+    this.spherical = {
+      theta: 0.45,
+      phi: 1.05,
+      radius: Math.max(0.55, maxDim * 2.35),
+    };
+  }
+
   private onPointerDown = (e: PointerEvent) => {
-    if (!this.brush) return;
     e.preventDefault();
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+    this.renderer.domElement.setPointerCapture?.(e.pointerId);
+
+    if (this.viewDragMode === 'turn' || e.shiftKey || e.button === 1 || e.button === 2) {
+      this.panning = e.shiftKey || e.button === 1;
+      this.orbiting = !this.panning;
+      this.updateCursor();
+      return;
+    }
+
+    // Sculpt mode
+    if (!this.brush) return;
     this.painting = true;
     const mesh = findSculptMesh(this.soloRoot);
     this.strokeStartSnapshot = mesh ? readSculptData(mesh) : null;
-    this.renderer.domElement.setPointerCapture?.(e.pointerId);
     this.paintAt(e.clientX, e.clientY);
   };
 
   private onPointerMove = (e: PointerEvent) => {
+    const dx = e.clientX - this.lastPointerX;
+    const dy = e.clientY - this.lastPointerY;
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+
+    if (this.orbiting) {
+      e.preventDefault();
+      this.spherical.theta -= dx * 0.01;
+      this.spherical.phi = Math.min(
+        Math.PI - 0.08,
+        Math.max(0.08, this.spherical.phi + dy * 0.01)
+      );
+      this.applyCameraFromSpherical();
+      return;
+    }
+
+    if (this.panning) {
+      e.preventDefault();
+      const panScale = this.spherical.radius * 0.0018;
+      const right = new THREE.Vector3();
+      const up = new THREE.Vector3();
+      this.camera.matrixWorld.extractBasis(right, up, new THREE.Vector3());
+      this.target.addScaledVector(right, -dx * panScale);
+      this.target.addScaledVector(up, dy * panScale);
+      this.applyCameraFromSpherical();
+      return;
+    }
+
     if (!this.painting || !this.brush) return;
     e.preventDefault();
     this.paintAt(e.clientX, e.clientY);
   };
 
   private onPointerUp = (e: PointerEvent) => {
+    if (this.orbiting || this.panning) {
+      this.orbiting = false;
+      this.panning = false;
+      this.updateCursor();
+      try {
+        this.renderer.domElement.releasePointerCapture?.(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
     if (!this.painting) return;
     this.painting = false;
     try {
@@ -1359,6 +1550,17 @@ class SkinPreview {
       this.emitHistory();
     }
     this.flushSculptCommit();
+  };
+
+  private onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 1.08 : 0.92;
+    this.spherical.radius = Math.min(12, Math.max(0.25, this.spherical.radius * factor));
+    this.applyCameraFromSpherical();
+  };
+
+  private onContextMenu = (e: Event) => {
+    e.preventDefault();
   };
 
   private paintAt(clientX: number, clientY: number) {
@@ -1398,20 +1600,20 @@ class SkinPreview {
   }
 
   setShowAvatar(on: boolean) {
+    const changed = this.showBody !== on;
     this.showBody = on;
     if (this.avatar) this.avatar.visible = on;
     this.soloRoot.visible = !on;
-    if (on) {
-      this.camera.position.set(0, 1.35, 3.0);
-      this.camera.lookAt(0, 1.1, 0);
-    } else {
-      this.camera.position.set(0, 0.35, 1.4);
-      this.camera.lookAt(0, 0.2, 0);
+    if (this.avatar) this.avatar.rotation.y = 0;
+    this.soloRoot.rotation.y = 0;
+    if (changed) {
+      if (!on) this.lastFramedSlot = null; // force reframe solo
+      this.resetCamera();
     }
   }
 
   async setAttachments(atts: SkinAttachment[], focusSlot?: SkinAttachSlot) {
-    if (this.painting) return; // don't rebuild mid-stroke
+    if (this.painting || this.orbiting || this.panning) return;
     if (this.avatar) await applySkinAttachments(this.avatar, atts);
     while (this.soloRoot.children.length) this.soloRoot.remove(this.soloRoot.children[0]);
     const primary =
@@ -1428,6 +1630,12 @@ class SkinPreview {
         box.getCenter(c);
         part.position.sub(c);
         this.soloRoot.add(part);
+        const slotChanged = this.lastFramedSlot !== primary.slot;
+        if (!this.showBody && slotChanged) {
+          this.frameSoloPart();
+          this.applyCameraFromSpherical();
+          this.lastFramedSlot = primary.slot;
+        }
       } catch (err) {
         console.warn('[SkinPreview solo]', err);
       }
@@ -1453,6 +1661,8 @@ class SkinPreview {
     el.removeEventListener('pointerup', this.onPointerUp);
     el.removeEventListener('pointerleave', this.onPointerUp);
     el.removeEventListener('pointercancel', this.onPointerUp);
+    el.removeEventListener('wheel', this.onWheel);
+    el.removeEventListener('contextmenu', this.onContextMenu);
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
