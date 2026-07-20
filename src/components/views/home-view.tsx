@@ -353,6 +353,7 @@ export default function HomeView({
                             src={msg.user.avatarUrl}
                             name={msg.user.username}
                             isVip={msg.user.isVip}
+                            frameConfig={msg.user.equippedFrameConfig}
                             className="h-7 w-7"
                             crownClassName="h-3.5 w-3.5 -top-0.5 -right-0.5"
                           />
@@ -362,6 +363,7 @@ export default function HomeView({
                                 userId={msg.user.id}
                                 role={msg.user.role}
                                 isVip={msg.user.isVip}
+                                nicknameEffect={msg.user.equippedNicknameConfig}
                                 className="text-sm"
                               >
                                 {msg.user.username}

@@ -78,8 +78,9 @@ import {
 
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Progress } from '@/components/ui/progress';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
+import { NicknameEffectText } from '@/components/nickname-effect';
+import { getCurrentUserProfile } from '@/lib/social-actions';
 import {
   Tooltip,
   TooltipContent,
@@ -129,6 +130,8 @@ export interface SessionPlayer {
   bio: string;
   email: string | null;
   emailVerified: boolean;
+  equippedFrameConfig?: unknown | null;
+  equippedNicknameConfig?: unknown | null;
 }
 
 const HUB_PAGE_ICONS: Record<HubPageId, LucideIcon> = {
@@ -209,6 +212,12 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [headerLogoStyle, setHeaderLogoStyle] = useState('');
   const [homeHeroImage, setHomeHeroImage] = useState('');
   const [isVip, setIsVip] = useState(user.isVip);
+  const [equippedFrameConfig, setEquippedFrameConfig] = useState<unknown | null>(
+    user.equippedFrameConfig ?? null
+  );
+  const [equippedNicknameConfig, setEquippedNicknameConfig] = useState<unknown | null>(
+    user.equippedNicknameConfig ?? null
+  );
   const [isEmailPromptOpen, setIsEmailPromptOpen] = useState(false);
   const [homeTitle, setHomeTitle] = useState(PAGE_META.home.title);
   const [homeSubtitle, setHomeSubtitle] = useState(PAGE_META.home.subtitle);
@@ -246,6 +255,21 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
       setIsLeftMenuOpen(false);
     }
   }, [isMobile]);
+
+  // Refresh equipped cosmetics when opening the right profile rail
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    getCurrentUserProfile()
+      .then((u) => {
+        setEquippedFrameConfig(u.equippedFrameConfig ?? null);
+        setEquippedNicknameConfig(u.equippedNicknameConfig ?? null);
+        setIsVip(u.isVip);
+        setVpBalance(u.vpCurrency);
+        setXpProgress(u.xpProgress);
+        setCurrentRank(u.currentRank);
+      })
+      .catch(() => {});
+  }, [isMenuOpen]);
 
   useEffect(() => {
     if (user.emailVerified) return;
@@ -728,7 +752,20 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                   <p>Inventory</p>
                 </TooltipContent>
               </Tooltip>
-              <InventoryDrawer open={isInventoryOpen} onOpenChange={setIsInventoryOpen} />
+              <InventoryDrawer
+                open={isInventoryOpen}
+                onOpenChange={setIsInventoryOpen}
+                onEquipChange={() => {
+                  getCurrentUserProfile()
+                    .then((u) => {
+                      setEquippedFrameConfig(u.equippedFrameConfig ?? null);
+                      setEquippedNicknameConfig(u.equippedNicknameConfig ?? null);
+                      setIsVip(u.isVip);
+                      setVpBalance(u.vpCurrency);
+                    })
+                    .catch(() => {});
+                }}
+              />
             </div>
 
             <button
@@ -830,22 +867,25 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                           progress={levelProgressPercent}
                           level={level}
                         >
-                          <div className="h-28 w-28 rounded-full border-4 border-slate-800 overflow-visible">
+                          <div className="h-24 w-24 overflow-visible">
                             <PlayerAvatar
                               src={user.avatarUrl}
                               name={user.username}
                               isVip={isVip}
+                              frameConfig={equippedFrameConfig}
                               className="h-full w-full"
+                              borderClassName="border-2 border-slate-900"
                               crownClassName="h-7 w-7 -top-1 -right-1"
                             />
                           </div>
                         </CircularProgress>
                       </div>
                       <h3
-                        className={`text-xl font-bold mt-2 flex items-center justify-center gap-1.5 flex-wrap ${getRoleTextColorClass(
-                          user.role,
-                          isVip
-                        )}`}
+                        className={`text-xl font-bold mt-2 flex items-center justify-center gap-1.5 flex-wrap ${
+                          !equippedNicknameConfig
+                            ? getRoleTextColorClass(user.role, isVip)
+                            : ''
+                        }`}
                       >
                         <button
                           type="button"
@@ -853,7 +893,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                           className="truncate max-w-[10rem] hover:underline underline-offset-2 decoration-primary/60"
                           title="Open your profile"
                         >
-                          {user.username}
+                          <NicknameEffectText
+                            name={user.username}
+                            effect={equippedNicknameConfig}
+                          />
                         </button>
                         {isVip && (
                           <Badge className="bg-yellow-500 text-black h-5 px-1.5 text-[10px]">

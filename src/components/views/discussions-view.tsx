@@ -8,7 +8,6 @@ import {
   MessageSquarePlus,
   Send,
 } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -169,6 +168,7 @@ export default function DiscussionsView() {
                     src={post.author.avatarUrl}
                     name={post.author.username}
                     isVip={post.author.isVip}
+                    frameConfig={post.author.equippedFrameConfig}
                     className="h-6 w-6"
                     crownClassName="h-3.5 w-3.5 -top-0.5 -right-0.5"
                   />
@@ -176,6 +176,7 @@ export default function DiscussionsView() {
                     userId={post.author.id}
                     role={post.author.role}
                     isVip={post.author.isVip}
+                    nicknameEffect={post.author.equippedNicknameConfig}
                   >
                     {post.author.username}
                   </UserHoverCard>
@@ -265,15 +266,20 @@ function ThreadReplies({
     <div className="space-y-3 border-t border-slate-700/40 pt-3">
       {replies.map((r) => (
         <div key={r.id} className="flex gap-2">
-          <Avatar className="h-7 w-7">
-            <AvatarImage src={r.author.avatarUrl} />
-            <AvatarFallback>{r.author.username.charAt(0)}</AvatarFallback>
-          </Avatar>
+          <PlayerAvatar
+            src={r.author.avatarUrl}
+            name={r.author.username}
+            isVip={r.author.isVip}
+            frameConfig={r.author.equippedFrameConfig}
+            className="h-7 w-7"
+            crownClassName="h-3.5 w-3.5 -top-0.5 -right-0.5"
+          />
           <div className="min-w-0 flex-1">
             <UserHoverCard
               userId={r.author.id}
               role={r.author.role}
               isVip={r.author.isVip}
+              nicknameEffect={r.author.equippedNicknameConfig}
               className="text-sm font-medium"
             >
               {r.author.username}

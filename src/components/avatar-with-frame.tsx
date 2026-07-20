@@ -16,6 +16,7 @@ export function AvatarWithFrame({
   frameConfig,
   className,
   sizeClass = 'h-24 w-24 sm:h-32 sm:w-32',
+  borderClassName = 'border-4 border-slate-900 shadow-2xl',
 }: {
   src?: string | null;
   alt?: string;
@@ -23,11 +24,12 @@ export function AvatarWithFrame({
   frameConfig?: FrameConfig | null | unknown;
   className?: string;
   sizeClass?: string;
+  borderClassName?: string;
 }) {
   const frame = frameConfig ? normalizeFrameConfig(frameConfig) : null;
 
   const avatar = (
-    <Avatar className={cn(sizeClass, 'border-4 border-slate-900 shadow-2xl', className)}>
+    <Avatar className={cn(sizeClass, borderClassName, className)}>
       <AvatarImage src={src ?? undefined} alt={alt ?? 'Player'} />
       <AvatarFallback>{fallback ?? '?'}</AvatarFallback>
     </Avatar>

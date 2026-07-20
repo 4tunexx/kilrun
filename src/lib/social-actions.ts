@@ -14,6 +14,10 @@ import {
 } from '@/lib/roles';
 import { processWebsiteAction } from '@/lib/progression-actions';
 import { normalizeForumCategory } from '@/lib/forum-categories';
+import {
+  PUBLIC_USER_CARD_SELECT,
+  PUBLIC_USER_COSMETIC_SELECT,
+} from '@/lib/cosmetics';
 
 async function requireSessionUser() {
   const session = await auth();
@@ -348,6 +352,8 @@ export type LeaderboardRow = {
   kills: number;
   kd: number;
   rank: number;
+  equippedFrameConfig: unknown | null;
+  equippedNicknameConfig: unknown | null;
 };
 
 /**
@@ -375,6 +381,7 @@ export async function getLeaderboard(opts?: {
       isVip: true,
       role: true,
       reputation: true,
+      ...PUBLIC_USER_COSMETIC_SELECT,
     },
   });
 
@@ -416,6 +423,8 @@ export async function getLeaderboard(opts?: {
       kills: s.kills,
       kd,
       rank: 0,
+      equippedFrameConfig: u.equippedFrameConfig ?? null,
+      equippedNicknameConfig: u.equippedNicknameConfig ?? null,
     };
   });
 
@@ -469,6 +478,7 @@ export async function getUserBrief(userId: string) {
       xpProgress: true,
       isVip: true,
       role: true,
+      ...PUBLIC_USER_COSMETIC_SELECT,
     },
   });
 }
@@ -500,6 +510,7 @@ export async function getFriends() {
           xpProgress: true,
           currentRank: true,
           lastSeenAt: true,
+          ...PUBLIC_USER_COSMETIC_SELECT,
         },
       },
       userB: {
@@ -512,6 +523,7 @@ export async function getFriends() {
           xpProgress: true,
           currentRank: true,
           lastSeenAt: true,
+          ...PUBLIC_USER_COSMETIC_SELECT,
         },
       },
     },
@@ -543,7 +555,7 @@ export async function getFriendRequests() {
   return prisma.friendship.findMany({
     where: { userBId: user.id, status: 'pending' },
     include: {
-      userA: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
+      userA: { select: PUBLIC_USER_CARD_SELECT },
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -632,15 +644,23 @@ export async function getConversations() {
     orderBy: { createdAt: 'desc' },
     take: 200,
     include: {
-      sender: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
-      receiver: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
+      sender: { select: PUBLIC_USER_CARD_SELECT },
+      receiver: { select: PUBLIC_USER_CARD_SELECT },
     },
   });
 
   const byPeer = new Map<
     string,
     {
-      peer: { id: string; username: string; avatarUrl: string; role: string; isVip: boolean };
+      peer: {
+        id: string;
+        username: string;
+        avatarUrl: string;
+        role: string;
+        isVip: boolean;
+        equippedFrameConfig: unknown | null;
+        equippedNicknameConfig: unknown | null;
+      };
       lastMessage: string;
       createdAt: Date;
       unread: number;
@@ -737,7 +757,7 @@ export async function getForumPosts(take = 30) {
     orderBy: { createdAt: 'desc' },
     take,
     include: {
-      author: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
+      author: { select: PUBLIC_USER_CARD_SELECT },
       _count: { select: { replies: true } },
     },
   });
@@ -771,7 +791,7 @@ export async function getForumReplies(postId: string) {
     where: { postId },
     orderBy: { createdAt: 'asc' },
     include: {
-      author: { select: { id: true, username: true, avatarUrl: true, role: true, isVip: true } },
+      author: { select: PUBLIC_USER_CARD_SELECT },
     },
   });
 }
@@ -1572,6 +1592,7 @@ export async function searchPlayers(query: string) {
         isVip: true,
         xpProgress: true,
         currentRank: true,
+        ...PUBLIC_USER_COSMETIC_SELECT,
       },
     });
   } catch {
@@ -1587,6 +1608,7 @@ export async function searchPlayers(query: string) {
         isVip: true,
         xpProgress: true,
         currentRank: true,
+        ...PUBLIC_USER_COSMETIC_SELECT,
       },
     });
     const lower = q.toLowerCase();

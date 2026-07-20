@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { Loader2, Send, Trash2 } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
+import { NicknameEffectText } from '@/components/nickname-effect';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -19,7 +20,15 @@ import { UserHoverCard } from '@/components/user-hover-card';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 
 type Conversation = {
-  peer: { id: string; username: string; avatarUrl: string; role?: string; isVip?: boolean };
+  peer: {
+    id: string;
+    username: string;
+    avatarUrl: string;
+    role?: string;
+    isVip?: boolean;
+    equippedFrameConfig?: unknown | null;
+    equippedNicknameConfig?: unknown | null;
+  };
   lastMessage: string;
   createdAt: Date;
   unread: number;
@@ -42,6 +51,8 @@ export default function MessagesView({ userId }: { userId: string }) {
     avatarUrl: string;
     role?: string;
     isVip?: boolean;
+    equippedFrameConfig?: unknown | null;
+    equippedNicknameConfig?: unknown | null;
   } | null>(null);
   const [thread, setThread] = useState<ThreadMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -149,20 +160,26 @@ export default function MessagesView({ userId }: { userId: string }) {
                       activePeerId === c.peer.id ? 'bg-slate-800/80' : ''
                     }`}
                   >
-                    <Avatar>
-                      <AvatarImage src={c.peer.avatarUrl} />
-                      <AvatarFallback>{c.peer.username.charAt(0)}</AvatarFallback>
-                    </Avatar>
+                    <div className="h-10 w-10 shrink-0">
+                      <PlayerAvatar
+                        src={c.peer.avatarUrl}
+                        name={c.peer.username}
+                        isVip={c.peer.isVip}
+                        frameConfig={c.peer.equippedFrameConfig}
+                        className="h-full w-full"
+                      />
+                    </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex justify-between gap-2">
-                        <p
-                          className={`font-semibold truncate ${getRoleTextColorClass(
-                            c.peer.role,
-                            c.peer.isVip
-                          )}`}
-                        >
-                          {c.peer.username}
-                        </p>
+                        <NicknameEffectText
+                          name={c.peer.username}
+                          effect={c.peer.equippedNicknameConfig}
+                          className={`font-semibold truncate ${
+                            !c.peer.equippedNicknameConfig
+                              ? getRoleTextColorClass(c.peer.role, c.peer.isVip)
+                              : ''
+                          }`}
+                        />
                         {c.unread > 0 && (
                           <span className="text-xs bg-primary px-1.5 rounded-full">
                             {c.unread}
@@ -194,14 +211,20 @@ export default function MessagesView({ userId }: { userId: string }) {
                 >
                   Back
                 </Button>
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={activePeer.avatarUrl} />
-                  <AvatarFallback>{activePeer.username.charAt(0)}</AvatarFallback>
-                </Avatar>
+                <div className="h-8 w-8 shrink-0">
+                  <PlayerAvatar
+                    src={activePeer.avatarUrl}
+                    name={activePeer.username}
+                    isVip={activePeer.isVip}
+                    frameConfig={activePeer.equippedFrameConfig}
+                    className="h-full w-full"
+                  />
+                </div>
                 <UserHoverCard
                   userId={activePeer.id}
                   role={activePeer.role}
                   isVip={activePeer.isVip}
+                  nicknameEffect={activePeer.equippedNicknameConfig}
                   className="flex-1 truncate"
                 >
                   {activePeer.username}

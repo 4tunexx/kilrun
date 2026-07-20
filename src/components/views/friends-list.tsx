@@ -13,7 +13,7 @@ import {
   X,
   UserPlus,
 } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -47,6 +47,8 @@ type FriendRow = {
   currentRank?: string;
   isOnline?: boolean;
   lastSeenAt?: Date | null;
+  equippedFrameConfig?: unknown | null;
+  equippedNicknameConfig?: unknown | null;
 };
 
 export const FriendsList = ({
@@ -60,7 +62,15 @@ export const FriendsList = ({
   const [requests, setRequests] = useState<
     {
       id: string;
-      userA: { id: string; username: string; avatarUrl: string; role?: string; isVip?: boolean };
+      userA: {
+        id: string;
+        username: string;
+        avatarUrl: string;
+        role?: string;
+        isVip?: boolean;
+        equippedFrameConfig?: unknown | null;
+        equippedNicknameConfig?: unknown | null;
+      };
     }[]
   >([]);
   const [query, setQuery] = useState('');
@@ -159,14 +169,21 @@ export const FriendsList = ({
               className="flex items-center justify-between gap-2 p-3 rounded-lg bg-slate-900/60 backdrop-blur-md border border-slate-700/30"
             >
               <div className="flex items-center gap-2 min-w-0">
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={req.userA.avatarUrl} />
-                  <AvatarFallback>{req.userA.username.charAt(0)}</AvatarFallback>
-                </Avatar>
+                <div className="h-8 w-8 shrink-0">
+                  <PlayerAvatar
+                    src={req.userA.avatarUrl}
+                    name={req.userA.username}
+                    isVip={req.userA.isVip}
+                    frameConfig={req.userA.equippedFrameConfig}
+                    className="h-full w-full"
+                    crownClassName="h-3.5 w-3.5"
+                  />
+                </div>
                 <UserHoverCard
                   userId={req.userA.id}
                   role={req.userA.role}
                   isVip={req.userA.isVip}
+                  nicknameEffect={req.userA.equippedNicknameConfig}
                   className="truncate text-sm"
                 >
                   {req.userA.username}
@@ -222,15 +239,21 @@ export const FriendsList = ({
                     className="flex items-center justify-between p-3 rounded-lg bg-slate-900/60 backdrop-blur-md border border-slate-700/30"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <Avatar>
-                        <AvatarImage src={player.avatarUrl} alt={player.username} />
-                        <AvatarFallback>{player.username.charAt(0)}</AvatarFallback>
-                      </Avatar>
+                      <div className="h-10 w-10 shrink-0">
+                        <PlayerAvatar
+                          src={player.avatarUrl}
+                          name={player.username}
+                          isVip={player.isVip}
+                          frameConfig={player.equippedFrameConfig}
+                          className="h-full w-full"
+                        />
+                      </div>
                       <div className="min-w-0">
                         <UserHoverCard
                           userId={player.id}
                           role={player.role}
                           isVip={player.isVip}
+                          nicknameEffect={player.equippedNicknameConfig}
                           className="truncate block"
                         >
                           {player.username}
@@ -312,11 +335,14 @@ export const FriendsList = ({
                   className="flex items-center justify-between p-3 rounded-lg bg-slate-900/60 backdrop-blur-md border border-slate-700/30 hover:border-primary/40 transition-colors"
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="relative shrink-0">
-                      <Avatar>
-                        <AvatarImage src={friend.avatarUrl} alt={friend.username} />
-                        <AvatarFallback>{friend.username.charAt(0)}</AvatarFallback>
-                      </Avatar>
+                    <div className="relative shrink-0 h-10 w-10">
+                      <PlayerAvatar
+                        src={friend.avatarUrl}
+                        name={friend.username}
+                        isVip={friend.isVip}
+                        frameConfig={friend.equippedFrameConfig}
+                        className="h-full w-full"
+                      />
                       <span
                         className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-slate-900 ${
                           online ? 'bg-emerald-400' : 'bg-slate-500'
@@ -336,6 +362,7 @@ export const FriendsList = ({
                           userId={friend.id}
                           role={friend.role}
                           isVip={friend.isVip}
+                          nicknameEffect={friend.equippedNicknameConfig}
                           className="truncate"
                         >
                           {friend.username}

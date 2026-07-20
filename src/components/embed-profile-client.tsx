@@ -39,6 +39,8 @@ export default function EmbedProfileClient({ userId }: { userId: string }) {
             levelProgressPercent: data.levelProgressPercent,
             reputation: data.reputation,
             equippedBannerConfig: data.equippedBannerConfig,
+            equippedFrameConfig: data.equippedFrameConfig,
+            equippedNicknameConfig: data.equippedNicknameConfig,
             showcase: data.showcase,
             showcaseLayout: data.showcaseLayout,
           });
