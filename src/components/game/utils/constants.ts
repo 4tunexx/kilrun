@@ -12,8 +12,10 @@ export const NETWORK_SEND_INTERVAL_MS = 1000 / NETWORK_SEND_HZ;
 
 export const CAMERA_FOLLOW_LERP = 0.14;
 export const CAMERA_YAW_KEY_SPEED = 1.8; // rad/s for Q/E
-export const CAMERA_YAW_MOUSE_SENS = 0.0042;
-export const CAMERA_YAW_STICK_SENS = 2.0;
+/** Foundry mouse_sensitivity 0.1° per pixel → radians. */
+export const CAMERA_YAW_MOUSE_SENS = (0.1 * Math.PI) / 180;
+/** Foundry controller_sensitivity ≈ 2°/frame @60fps → ~2.1 rad/s. */
+export const CAMERA_YAW_STICK_SENS = 2.1;
 
 export const MOBILE_LOOK_OFFSET_MAX = 4.5;
 export const MOBILE_LOOK_SENSITIVITY = 0.12;

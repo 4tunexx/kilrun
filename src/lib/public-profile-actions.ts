@@ -37,6 +37,9 @@ export type PublicProfile = {
   /** Highest Ranked Competitive tier ever reached (kept after Premium expires). */
   peakRank: string;
   peakRankImage?: string | null;
+  /** Display rank badge image / color from admin SiteSettings.rankConfigJson. */
+  rankImage?: string | null;
+  rankColor?: string | null;
   kp: number;
   peakKp: number;
   level: number;
@@ -133,6 +136,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
   });
   // Public showcase: always show highest Ranked tier reached (peak).
   const displayRank = peakRank && peakRank !== 'Unranked' ? peakRank : getRankForKp(kp, rankCfg.tiers);
+  const displayDef = findRankTierDef(displayRank, rankCfg.tiers);
 
   const totalRuns = matchStats.length;
   const bestScore = totalRuns > 0 ? Math.max(...matchStats.map((s) => s.score)) : 0;
@@ -185,7 +189,9 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     isPremium: premium,
     currentRank: displayRank,
     peakRank,
-    peakRankImage: peakDef?.imageUrl || null,
+    peakRankImage: peakDef?.imageUrl || displayDef?.imageUrl || null,
+    rankImage: displayDef?.imageUrl || peakDef?.imageUrl || null,
+    rankColor: displayDef?.color || peakDef?.color || null,
     kp,
     peakKp,
     level: progress.level,
@@ -231,6 +237,12 @@ export async function getPublicProfileSummary(userId: string) {
   const reputation = repVotes.reduce((sum, v) => sum + v.value, 0);
   const { getRankForKp, KP_DEFAULT } = await import('@/lib/kp');
   const { isPremiumActive } = await import('@/lib/premium');
+  const { parseRankConfig, findRankTierDef } = await import('@/lib/rank-config');
+  const { getSiteSettings } = await import('@/lib/progression-actions');
+  const settings = await getSiteSettings();
+  const rankCfg = parseRankConfig(
+    (settings as { rankConfigJson?: string }).rankConfigJson ?? '{}'
+  );
   const kp =
     typeof (target as { kp?: number }).kp === 'number'
       ? (target as { kp: number }).kp
@@ -242,8 +254,10 @@ export async function getPublicProfileSummary(userId: string) {
     kp
   );
   const peakRank =
-    (target as { peakRank?: string }).peakRank || getRankForKp(peakKp);
-  const displayRank = peakRank && peakRank !== 'Unranked' ? peakRank : getRankForKp(kp);
+    (target as { peakRank?: string }).peakRank || getRankForKp(peakKp, rankCfg.tiers);
+  const displayRank =
+    peakRank && peakRank !== 'Unranked' ? peakRank : getRankForKp(kp, rankCfg.tiers);
+  const rankDef = findRankTierDef(displayRank, rankCfg.tiers);
   return {
     id: target.id,
     username: target.username,
@@ -257,6 +271,8 @@ export async function getPublicProfileSummary(userId: string) {
     }),
     currentRank: displayRank,
     peakRank,
+    rankImage: rankDef?.imageUrl || null,
+    rankColor: rankDef?.color || null,
     kp,
     peakKp,
     level: progress.level,

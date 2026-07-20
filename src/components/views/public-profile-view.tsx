@@ -7,7 +7,6 @@ import {
   Award,
   Check,
   Gauge,
-  Gem,
   Loader2,
   Lock,
   MessageSquare,
@@ -23,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LevelBar } from '@/components/ui/level-bar';
-import { RankBadge } from '@/components/ui/rank-badge';
+import { RankLabel } from '@/components/ui/rank-badge';
 import { AvatarWithFrame } from '@/components/avatar-with-frame';
 import { NicknameEffectText } from '@/components/nickname-effect';
 import {
@@ -483,13 +482,14 @@ export default function PublicProfileView({
                 <p className="text-xs text-slate-400">
                   {profile.isPremium ? 'Ranked rank' : 'Highest Ranked rank'}
                 </p>
-                <p className="text-lg font-bold text-yellow-400 flex items-center justify-center gap-1.5">
-                  <RankBadge
+                <p className="text-lg font-bold flex items-center justify-center gap-1.5">
+                  <RankLabel
                     rank={profile.peakRank || profile.currentRank}
-                    imageUrl={profile.peakRankImage}
+                    imageUrl={profile.rankImage || profile.peakRankImage}
+                    color={profile.rankColor}
                     size={22}
+                    textClassName="text-lg font-bold"
                   />
-                  <Gem className="h-4 w-4 text-amber-300 fill-amber-400/40" /> {profile.peakRank || profile.currentRank}
                 </p>
                 {typeof profile.peakKp === 'number' && (
                   <p className="text-[10px] text-slate-500 mt-1 tabular-nums">

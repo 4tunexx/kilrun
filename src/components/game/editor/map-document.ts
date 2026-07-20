@@ -381,7 +381,26 @@ export interface MapEnvironment {
   floor: FloorPreset;
   floorColor: string;
   defaultTextureUrl?: string;
+  /** Equirectangular / panoramic sky image (data URL or http). */
+  skyTextureUrl?: string;
+  /** Soft horizon tint blended into fog. */
+  horizonColor?: string;
+  /** Hemisphere / ambient fill (0–2). */
+  ambientIntensity?: number;
+  /** Key light strength (0–4). */
+  sunIntensity?: number;
+  sunColor?: string;
+  /** Optional ground texture repeat tiling. */
+  floorTextureScale?: number;
 }
+
+/** Embedded 3rd-person view override (from 3rd View tool). Shape matches tps-view-settings. */
+export type MapTpsView = {
+  version?: 1;
+  camera?: Record<string, number>;
+  crosshair?: Record<string, number | string | boolean>;
+  player?: Record<string, number | boolean>;
+};
 
 export interface MapDocument {
   version: 1;
@@ -395,6 +414,8 @@ export interface MapDocument {
   layers: EditorLayer[];
   entities: EditorEntity[];
   environment?: MapEnvironment;
+  /** Optional per-map 3rd-person camera / crosshair / player framing. */
+  tpsView?: MapTpsView;
   meta?: { createdAt?: string; updatedAt?: string };
 }
 
@@ -409,6 +430,10 @@ export const DEFAULT_ENVIRONMENT: MapEnvironment = {
   fogDensity: 0.022,
   floor: 'grid',
   floorColor: '#1a2740',
+  ambientIntensity: 0.55,
+  sunIntensity: 1.15,
+  sunColor: '#fff4e0',
+  floorTextureScale: 40,
 };
 
 export function defaultAnimation(): EntityAnimation {

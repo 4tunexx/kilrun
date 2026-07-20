@@ -1,13 +1,16 @@
 import { Vector2 } from '../types';
 
 /**
- * Free-look mouse — move the mouse to orbit the camera. No RMB hold.
- * Pointer lock engages on first click into the canvas (browser requirement),
- * then look keeps working with zero buttons held.
+ * Mouse for GTA-style TPS:
+ * - LMB = fire / attack
+ * - RMB held = aim (strafe, body faces camera, crosshair)
+ * - RMB released = free look orbit around player (body faces move)
+ * Pointer lock on click so look works.
  */
 export class MouseHandler {
   private position: Vector2 = { x: 0, y: 0 };
-  private isDown = false;
+  private leftDown = false;
+  private rightDown = false;
   private lookDeltaX = 0;
   private lookDeltaY = 0;
   private host: HTMLElement | null = null;
@@ -21,23 +24,34 @@ export class MouseHandler {
     el.addEventListener('mousemove', (e) => {
       const evt = e as MouseEvent;
       this.position = { x: evt.clientX, y: evt.clientY };
-      // Always free-look — no button hold
+      const locked =
+        !this.host ||
+        document.pointerLockElement === this.host ||
+        document.pointerLockElement === document.body;
+      if (!locked) return;
       this.lookDeltaX += evt.movementX || 0;
       this.lookDeltaY += evt.movementY || 0;
     });
 
     el.addEventListener('mousedown', (e) => {
       const evt = e as MouseEvent;
-      if (evt.button === 0) this.isDown = true;
-      // Any click focuses free-look lock (then mouse moves alone)
+      if (evt.button === 0) this.leftDown = true;
+      if (evt.button === 2) this.rightDown = true;
       this.tryLock();
     });
 
     el.addEventListener('mouseup', (e) => {
-      if ((e as MouseEvent).button === 0) this.isDown = false;
+      const evt = e as MouseEvent;
+      if (evt.button === 0) this.leftDown = false;
+      if (evt.button === 2) this.rightDown = false;
     });
 
-    // If play CTA already gave a user-gesture, lock ASAP on enter
+    // Lost focus / leave — release buttons so aim doesn't stick
+    window.addEventListener('blur', () => {
+      this.leftDown = false;
+      this.rightDown = false;
+    });
+
     if (this.host) {
       this.host.addEventListener('pointerenter', () => this.tryLock());
     }
@@ -55,12 +69,12 @@ export class MouseHandler {
   }
 
   public isFiring(): boolean {
-    return this.isDown;
+    return this.leftDown;
   }
 
-  /** Free look is always active. */
+  /** GTA aim focus — hold RMB. */
   public isRightHeld(): boolean {
-    return true;
+    return this.rightDown;
   }
 
   public consumeLookDeltaX(): number {

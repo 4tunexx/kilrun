@@ -53,6 +53,8 @@ import {
   Bug,
   MousePointer2,
   Paintbrush,
+  Magnet,
+  PaintBucket,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -101,7 +103,10 @@ import {
 import { MapPlayPreview } from './map-play-preview';
 import { PlayerModelStudio } from './player-model-studio';
 import { ModelSkinEditor } from './model-skin-editor';
+import { TpsViewStudio } from './tps-view-studio';
 import { ensureMapPlayerEntity } from './player-avatar';
+import type { TpsViewSettings } from '../tps/tps-view-settings';
+import { sanitizeTpsView } from '../tps/tps-view-settings';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { adminUpsertStoreItem } from '@/lib/social-actions';
 import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
@@ -153,6 +158,7 @@ export function MapEditor({
   const apiRef = useRef<EditorViewportApi | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const texFileRef = useRef<HTMLInputElement>(null);
+  const skyFileRef = useRef<HTMLInputElement>(null);
 
   const starter = useMemo(() => {
     if (initialMapId) {
@@ -206,6 +212,7 @@ export function MapEditor({
   const [toolsOpen, setToolsOpen] = useState(!mobileFirst);
   const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
   const [modelEditorOpen, setModelEditorOpen] = useState(false);
+  const [tpsViewOpen, setTpsViewOpen] = useState(false);
   const [showAllCollisionGizmos, setShowAllCollisionGizmos] = useState(false);
   const lastLockedToastAt = useRef(0);
   const cameraBeforePlayRef = useRef<EditorCameraState | null>(null);
@@ -621,6 +628,28 @@ export function MapEditor({
         setEditTool('brush');
         if (!brush) setBrush('floor-square');
       }
+      if (e.key === 'p' || e.key === 'P') {
+        const selModel = docRef.current.entities.find((ent) => ent.id === selectedId)?.model;
+        if (selModel) setBrush(selModel);
+        else if (!brush) setBrush('floor-square');
+        setEditTool('bucket');
+        if (freeFly) apiRef.current?.setFreeFly(false);
+      }
+      if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey) {
+        const ids =
+          selectedIds.length >= 2
+            ? selectedIds
+            : selectedId
+              ? [selectedId, ...selectedIds.filter((id) => id !== selectedId)]
+              : [];
+        const ok = apiRef.current?.snapSelectedTogether(ids);
+        if (ok) {
+          toast({
+            title: 'Snapped together',
+            description: 'Edge-to-edge in a line, shared bottom height.',
+          });
+        }
+      }
       if (e.key === 'g' || e.key === 'G') setGridSnap((v) => !v);
       if (e.key === 'f' || e.key === 'F') apiRef.current?.focusSelected();
       if (e.key === 'Delete' || e.key === 'Backspace') apiRef.current?.deleteSelected();
@@ -750,6 +779,7 @@ export function MapEditor({
     setSelectedId(ensured.entity.id);
     apiRef.current?.setSelectedId(ensured.entity.id);
     setModelEditorOpen(false);
+    setTpsViewOpen(false);
     setPlayerStudioOpen(true);
     setUiCollapsed(false);
     setPropsOpen(false);
@@ -768,6 +798,7 @@ export function MapEditor({
     setSelectedId(ensured.entity.id);
     apiRef.current?.setSelectedId(ensured.entity.id);
     setPlayerStudioOpen(false);
+    setTpsViewOpen(false);
     setModelEditorOpen(true);
     setUiCollapsed(false);
     setPropsOpen(false);
@@ -819,6 +850,41 @@ export function MapEditor({
     const next = { ...env, ...partial };
     setDoc((d) => ({ ...d, environment: next }));
     apiRef.current?.applyEnvironment(next);
+  };
+
+  const openTpsViewStudio = () => {
+    const ensured = ensureMapPlayerEntity(docRef.current);
+    if (ensured.created) {
+      scheduleHistory();
+      setDoc(ensured.doc);
+      docRef.current = ensured.doc;
+      apiRef.current?.setDoc(ensured.doc);
+    }
+    setSelectedId(ensured.entity.id);
+    apiRef.current?.setSelectedId(ensured.entity.id);
+    setPlayerStudioOpen(false);
+    setModelEditorOpen(false);
+    setTpsViewOpen(true);
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(false);
+    setToolsOpen(false);
+  };
+
+  const saveTpsToMap = (settings: TpsViewSettings) => {
+    const clean = sanitizeTpsView(settings);
+    scheduleHistory();
+    setDoc((d) => {
+      const next = { ...d, tpsView: clean };
+      docRef.current = next;
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+    setDirty(true);
+    toast({
+      title: '3rd View saved to map',
+      description: 'Also saved globally for Play Test & matches.',
+    });
   };
 
   const startPlay = () => {
@@ -1129,6 +1195,16 @@ export function MapEditor({
         </Button>
         <Button
           size="sm"
+          variant={tpsViewOpen ? 'default' : 'secondary'}
+          className={`shrink-0 ${tpsViewOpen ? 'bg-violet-600 hover:bg-violet-500 text-white' : ''}`}
+          onClick={() => (tpsViewOpen ? setTpsViewOpen(false) : openTpsViewStudio())}
+          title="3rd View — camera boom, crosshair, player framing for Play Test & matches"
+        >
+          <Eye className="w-4 h-4 mr-1" />
+          {isMobile ? '3rd' : '3rd View'}
+        </Button>
+        <Button
+          size="sm"
           variant={playerStudioOpen ? 'default' : 'secondary'}
           className={`shrink-0 ${playerStudioOpen ? 'bg-sky-600 hover:bg-sky-500 text-white' : ''}`}
           onClick={() => (playerStudioOpen ? setPlayerStudioOpen(false) : openPlayerStudio())}
@@ -1336,7 +1412,7 @@ export function MapEditor({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
-                <div className="grid grid-cols-2 gap-1">
+                <div className="grid grid-cols-3 gap-1">
                   <button
                     type="button"
                     className={`text-xs px-2 py-1.5 rounded border flex items-center justify-center gap-1 ${
@@ -1361,10 +1437,30 @@ export function MapEditor({
                       setEditTool('brush');
                       if (!brush) setBrush('floor-square');
                     }}
-                    title="Brush paint (B) — click ground to place"
+                    title="Brush (B) — click once to place"
                   >
                     <Paintbrush className="w-3 h-3" />
                     Brush
+                  </button>
+                  <button
+                    type="button"
+                    className={`text-xs px-2 py-1.5 rounded border flex items-center justify-center gap-1 ${
+                      editTool === 'bucket'
+                        ? 'border-fuchsia-400 text-fuchsia-200 bg-fuchsia-500/10'
+                        : 'border-white/10 text-white/50'
+                    }`}
+                    onClick={() => {
+                      // If a scene object is selected, paint that model; else keep library brush.
+                      const selModel = selected?.model;
+                      if (selModel) setBrush(selModel);
+                      else if (!brush) setBrush('floor-square');
+                      setEditTool('bucket');
+                      if (freeFly) apiRef.current?.setFreeFly(false);
+                    }}
+                    title="Paint Bucket (P) — hold+drag paints; camera locked"
+                  >
+                    <PaintBucket className="w-3 h-3" />
+                    Bucket
                   </button>
                 </div>
               </div>
@@ -1375,7 +1471,8 @@ export function MapEditor({
                     type="button"
                     onClick={() => {
                       setBrush(name);
-                      setEditTool('brush');
+                      // Keep Bucket if already painting; otherwise arm normal Brush.
+                      setEditTool((t) => (t === 'bucket' ? 'bucket' : 'brush'));
                       // Free the canvas after picking a brush on mobile.
                       if (isMobile) {
                         setSidebarOpen(false);
@@ -1383,7 +1480,7 @@ export function MapEditor({
                       }
                     }}
                     className={`rounded border p-1 text-left ${
-                      brush === name && editTool === 'brush'
+                      brush === name && (editTool === 'brush' || editTool === 'bucket')
                         ? 'border-cyan-400 bg-cyan-500/10'
                         : brush === name
                           ? 'border-white/30 bg-white/5'
@@ -1401,9 +1498,11 @@ export function MapEditor({
                 ))}
               </div>
               <p className="text-[10px] text-white/40 p-2 border-t border-white/10">
-                {editTool === 'brush'
-                  ? 'Brush: click ground to paint. Click same model to select it. Alt+click stacks on top (Alt+drag = box select).'
-                  : 'Select: click objects to pick them. Pick a model or Brush to paint.'}{' '}
+                {editTool === 'bucket'
+                  ? 'Paint Bucket: camera locked — hold and drag to paint the selected model along a path.'
+                  : editTool === 'brush'
+                    ? 'Brush: click ground to place. Same model cell selects it. Alt+click stacks.'
+                    : 'Select: click objects to pick them. Pick a model, then Brush or Bucket.'}{' '}
                 Orbit drag = move view. Ctrl = free fly.
               </p>
             </>
@@ -1551,9 +1650,19 @@ export function MapEditor({
                 <button
                   key={e.id}
                   type="button"
-                  onClick={() => {
-                    setSelectedId(e.id);
-                    apiRef.current?.setSelectedId(e.id);
+                  onClick={(ev) => {
+                    if (ev.shiftKey) {
+                      const next = selectedIds.includes(e.id)
+                        ? selectedIds.filter((id) => id !== e.id)
+                        : [...(selectedIds.length ? selectedIds : selectedId ? [selectedId] : []), e.id];
+                      setSelectedIds(next);
+                      setSelectedId(next[next.length - 1] ?? null);
+                      apiRef.current?.setSelectedIds(next);
+                    } else {
+                      setSelectedId(e.id);
+                      setSelectedIds([e.id]);
+                      apiRef.current?.setSelectedId(e.id);
+                    }
                   }}
                   className={`w-full text-left px-2 py-1.5 rounded text-sm truncate ${
                     selectedId === e.id || selectedIds.includes(e.id)
@@ -1572,9 +1681,34 @@ export function MapEditor({
             <div className="flex-1 overflow-y-auto p-3 space-y-3 text-sm">
               <p className="text-[10px] tracking-widest text-white/50 uppercase">Prefabs / Stamps</p>
               <p className="text-[11px] text-white/55 leading-relaxed">
-                Shift+click to multi-select ({selectedIds.length || (selectedId ? 1 : 0)} selected),
-                save as a stamp, then click ground to place copies.
+                Shift+click to multi-select ({selectedIds.length || (selectedId ? 1 : 0)} selected).
+                With 2+ selected, press the magnet Snap icon — objects stick edge-to-edge in a line
+                at the same bottom height (first click is the anchor).
               </p>
+              {selectedIds.length >= 2 && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    const ok = apiRef.current?.snapSelectedTogether(selectedIds);
+                    if (ok) {
+                      toast({
+                        title: 'Snapped together',
+                        description: 'Edge-to-edge in a line, shared bottom height.',
+                      });
+                    } else {
+                      toast({
+                        title: 'Select 2 objects first',
+                        description: 'Shift+click two objects, then Snap.',
+                        variant: 'destructive',
+                      });
+                    }
+                  }}
+                >
+                  <Magnet className="w-4 h-4 mr-1" /> Snap together
+                </Button>
+              )}
               <input
                 className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
                 value={prefabName}
@@ -1697,6 +1831,58 @@ export function MapEditor({
                   onChange={(e) => patchEnv({ sky: 'custom', skyColor: e.target.value })}
                 />
               </label>
+              <div className="space-y-1.5">
+                <p className="text-xs text-white/60">Sky texture / background</p>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => skyFileRef.current?.click()}
+                >
+                  <Upload className="w-4 h-4 mr-1" /> Upload sky image
+                </Button>
+                <input
+                  ref={skyFileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      patchEnv({
+                        sky: 'custom',
+                        skyTextureUrl: String(reader.result),
+                      });
+                    };
+                    reader.readAsDataURL(f);
+                    e.target.value = '';
+                  }}
+                />
+                {env.skyTextureUrl && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="w-full text-xs text-red-300"
+                    onClick={() => patchEnv({ skyTextureUrl: undefined })}
+                  >
+                    Clear sky texture
+                  </Button>
+                )}
+                <p className="text-[10px] text-white/35">
+                  Panorama / equirectangular works best. JPG/PNG under ~2 MB.
+                </p>
+              </div>
+              <label className="block text-xs text-white/60">
+                Horizon / ground tint
+                <input
+                  type="color"
+                  className="mt-1 w-full h-9 bg-transparent"
+                  value={env.horizonColor || env.fogColor}
+                  onChange={(e) => patchEnv({ horizonColor: e.target.value })}
+                />
+              </label>
               <label className="block text-xs text-white/60">
                 Fog color
                 <input
@@ -1718,6 +1904,40 @@ export function MapEditor({
                   onChange={(e) => patchEnv({ fogDensity: Number(e.target.value) })}
                 />
               </label>
+              <p className="text-[10px] tracking-widest text-white/50 uppercase pt-1">Lighting</p>
+              <label className="block text-xs text-white/60">
+                Ambient ({(env.ambientIntensity ?? 0.55).toFixed(2)})
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  className="w-full"
+                  value={env.ambientIntensity ?? 0.55}
+                  onChange={(e) => patchEnv({ ambientIntensity: Number(e.target.value) })}
+                />
+              </label>
+              <label className="block text-xs text-white/60">
+                Sun intensity ({(env.sunIntensity ?? 1.15).toFixed(2)})
+                <input
+                  type="range"
+                  min={0}
+                  max={4}
+                  step={0.05}
+                  className="w-full"
+                  value={env.sunIntensity ?? 1.15}
+                  onChange={(e) => patchEnv({ sunIntensity: Number(e.target.value) })}
+                />
+              </label>
+              <label className="block text-xs text-white/60">
+                Sun color
+                <input
+                  type="color"
+                  className="mt-1 w-full h-9 bg-transparent"
+                  value={env.sunColor || '#fff4e0'}
+                  onChange={(e) => patchEnv({ sunColor: e.target.value })}
+                />
+              </label>
               <p className="text-[10px] tracking-widest text-white/50 uppercase pt-2">Floor type</p>
               <select
                 className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5"
@@ -1736,6 +1956,18 @@ export function MapEditor({
                   className="mt-1 w-full h-9 bg-transparent"
                   value={env.floorColor}
                   onChange={(e) => patchEnv({ floorColor: e.target.value })}
+                />
+              </label>
+              <label className="block text-xs text-white/60">
+                Floor texture tile ({env.floorTextureScale ?? 40})
+                <input
+                  type="range"
+                  min={4}
+                  max={120}
+                  step={1}
+                  className="w-full"
+                  value={env.floorTextureScale ?? 40}
+                  onChange={(e) => patchEnv({ floorTextureScale: Number(e.target.value) })}
                 />
               </label>
             </div>
@@ -1881,11 +2113,13 @@ export function MapEditor({
             {activeLayer
               ? ` · L${sortedLayers.findIndex((l) => l.id === activeLayer.id)}:${activeLayer.name}`
               : ''}
-            {editTool === 'brush' && brush
-              ? ` · brush: ${brush}`
-              : editTool === 'brush'
-                ? ' · brush (pick a model)'
-                : ' · select'}
+            {editTool === 'bucket' && brush
+              ? ` · bucket: ${brush}`
+              : editTool === 'brush' && brush
+                ? ` · brush: ${brush}`
+                : editTool === 'brush' || editTool === 'bucket'
+                  ? ' · pick a model'
+                  : ' · select'}
             {selectedIds.length > 1
               ? ` · multi: ${selectedIds.length}`
               : selected
@@ -1989,11 +2223,29 @@ export function MapEditor({
               }}
               title={
                 brush
-                  ? `Brush paint (B) — place ${brush}. Alt+click stacks on same model.`
-                  : 'Brush paint (B) — pick a model in Assets'
+                  ? `Brush (B) — click to place ${brush}`
+                  : 'Brush (B) — pick a model in Assets'
               }
             >
               <Paintbrush className="w-4 h-4" />
+            </ToolBtn>
+            <ToolBtn
+              active={editTool === 'bucket'}
+              onClick={() => {
+                // If a scene object is selected, paint that model; else keep library brush.
+                const selModel = selected?.model;
+                if (selModel) setBrush(selModel);
+                else if (!brush) setBrush('floor-square');
+                setEditTool('bucket');
+                if (freeFly) apiRef.current?.setFreeFly(false);
+              }}
+              title={
+                brush
+                  ? `Paint Bucket (P) — hold+drag paints ${brush}; camera locked`
+                  : 'Paint Bucket (P) — pick a model, then hold+drag'
+              }
+            >
+              <PaintBucket className="w-4 h-4 text-fuchsia-300" />
             </ToolBtn>
             <div className="w-px h-6 bg-white/15 mx-1" />
             <ToolBtn active={mode === 'translate'} onClick={() => setMode('translate')} title="Move (W)">
@@ -2140,6 +2392,13 @@ export function MapEditor({
               </>
             )}
             <ToolBtn
+              active={tpsViewOpen}
+              onClick={() => (tpsViewOpen ? setTpsViewOpen(false) : openTpsViewStudio())}
+              title="3rd View — camera / crosshair / player"
+            >
+              <Eye className="w-4 h-4 text-violet-300" />
+            </ToolBtn>
+            <ToolBtn
               active={playerStudioOpen}
               onClick={() => (playerStudioOpen ? setPlayerStudioOpen(false) : openPlayerStudio())}
               title="Player Model studio"
@@ -2168,13 +2427,48 @@ export function MapEditor({
             <ToolBtn onClick={() => apiRef.current?.duplicateSelected()} title="Duplicate">
               <Copy className="w-4 h-4" />
             </ToolBtn>
+            <ToolBtn
+              disabled={selectedIds.length < 2}
+              onClick={() => {
+                const ids =
+                  selectedIds.length >= 2
+                    ? selectedIds
+                    : selectedId
+                      ? [selectedId, ...selectedIds.filter((id) => id !== selectedId)]
+                      : selectedIds;
+                const ok = apiRef.current?.snapSelectedTogether(ids);
+                if (ok) {
+                  toast({
+                    title: 'Snapped together',
+                    description: 'Edge-to-edge in a line, shared bottom height.',
+                  });
+                } else {
+                  toast({
+                    title: 'Select 2 objects first',
+                    description: 'Click one, then Shift+click another, then press magnet.',
+                    variant: 'destructive',
+                  });
+                }
+              }}
+              title={
+                selectedIds.length >= 2
+                  ? 'Snap (magnet) — stick edge-to-edge, same bottom'
+                  : 'Snap (magnet) — Shift+click 2+ objects, then press'
+              }
+            >
+              <Magnet
+                className={`w-4 h-4 ${
+                  selectedIds.length >= 2 ? 'text-emerald-300' : 'text-white/30'
+                }`}
+              />
+            </ToolBtn>
             <ToolBtn onClick={() => apiRef.current?.deleteSelected()} title="Delete">
               <Trash2 className="w-4 h-4 text-red-300" />
             </ToolBtn>
           </div>
           )}
 
-          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && !modelEditorOpen && (
+          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && (
             <button
               type="button"
               onClick={() => setPropsOpen(true)}
@@ -2184,7 +2478,7 @@ export function MapEditor({
             </button>
           )}
 
-          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && !modelEditorOpen && (
+          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && (
             <div
               className={`absolute z-[80] bg-black/80 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm overflow-y-auto ${
                 isMobile
@@ -3121,6 +3415,30 @@ export function MapEditor({
           )}
           </div>
 
+          {tpsViewOpen && (
+            <TpsViewStudio
+              isMobile={isMobile}
+              onClose={() => setTpsViewOpen(false)}
+              onPlayTest={() => {
+                setTpsViewOpen(false);
+                startPlay();
+              }}
+              mapOverride={doc.tpsView ? sanitizeTpsView(doc.tpsView) : null}
+              onSaveToMap={saveTpsToMap}
+              playerEntity={playerAvatar}
+              onChangePlayer={(patch) => {
+                if (!playerAvatar) {
+                  openPlayerStudio();
+                  return;
+                }
+                patchEntityById(playerAvatar.id, patch);
+              }}
+              onOpenFullPlayerStudio={() => {
+                setTpsViewOpen(false);
+                openPlayerStudio();
+              }}
+            />
+          )}
           {playerStudioOpen && playerAvatar && (
             <PlayerModelStudio
               entity={playerAvatar}
@@ -3184,19 +3502,26 @@ function ToolBtn({
   active,
   onClick,
   title,
+  disabled,
 }: {
   children: React.ReactNode;
   active?: boolean;
   onClick?: () => void;
   title?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       title={title}
+      disabled={disabled}
       onClick={onClick}
       className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-        active ? 'bg-cyan-500/30 text-cyan-200' : 'text-white/70 hover:bg-white/10'
+        disabled
+          ? 'text-white/25 cursor-not-allowed'
+          : active
+            ? 'bg-cyan-500/30 text-cyan-200'
+            : 'text-white/70 hover:bg-white/10'
       }`}
     >
       {children}

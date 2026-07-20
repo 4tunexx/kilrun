@@ -17,7 +17,6 @@ import { toThree } from './renderer/coords';
 import {
   detectTouchDevice,
   CAMERA_YAW_KEY_SPEED,
-  CAMERA_YAW_MOUSE_SENS,
   CAMERA_YAW_STICK_SENS,
   NETWORK_SEND_INTERVAL_MS,
   SPAWN_X,
@@ -32,6 +31,12 @@ import { MobilePlayGate } from './ui/mobile-play-gate';
 import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
 import { Crosshair } from './ui/crosshair';
+import {
+  loadTpsViewSettings,
+  mouseSensRadians,
+  resolveTpsView,
+  type TpsViewSettings,
+} from './tps/tps-view-settings';
 import dynamic from 'next/dynamic';
 import {
   findWeaponAttachment,
@@ -67,14 +72,6 @@ import { ModeStatusHud } from './ui/mode-status-hud';
 import type { GameRoomName } from './net/connection';
 
 const MapEditor = dynamic(() => import('./editor/map-editor'), { ssr: false });
-
-const PITCH_SENS = 0.0028;
-/** TPS boom length — far enough to see body + platforms, close enough for aim. */
-const ZOOM = 6.6;
-const PITCH_MIN = -1.05;
-const PITCH_MAX = 0.72;
-/** Slight look-down so the course ahead reads clearly (Fortnite / TPS idle). */
-const DEFAULT_PITCH = -0.22;
 
 interface KilrunEngineProps {
   joinOptions: JoinOptions;
@@ -124,8 +121,11 @@ export default function KilrunEngine({
   const [assetsReady, setAssetsReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [aiming, setAiming] = useState(!detectTouchDevice());
-  const aimingRef = useRef(!detectTouchDevice());
+  const [aiming, setAiming] = useState(false);
+  const aimingRef = useRef(false);
+  const [tpsHud, setTpsHud] = useState<TpsViewSettings>(() => loadTpsViewSettings());
+  const tpsRef = useRef(tpsHud);
+  tpsRef.current = tpsHud;
   const { toggle: toggleFullscreen } = useGameFullscreen(rootRef, true);
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
@@ -140,6 +140,11 @@ export default function KilrunEngine({
       .then((cloud) => {
         if (cancelled || !cloud?.document) return;
         cloudDocRef.current = cloud.document;
+        if (cloud.document.tpsView) {
+          const merged = resolveTpsView(cloud.document.tpsView);
+          tpsRef.current = merged;
+          setTpsHud(merged);
+        }
         // Allow lobby effect to re-push if we already short-circuited on local-only miss.
         customLoadedRef.current = false;
       })
@@ -215,6 +220,18 @@ export default function KilrunEngine({
   }, [paused, editorOpen]);
 
   useEffect(() => {
+    const onTps = (ev: Event) => {
+      const detail = (ev as CustomEvent<TpsViewSettings>).detail;
+      if (!detail) return;
+      const clean = resolveTpsView(detail);
+      tpsRef.current = clean;
+      setTpsHud(clean);
+    };
+    window.addEventListener('kilrun:tps-view', onTps as EventListener);
+    return () => window.removeEventListener('kilrun:tps-view', onTps as EventListener);
+  }, []);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
@@ -242,20 +259,26 @@ export default function KilrunEngine({
     const inputManager = new InputManager(hostElement, isMobile);
     joystickRef.current = inputManager.joystick;
 
-    let cameraYaw = 0;
-    let cameraPitch = DEFAULT_PITCH;
-    let sendAccumulatorMs = 0;
-    let shootHeld = false;
-    let wasShootEdge = false;
-    let interactPulse = false;
-    const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
-    const overlayPlayerPos = new THREE.Vector3();
-
     if (playDoc) {
       customDocRef.current = playDoc;
       map.clearHardcodedDecor();
       void overlay.load(playDoc);
+      if (playDoc.tpsView) {
+        const merged = resolveTpsView(playDoc.tpsView);
+        tpsRef.current = merged;
+        setTpsHud(merged);
+      }
     }
+
+    let cameraYaw = 0;
+    let cameraPitch = tpsRef.current.camera.defaultPitch;
+    let sendAccumulatorMs = 0;
+    let shootHeld = false;
+    let wasShootEdge = false;
+    let meleeUntil = 0;
+    let interactPulse = false;
+    const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
+    const overlayPlayerPos = new THREE.Vector3();
 
     const spawnCharacter = (sessionId: string, username: string) => {
       if (characters.has(sessionId)) return;
@@ -332,38 +355,67 @@ export default function KilrunEngine({
       const frozen = pausedRef.current;
 
       if (!frozen) {
-        // Mouse right → look right; A → strafe left (signs verified)
+        const tps = tpsRef.current;
+        const lookSens = mouseSensRadians(tps);
+        // Mouse / stick always orbit camera (GTA free look + aim look)
         cameraYaw += inputManager.getCameraTurnIntent() * CAMERA_YAW_KEY_SPEED * dt;
-        cameraYaw -= inputManager.consumeMouseLookDeltaX() * CAMERA_YAW_MOUSE_SENS;
-        cameraPitch -= inputManager.consumeMouseLookDeltaY() * PITCH_SENS;
-        if (isMobile && inputManager.isAiming()) {
+        cameraYaw -= inputManager.consumeMouseLookDeltaX() * lookSens;
+        cameraPitch -= inputManager.consumeMouseLookDeltaY() * lookSens;
+        if (isMobile) {
           const aim = inputManager.joystick.getAimVector();
-          cameraYaw -= aim.x * CAMERA_YAW_STICK_SENS * dt;
-          cameraPitch -= aim.y * 0.95 * dt;
-          if (!aimingRef.current) {
-            aimingRef.current = true;
-            setAiming(true);
+          if (aim.x || aim.y) {
+            cameraYaw -= aim.x * CAMERA_YAW_STICK_SENS * dt;
+            cameraPitch -= aim.y * 0.95 * dt;
           }
-        } else if (isMobile) {
-          if (aimingRef.current) {
-            aimingRef.current = false;
-            setAiming(false);
-          }
+        }
+        // RMB (or mobile look-stick) = aim focus — drives crosshair + body lock
+        const nowAim = inputManager.isAimHeld();
+        if (nowAim !== aimingRef.current) {
+          aimingRef.current = nowAim;
+          setAiming(nowAim);
         }
       } else {
         // Drain deltas so resume doesn't snap
         inputManager.consumeMouseLookDeltaX();
         inputManager.consumeMouseLookDeltaY();
       }
-      cameraPitch = THREE.MathUtils.clamp(cameraPitch, PITCH_MIN, PITCH_MAX);
+      {
+        const tps = tpsRef.current;
+        cameraPitch = THREE.MathUtils.clamp(
+          cameraPitch,
+          tps.camera.pitchMin,
+          tps.camera.pitchMax
+        );
+      }
 
       const localSessionId = connectionRef.current?.sessionId;
       const localState = localSessionId ? playersRef.current.get(localSessionId) : undefined;
 
+      const stick = inputManager.getMoveVector();
+      const wishFwd = -stick.y;
+      const wishStrafe = stick.x;
+      const aimHeld = !frozen && inputManager.isAimHeld();
+
       characters.forEach((view, sessionId) => {
         const player = playersRef.current.get(sessionId);
         if (!player) return;
-        view.update(player, dt, sessionId === localSessionId ? cameraYaw : player.cameraYaw);
+        const isLocal = sessionId === localSessionId;
+        view.update(
+          player,
+          dt,
+          isLocal ? cameraYaw : player.cameraYaw,
+          isLocal && !frozen ? { fwd: wishFwd, strafe: wishStrafe } : undefined,
+          isLocal ? aimHeld : false
+        );
+        if (isLocal) {
+          const pl = tpsRef.current.player;
+          const cam = tpsRef.current.camera;
+          view.root.scale.setScalar(pl.scale);
+          view.root.position.y += pl.offsetY;
+          if (pl.hideWhenClose && cam.boomDistance < pl.hideDistance) {
+            view.root.visible = false;
+          }
+        }
       });
       map.update(dt);
 
@@ -385,7 +437,22 @@ export default function KilrunEngine({
       } else {
         overlay.update(dt, null, false, []);
       }
-      updateFollowCamera(world.camera, targetPos, cameraYaw, cameraPitch, dt, ZOOM);
+      // GTA: free orbit always; RMB aim pulls camera tighter over shoulder
+      {
+        const cam = tpsRef.current.camera;
+        const aimCam = aimHeld
+          ? {
+              ...cam,
+              boomDistance: Math.max(2.2, cam.boomDistance * 0.72),
+              shoulder:
+                cam.shoulder === 0
+                  ? 0.42
+                  : cam.shoulder + Math.sign(cam.shoulder) * 0.35,
+              followSharpness: cam.followSharpness + 8,
+            }
+          : cam;
+        updateFollowCamera(world.camera, targetPos, cameraYaw, cameraPitch, dt, aimCam);
+      }
 
       if (!frozen) {
         const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
@@ -395,21 +462,24 @@ export default function KilrunEngine({
           characters
             .get(localSessionId)
             ?.triggerAttack(combat.attackStyle ?? 'attack');
+          if (combat.kind === 'melee') {
+            meleeUntil = performance.now() + 500;
+          }
         }
         wasShootEdge = shootNow;
         shootHeld = shootHeld || shootNow;
         sendAccumulatorMs += dtMs;
         if (sendAccumulatorMs >= NETWORK_SEND_INTERVAL_MS && localState) {
           sendAccumulatorMs = 0;
+          // Camera-relative: W into look, A = left, D = right (screen space).
+          // Look flat (sin,cos) in Three XZ → sim; screen-right = (−cos, sin).
           const stick = inputManager.getMoveVector();
-          const wishX = -stick.x;
-          const wishZ = -stick.y;
+          const wishFwd = -stick.y;
+          const wishStrafe = stick.x;
           const cos = Math.cos(cameraYaw);
           const sin = Math.sin(cameraYaw);
-          const threeMoveX = wishX * cos + wishZ * sin;
-          const threeMoveZ = -wishX * sin + wishZ * cos;
-          const moveX = threeMoveZ;
-          const moveY = threeMoveX;
+          const moveX = wishFwd * cos + wishStrafe * sin;
+          const moveY = wishFwd * sin - wishStrafe * cos;
 
           const message: PlayerInputMessage = {
             moveX,
@@ -422,6 +492,7 @@ export default function KilrunEngine({
             jumpPressed: inputManager.isJumpPressed(),
             shootPressed: shootHeld,
             interactPressed: inputManager.isInteractPressed(),
+            meleeActive: performance.now() < meleeUntil,
           };
           connectionRef.current?.sendInput(message);
           shootHeld = false;
@@ -537,7 +608,7 @@ export default function KilrunEngine({
           enabled={isMobile && room.phase === 'playing' && !paused}
         />
         {room.phase === 'playing' && !paused && !editorOpen && (
-          <Crosshair visible={aiming || !isMobile} />
+          <Crosshair visible={aiming && !paused && !editorOpen} style={tpsHud.crosshair} />
         )}
 
         <PauseMenu

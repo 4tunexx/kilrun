@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import type { TpsCameraSettings } from '../tps/tps-view-settings';
+import { DEFAULT_TPS_VIEW } from '../tps/tps-view-settings';
 
 export interface ThreeWorld {
   renderer: THREE.WebGLRenderer;
@@ -19,7 +21,7 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
   scene.background = new THREE.Color(0x081018);
   scene.fog = new THREE.FogExp2(0x0a1528, 0.024);
 
-  const camera = new THREE.PerspectiveCamera(55, 1, 0.15, 220);
+  const camera = new THREE.PerspectiveCamera(75, 1, 0.15, 220);
   camera.position.set(0, 6, -12);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -87,16 +89,16 @@ const _pivot = new THREE.Vector3();
 const _desired = new THREE.Vector3();
 const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
-const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
+const _lookAt = new THREE.Vector3();
+
+export type FollowCameraOpts = Partial<TpsCameraSettings> & {
+  /** Override boom length without full settings object. */
+  zoomDistance?: number;
+};
 
 /**
- * Modern 3D action-platformer camera (Fortnite / TPS hybrid):
- * - Boom sits behind + slightly over the right shoulder
- * - Camera orientation = look yaw/pitch → **screen center is the aim ray** (crosshair)
- * - Body stays visible in the lower frame; slight downward default pitch reads platforms ahead
- * - Does NOT lookAt the mesh (that pins the reticle on the head and breaks aim)
- *
- * Pitch: up = positive (look at sky). Typical idle ≈ -0.22 (slightly down the course).
+ * TPS boom camera: orbits a fixed head pivot. Mouse pitch/yaw rotate the boom.
+ * Pass `FollowCameraOpts` (from 3rd View tool) to tune boom / FOV / shoulder live.
  */
 export function updateFollowCamera(
   camera: THREE.PerspectiveCamera,
@@ -104,40 +106,56 @@ export function updateFollowCamera(
   yaw: number,
   pitch: number,
   dt: number,
-  zoomDistance = 6.6
+  zoomOrOpts: number | FollowCameraOpts = 5.2
 ) {
-  const safePitch = THREE.MathUtils.clamp(pitch, -1.05, 0.72);
-  /** Chest pivot — feet at target.y, avatar ~1.75–1.8 tall */
-  const lookHeight = 1.26;
-  const shoulder = 0.52;
-  // Looking down: pull boom in a hair + lift so the body stays framed (not under the lens)
-  const lookDown = Math.max(0, -safePitch);
-  const dist = zoomDistance * (1 - lookDown * 0.1);
-  const boomLift = 0.28 + lookDown * 1.15;
+  const defaults = DEFAULT_TPS_VIEW.camera;
+  const opts: FollowCameraOpts =
+    typeof zoomOrOpts === 'number' ? { zoomDistance: zoomOrOpts } : zoomOrOpts ?? {};
+
+  const boomDistance = opts.boomDistance ?? opts.zoomDistance ?? defaults.boomDistance;
+  const lookHeight = opts.lookHeight ?? defaults.lookHeight;
+  const shoulder = opts.shoulder ?? defaults.shoulder;
+  const pitchMin = opts.pitchMin ?? defaults.pitchMin;
+  const pitchMax = opts.pitchMax ?? defaults.pitchMax;
+  const followSharpness = opts.followSharpness ?? defaults.followSharpness;
+  const fov = opts.fov ?? defaults.fov;
+
+  if (Math.abs(camera.fov - fov) > 0.05) {
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }
+
+  const safePitch = THREE.MathUtils.clamp(pitch, pitchMin, pitchMax);
+  const dist = boomDistance;
 
   const cosPitch = Math.cos(safePitch);
   const sinPitch = Math.sin(safePitch);
   const sinYaw = Math.sin(yaw);
   const cosYaw = Math.cos(yaw);
 
-  // Aim forward in Three space (matches server aim remap)
   _forward.set(sinYaw * cosPitch, sinPitch, cosYaw * cosPitch);
-  _right.set(cosYaw, 0, -sinYaw);
+  if (_forward.lengthSq() < 1e-8) _forward.set(0, 0, 1);
+  else _forward.normalize();
+
+  // Screen-right when looking along `_forward` (keeps A/D correct with lookAt).
+  _right.set(-cosYaw, 0, sinYaw);
 
   _pivot.set(target.x, target.y + lookHeight, target.z);
-
   _desired
     .copy(_pivot)
     .addScaledVector(_forward, -dist)
     .addScaledVector(_right, shoulder);
-  _desired.y += boomLift;
 
-  // Snappy follow — position lags a touch; orientation is instant (TPS standard)
-  const lerp = 1 - Math.pow(0.001, dt * 20);
-  camera.position.lerp(_desired, Math.min(1, lerp));
+  if (camera.position.distanceToSquared(_desired) > 400) {
+    camera.position.copy(_desired);
+  } else {
+    const lerp = 1 - Math.pow(0.001, dt * followSharpness);
+    camera.position.lerp(_desired, Math.min(1, lerp));
+  }
 
-  _euler.set(-safePitch, yaw, 0);
-  camera.quaternion.setFromEuler(_euler);
+  _lookAt.copy(camera.position).add(_forward);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(_lookAt);
 }
 
 /** @deprecated Use updateFollowCamera — kept so older call sites with a style arg still compile. */
@@ -149,7 +167,7 @@ export function updateFollowCameraStyled(
   yaw: number,
   pitch: number,
   dt: number,
-  zoomDistance = 6.6,
+  zoomDistance = 5.2,
   _style?: FollowCameraStyle
 ) {
   updateFollowCamera(camera, target, yaw, pitch, dt, zoomDistance);

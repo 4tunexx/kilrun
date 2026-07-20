@@ -22,62 +22,119 @@ function groundedBody(over: Partial<SimBody> = {}): SimBody {
 
 const floor: SimPad = { x: 0, y: 0, z: 0, width: 6, depth: 6, kind: 'solid', height: 0.25 };
 
-describe('stepPlatformer', () => {
+describe('stepPlatformer (Foundry feel)', () => {
   it('jumps with coyote after walking off a ledge', () => {
     const body = groundedBody();
     const scratch = createSimScratch();
-    // Stand on floor
-    stepPlatformer(body, { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false }, 1 / 30, [floor], scratch, bounds);
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds
+    );
     expect(body.isGrounded).toBe(true);
 
-    // Walk off to the right (no floor under new x)
     body.x = 5;
-    stepPlatformer(body, { moveX: 1, moveY: 0, jumpPressed: false, sprint: false, crouch: false }, 1 / 30, [floor], scratch, bounds);
-    // Still in coyote — press jump
-    stepPlatformer(body, { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false }, 1 / 30, [floor], scratch, bounds);
+    stepPlatformer(
+      body,
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds
+    );
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds
+    );
     expect(body.vz).toBeGreaterThan(5);
     expect(body.isGrounded).toBe(false);
   });
 
-  it('buffers a jump pressed slightly before landing', () => {
-    const body = groundedBody({ z: 0.85, vz: -6, isGrounded: false });
+  it('double-jumps in air (Foundry jump_count === 1)', () => {
+    const body = groundedBody();
     const scratch = createSimScratch();
-    // Tap jump once in air just above the pad (outside snap range)
-    stepPlatformer(body, { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false }, 1 / 60, [floor], scratch, bounds);
-    expect(body.isGrounded).toBe(false);
-    expect(scratch.jumpBufferMs).toBeGreaterThan(0);
-    // Release jump input but keep buffer; fall onto pad
-    for (let i = 0; i < 20; i++) {
-      stepPlatformer(body, { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false }, 1 / 60, [floor], scratch, bounds);
-      if (body.vz > 4) break;
-    }
-    expect(body.vz).toBeGreaterThan(4);
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds
+    );
+    expect(body.vz).toBeCloseTo(10, 0);
+    // Release then press again for double jump
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+      1 / 60,
+      [floor],
+      scratch,
+      bounds
+    );
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false },
+      1 / 60,
+      [floor],
+      scratch,
+      bounds
+    );
+    expect(body.vz).toBeCloseTo(8, 0);
+    expect(scratch.jumpCount).toBe(2);
   });
 
   it('pulls feet back onto a pad when barely past the capsule rim', () => {
-    // Capsule allows stand until halfW+radius (=3.4); place just beyond that
     const body = groundedBody({ x: 3.5, y: 0, z: 0.05 });
     const scratch = createSimScratch();
-    stepPlatformer(body, { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false }, 1 / 30, [floor], scratch, bounds);
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds
+    );
     expect(body.isGrounded).toBe(true);
     expect(Math.abs(body.x)).toBeLessThan(3.0);
   });
 
-  it('softens gravity near jump apex', () => {
+  it('applies constant Foundry gravity (no apex hang)', () => {
+    const body = groundedBody({ z: 2, vz: 1, isGrounded: false });
+    const scratch = createSimScratch();
+    scratch.jumpCount = 1;
+    scratch.coyoteMs = 0;
+    const vzBefore = body.vz;
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+      1 / 60,
+      [floor],
+      scratch,
+      bounds
+    );
+    // gravity 20 * dt ≈ 0.333
+    expect(vzBefore - body.vz).toBeCloseTo(20 / 60, 2);
+  });
+
+  it('sets horizontal velocity directly to wish * speed', () => {
     const body = groundedBody();
     const scratch = createSimScratch();
-    stepPlatformer(body, { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false }, 1 / 30, [floor], scratch, bounds);
-    // Advance until near apex
-    for (let i = 0; i < 40; i++) {
-      stepPlatformer(body, { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false }, 1 / 60, [floor], scratch, bounds);
-      if (body.vz > 0 && body.vz < 2) break;
-    }
-    const vzBefore = body.vz;
-    const zBefore = body.z;
-    stepPlatformer(body, { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false }, 1 / 60, [floor], scratch, bounds);
-    // With apex hang, vertical loss should be gentler than full gravity*dt (~0.53)
-    const dv = vzBefore - body.vz;
-    expect(dv).toBeLessThan(0.45);
-    expect(body.z).toBeGreaterThanOrEqual(zBefore - 0.05);
+    stepPlatformer(
+      body,
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds
+    );
+    expect(scratch.velX).toBeCloseTo(5, 5);
+    expect(body.x).toBeCloseTo(5 / 30, 2);
   });
 });

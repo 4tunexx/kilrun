@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
 import type { MapDocument } from './map-document';
-import { ensureEnvironment, ensureHazard } from './map-document';
+import { ensureEnvironment } from './map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
 import { AnimationDirector } from './animation-director';
 import { DualJoystick } from '../input/dual-joystick';
@@ -21,7 +21,9 @@ import {
 import {
   mapDocSpawnPoints,
   mapDocToSimFinishes,
+  mapDocToSimHazards,
   mapDocToSimPlatforms,
+  mapDocToSimTeleports,
   mapDocToWorldBounds,
   prepareDocForPlayTest,
 } from './prefab-storage';
@@ -35,11 +37,15 @@ import {
   resolveWeaponCombat,
 } from '@/lib/weapons';
 import { Crosshair } from '../ui/crosshair';
-
-const PLAY_ZOOM = 6.6;
-const PLAY_PITCH_MIN = -1.05;
-const PLAY_PITCH_MAX = 0.72;
-const PLAY_DEFAULT_PITCH = -0.22;
+import {
+  mouseSensRadians,
+  resolveTpsView,
+  type TpsViewSettings,
+} from '../tps/tps-view-settings';
+import {
+  computeLocomotionFacingYaw,
+  stepBodyYaw,
+} from '../tps/locomotion-facing';
 
 function addCollisionPadMeshes(scene: THREE.Scene, pads: SimPad[]) {
   const group = new THREE.Group();
@@ -170,6 +176,8 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
   const [finished, setFinished] = useState(false);
   const [loading, setLoading] = useState(true);
   const [autoStartNote, setAutoStartNote] = useState(false);
+  const [tpsHud, setTpsHud] = useState<TpsViewSettings>(() => resolveTpsView(doc.tpsView));
+  const [aimingHud, setAimingHud] = useState(false);
   const isTouch = typeof window !== 'undefined' && detectTouchDevice();
 
   useEffect(() => {
@@ -180,6 +188,10 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     const playDoc = prepared.doc;
     if (prepared.autoStart) setAutoStartNote(true);
 
+    const tps = resolveTpsView(playDoc.tpsView);
+    setTpsHud(tps);
+    const mouseSens = mouseSensRadians(tps);
+
     let disposed = false;
     const scene = new THREE.Scene();
     const env = ensureEnvironment(playDoc);
@@ -188,11 +200,21 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     const fogDensity = Math.min(env.fogDensity ?? 0.018, 0.014);
     scene.fog = new THREE.FogExp2(env.fogColor || '#0c1830', fogDensity);
 
-    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 300);
+    const camera = new THREE.PerspectiveCamera(tps.camera.fov, 1, 0.1, 300);
     const pads = mapDocToSimPlatforms(playDoc);
     const finishes = mapDocToSimFinishes(playDoc);
+    const hazards = mapDocToSimHazards(playDoc);
+    const teleports = mapDocToSimTeleports(playDoc);
     const bounds = mapDocToWorldBounds(playDoc, pads, finishes);
     const spawn = mapDocSpawnPoints(playDoc).runner;
+    const teleportCooldownUntil = new Map<string, number>();
+    const hazardPulseUntil = new Map<string, number>();
+    const hazardNextToggle = new Map<string, number>();
+    for (const h of hazards) {
+      if (h.alwaysActive || h.buttonControlled) continue;
+      hazardNextToggle.set(h.id, performance.now() + (h.intervalMs || 1500));
+      hazardPulseUntil.set(h.id, 0);
+    }
 
     const body: SimBody = {
       x: spawn?.x ?? 0,
@@ -242,12 +264,16 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     const roots = new Map<string, THREE.Object3D>();
     let playerRoot: THREE.Object3D | null = null;
     let playerId: string | null = null;
+    let playerBaseScale = 1;
+    let bodyYaw = 0;
+    let aimHeld = false;
+    let aimHeldUi = false;
     let hpLocal = 100;
     const lastDamageAt = new Map<string, number>();
 
     const keys = new Set<string>();
     let yaw = 0;
-    let pitch = PLAY_DEFAULT_PITCH;
+    let pitch = tps.camera.defaultPitch;
     let interactPulse = false;
     let attackPulse = false;
     let lastAttackAt = 0;
@@ -257,6 +283,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     let checkpoint: { x: number; y: number; z: number } | null = null;
     let wasGrounded = true;
     let landUntil = 0;
+    let meleeUntil = 0;
     let avatarEntity = getMapPlayerAvatar(playDoc) ?? null;
     let avatarBindings = avatarEntity?.playerAnims;
     let worldReady = false;
@@ -286,6 +313,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         root.userData.isPlayAvatar = true;
         scene.add(root);
         playerRoot = root;
+        playerBaseScale = root.scale.x || 1;
         playerId = avatarEntity?.id ?? '__play_avatar__';
         director.register(playerId, root, loaded.animations);
         if (!avatarBindings || Object.keys(avatarBindings).length === 0) {
@@ -325,6 +353,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         wrap.position.set(px, py, pz);
         scene.add(wrap);
         playerRoot = wrap;
+        playerBaseScale = 1;
         playerId = '__play_avatar_fallback__';
       }
 
@@ -413,17 +442,38 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
     const onMove = (e: MouseEvent) => {
-      yaw -= (e.movementX || 0) * 0.0024;
-      pitch -= (e.movementY || 0) * 0.002;
-      pitch = THREE.MathUtils.clamp(pitch, PLAY_PITCH_MIN, PLAY_PITCH_MAX);
+      // Mouse looks only while locked — WASD/Space/Ctrl never touch the camera.
+      if (document.pointerLockElement !== host && document.pointerLockElement !== document.body) {
+        return;
+      }
+      yaw -= (e.movementX || 0) * mouseSens;
+      pitch -= (e.movementY || 0) * mouseSens;
+      pitch = THREE.MathUtils.clamp(pitch, tps.camera.pitchMin, tps.camera.pitchMax);
     };
     const onMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) attackPulse = true;
+      if (e.button === 0) {
+        attackPulse = true;
+        host.requestPointerLock?.().catch(() => {});
+      }
+      if (e.button === 2) {
+        aimHeld = true;
+        host.requestPointerLock?.().catch(() => {});
+      }
     };
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 2) aimHeld = false;
+    };
+    const onBlur = () => {
+      aimHeld = false;
+    };
+    const onContextMenu = (e: Event) => e.preventDefault();
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('blur', onBlur);
+    host.addEventListener('contextmenu', onContextMenu);
 
     let joy: DualJoystick | null = null;
     if (detectTouchDevice()) {
@@ -444,7 +494,13 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       if (lookStick.x || lookStick.y) {
         yaw -= lookStick.x * 1.2 * dt;
         pitch -= lookStick.y * 0.95 * dt;
-        pitch = THREE.MathUtils.clamp(pitch, PLAY_PITCH_MIN, PLAY_PITCH_MAX);
+        pitch = THREE.MathUtils.clamp(pitch, tps.camera.pitchMin, tps.camera.pitchMax);
+      }
+      // Mobile: holding look stick = aim focus (same as RMB)
+      const aimNow = joy ? Math.hypot(lookStick.x, lookStick.y) > 0.25 : aimHeld;
+      if (aimNow !== aimHeldUi) {
+        aimHeldUi = aimNow;
+        setAimingHud(aimNow);
       }
 
       const sprint =
@@ -461,6 +517,8 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         wishFwd += -moveStick.y;
         wishStrafe += moveStick.x;
       }
+      // Camera-relative: W into look, A = screen-left, D = screen-right.
+      // Look flat = (sinYaw, cosYaw) in Three XZ; screen-right = (−cosYaw, sinYaw).
       const c = Math.cos(yaw);
       const s = Math.sin(yaw);
       const moveX = wishFwd * c + wishStrafe * s;
@@ -475,6 +533,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
             jumpPressed: keys.has('Space') || !!joy?.isJumpHeld(),
             sprint,
             crouch,
+            meleeActive: performance.now() < meleeUntil,
           },
           dt,
           pads,
@@ -535,7 +594,24 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       const [tx, ty, tz] = simToThree(body.x, body.y, body.z);
       playerPos.set(tx, ty, tz);
 
-      updateFollowCamera(camera, playerPos, yaw, pitch, dt, PLAY_ZOOM);
+      updateFollowCamera(
+        camera,
+        playerPos,
+        yaw,
+        pitch,
+        dt,
+        aimNow
+          ? {
+              ...tps.camera,
+              boomDistance: Math.max(2.2, tps.camera.boomDistance * 0.72),
+              shoulder:
+                tps.camera.shoulder === 0
+                  ? 0.42
+                  : tps.camera.shoulder + Math.sign(tps.camera.shoulder) * 0.35,
+              followSharpness: tps.camera.followSharpness + 8,
+            }
+          : tps.camera
+      );
 
       const colliding = new Set<string>();
       roots.forEach((root, id) => {
@@ -543,8 +619,18 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       });
 
       if (playerRoot && playerId) {
-        playerRoot.position.set(tx, ty, tz);
-        playerRoot.rotation.y = yaw;
+        playerRoot.visible = !(
+          tps.player.hideWhenClose && tps.camera.boomDistance < tps.player.hideDistance
+        );
+        playerRoot.position.set(tx, ty + tps.player.offsetY, tz);
+        playerRoot.scale.setScalar(playerBaseScale * tps.player.scale);
+        // GTA: RMB aim = face camera + strafe; free = face walk direction
+        const targetYaw = aimNow
+          ? yaw
+          : computeLocomotionFacingYaw(yaw, wishFwd, wishStrafe, bodyYaw);
+        bodyYaw = stepBodyYaw(bodyYaw, targetYaw, dt, aimNow ? 18 : 16);
+        playerRoot.rotation.y =
+          bodyYaw + (tps.player.yawOffsetDeg * Math.PI) / 180;
         const justLanded = !wasGrounded && body.isGrounded;
         wasGrounded = body.isGrounded;
         if (justLanded) landUntil = performance.now() + 280;
@@ -559,13 +645,21 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
           if (now - lastAttackAt >= combat.cooldownMs) {
             lastAttackAt = now;
             attackThisFrame = true;
+            if (combat.kind === 'melee') meleeUntil = now + 500;
             if (combat.kind !== 'cosmetic') {
-              const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+              // Foundry: melee_direction = direction_to(camera aim point)
+              const cosP = Math.cos(pitch);
+              const sinP = Math.sin(pitch);
+              const forward = new THREE.Vector3(
+                Math.sin(yaw) * cosP,
+                sinP,
+                Math.cos(yaw) * cosP
+              );
               const reach = Math.max(1.2, combat.range);
-              const aimPoint = playerPos
+              const eye = playerPos.clone().add(new THREE.Vector3(0, 1.5, 0));
+              const aimPoint = eye
                 .clone()
-                .addScaledVector(forward, Math.min(reach, combat.kind === 'hitscan' ? 3.2 : 2.2));
-              aimPoint.y += 0.9;
+                .addScaledVector(forward, Math.min(reach, combat.kind === 'hitscan' ? 3.2 : 2.4));
               const hitRadius = combat.kind === 'hitscan' ? 1.6 : Math.max(1.35, reach * 0.55);
               roots.forEach((root, id) => {
                 if (root.position.distanceTo(aimPoint) > hitRadius) return;
@@ -600,26 +694,63 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         director.evaluateTriggers(playDoc.entities, playerPos, true, colliding);
       }
 
-      for (const ent of playDoc.entities) {
-        const hz = ensureHazard(ent);
-        if (!hz.enabled && ent.kind !== 'hazard') continue;
-        if (ent.kind === 'hazard' && ent.hazard?.enabled === false) continue;
-        const root = roots.get(ent.id);
-        const pos = root
-          ? root.position
-          : new THREE.Vector3(ent.position[0], ent.position[1], ent.position[2]);
-        const reach = Math.max(1.15, Math.abs(ent.scale[0]) * 0.85);
-        if (playerPos.distanceTo(pos) > reach) continue;
-        if (hz.instantKill) {
+      // Timed hazard pulses (match-like: interval off → activeMs on).
+      for (const h of hazards) {
+        if (h.alwaysActive || h.buttonControlled) continue;
+        const nextAt = hazardNextToggle.get(h.id) ?? now;
+        if (now >= nextAt) {
+          const activeMs = Math.max(100, h.activeMs ?? 900);
+          hazardPulseUntil.set(h.id, now + activeMs);
+          hazardNextToggle.set(h.id, now + activeMs + Math.max(100, h.intervalMs));
+        }
+      }
+
+      // Authoritative-style AABB hazards (sim space).
+      for (const h of hazards) {
+        if (h.buttonControlled) continue;
+        const pulsing = !h.alwaysActive && (hazardPulseUntil.get(h.id) ?? 0) > now;
+        if (!h.alwaysActive && !pulsing) continue;
+        const halfW = h.width / 2 + 0.35;
+        const halfD = h.width / 2 + 0.35;
+        const halfH = h.height / 2;
+        if (
+          Math.abs(body.x - h.x) > halfW ||
+          Math.abs(body.y - h.y) > halfD ||
+          Math.abs(body.z - h.z) > halfH + 0.4
+        ) {
+          continue;
+        }
+        if (h.instantKill) {
           hpLocal = 0;
           setHp(0);
           continue;
         }
-        const last = lastDamageAt.get(ent.id) ?? 0;
-        if (now - last >= hz.intervalMs) {
-          lastDamageAt.set(ent.id, now);
-          hpLocal = Math.max(0, hpLocal - hz.damage);
+        const last = lastDamageAt.get(h.id) ?? 0;
+        if (now - last >= Math.max(120, h.intervalMs * 0.35)) {
+          lastDamageAt.set(h.id, now);
+          hpLocal = Math.max(0, hpLocal - h.damage);
           setHp(hpLocal);
+        }
+      }
+
+      // Teleporters
+      for (const t of teleports) {
+        const cd = teleportCooldownUntil.get(t.id) ?? 0;
+        if (now < cd) continue;
+        const halfW = t.width / 2 + 0.3;
+        const halfD = t.depth / 2 + 0.3;
+        if (
+          Math.abs(body.x - t.x) <= halfW &&
+          Math.abs(body.y - t.y) <= halfD &&
+          body.z >= t.z - 0.4 &&
+          body.z <= t.z + Math.max(t.height, 1.2)
+        ) {
+          body.x = t.targetX;
+          body.y = t.targetY;
+          body.z = t.targetZ;
+          body.vz = 0;
+          snapBodyToPads(body, pads);
+          teleportCooldownUntil.set(t.id, now + t.cooldownMs);
         }
       }
 
@@ -638,6 +769,9 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('blur', onBlur);
+      host.removeEventListener('contextmenu', onContextMenu);
       joy?.destroy();
       joystickRef.current = null;
       if (document.pointerLockElement) document.exitPointerLock?.();
@@ -655,8 +789,8 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         </span>
         <span className="text-[10px] sm:text-xs text-white/50 truncate min-w-0">
           {isTouch
-            ? '3rd person TPS · Left move · Right look · Jump / Use / Attack'
-            : '3rd person TPS · WASD · mouse look · E use · click attack'}
+            ? '3rd person · Left move · Right look · Jump / Use / Attack'
+            : 'RMB aim · Mouse look · WASD · Space jump · Shift sprint · E use'}
         </span>
         <div className="ml-4 flex items-center gap-2 text-xs">
           <span className="text-white/50">HP</span>
@@ -675,7 +809,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       </div>
       <div className="flex-1 relative min-h-0">
         <div ref={hostRef} className="absolute inset-0 touch-none" />
-        <Crosshair visible />
+        <Crosshair visible={aimingHud} style={tpsHud.crosshair} />
         {loading && (
           <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 pointer-events-none">
             <p className="text-sm font-semibold text-white/80 tracking-wide">Loading play test…</p>

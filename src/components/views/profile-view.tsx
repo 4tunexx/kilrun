@@ -14,7 +14,6 @@ import {
   Zap,
   MailX,
   Swords,
-  Gem,
   Trophy,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -50,7 +49,7 @@ import {
 import { AvatarWithFrame } from '@/components/avatar-with-frame';
 import { NicknameEffectText } from '@/components/nickname-effect';
 import { getMatchStats, getMyRankedStats, getSessionUser, getStatsSummary, type RankedStatsSummary, type StatsSummary } from '@/lib/actions';
-import { RankBadge } from '@/components/ui/rank-badge';
+import { RankLabel } from '@/components/ui/rank-badge';
 import {
   deactivateOwnEmail,
   equipInventoryItem,
@@ -481,16 +480,15 @@ export default function ProfileView({ userId }: { userId: string }) {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
-                  <div className="flex items-center justify-center gap-1.5 mb-1">
-                    <RankBadge
+                  <div className="flex items-center justify-center mb-1">
+                    <RankLabel
                       rank={ranked?.currentRank || 'Unranked'}
+                      imageUrl={ranked?.rankImage}
+                      color={ranked?.rankColor}
                       size={22}
+                      textClassName="text-xl font-black"
                     />
-                    <Gem className="h-4 w-4 text-amber-300 fill-amber-400/40" />
                   </div>
-                  <p className="text-xl font-black text-yellow-400">
-                    {ranked?.currentRank || 'Unranked'}
-                  </p>
                   <p className="text-xs text-slate-400">Current rank</p>
                 </div>
                 <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
@@ -501,9 +499,13 @@ export default function ProfileView({ userId }: { userId: string }) {
                   <p className="text-xs text-slate-400">Live KP</p>
                 </div>
                 <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
-                  <p className="text-xl font-black text-amber-200">
-                    {ranked?.peakRank || 'Unranked'}
-                  </p>
+                  <RankLabel
+                    rank={ranked?.peakRank || 'Unranked'}
+                    imageUrl={ranked?.peakRankImage}
+                    color={ranked?.peakRankColor}
+                    size={18}
+                    textClassName="text-xl font-black"
+                  />
                   <p className="text-xs text-slate-400 mt-1">
                     Peak · {(ranked?.peakKp ?? 1000).toLocaleString()} KP
                   </p>

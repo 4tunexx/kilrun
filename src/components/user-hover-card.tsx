@@ -1,11 +1,12 @@
 'use client';
 
 import { useRef, useState, type ReactNode } from 'react';
-import { ExternalLink, Gem, Loader2, ThumbsUp } from 'lucide-react';
+import { ExternalLink, Loader2, ThumbsUp } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { LevelBar } from '@/components/ui/level-bar';
+import { RankLabel } from '@/components/ui/rank-badge';
 import {
   Dialog,
   DialogContent,
@@ -39,6 +40,10 @@ export type MiniProfileSummary = {
   role: string;
   isVip: boolean;
   currentRank: string;
+  /** Admin-panel tier badge image (optional). */
+  rankImage?: string | null;
+  /** Admin-panel tier color hex. */
+  rankColor?: string | null;
   level: number;
   xpIntoLevel: number;
   xpForNextLevel: number;
@@ -260,9 +265,13 @@ export function MiniProfileCard({
             {summary.isVip && (
               <Badge className="h-5 shrink-0 bg-yellow-500 text-[10px] text-black">VIP</Badge>
             )}
-            <span className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-amber-300">
-              <Gem className="h-3 w-3 fill-amber-400/40" /> {summary.currentRank}
-            </span>
+            <RankLabel
+              rank={summary.currentRank}
+              imageUrl={summary.rankImage}
+              color={summary.rankColor}
+              size={14}
+              textClassName="text-[11px]"
+            />
           </div>
         </div>
         <div className="mt-2.5">
@@ -330,15 +339,27 @@ export function MiniProfileCard({
     </>
   );
 
+  // Outer must NOT be a <button> — the Kilrun logo control is already a button
+  // (nested buttons break HTML + hydration).
   if (onViewProfile) {
     return (
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onViewProfile}
-        className={cn('block w-full text-left group overflow-hidden', className)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onViewProfile();
+          }
+        }}
+        className={cn(
+          'block w-full text-left group overflow-hidden cursor-pointer',
+          className
+        )}
       >
         {body}
-      </button>
+      </div>
     );
   }
 

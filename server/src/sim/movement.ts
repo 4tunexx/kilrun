@@ -1,18 +1,13 @@
 import { PlatformState, PlayerState } from '../schema/RoomState.js';
 import {
-  AIR_ACCEL,
-  AIR_CONTROL,
-  APEX_GRAVITY_MULT,
-  APEX_VZ_THRESHOLD,
   COYOTE_TIME_MS,
   CROUCH_SPEED_MULTIPLIER,
+  DOUBLE_JUMP_VELOCITY,
   ENERGY_DRAIN_RATE,
   ENERGY_EXHAUSTED_SPEED_MULT,
   ENERGY_EXHAUSTED_THRESHOLD,
   ENERGY_REGEN_RATE,
   GRAVITY,
-  GROUND_ACCEL,
-  GROUND_FRICTION,
   JUMP_BUFFER_MS,
   JUMP_CUT_MULTIPLIER,
   JUMP_ENERGY_COST,
@@ -21,10 +16,10 @@ import {
   LAND_SNAP_FAST,
   LAND_SNAP_SLOW,
   LEDGE_ASSIST,
-  MAX_AIR_SPEED_MULT,
   MAX_ENERGY,
   MAX_FALL_SPEED,
   MAX_GROUND_SPEED,
+  MELEE_MOVE_MULT,
   PLAYER_RADIUS,
   SPRINT_MULTIPLIER,
   TRAPPER_MOVE_SPEED,
@@ -46,6 +41,8 @@ export interface PlayerInput {
   jumpPressed: boolean;
   shootPressed: boolean;
   interactPressed: boolean;
+  /** True while melee swing is active (Foundry speed_mod 0.5). */
+  meleeActive?: boolean;
 }
 
 const EMPTY_INPUT: PlayerInput = {
@@ -59,6 +56,7 @@ const EMPTY_INPUT: PlayerInput = {
   jumpPressed: false,
   shootPressed: false,
   interactPressed: false,
+  meleeActive: false,
 };
 
 export function defaultInput(): PlayerInput {
@@ -73,6 +71,8 @@ export interface PlayerSimScratch {
   jumpBufferMs: number;
   wasJumpHeld: boolean;
   exhausted: boolean;
+  /** Foundry jump_count: 0 ground, 1 after first/walk-off, 2 after double. */
+  jumpCount: number;
 }
 
 export function createSimScratch(): PlayerSimScratch {
@@ -83,6 +83,7 @@ export function createSimScratch(): PlayerSimScratch {
     jumpBufferMs: 0,
     wasJumpHeld: false,
     exhausted: false,
+    jumpCount: 0,
   };
 }
 
@@ -101,8 +102,8 @@ export const DEFAULT_WORLD_BOUNDS: WorldBounds = {
 };
 
 /**
- * Authoritative Deathrun platformer step — Quake-inspired accel/friction on
- * XY, gravity + coyote/buffer jump + apex hang on Z, energy sprint.
+ * Authoritative Deathrun platformer step — Foundry (Godot) feel:
+ * direct wish×speed on XY, gravity + coyote/buffer + double jump on Z, energy sprint.
  * Shared by all modes. Keep feel in sync with `src/lib/platformer-sim.ts`.
  */
 export function applyMovement(
@@ -133,8 +134,9 @@ export function applyMovement(
     player.role === 'trapper' ? TRAPPER_MOVE_SPEED : MAX_GROUND_SPEED;
   let maxSpeed = baseMax;
   if (input.crouch) maxSpeed *= CROUCH_SPEED_MULTIPLIER;
+  if (input.meleeActive) maxSpeed *= MELEE_MOVE_MULT;
 
-  // Energy / sprint (Godot stamina model).
+  // Energy / sprint (Kilrun stamina on top of Foundry base speed).
   const wantsSprint =
     input.sprint && !input.crouch && wishMag > 0.2 && !scratch.exhausted;
   if (wantsSprint && player.energy > 0) {
@@ -178,9 +180,13 @@ export function applyMovement(
 
   if (grounded && support) {
     scratch.coyoteMs = COYOTE_TIME_MS;
+    scratch.jumpCount = 0;
     player.z = support.topZ;
     player.vz = 0;
   } else {
+    if (scratch.jumpCount === 0 && scratch.coyoteMs <= 0) {
+      scratch.jumpCount = 1;
+    }
     scratch.coyoteMs = Math.max(0, scratch.coyoteMs - dtSeconds * 1000);
   }
 
@@ -193,72 +199,77 @@ export function applyMovement(
     grounded = false;
     scratch.coyoteMs = 0;
     scratch.jumpBufferMs = 0;
+    scratch.jumpCount = 1;
   }
 
-  // Jump buffer: edge-trigger on press; variable height on release.
+  // Foundry jump: buffer for ground/coyote; immediate double jump when jumpCount === 1.
   const jumpEdge = input.jumpPressed && !scratch.wasJumpHeld;
   const jumpReleased = !input.jumpPressed && scratch.wasJumpHeld;
-  if (jumpReleased && player.vz > 0) {
+  if (jumpReleased && player.vz > 0 && scratch.jumpCount === 1) {
     player.vz *= JUMP_CUT_MULTIPLIER;
+    scratch.coyoteMs = 0;
   }
   scratch.wasJumpHeld = input.jumpPressed;
-  if (jumpEdge) scratch.jumpBufferMs = JUMP_BUFFER_MS;
-  else scratch.jumpBufferMs = Math.max(0, scratch.jumpBufferMs - dtSeconds * 1000);
 
-  const canJump =
-    (player.isGrounded || scratch.coyoteMs > 0) &&
-    scratch.jumpBufferMs > 0;
-  if (canJump && player.energy >= JUMP_ENERGY_COST * 0.2) {
+  if (jumpEdge) {
+    if (scratch.jumpCount === 0 || scratch.jumpCount === 2) {
+      scratch.jumpBufferMs = JUMP_BUFFER_MS;
+    } else if (
+      scratch.jumpCount === 1 &&
+      player.energy >= JUMP_ENERGY_COST * 0.2
+    ) {
+      player.vz = DOUBLE_JUMP_VELOCITY;
+      player.isGrounded = false;
+      grounded = false;
+      scratch.coyoteMs = 0;
+      scratch.jumpCount = 2;
+      player.energy = Math.max(0, player.energy - JUMP_ENERGY_COST);
+    }
+  } else {
+    scratch.jumpBufferMs = Math.max(0, scratch.jumpBufferMs - dtSeconds * 1000);
+  }
+
+  if (
+    scratch.coyoteMs > 0 &&
+    scratch.jumpBufferMs > 0 &&
+    player.energy >= JUMP_ENERGY_COST * 0.2
+  ) {
     player.vz = JUMP_VELOCITY;
     player.isGrounded = false;
     grounded = false;
     scratch.coyoteMs = 0;
     scratch.jumpBufferMs = 0;
+    scratch.jumpCount = Math.max(1, scratch.jumpCount + 1);
     player.energy = Math.max(0, player.energy - JUMP_ENERGY_COST);
   }
 
-  // Horizontal accel
-  if (grounded) {
-    const onIce = support!.platform.kind === 'ice';
-    const friction = onIce ? GROUND_FRICTION * 0.18 : GROUND_FRICTION;
-    const accel = onIce ? GROUND_ACCEL * 0.45 : GROUND_ACCEL;
+  // Foundry: velocity.xz = move_direction * speed (ground + air). Ice keeps slip.
+  const onIce = grounded && support?.platform.kind === 'ice';
+  if (onIce) {
+    scratch.velX += wishX * maxSpeed * 2.5 * dtSeconds;
+    scratch.velY += wishY * maxSpeed * 2.5 * dtSeconds;
+    const ns = Math.hypot(scratch.velX, scratch.velY);
+    const cap = maxSpeed * 1.35;
+    if (ns > cap && ns > 0) {
+      scratch.velX *= cap / ns;
+      scratch.velY *= cap / ns;
+    }
+    const friction = 4 * dtSeconds;
     const speed = Math.hypot(scratch.velX, scratch.velY);
-    if (speed > 0.01) {
-      const drop = Math.min(speed, friction * dtSeconds);
-      const scale = (speed - drop) / speed;
-      scratch.velX *= scale;
-      scratch.velY *= scale;
-    } else {
-      scratch.velX = 0;
-      scratch.velY = 0;
-    }
-    scratch.velX += wishX * accel * dtSeconds;
-    scratch.velY += wishY * accel * dtSeconds;
-
-    if (support!.platform.kind === 'conveyor' && support!.platform.conveyorSpeed > 0) {
-      const spd = support!.platform.conveyorSpeed;
-      scratch.velX += support!.platform.conveyorDirX * spd * dtSeconds * 2.2;
-      scratch.velY += support!.platform.conveyorDirY * spd * dtSeconds * 2.2;
-    }
-
-    const newSpeed = Math.hypot(scratch.velX, scratch.velY);
-    const speedCap = onIce ? maxSpeed * 1.35 : maxSpeed;
-    if (newSpeed > speedCap && newSpeed > 0) {
-      const s = speedCap / newSpeed;
-      scratch.velX *= s;
-      scratch.velY *= s;
+    if (wishMag < 0.05 && speed > 0.01) {
+      const drop = Math.min(speed, friction);
+      scratch.velX *= (speed - drop) / speed;
+      scratch.velY *= (speed - drop) / speed;
     }
   } else {
-    const apexBoost = Math.abs(player.vz) < APEX_VZ_THRESHOLD ? 1.18 : 1;
-    scratch.velX += wishX * AIR_ACCEL * AIR_CONTROL * apexBoost * dtSeconds;
-    scratch.velY += wishY * AIR_ACCEL * AIR_CONTROL * apexBoost * dtSeconds;
-    const airMax = maxSpeed * MAX_AIR_SPEED_MULT;
-    const newSpeed = Math.hypot(scratch.velX, scratch.velY);
-    if (newSpeed > airMax && newSpeed > 0) {
-      const s = airMax / newSpeed;
-      scratch.velX *= s;
-      scratch.velY *= s;
-    }
+    scratch.velX = wishX * maxSpeed;
+    scratch.velY = wishY * maxSpeed;
+  }
+
+  if (grounded && support?.platform.kind === 'conveyor' && support.platform.conveyorSpeed > 0) {
+    const spd = support.platform.conveyorSpeed;
+    scratch.velX += support.platform.conveyorDirX * spd;
+    scratch.velY += support.platform.conveyorDirY * spd;
   }
 
   player.x = clamp(
@@ -283,11 +294,9 @@ export function applyMovement(
   if (Math.abs(player.x - beforePushX) > 1e-5) scratch.velX = 0;
   if (Math.abs(player.y - beforePushY) > 1e-5) scratch.velY = 0;
 
-  // Vertical — apex hang for readable jump arcs
+  // Vertical — constant Foundry gravity
   if (!player.isGrounded) {
-    let g = GRAVITY;
-    if (Math.abs(player.vz) < APEX_VZ_THRESHOLD) g *= APEX_GRAVITY_MULT;
-    player.vz = Math.max(-MAX_FALL_SPEED, player.vz - g * dtSeconds);
+    player.vz = Math.max(-MAX_FALL_SPEED, player.vz - GRAVITY * dtSeconds);
     player.z += player.vz * dtSeconds;
 
     const snap = player.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
@@ -320,16 +329,19 @@ export function applyMovement(
         player.vz = land.platform.boost > 0 ? land.platform.boost : JUMP_PAD_BOOST;
         player.isGrounded = false;
         scratch.coyoteMs = 0;
+        scratch.jumpCount = 1;
       } else {
         player.vz = 0;
         player.isGrounded = true;
         scratch.coyoteMs = COYOTE_TIME_MS;
+        scratch.jumpCount = 0;
         // Same-frame buffered jump on landing
         if (scratch.jumpBufferMs > 0 && player.energy >= JUMP_ENERGY_COST * 0.2) {
           player.vz = JUMP_VELOCITY;
           player.isGrounded = false;
           scratch.coyoteMs = 0;
           scratch.jumpBufferMs = 0;
+          scratch.jumpCount = 1;
           player.energy = Math.max(0, player.energy - JUMP_ENERGY_COST);
         }
       }

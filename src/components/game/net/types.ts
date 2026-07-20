@@ -91,4 +91,6 @@ export interface PlayerInputMessage {
   jumpPressed: boolean;
   shootPressed: boolean;
   interactPressed: boolean;
+  /** Foundry melee speed_mod 0.5 while swing is active. */
+  meleeActive?: boolean;
 }

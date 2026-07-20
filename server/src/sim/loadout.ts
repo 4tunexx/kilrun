@@ -50,10 +50,10 @@ export function sanitizeWeaponCombat(raw: unknown): SanitizedWeapon {
   if (kind === 'melee') {
     return {
       kind: 'melee',
-      range: clamp(Number(o.range ?? 2.2), 0.8, 3.5),
+      range: clamp(Number(o.range ?? 2.4), 0.8, 3.5),
       damage: clamp(Number(o.damage ?? 20), 1, 80),
-      cooldownMs: clamp(Number(o.cooldownMs ?? 420), 200, 1200),
-      coneRadians: clamp(Number(o.coneRadians ?? 0.55), 0.2, 0.9),
+      cooldownMs: clamp(Number(o.cooldownMs ?? 500), 200, 1200),
+      coneRadians: clamp(Number(o.coneRadians ?? 0.5), 0.2, 0.9),
     };
   }
 

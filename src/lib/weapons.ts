@@ -60,10 +60,11 @@ export const WEAPON_COMBAT_KINDS: {
 
 export const DEFAULT_MELEE_COMBAT: WeaponCombatConfig = {
   kind: 'melee',
-  range: 2.2,
+  range: 2.4,
   damage: 20,
-  cooldownMs: 420,
-  coneRadians: 0.55,
+  /** Foundry MeleeDurationTimer 0.5s; cooldown ~same cadence. */
+  cooldownMs: 500,
+  coneRadians: 0.5,
   muzzleOffset: [0, 0.35, 0],
   attackStyle: 'attack',
 };

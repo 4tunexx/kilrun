@@ -1,32 +1,93 @@
 'use client';
 
 import React from 'react';
+import type { TpsCrosshairSettings } from '../tps/tps-view-settings';
+import { DEFAULT_TPS_VIEW } from '../tps/tps-view-settings';
 
 /**
- * TPS reticle — screen center = camera aim ray (Fortnite-style).
- * Always on for desktop Play Test / match; mobile shows while look stick is held
- * when `visible` is driven by aiming state.
+ * Center reticle — screen center = camera aim ray.
+ * Style comes from the 3rd View tool (`TpsCrosshairSettings`).
  */
 export const Crosshair: React.FC<{
   visible: boolean;
   offsetX?: number;
   offsetY?: number;
-}> = ({ visible, offsetX = 0, offsetY = 0 }) => {
+  style?: Partial<TpsCrosshairSettings>;
+}> = ({ visible, offsetX = 0, offsetY = 0, style }) => {
   if (!visible) return null;
+
+  const s = { ...DEFAULT_TPS_VIEW.crosshair, ...style };
+  const half = s.size / 2;
+  const lineLen = s.size;
+  const color = s.color;
+  const op = s.opacity;
 
   return (
     <div
       className="absolute top-1/2 left-1/2 pointer-events-none z-[120]"
-      style={{ transform: `translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px))` }}
+      style={{
+        transform: `translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px))`,
+        color,
+        opacity: op,
+      }}
       aria-hidden
     >
-      {/* Soft outer ring for readability on bright props */}
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full border border-white/25" />
-      <div className="w-1.5 h-1.5 bg-white rounded-full shadow-[0_0_4px_rgba(0,0,0,0.85)] mix-blend-difference" />
-      <div className="absolute left-1/2 -translate-x-1/2 -top-[15px] w-[2px] h-2.5 bg-white/90 shadow-[0_0_3px_rgba(0,0,0,0.8)]" />
-      <div className="absolute left-1/2 -translate-x-1/2 top-[9px] w-[2px] h-2.5 bg-white/90 shadow-[0_0_3px_rgba(0,0,0,0.8)]" />
-      <div className="absolute top-1/2 -translate-y-1/2 -left-[15px] h-[2px] w-2.5 bg-white/90 shadow-[0_0_3px_rgba(0,0,0,0.8)]" />
-      <div className="absolute top-1/2 -translate-y-1/2 left-[9px] h-[2px] w-2.5 bg-white/90 shadow-[0_0_3px_rgba(0,0,0,0.8)]" />
+      {s.showRing && (
+        <div
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-current"
+          style={{
+            width: s.size * 2.4 + s.gap,
+            height: s.size * 2.4 + s.gap,
+            opacity: 0.35,
+          }}
+        />
+      )}
+      {s.showDot && (
+        <div
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current shadow-[0_0_3px_rgba(0,0,0,0.9)]"
+          style={{ width: Math.max(2, s.thickness + 1), height: Math.max(2, s.thickness + 1) }}
+        />
+      )}
+      {s.showLines && (
+        <>
+          <div
+            className="absolute left-1/2 -translate-x-1/2 bg-current"
+            style={{
+              width: s.thickness,
+              height: lineLen,
+              top: -(half + s.gap + lineLen),
+              boxShadow: '0 0 2px rgba(0,0,0,0.8)',
+            }}
+          />
+          <div
+            className="absolute left-1/2 -translate-x-1/2 bg-current"
+            style={{
+              width: s.thickness,
+              height: lineLen,
+              top: half + s.gap,
+              boxShadow: '0 0 2px rgba(0,0,0,0.8)',
+            }}
+          />
+          <div
+            className="absolute top-1/2 -translate-y-1/2 bg-current"
+            style={{
+              height: s.thickness,
+              width: lineLen,
+              left: -(half + s.gap + lineLen),
+              boxShadow: '0 0 2px rgba(0,0,0,0.8)',
+            }}
+          />
+          <div
+            className="absolute top-1/2 -translate-y-1/2 bg-current"
+            style={{
+              height: s.thickness,
+              width: lineLen,
+              left: half + s.gap,
+              boxShadow: '0 0 2px rgba(0,0,0,0.8)',
+            }}
+          />
+        </>
+      )}
     </div>
   );
 };

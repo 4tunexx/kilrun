@@ -265,7 +265,7 @@ export const HUD: React.FC<{
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-center px-3 hidden sm:block">
         <p className="text-[11px] font-bold tracking-widest text-white/55 uppercase">
-          • Space Jump // Shift Sprint // Mouse Look // Esc Menu
+          • Space Jump // Shift Sprint // RMB Aim // Mouse Look // Esc Menu
         </p>
       </div>
 

@@ -50,7 +50,10 @@ export class InputManager {
   }
 
   public isCrouchPressed(): boolean {
-    return this.keyboard.isPressed('control');
+    return (
+      this.keyboard.isPressed('control') ||
+      this.keyboard.isPressed('c')
+    );
   }
 
   public isInteractPressed(): boolean {
@@ -75,11 +78,13 @@ export class InputManager {
       : this.mouse.isFiring() || this.joystick.consumeAttackPulse();
   }
 
-  /** Camera yaw turn from Q/E keys (desktop) — mouse orbit is RMB-only. */
+  /**
+   * Optional keyboard camera turn. E is reserved for Interact — do not yaw with E.
+   * Primary look is mouse; Q is an accessibility fallback only.
+   */
   public getCameraTurnIntent(): number {
     let turn = 0;
     if (this.keyboard.isPressed('q')) turn -= 1;
-    if (this.keyboard.isPressed('e')) turn += 1;
     return turn;
   }
 
@@ -91,13 +96,22 @@ export class InputManager {
     return this.mouse.consumeLookDeltaY();
   }
 
-  public isCameraLookHeld(): boolean {
-    // Free look is always on for platformer
-    return true;
+  /**
+   * GTA-style aim focus: hold RMB (desktop) or right look-stick (mobile).
+   * While aiming: body faces camera, WASD strafes, crosshair on.
+   * Released: free orbit look, body faces walk direction.
+   */
+  public isAimHeld(): boolean {
+    if (this.isMobile) return this.joystick.isAiming();
+    return this.mouse.isRightHeld();
   }
 
-  /** No FPS crosshair in free 3rd-person. */
+  /** @deprecated Use isAimHeld — kept for callers that gated mobile crosshair. */
   public isAiming(): boolean {
-    return this.isMobile ? this.joystick.isAiming() : false;
+    return this.isAimHeld();
+  }
+
+  public isCameraLookHeld(): boolean {
+    return true;
   }
 }

@@ -569,6 +569,10 @@ export type RankedStatsSummary = {
   peakKp: number;
   currentRank: string;
   peakRank: string;
+  rankImage?: string | null;
+  rankColor?: string | null;
+  peakRankImage?: string | null;
+  peakRankColor?: string | null;
   isPremium: boolean;
   premiumExpiresAt: string | null;
   rankedWins: number;
@@ -582,23 +586,34 @@ export type RankedStatsSummary = {
 export async function getMyRankedStats(userId: string): Promise<RankedStatsSummary> {
   const { isPremiumActive } = await import('@/lib/premium');
   const { KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
+  const { parseRankConfig, findRankTierDef } = await import('@/lib/rank-config');
+  const { getSiteSettings } = await import('@/lib/progression-actions');
+
+  const empty = {
+    kp: KP_DEFAULT,
+    peakKp: KP_DEFAULT,
+    currentRank: 'Unranked',
+    peakRank: 'Unranked',
+    rankImage: null as string | null,
+    rankColor: null as string | null,
+    peakRankImage: null as string | null,
+    peakRankColor: null as string | null,
+    isPremium: false,
+    premiumExpiresAt: null as string | null,
+    rankedWins: 0,
+    rankedLosses: 0,
+    casualWins: 0,
+    casualLosses: 0,
+    matchesPlayed: 0,
+  };
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) {
-    return {
-      kp: KP_DEFAULT,
-      peakKp: KP_DEFAULT,
-      currentRank: 'Unranked',
-      peakRank: 'Unranked',
-      isPremium: false,
-      premiumExpiresAt: null,
-      rankedWins: 0,
-      rankedLosses: 0,
-      casualWins: 0,
-      casualLosses: 0,
-      matchesPlayed: 0,
-    };
-  }
+  if (!user) return empty;
+
+  const settings = await getSiteSettings();
+  const rankCfg = parseRankConfig(
+    (settings as { rankConfigJson?: string }).rankConfigJson ?? '{}'
+  );
 
   const premiumExpiresAt =
     (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt ?? null;
@@ -616,8 +631,11 @@ export async function getMyRankedStats(userId: string): Promise<RankedStatsSumma
       : kp,
     kp
   );
+  const currentRank = getRankForKp(kp, rankCfg.tiers);
   const peakRank =
-    (user as { peakRank?: string }).peakRank || getRankForKp(peakKp);
+    (user as { peakRank?: string }).peakRank || getRankForKp(peakKp, rankCfg.tiers);
+  const curDef = findRankTierDef(currentRank, rankCfg.tiers);
+  const peakDef = findRankTierDef(peakRank, rankCfg.tiers);
 
   const results = await prisma.matchResult.findMany({
     where: {
@@ -645,8 +663,12 @@ export async function getMyRankedStats(userId: string): Promise<RankedStatsSumma
   return {
     kp,
     peakKp,
-    currentRank: getRankForKp(kp),
+    currentRank,
     peakRank,
+    rankImage: curDef?.imageUrl || null,
+    rankColor: curDef?.color || null,
+    peakRankImage: peakDef?.imageUrl || null,
+    peakRankColor: peakDef?.color || null,
     isPremium,
     premiumExpiresAt: premiumExpiresAt
       ? new Date(premiumExpiresAt).toISOString()

@@ -235,6 +235,12 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const [tx, ty, tz] = e.position;
   const sizeX = Math.max(1.2, Math.abs(e.scale[0]) * 2);
   const sizeZ = Math.max(1.2, Math.abs(e.scale[2]) * 2);
+  // Yaw expands the axis-aligned pad so rotated floors/walls still block.
+  const yaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
+  const absC = Math.abs(Math.cos(yaw));
+  const absS = Math.abs(Math.sin(yaw));
+  const worldSizeX = sizeX * absC + sizeZ * absS;
+  const worldSizeZ = sizeX * absS + sizeZ * absC;
   const jump = e.jumpPad?.enabled;
   const ice = !!e.surface?.ice;
   const conveyor = !!e.surface?.conveyor;
@@ -263,13 +269,14 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
       Math.abs(e.scale[1]) >= 1.15 ||
       e.solid === true);
   const height = topOnly
-    ? 0.25
+    ? 0.28
     : wallLike
-      ? Math.max(0.8, Math.abs(e.scale[1]) * 2)
-      : 0.45;
+      ? Math.max(1.2, Math.abs(e.scale[1]) * 2)
+      : e.solid === true
+        ? Math.max(0.9, Math.abs(e.scale[1]) * 2)
+        : 0.45;
   const topZ = topOnly ? ty : ty + height * 0.5;
 
-  const yaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
   const dirSimX = Math.cos(yaw);
   const dirSimY = Math.sin(yaw);
 
@@ -277,8 +284,8 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
     x: tz,
     y: tx,
     z: topZ,
-    width: sizeZ,
-    depth: sizeX,
+    width: worldSizeZ,
+    depth: worldSizeX,
     kind,
     boost: jump ? Math.max(4, e.jumpPad?.boost ?? 14) : undefined,
     height,

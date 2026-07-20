@@ -142,10 +142,10 @@ export class AnimationDirector {
     } else if (state.crouch) {
       slot = 'crouch';
     } else if (state.moving) {
-      if (Math.abs(state.moveX) > Math.abs(state.moveZ) + 0.1) {
-        slot = state.moveX < 0 ? 'strafe_left' : 'strafe_right';
-      } else if (state.moveZ < -0.2) {
-        slot = 'back';
+      // Body yaw faces travel (see locomotion-facing). Prefer walk/run;
+      // only use dedicated back clip for pure backpedal (S alone).
+      if (state.moveZ < -0.5 && Math.abs(state.moveX ?? 0) < 0.35) {
+        slot = bindings.back ? 'back' : state.sprint ? 'run' : 'walk';
       } else {
         slot = state.sprint ? 'run' : 'walk';
       }

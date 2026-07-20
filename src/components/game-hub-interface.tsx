@@ -29,6 +29,7 @@ import {
   Coins,
   type LucideIcon,
 } from 'lucide-react';
+import { RankLabel } from '@/components/ui/rank-badge';
 import HomeView from '@/components/views/home-view';
 import StoreView from '@/components/views/store-view';
 import CommunityView from '@/components/views/community-view';
@@ -1247,15 +1248,16 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                         }
                       >
                         <div className="text-xs text-slate-400">Rank</div>
-                        <div
-                          className={`text-lg font-bold ${
-                            rankedAccess ? 'text-yellow-400' : 'text-amber-300'
-                          }`}
-                        >
-                          {rankedAccess
-                            ? currentRank
-                            : 'Go Premium'}
-                        </div>
+                        {rankedAccess ? (
+                          <RankLabel
+                            rank={currentRank}
+                            size={18}
+                            textClassName="text-lg font-bold"
+                            className="justify-center mt-0.5"
+                          />
+                        ) : (
+                          <div className="text-lg font-bold text-amber-300">Go Premium</div>
+                        )}
                         {rankedAccess ? (
                           <div className="text-[10px] text-slate-500 mt-0.5 tabular-nums">
                             {kp.toLocaleString()} KP
@@ -1265,8 +1267,13 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                             {freeRankedWeek && !isPremium ? ' · Free week' : ''}
                           </div>
                         ) : peakRank && peakRank !== 'Unranked' ? (
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            Peak {peakRank}
+                          <div className="text-[10px] text-slate-500 mt-0.5 flex items-center justify-center gap-1">
+                            Peak{' '}
+                            <RankLabel
+                              rank={peakRank}
+                              size={12}
+                              textClassName="text-[10px] font-semibold"
+                            />
                             {peakKp ? ` · ${peakKp.toLocaleString()} KP` : ''}
                           </div>
                         ) : null}

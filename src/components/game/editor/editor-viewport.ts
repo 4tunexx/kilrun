@@ -86,8 +86,8 @@ export interface EditorCameraState {
   pitch: number;
 }
 
-/** Primary pointer tool: Select picks objects; Brush paints/places the active model. */
-export type EditTool = 'select' | 'brush';
+/** Primary pointer tool: Select picks; Brush places one click; Bucket hold-drags paint. */
+export type EditTool = 'select' | 'brush' | 'bucket';
 
 export interface EditorViewportApi {
   setDoc: (doc: MapDocument) => void;
@@ -124,6 +124,8 @@ export interface EditorViewportApi {
   placeEntity: (kind: EditorEntity['kind'], model?: string) => void;
   stampEntities: (entities: EditorEntity[]) => void;
   duplicateSelected: (axis?: 'x' | 'y' | 'z') => void;
+  /** Align multi-selection: shared bottom Y, edge-to-edge along X. Returns false if nothing snapped. */
+  snapSelectedTogether: (idsOverride?: string[]) => boolean;
   focusSelected: () => void;
   /** Restore default edit camera (or Start / edit focus). */
   resetCamera: () => void;
@@ -166,7 +168,7 @@ export function createEditorViewport(
   let selectedId: string | null = null;
   let selectedIds: string[] = [];
   let brush: string | null = 'floor-square';
-  /** Select = pick/transform only; Brush = paint/place active model. */
+  /** Select = pick; Brush = single click place; Bucket = hold-drag continuous paint. */
   let editTool: EditTool = 'select';
   let stampEntitiesQueue: EditorEntity[] | null = null;
   let activeLayerId = doc.layers[0]?.id ?? '';
@@ -181,6 +183,9 @@ export function createEditorViewport(
   let showAllCollisionGizmos = false;
   let measureMode = false;
   let measureA: THREE.Vector3 | null = null;
+  /** Paint Bucket only: hold LMB and drag to paint continuously. */
+  let bucketPainting = false;
+  let lastPaintCellKey: string | null = null;
   const keys = new Set<string>();
   let touchAxes = { moveX: 0, moveY: 0, lookX: 0, lookY: 0, sprint: false };
   const DEFAULT_CAM_POS = new THREE.Vector3(12, 14, 18);
@@ -218,11 +223,14 @@ export function createEditorViewport(
     cursor: 'default',
   });
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
+  scene.add(ambientLight);
   const sun = new THREE.DirectionalLight(0xfff2d6, 1.1);
   sun.position.set(20, 30, 10);
   scene.add(sun);
-  scene.add(new THREE.HemisphereLight(0x88aacc, 0x334455, 0.45));
+  const hemiLight = new THREE.HemisphereLight(0x88aacc, 0x334455, 0.45);
+  scene.add(hemiLight);
+  let skyTexture: THREE.Texture | null = null;
 
   const grid = new THREE.GridHelper(80, 80, 0x4b9fff, 0x2a3a4a);
   scene.add(grid);
@@ -252,8 +260,35 @@ export function createEditorViewport(
 
   function applyEnvironment(env: MapEnvironment) {
     const skyHex = env.sky === 'custom' ? env.skyColor : SKY_COLORS[env.sky] ?? env.skyColor;
-    scene.background = new THREE.Color(skyHex);
-    scene.fog = new THREE.FogExp2(env.fogColor || skyHex, env.fogDensity ?? 0.02);
+    const fogHex = env.fogColor || env.horizonColor || skyHex;
+
+    if (skyTexture) {
+      skyTexture.dispose();
+      skyTexture = null;
+    }
+
+    if (env.skyTextureUrl) {
+      new THREE.TextureLoader().load(
+        env.skyTextureUrl,
+        (tex) => {
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.mapping = THREE.EquirectangularReflectionMapping;
+          skyTexture = tex;
+          scene.background = tex;
+          scene.environment = tex;
+        },
+        undefined,
+        () => {
+          scene.background = new THREE.Color(skyHex);
+          scene.environment = null;
+        }
+      );
+    } else {
+      scene.background = new THREE.Color(skyHex);
+      scene.environment = null;
+    }
+
+    scene.fog = new THREE.FogExp2(fogHex, env.fogDensity ?? 0.02);
     grid.visible = env.floor === 'grid';
     floorMesh.visible = env.floor !== 'void';
     const mat = floorMesh.material as THREE.MeshStandardMaterial;
@@ -270,14 +305,24 @@ export function createEditorViewport(
       mat.metalness = 0;
       mat.roughness = 1;
     }
+    ambientLight.intensity = env.ambientIntensity ?? 0.55;
+    sun.intensity = env.sunIntensity ?? 1.15;
+    if (env.sunColor) sun.color.set(env.sunColor);
+    hemiLight.intensity = Math.max(0.2, (env.ambientIntensity ?? 0.55) * 0.85);
+    if (env.horizonColor) hemiLight.groundColor.set(env.horizonColor);
+
+    const tile = Math.max(1, env.floorTextureScale ?? 40);
     if (env.defaultTextureUrl) {
       new THREE.TextureLoader().load(env.defaultTextureUrl, (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(40, 40);
+        tex.repeat.set(tile, tile);
         mat.map = tex;
         mat.needsUpdate = true;
       });
+    } else if (mat.map) {
+      mat.map = null;
+      mat.needsUpdate = true;
     }
   }
   applyEnvironment(ensureEnvironment(doc));
@@ -728,7 +773,7 @@ export function createEditorViewport(
   }
 
   function attachSelectionGizmo() {
-    if (!selectedId || !roots.has(selectedId) || freeFly) {
+    if (!selectedId || !roots.has(selectedId) || freeFly || editTool === 'bucket') {
       transform.detach();
       return;
     }
@@ -737,18 +782,34 @@ export function createEditorViewport(
       transform.detach();
       return;
     }
-    transform.attach(roots.get(selectedId)!);
+    const obj = roots.get(selectedId);
+    // TransformControls throws if the object is not in the scene graph.
+    if (!obj || !obj.parent) {
+      transform.detach();
+      return;
+    }
+    transform.attach(obj);
+  }
+
+  /** Remove an entity root safely — never leave TransformControls attached to a detached mesh. */
+  function disposeRoot(id: string) {
+    const obj = roots.get(id);
+    if (!obj) return;
+    if ((transform as unknown as { object?: THREE.Object3D }).object === obj) {
+      transform.detach();
+    }
+    director.unregister(id);
+    entityClips.delete(id);
+    obj.removeFromParent();
+    roots.delete(id);
   }
 
   async function rebuildAll() {
+    // Detach first — rebuild may remove/recreate the attached mesh.
+    transform.detach();
     const keep = new Set(doc.entities.map((e) => e.id));
-    roots.forEach((obj, id) => {
-      if (!keep.has(id)) {
-        director.unregister(id);
-        entityClips.delete(id);
-        obj.removeFromParent();
-        roots.delete(id);
-      }
+    roots.forEach((_obj, id) => {
+      if (!keep.has(id)) disposeRoot(id);
     });
     await Promise.all(doc.entities.map((e) => syncEntity(e)));
     refreshGizmos();
@@ -908,37 +969,119 @@ export function createEditorViewport(
     if (freeFly) renderer.domElement.style.cursor = 'none';
     else if (measureMode) renderer.domElement.style.cursor = 'cell';
     else if (editTool === 'select') renderer.domElement.style.cursor = 'default';
+    else if (editTool === 'bucket') renderer.domElement.style.cursor = 'cell';
     else renderer.domElement.style.cursor = 'crosshair';
   }
 
-  function setFreeFly(on: boolean) {
-    freeFly = on;
-    orbit.enabled = !on;
-    transform.enabled = !on;
+  function applyToolCameraLock() {
+    // Paint Bucket disables orbit/transform so drag paints instead of spinning the view.
+    const lockCam = editTool === 'bucket' || freeFly || measureMode;
+    orbit.enabled = !lockCam && !bucketPainting;
+    transform.enabled = editTool !== 'bucket' && !freeFly && !measureMode;
+    if (editTool === 'bucket') transform.detach();
     updateCursor();
+  }
+
+  function setFreeFly(on: boolean) {
+    const wasFlying = freeFly;
+    freeFly = on;
+    if (on && editTool === 'bucket') {
+      // Free fly wins — leave bucket so camera works.
+      editTool = 'select';
+      bucketPainting = false;
+      lastPaintCellKey = null;
+    }
+    applyToolCameraLock();
     if (on) {
       transform.detach();
-      // Sync yaw/pitch from camera
       const dir = new THREE.Vector3();
       camera.getWorldDirection(dir);
       yaw = Math.atan2(dir.x, dir.z);
       pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
       host.requestPointerLock?.().catch(() => {});
-    } else if (document.pointerLockElement) {
-      document.exitPointerLock?.();
-      if (selectedId && roots.has(selectedId)) transform.attach(roots.get(selectedId)!);
+    } else if (wasFlying) {
+      if (document.pointerLockElement) document.exitPointerLock?.();
+      const dir = new THREE.Vector3(
+        Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        Math.cos(yaw) * Math.cos(pitch)
+      );
+      const lookDist = 14;
+      orbit.target.set(
+        camera.position.x + dir.x * lookDist,
+        camera.position.y + dir.y * lookDist,
+        camera.position.z + dir.z * lookDist
+      );
+      orbit.update();
+      if (selectedId && roots.has(selectedId) && editTool !== 'bucket') {
+        transform.attach(roots.get(selectedId)!);
+      }
     }
     handlers.onFreeFlyChange?.(on);
+  }
+
+  /** Continuous place for Paint Bucket only (active library model / brush). */
+  function paintBucketAtEvent(ev: { clientX: number; clientY: number }): boolean {
+    if (editTool !== 'bucket' || !brush || measureMode || freeFly) return false;
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const placed = pickPlacePoint(true);
+    const point = placed?.point ?? raycaster.intersectObject(ground)[0]?.point;
+    if (!point) return false;
+    let px = point.x;
+    let pz = point.z;
+    if (gridSnap) {
+      px = snapToGrid(px, gridSize);
+      pz = snapToGrid(pz, gridSize);
+    }
+    const cellKey = `${px.toFixed(3)},${pz.toFixed(3)}`;
+    if (cellKey === lastPaintCellKey) return false;
+    // Skip cells that already have this model (no spam stacks while dragging).
+    const hit = doc.entities.find(
+      (e) =>
+        e.model === brush &&
+        Math.abs((gridSnap ? snapToGrid(e.position[0], gridSize) : e.position[0]) - px) <
+          Math.max(0.2, gridSize * 0.45) &&
+        Math.abs((gridSnap ? snapToGrid(e.position[2], gridSize) : e.position[2]) - pz) <
+          Math.max(0.2, gridSize * 0.45)
+    );
+    if (hit) {
+      lastPaintCellKey = cellKey;
+      return false;
+    }
+    lastPaintCellKey = cellKey;
+    placeAt(new THREE.Vector3(px, 0, pz), 'prop', brush);
+    return true;
   }
 
   const onPointerDown = (ev: PointerEvent) => {
     if (ev.button !== 0) return;
     downX = ev.clientX;
     downY = ev.clientY;
-    if (ev.altKey && !freeFly && !measureMode) {
-      // Defer box-select until the pointer actually drags — short Alt+click = force stack.
+    if (ev.altKey && !freeFly && !measureMode && editTool !== 'bucket') {
       altBoxPending = true;
       boxStart = { x: ev.clientX, y: ev.clientY };
+      return;
+    }
+    // Paint Bucket: hold + drag paints the selected library model; camera stays locked.
+    if (
+      !freeFly &&
+      !measureMode &&
+      editTool === 'bucket' &&
+      brush &&
+      !ev.shiftKey
+    ) {
+      bucketPainting = true;
+      lastPaintCellKey = null;
+      orbit.enabled = false;
+      paintBucketAtEvent(ev);
+      try {
+        renderer.domElement.setPointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
     }
   };
 
@@ -977,7 +1120,7 @@ export function createEditorViewport(
     if (!boxSelecting) return;
     boxSelecting = false;
     boxOverlay.style.display = 'none';
-    orbit.enabled = !freeFly;
+    orbit.enabled = !freeFly && editTool !== 'bucket';
     const hostRect = host.getBoundingClientRect();
     const x1 = Math.min(boxStart.x, ev.clientX);
     const x2 = Math.max(boxStart.x, ev.clientX);
@@ -1007,7 +1150,19 @@ export function createEditorViewport(
   };
 
   const onPointerUp = (ev: PointerEvent) => {
-    if (ev.button !== 0 || freeFly) return;
+    if (ev.button !== 0) return;
+    const wasBucketPainting = bucketPainting;
+    if (bucketPainting) {
+      bucketPainting = false;
+      lastPaintCellKey = null;
+      try {
+        renderer.domElement.releasePointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      applyToolCameraLock();
+    }
+    if (freeFly) return;
     if (boxSelecting) {
       finishBoxSelect(ev);
       return;
@@ -1015,6 +1170,8 @@ export function createEditorViewport(
     // Short Alt+click: cancel pending box-select and continue (force-stack / normal click).
     if (altBoxPending) altBoxPending = false;
     if ((transform as unknown as { dragging: boolean }).dragging) return;
+    // Paint Bucket already painted on down/move — skip click place.
+    if (wasBucketPainting || editTool === 'bucket') return;
     const dist = Math.hypot(ev.clientX - downX, ev.clientY - downY);
     if (dist > 5) return;
 
@@ -1160,6 +1317,10 @@ export function createEditorViewport(
   };
 
   const onMouseMove = (ev: MouseEvent) => {
+    if (bucketPainting && editTool === 'bucket' && !freeFly && !measureMode) {
+      paintBucketAtEvent(ev);
+      return;
+    }
     if (altBoxPending || boxSelecting) {
       onPointerMoveBox(ev as unknown as PointerEvent);
       return;
@@ -1226,6 +1387,7 @@ export function createEditorViewport(
       );
       const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
+      // Strafe relative to look: A = left, D = right
       if (keys.has('KeyW')) camera.position.addScaledVector(forward, speed);
       if (keys.has('KeyS')) camera.position.addScaledVector(forward, -speed);
       if (keys.has('KeyA')) camera.position.addScaledVector(right, speed);
@@ -1233,7 +1395,7 @@ export function createEditorViewport(
       if (keys.has('Space')) camera.position.y += speed;
       if (keys.has('KeyC') || keys.has('KeyZ')) camera.position.y -= speed;
 
-      // Right stick: Y = forward/back along look, X = strafe
+      // Right stick: Y = forward/back along look, X = strafe (same A/D sense)
       if (touchAxes.moveY) camera.position.addScaledVector(forward, -touchAxes.moveY * speed);
       if (touchAxes.moveX) camera.position.addScaledVector(right, -touchAxes.moveX * speed);
 
@@ -1259,6 +1421,12 @@ export function createEditorViewport(
         camera.lookAt(orbit.target);
       }
       orbit.update();
+    }
+    // Guard: TransformControls errors if its target left the scene (rebuild/delete/resync).
+    const attached = (transform as unknown as { object?: THREE.Object3D | null }).object;
+    if (attached && !attached.parent) {
+      transform.detach();
+      attachSelectionGizmo();
     }
     director.update(dt);
     renderer.render(scene, camera);
@@ -1291,7 +1459,24 @@ export function createEditorViewport(
     },
     setEditTool: (tool) => {
       editTool = tool;
-      updateCursor();
+      bucketPainting = false;
+      lastPaintCellKey = null;
+      if (tool === 'bucket') {
+        if (freeFly) setFreeFly(false);
+        // Prefer painting the model of the current scene selection if it has one.
+        if (selectedId) {
+          const sel = doc.entities.find((e) => e.id === selectedId);
+          if (sel?.model) brush = sel.model;
+        }
+        if (!brush) brush = 'floor-square';
+      }
+      applyToolCameraLock();
+      if (tool !== 'bucket' && selectedId && roots.has(selectedId) && !freeFly) {
+        const selEnt = doc.entities.find((e) => e.id === selectedId);
+        if (!layerMeta(selEnt?.layerId ?? '')?.locked) {
+          transform.attach(roots.get(selectedId)!);
+        }
+      }
     },
     getEditTool: () => editTool,
     setActiveLayerId: (id) => {
@@ -1321,7 +1506,11 @@ export function createEditorViewport(
       measureA = null;
       while (measureGroup.children.length) measureGroup.remove(measureGroup.children[0]);
       handlers.onMeasureChange?.(null);
-      updateCursor();
+      if (on) {
+        bucketPainting = false;
+        if (editTool === 'bucket') editTool = 'select';
+      }
+      applyToolCameraLock();
     },
     isMeasureMode: () => measureMode,
     applyEnvironment: (env) => {
@@ -1394,6 +1583,141 @@ export function createEditorViewport(
         handlers.onSelect(selectedId);
         handlers.onSelectionChange?.(selectedIds);
       });
+    },
+    snapSelectedTogether: (idsOverride) => {
+      // Prefer ids passed from UI (Shift-multi select), fall back to viewport selection.
+      const raw =
+        idsOverride && idsOverride.length >= 2
+          ? idsOverride
+          : selectedIds.length >= 2
+            ? selectedIds
+            : selectedId
+              ? [selectedId]
+              : [];
+      const ids = Array.from(new Set(raw.filter(Boolean)));
+      if (ids.length < 2) return false;
+
+      const ents = ids
+        .map((id) => doc.entities.find((e) => e.id === id))
+        .filter((e): e is EditorEntity => !!e);
+      if (ents.length < 2) return false;
+      if (ents.some((e) => layerMeta(e.layerId)?.locked)) {
+        handlers.onPlaceResult?.('locked', 'selection');
+        return false;
+      }
+
+      /** Real world AABB half-extents + bottom (mesh, not just scale). */
+      const measure = (e: EditorEntity) => {
+        const root = roots.get(e.id);
+        if (root) {
+          root.updateMatrixWorld(true);
+          const box = new THREE.Box3().setFromObject(root);
+          if (!box.isEmpty()) {
+            return {
+              hx: Math.max(0.05, (box.max.x - box.min.x) / 2),
+              hy: Math.max(0.05, (box.max.y - box.min.y) / 2),
+              hz: Math.max(0.05, (box.max.z - box.min.z) / 2),
+              bottom: box.min.y,
+              cx: (box.min.x + box.max.x) / 2,
+              cy: (box.min.y + box.max.y) / 2,
+              cz: (box.min.z + box.max.z) / 2,
+              // Offset from entity pivot (root.position) to AABB center
+              ox: (box.min.x + box.max.x) / 2 - root.position.x,
+              oy: (box.min.y + box.max.y) / 2 - root.position.y,
+              oz: (box.min.z + box.max.z) / 2 - root.position.z,
+            };
+          }
+        }
+        const hx = Math.max(0.5, Math.abs(e.scale[0]));
+        const hy = Math.max(0.15, Math.abs(e.scale[1]));
+        const hz = Math.max(0.5, Math.abs(e.scale[2]));
+        return {
+          hx,
+          hy,
+          hz,
+          bottom: e.position[1] - hy,
+          cx: e.position[0],
+          cy: e.position[1],
+          cz: e.position[2],
+          ox: 0,
+          oy: 0,
+          oz: 0,
+        };
+      };
+
+      const anchor = ents[0];
+      const aM = measure(anchor);
+      const floorY = aM.bottom;
+
+      const updates = new Map<string, [number, number, number]>();
+
+      // Anchor stays in XZ; only re-seat onto measured bottom if needed.
+      {
+        const root = roots.get(anchor.id);
+        const y = floorY + aM.hy - aM.oy;
+        const pos: [number, number, number] = [
+          root?.position.x ?? anchor.position[0],
+          y,
+          root?.position.z ?? anchor.position[2],
+        ];
+        updates.set(anchor.id, pos);
+      }
+
+      let prev = {
+        cx: aM.cx,
+        cz: aM.cz,
+        hx: aM.hx,
+        hz: aM.hz,
+      };
+
+      for (let i = 1; i < ents.length; i++) {
+        const e = ents[i];
+        const m = measure(e);
+        const dx = m.cx - prev.cx;
+        const dz = m.cz - prev.cz;
+        const alongX = Math.abs(dx) >= Math.abs(dz);
+        let newCx: number;
+        let newCz: number;
+        if (alongX) {
+          const sign = Math.sign(dx) || 1;
+          newCx = prev.cx + sign * (prev.hx + m.hx);
+          newCz = prev.cz; // flush in a straight line
+        } else {
+          const sign = Math.sign(dz) || 1;
+          newCz = prev.cz + sign * (prev.hz + m.hz);
+          newCx = prev.cx;
+        }
+        const newCy = floorY + m.hy;
+        // Convert desired AABB center → entity pivot
+        const pos: [number, number, number] = [
+          newCx - m.ox,
+          newCy - m.oy,
+          newCz - m.oz,
+        ];
+        updates.set(e.id, pos);
+        prev = { cx: newCx, cz: newCz, hx: m.hx, hz: m.hz };
+      }
+
+      // Keep selection order in viewport for further snaps
+      selectedIds = ids;
+      selectedId = ids[ids.length - 1] ?? null;
+
+      doc = {
+        ...doc,
+        entities: doc.entities.map((e) => {
+          const pos = updates.get(e.id);
+          return pos ? { ...e, position: pos } : e;
+        }),
+      };
+      for (const [id, pos] of updates) {
+        const root = roots.get(id);
+        if (root) root.position.set(pos[0], pos[1], pos[2]);
+      }
+      handlers.onDocChange(doc);
+      attachSelectionGizmo();
+      refreshGizmos();
+      handlers.onSelectionChange?.(selectedIds);
+      return true;
     },
     focusSelected: () => {
       if (!selectedId) return;
@@ -1478,12 +1802,8 @@ export function createEditorViewport(
         return;
       }
       doc = { ...doc, entities: doc.entities.filter((e) => !ids.includes(e.id)) };
-      ids.forEach((id) => {
-        director.unregister(id);
-        entityClips.delete(id);
-        roots.get(id)?.removeFromParent();
-        roots.delete(id);
-      });
+      transform.detach();
+      ids.forEach((id) => disposeRoot(id));
       select(null);
       refreshGizmos();
       handlers.onDocChange(doc);
@@ -1495,10 +1815,8 @@ export function createEditorViewport(
       const modelChanged = patch.model !== undefined || patch.customModelUrl !== undefined;
       const kindChanged = patch.kind !== undefined && patch.kind !== prev?.kind;
       if (modelChanged || kindChanged) {
-        director.unregister(id);
-        entityClips.delete(id);
-        roots.get(id)?.removeFromParent();
-        roots.delete(id);
+        transform.detach();
+        disposeRoot(id);
       }
       doc = {
         ...doc,
@@ -1534,9 +1852,14 @@ export function createEditorViewport(
             }
           }
           await syncEntity(ent);
+          attachSelectionGizmo();
           handlers.onDocChange(doc);
         })();
       } else {
+        const ent = doc.entities.find((e) => e.id === id);
+        if (ent) {
+          void syncEntity(ent).then(() => attachSelectionGizmo());
+        }
         handlers.onDocChange(doc);
       }
     },

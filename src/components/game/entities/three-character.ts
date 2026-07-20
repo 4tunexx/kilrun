@@ -5,6 +5,10 @@ import { suggestPlayerBindings } from '../editor/map-document';
 import { loadPlayerAvatar } from '../editor/player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import { toThree } from '../renderer/coords';
+import {
+  computeLocomotionFacingYaw,
+  stepBodyYaw,
+} from '../tps/locomotion-facing';
 import { applySkinAttachments, tickSkinAttachments } from '../editor/skin-attachments';
 import type { SkinAttachment } from '@/lib/player-skins';
 
@@ -74,8 +78,10 @@ export class ThreeCharacter {
   private avatarOpts: CharacterAvatarOptions;
   private avatarScene: THREE.Object3D | null = null;
   private skinTime = 0;
+  private isLocal = false;
 
-  constructor(_username: string, _isLocal: boolean, avatar?: CharacterAvatarOptions) {
+  constructor(_username: string, isLocal: boolean, avatar?: CharacterAvatarOptions) {
+    this.isLocal = isLocal;
     this.avatarOpts = avatar ?? {};
     this.root.visible = false;
     void this.load();
@@ -188,7 +194,14 @@ export class ThreeCharacter {
     this.play(fallback, false);
   }
 
-  public update(player: NetPlayerState, dt: number, cameraYaw?: number) {
+  public update(
+    player: NetPlayerState,
+    dt: number,
+    cameraYaw?: number,
+    moveWish?: { fwd: number; strafe: number },
+    /** GTA aim: face camera and strafe — ignore locomotion turn. */
+    aimHeld?: boolean
+  ) {
     if (this.disposed) return;
 
     const [tx, ty, tz] = toThree(player.x, player.y, player.z ?? 0);
@@ -214,16 +227,32 @@ export class ThreeCharacter {
 
     this.root.position.copy(this.displayPos);
 
-    // Fortnite-style: body faces camera/aim yaw (strafe while moving). Fall back to move facing.
     const aimYaw = typeof cameraYaw === 'number' ? cameraYaw : player.cameraYaw;
-    const wantYaw =
+    const lookYaw =
       typeof aimYaw === 'number' && Number.isFinite(aimYaw) ? aimYaw : this.facing;
-    const turnRate = this.speed > 1.2 ? 12 : 10;
-    this.root.rotation.y = THREE.MathUtils.lerp(
+
+    let wantYaw = this.facing;
+    if (aimHeld) {
+      // Aim focus: body locked to camera — walk L/R/F/B without turning
+      wantYaw = lookYaw;
+    } else if (moveWish && Math.hypot(moveWish.fwd, moveWish.strafe) > 0.12) {
+      wantYaw = computeLocomotionFacingYaw(
+        lookYaw,
+        moveWish.fwd,
+        moveWish.strafe,
+        this.root.rotation.y
+      );
+    } else if (this.isLocal && typeof lookYaw === 'number') {
+      if (this.speed < 0.35) wantYaw = lookYaw;
+    }
+
+    this.root.rotation.y = stepBodyYaw(
       this.root.rotation.y,
       wantYaw,
-      1 - Math.pow(0.001, dt * turnRate)
+      dt,
+      aimHeld ? 18 : this.speed > 1.2 ? 16 : 12
     );
+    this.facing = this.root.rotation.y;
 
     const justLanded = !this.wasGrounded && player.isGrounded;
     this.wasGrounded = player.isGrounded;
@@ -242,6 +271,15 @@ export class ThreeCharacter {
       this.play(player.vz > 0.5 ? 'jump' : 'fall', false);
     } else if (player.isCrouching) {
       this.play('crouch');
+    } else if (aimHeld && moveWish && this.speed > 0.8) {
+      // Aim-strafe: body faces camera — use directional clips when available
+      if (Math.abs(moveWish.strafe) > Math.abs(moveWish.fwd) + 0.15) {
+        this.play(moveWish.strafe < 0 ? 'strafe_left' : 'strafe_right');
+      } else if (moveWish.fwd < -0.35) {
+        this.play(this.actions.has('back') ? 'back' : 'walk');
+      } else {
+        this.play(player.isSprinting || this.speed > 6 ? 'run' : 'walk');
+      }
     } else if (this.speed > 6 || player.isSprinting) {
       this.play('run');
     } else if (this.speed > 0.8) {
