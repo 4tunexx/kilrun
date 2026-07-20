@@ -38,6 +38,7 @@ import {
   resolveWeaponCombat,
 } from '@/lib/weapons';
 import type { SkinAttachment } from '@/lib/player-skins';
+import { parseEquippedSkinsJson } from '@/lib/match-loadout';
 import {
   getActivePlayMapIdForMode,
   mapDocSpawnPoints,
@@ -57,6 +58,7 @@ import {
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
 import type { KilrunMode } from '@/lib/game-modes';
+import { getActiveCloudMapDocument } from '@/lib/game-map-actions';
 import { HordeLobbyOverlay } from './modes/horde/lobby-overlay';
 import { HordeResultsScreen } from './modes/horde/results-screen';
 import { CompetitiveLobbyOverlay } from './modes/competitive/lobby-overlay';
@@ -66,8 +68,8 @@ import type { GameRoomName } from './net/connection';
 
 const MapEditor = dynamic(() => import('./editor/map-editor'), { ssr: false });
 
-const PITCH_SENS = 0.0028;
-const ZOOM = 9.5;
+const PITCH_SENS = 0.0026;
+const ZOOM = 5.8;
 
 interface KilrunEngineProps {
   joinOptions: JoinOptions;
@@ -122,8 +124,27 @@ export default function KilrunEngine({
   const { toggle: toggleFullscreen } = useGameFullscreen(rootRef, true);
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
+  const cloudDocRef = useRef<MapDocument | null>(null);
   const equippedSkinsRef = useRef<SkinAttachment[] | null>(equippedSkins ?? null);
   equippedSkinsRef.current = equippedSkins ?? null;
+
+  // Prefer cloud Active map for this mode (works for all clients), fall back to localStorage.
+  useEffect(() => {
+    let cancelled = false;
+    void getActiveCloudMapDocument(mode)
+      .then((cloud) => {
+        if (cancelled || !cloud?.document) return;
+        cloudDocRef.current = cloud.document;
+        // Allow lobby effect to re-push if we already short-circuited on local-only miss.
+        customLoadedRef.current = false;
+      })
+      .catch(() => {
+        /* local fallback only */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
 
   // Push Active editor map for this mode to the server when lobby is ready
   useEffect(() => {
@@ -135,9 +156,14 @@ export default function KilrunEngine({
     if (customLoadedRef.current) return;
     if (!connectionRef.current?.sessionId) return;
 
-    const mapId = getActivePlayMapIdForMode(mode);
-    if (!mapId) return;
-    const doc = loadMapPlayable(mapId);
+    const resolveDoc = (): MapDocument | null => {
+      if (cloudDocRef.current) return cloudDocRef.current;
+      const mapId = getActivePlayMapIdForMode(mode);
+      if (!mapId) return null;
+      return loadMapPlayable(mapId);
+    };
+
+    const doc = resolveDoc();
     if (!doc) return;
 
     const platforms = mapDocToSimPlatforms(doc);
@@ -201,14 +227,18 @@ export default function KilrunEngine({
     let disposed = false;
     let raf = 0;
     const world = createThreeWorld(hostElement);
-    const map = new ThreeMap(world.scene);
+    const activeId = getActivePlayMapIdForMode(mode);
+    const localDoc = activeId ? loadMapPlayable(activeId) : null;
+    const playDoc = cloudDocRef.current ?? localDoc;
+    const hasCustomMap = Boolean(playDoc);
+    const map = new ThreeMap(world.scene, { hardcodedDecor: !hasCustomMap });
     const overlay = new CustomMapOverlay(world.scene);
     const characters = new Map<string, ThreeCharacter>();
     const inputManager = new InputManager(hostElement, isMobile);
     joystickRef.current = inputManager.joystick;
 
     let cameraYaw = 0;
-    let cameraPitch = 0.22;
+    let cameraPitch = 0.08;
     let sendAccumulatorMs = 0;
     let shootHeld = false;
     let wasShootEdge = false;
@@ -216,23 +246,28 @@ export default function KilrunEngine({
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
 
-    const activeId = getActivePlayMapIdForMode(mode);
-    if (activeId) {
-      const doc = loadMapPlayable(activeId);
-      if (doc) {
-        customDocRef.current = doc;
-        void overlay.load(doc);
-      }
+    if (playDoc) {
+      customDocRef.current = playDoc;
+      map.clearHardcodedDecor();
+      void overlay.load(playDoc);
     }
 
     const spawnCharacter = (sessionId: string, username: string) => {
       if (characters.has(sessionId)) return;
       const avatarEntity = customDocRef.current?.entities.find((e) => e.kind === 'player');
+      // Keep map avatar model/anims, but never apply unpaid editor skins in live matches.
+      const avatarForPlay = avatarEntity
+        ? { ...avatarEntity, playerSkins: undefined }
+        : undefined;
       const isLocal = sessionId === connectionRef.current?.sessionId;
+      const netPlayer = playersRef.current.get(sessionId);
+      const remoteSkins = !isLocal
+        ? parseEquippedSkinsJson(netPlayer?.equippedSkinsJson)
+        : null;
       const view = new ThreeCharacter(username, isLocal, {
-        avatarEntity,
-        // Local player: map skins + shop equipped. Remotes: map skins only until server sync.
-        equippedSkins: isLocal ? equippedSkinsRef.current : null,
+        avatarEntity: avatarForPlay,
+        // Local: purchased/equipped. Remotes: synced loadout from join.
+        equippedSkins: isLocal ? equippedSkinsRef.current : remoteSkins,
       });
       characters.set(sessionId, view);
       world.scene.add(view.root);
@@ -250,6 +285,9 @@ export default function KilrunEngine({
       onObstacleChange: (obstacle, index) => {
         void map.upsertObstacle(index, obstacle);
       },
+      onObstacleRemove: (index) => {
+        map.removeObstacle(index);
+      },
       onPlatformAdd: (platform, index) => {
         void map.upsertPlatform(index, platform);
       },
@@ -266,6 +304,8 @@ export default function KilrunEngine({
     obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o as NetObstacleState));
 
     const syncTimer = window.setInterval(() => {
+      map.prunePlatforms(platformsRef.current.keys());
+      map.pruneObstacles(obstaclesRef.current.keys());
       platformsRef.current.forEach((p, i) => void map.upsertPlatform(i, p));
       obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o));
       const live = new Set(playersRef.current.keys());
@@ -310,7 +350,7 @@ export default function KilrunEngine({
         inputManager.consumeMouseLookDeltaX();
         inputManager.consumeMouseLookDeltaY();
       }
-      cameraPitch = THREE.MathUtils.clamp(cameraPitch, -0.45, 0.5);
+      cameraPitch = THREE.MathUtils.clamp(cameraPitch, -1.0, 0.78);
 
       const localSessionId = connectionRef.current?.sessionId;
       const localState = localSessionId ? playersRef.current.get(localSessionId) : undefined;
@@ -345,11 +385,7 @@ export default function KilrunEngine({
       if (!frozen) {
         const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
         if (shootNow && !wasShootEdge && localSessionId) {
-          const weaponAtt =
-            findWeaponAttachment(equippedSkinsRef.current) ??
-            findWeaponAttachment(
-              customDocRef.current?.entities.find((e) => e.kind === 'player')?.playerSkins
-            );
+          const weaponAtt = findWeaponAttachment(equippedSkinsRef.current);
           const combat = resolveWeaponCombat(weaponAtt);
           characters
             .get(localSessionId)
@@ -374,6 +410,7 @@ export default function KilrunEngine({
             moveX,
             moveY,
             aimAngle: cameraYaw,
+            aimPitch: cameraPitch,
             cameraYaw,
             crouch: inputManager.isCrouchPressed(),
             sprint: inputManager.isSprintPressed(),

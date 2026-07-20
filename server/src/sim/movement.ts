@@ -33,6 +33,8 @@ export interface PlayerInput {
   moveX: number; // -1..1, camera-relative forward/back intent (world X after client rotates)
   moveY: number; // -1..1, camera-relative strafe
   aimAngle: number;
+  /** Look pitch (radians, up positive). */
+  aimPitch: number;
   cameraYaw: number;
   crouch: boolean;
   sprint: boolean;
@@ -45,6 +47,7 @@ const EMPTY_INPUT: PlayerInput = {
   moveX: 0,
   moveY: 0,
   aimAngle: 0,
+  aimPitch: 0,
   cameraYaw: 0,
   crouch: false,
   sprint: false,
@@ -108,6 +111,7 @@ export function applyMovement(
 
   player.cameraYaw = input.cameraYaw;
   player.aimAngle = input.aimAngle;
+  player.aimPitch = Number.isFinite(input.aimPitch) ? input.aimPitch : 0;
   player.isCrouching = input.crouch;
 
   // Wish direction (already camera-relative from client).
@@ -246,13 +250,17 @@ export function applyMovement(
     bounds.maxY - PLAYER_RADIUS
   );
 
-  // Side / wall AABB push-out for tall solids
+  // Side / wall AABB push-out for tall solids — kill velocity into the wall so we slide
+  const beforePushX = player.x;
+  const beforePushY = player.y;
   const pushed = resolveSolidCollisions(
     { x: player.x, y: player.y, z: player.z },
     platforms
   );
   player.x = clamp(pushed.x, bounds.minX + PLAYER_RADIUS, bounds.maxX - PLAYER_RADIUS);
   player.y = clamp(pushed.y, bounds.minY + PLAYER_RADIUS, bounds.maxY - PLAYER_RADIUS);
+  if (Math.abs(player.x - beforePushX) > 1e-5) scratch.velX = 0;
+  if (Math.abs(player.y - beforePushY) > 1e-5) scratch.velY = 0;
 
   // Vertical
   if (!player.isGrounded) {

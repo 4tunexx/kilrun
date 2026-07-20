@@ -50,22 +50,22 @@ export interface SimInput {
   crouch: boolean;
 }
 
-const GRAVITY = 28;
-const JUMP_VELOCITY = 9.4;
-const JUMP_CUT = 0.45;
+const GRAVITY = 30;
+const JUMP_VELOCITY = 9.8;
+const JUMP_CUT = 0.42;
 const JUMP_PAD_BOOST = 14;
-const COYOTE_MS = 90;
-const JUMP_BUFFER_MS = 110;
-const GROUND_ACCEL = 28;
-const GROUND_FRICTION = 14;
-const AIR_ACCEL = 10;
-const AIR_CONTROL = 0.65;
-const MAX_GROUND_SPEED = 6.2;
-const SPRINT_MULT = 1.35;
-const MAX_AIR_MULT = 1.05;
-const MAX_FALL = 22;
+const COYOTE_MS = 110;
+const JUMP_BUFFER_MS = 130;
+const GROUND_ACCEL = 32;
+const GROUND_FRICTION = 16;
+const AIR_ACCEL = 12;
+const AIR_CONTROL = 0.78;
+const MAX_GROUND_SPEED = 6.4;
+const SPRINT_MULT = 1.38;
+const MAX_AIR_MULT = 1.08;
+const MAX_FALL = 24;
 const PLAYER_RADIUS = 0.4;
-const PLAYER_HEIGHT = 1.0;
+const PLAYER_HEIGHT = 1.7;
 const MAX_ENERGY = 100;
 const ENERGY_DRAIN = 28;
 const ENERGY_REGEN = 18;
@@ -242,9 +242,13 @@ export function stepPlatformer(
 
   body.x = clamp(body.x + scratch.velX * dt, bounds.minX + PLAYER_RADIUS, bounds.maxX - PLAYER_RADIUS);
   body.y = clamp(body.y + scratch.velY * dt, bounds.minY + PLAYER_RADIUS, bounds.maxY - PLAYER_RADIUS);
+  const beforePushX = body.x;
+  const beforePushY = body.y;
   const pushed = resolveSolids(body, pads);
   body.x = clamp(pushed.x, bounds.minX + PLAYER_RADIUS, bounds.maxX - PLAYER_RADIUS);
   body.y = clamp(pushed.y, bounds.minY + PLAYER_RADIUS, bounds.maxY - PLAYER_RADIUS);
+  if (Math.abs(body.x - beforePushX) > 1e-5) scratch.velX = 0;
+  if (Math.abs(body.y - beforePushY) > 1e-5) scratch.velY = 0;
 
   if (!body.isGrounded) {
     body.vz = Math.max(-MAX_FALL, body.vz - GRAVITY * dt);

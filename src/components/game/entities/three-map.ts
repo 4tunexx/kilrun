@@ -23,20 +23,29 @@ const PAD_MODELS = [
 
 /**
  * Prototype-pack platformer course — floating pads, columns, crates over a glowing void.
+ * Hardcoded decor is optional and cleared when an active custom map replaces the default course.
  */
 export class ThreeMap {
   public readonly root = new THREE.Group();
+  private readonly decorRoot = new THREE.Group();
   private platformRoots = new Map<number, THREE.Object3D>();
   private obstacleRoots = new Map<number, THREE.Object3D>();
   private prefabCache = new Map<string, THREE.Group>();
   private atlas: THREE.Texture | null = null;
   private glowMats: THREE.MeshStandardMaterial[] = [];
+  private decorEnabled = true;
+  private decorToken = 0;
 
-  constructor(private scene: THREE.Scene) {
+  constructor(private scene: THREE.Scene, opts?: { hardcodedDecor?: boolean }) {
+    this.decorRoot.name = 'hardcoded-decor';
     scene.add(this.root);
+    this.root.add(this.decorRoot);
     this.buildAtmosphere();
     void this.loadAtlas();
-    void this.bootstrapDecor();
+    this.decorEnabled = opts?.hardcodedDecor !== false;
+    if (this.decorEnabled) {
+      void this.bootstrapDecor();
+    }
   }
 
   private async loadAtlas() {
@@ -92,31 +101,43 @@ export class ThreeMap {
     });
   }
 
+  /** Drop default Deathrun props so an active custom map fully replaces them. */
+  public clearHardcodedDecor() {
+    this.decorEnabled = false;
+    this.decorToken += 1;
+    while (this.decorRoot.children.length) {
+      this.decorRoot.remove(this.decorRoot.children[0]);
+    }
+  }
+
   private async bootstrapDecor() {
+    const token = this.decorToken;
     try {
       // Flanking columns
       for (let x = 4; x < WORLD_WIDTH; x += 6) {
         for (const side of [1.2, WORLD_HEIGHT - 1.2] as const) {
+          if (!this.decorEnabled || token !== this.decorToken) return;
           const col = await this.getPrefab(x % 12 === 0 ? 'column-rounded' : 'column');
           const [tx, , tz] = toThree(x, side, 0);
           col.position.set(tx, 0, tz);
           col.scale.setScalar(1.15);
           this.tintWithAtlas(col);
-          this.root.add(col);
+          this.decorRoot.add(col);
         }
       }
 
       // Finish flag + thick pad
+      if (!this.decorEnabled || token !== this.decorToken) return;
       const finishPad = await this.getPrefab('floor-thick');
       const [fx, , fz] = toThree(FINISH_X, WORLD_HEIGHT / 2, 0);
       finishPad.position.set(fx, -0.05, fz);
       finishPad.scale.set(2.2, 1, 2.2);
       this.tintWithAtlas(finishPad);
-      this.root.add(finishPad);
+      this.decorRoot.add(finishPad);
 
       const flag = await this.getPrefab('flag');
       flag.position.set(fx, 0.2, fz);
-      this.root.add(flag);
+      this.decorRoot.add(flag);
 
       const archMat = new THREE.MeshStandardMaterial({
         color: 0x22d3ee,
@@ -127,17 +148,18 @@ export class ThreeMap {
       const arch = new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.1, 8, 28, Math.PI), archMat);
       arch.position.set(fx, 2.2, fz);
       arch.rotation.y = Math.PI / 2;
-      this.root.add(arch);
+      this.decorRoot.add(arch);
 
       // Scatter props along the path for platformer feel
       const props = ['crate', 'crate-color', 'pipe-section', 'coin', 'ladder', 'button-floor-round'] as const;
       for (let i = 0; i < props.length; i++) {
+        if (!this.decorEnabled || token !== this.decorToken) return;
         const p = await this.getPrefab(props[i]);
         const [px, , pz] = toThree(8 + i * 5.5, WORLD_HEIGHT / 2 + (i % 2 === 0 ? 2.4 : -2.4), 0.6);
         p.position.set(px, 0.15, pz);
         p.scale.setScalar(props[i] === 'coin' ? 1.4 : 1);
         this.tintWithAtlas(p);
-        this.root.add(p);
+        this.decorRoot.add(p);
       }
     } catch (err) {
       console.warn('[ThreeMap] decor failed', err);
@@ -155,6 +177,35 @@ export class ThreeMap {
   public clearPlatforms() {
     this.platformRoots.forEach((node) => node.removeFromParent());
     this.platformRoots.clear();
+  }
+
+  public removeObstacle(index: number) {
+    const node = this.obstacleRoots.get(index);
+    if (node) {
+      node.removeFromParent();
+      this.obstacleRoots.delete(index);
+    }
+  }
+
+  public clearObstacles() {
+    this.obstacleRoots.forEach((node) => node.removeFromParent());
+    this.obstacleRoots.clear();
+  }
+
+  /** Remove platform meshes whose indices are no longer in the live set. */
+  public prunePlatforms(liveIndices: Iterable<number>) {
+    const live = new Set(liveIndices);
+    for (const index of [...this.platformRoots.keys()]) {
+      if (!live.has(index)) this.removePlatform(index);
+    }
+  }
+
+  /** Remove obstacle meshes whose indices are no longer in the live set. */
+  public pruneObstacles(liveIndices: Iterable<number>) {
+    const live = new Set(liveIndices);
+    for (const index of [...this.obstacleRoots.keys()]) {
+      if (!live.has(index)) this.removeObstacle(index);
+    }
   }
 
   public async upsertPlatform(index: number, platform: NetPlatformState) {

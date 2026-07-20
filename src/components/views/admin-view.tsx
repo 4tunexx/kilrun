@@ -102,13 +102,11 @@ import {
   getEffectiveVpPrice,
   isFireSaleActive,
 } from '@/lib/shop-catalog';
-import { SKIN_ATTACH_SLOTS } from '@/lib/player-skins';
 import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
 const STORE_CATEGORIES = [
-  'Skins',
   'Perks',
   'Boosts',
   'Emotes',
@@ -182,7 +180,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
 
   const [itemForm, setItemForm] = useState({
     itemName: '',
-    itemCategory: 'Skins',
+    itemCategory: 'Trails',
     itemSku: '',
     vpPrice: 100,
     imageUrl: '',
@@ -2100,36 +2098,10 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                     </SelectContent>
                   </Select>
                   <p className="text-[11px] text-slate-500">
-                    Banners, frames, and nickname effects are created in Cosmetics Studio
-                    above. Body skins come from Map Editor → Model Editor, or pick a skin
-                    slot below.
+                    Banners, frames, nickname effects, and body skins are created in Cosmetics
+                    Studio (or Model Editor → Publish). Do not create slot-only Skins here.
                   </p>
                 </div>
-                {itemForm.itemCategory === 'Skins' && (
-                  <div className="space-y-1">
-                    <Label>Skin slot</Label>
-                    <Select
-                      value={itemForm.cosmeticSlot}
-                      onValueChange={(v) =>
-                        setItemForm((f) => ({ ...f, cosmeticSlot: v }))
-                      }
-                    >
-                      <SelectTrigger className="bg-slate-900/50 border-slate-700">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SKIN_ATTACH_SLOTS.map((s) => (
-                          <SelectItem key={s.cosmeticSlot} value={s.cosmeticSlot}>
-                            {s.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-[11px] text-slate-500">
-                      Hat, pants, boots, gloves, weapon, etc. — matches Model Editor slots.
-                    </p>
-                  </div>
-                )}
                 <div className="space-y-1">
                   <Label>VP price</Label>
                   <Input
@@ -2157,10 +2129,12 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                     runAction('create-item', async () => {
                       if (itemForm.itemCategory === 'Skins') {
                         toast({
-                          title: 'Skins need Model Editor publish',
+                          title: 'Use Cosmetics Studio → Skins',
                           description:
-                            'Slot-only items have no mesh. Prefer Model Editor → Publish to shop so cosmeticConfig (attachments) is included.',
+                            'Slot-only skins are blocked. Create a primitive skin in Cosmetics Studio, or Publish from Model Editor.',
+                          variant: 'destructive',
                         });
+                        return;
                       }
                       await adminUpsertStoreItem({
                         itemName: itemForm.itemName,
@@ -2168,14 +2142,11 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                         itemSku: itemForm.itemSku,
                         vpPrice: itemForm.vpPrice,
                         imageUrl: itemForm.imageUrl || undefined,
-                        cosmeticSlot:
-                          itemForm.itemCategory === 'Skins'
-                            ? itemForm.cosmeticSlot
-                            : null,
+                        cosmeticSlot: null,
                       });
                       setItemForm({
                         itemName: '',
-                        itemCategory: 'Skins',
+                        itemCategory: 'Perks',
                         itemSku: '',
                         vpPrice: 100,
                         imageUrl: '',

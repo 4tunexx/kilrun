@@ -165,6 +165,36 @@ export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string; hint?: stri
 
 export type PlayerAnimBindings = Partial<Record<PlayerAnimSlot, string>>;
 
+/** Per-mesh / per-bone visual tweaks from Player Model studio. */
+export interface PlayerMeshEdits {
+  /** Mesh object name → hex color */
+  meshColors?: Record<string, string>;
+  /** Mesh object name → local scale xyz */
+  meshScales?: Record<string, [number, number, number]>;
+  /** Bone name → local scale xyz (round / squeeze body parts) */
+  boneScales?: Record<string, [number, number, number]>;
+}
+
+export interface PlayerExtraBone {
+  name: string;
+  parentName: string;
+  position: [number, number, number];
+}
+
+export interface PlayerAuthoredTrack {
+  boneName: string;
+  property: 'quaternion' | 'position' | 'scale';
+  times: number[];
+  values: number[];
+}
+
+/** Bone-recorded animation clip (Player Model studio timeline). */
+export interface PlayerAuthoredClip {
+  name: string;
+  duration: number;
+  tracks: PlayerAuthoredTrack[];
+}
+
 /** Fuzzy-match clip names into locomotion / life slots. */
 export function suggestPlayerBindings(clips: string[]): PlayerAnimBindings {
   if (!clips.length) return {};
@@ -302,6 +332,12 @@ export interface EditorEntity {
    * this player mesh — shown in Play Test / match when set on the avatar.
    */
   playerSkins?: SkinAttachment[];
+  /** Body mesh color / scale tweaks from Player Model studio. */
+  playerMeshEdits?: PlayerMeshEdits;
+  /** Extra helper bones added in Player Model studio. */
+  playerExtraBones?: PlayerExtraBone[];
+  /** Authored animation clips recorded from bone posing. */
+  playerAuthoredClips?: PlayerAuthoredClip[];
   /** Death zone / damage on touch */
   hazard?: EntityHazard;
   /**
@@ -947,9 +983,51 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
           sculpt: a.sculpt
             ? { positions: [...a.sculpt.positions], count: a.sculpt.count }
             : undefined,
+          bonded: a.bonded
+            ? a.bonded.map((b) => ({
+                ...b,
+                shape: b.shape ? { ...b.shape } : undefined,
+                material: b.material ? { ...b.material } : undefined,
+                sculpt: b.sculpt
+                  ? { positions: [...b.sculpt.positions], count: b.sculpt.count }
+                  : undefined,
+                position: [...b.position] as [number, number, number],
+                rotation: [...b.rotation] as [number, number, number],
+                scale: [...b.scale] as [number, number, number],
+              }))
+            : undefined,
           position: [...a.position] as [number, number, number],
           rotation: [...a.rotation] as [number, number, number],
           scale: [...a.scale] as [number, number, number],
+        }))
+      : undefined,
+    playerMeshEdits: ent.playerMeshEdits
+      ? {
+          meshColors: ent.playerMeshEdits.meshColors
+            ? { ...ent.playerMeshEdits.meshColors }
+            : undefined,
+          meshScales: ent.playerMeshEdits.meshScales
+            ? { ...ent.playerMeshEdits.meshScales }
+            : undefined,
+          boneScales: ent.playerMeshEdits.boneScales
+            ? { ...ent.playerMeshEdits.boneScales }
+            : undefined,
+        }
+      : undefined,
+    playerExtraBones: ent.playerExtraBones
+      ? ent.playerExtraBones.map((b) => ({
+          ...b,
+          position: [...b.position] as [number, number, number],
+        }))
+      : undefined,
+    playerAuthoredClips: ent.playerAuthoredClips
+      ? ent.playerAuthoredClips.map((c) => ({
+          ...c,
+          tracks: c.tracks.map((t) => ({
+            ...t,
+            times: [...t.times],
+            values: [...t.values],
+          })),
         }))
       : undefined,
     hazard: ent.hazard ? { ...ent.hazard } : undefined,

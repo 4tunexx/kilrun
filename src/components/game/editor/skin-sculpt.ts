@@ -60,8 +60,16 @@ function applySculptDabLocal(
   localHit: THREE.Vector3,
   opts: SculptStrokeOptions
 ): boolean {
-  const sx = mesh.getWorldScale(_tmp).x || 1;
-  const localRadius = Math.max(0.001, opts.radius / Math.max(0.001, Math.abs(sx)));
+  const worldScale = new THREE.Vector3();
+  mesh.getWorldScale(worldScale);
+  const axis = Math.max(
+    Math.abs(worldScale.x),
+    Math.abs(worldScale.y),
+    Math.abs(worldScale.z),
+    0.001
+  );
+  // Use max axis so squeezed parts still get a usable brush radius in local space.
+  const localRadius = Math.max(0.001, opts.radius / axis);
   const radiusSq = localRadius * localRadius;
   // Gentler per-dab so repeated Add piles clay instead of shredding faces.
   const strength = Math.max(0.01, Math.min(1, opts.strength)) * 0.045;
@@ -180,7 +188,34 @@ export function findSculptMesh(root: THREE.Object3D): THREE.Mesh | null {
   root.traverse((o) => {
     if (found) return;
     const m = o as THREE.Mesh;
-    if (m.isMesh && m.geometry) found = m;
+    if (m.isMesh && m.geometry && m.visible) found = m;
   });
   return found;
+}
+
+/** Collect all sculptable meshes under roots (solo part + on-body skins). */
+export function collectSculptMeshes(...roots: Array<THREE.Object3D | null | undefined>): THREE.Mesh[] {
+  const out: THREE.Mesh[] = [];
+  const seen = new Set<string>();
+  for (const root of roots) {
+    if (!root || !root.visible) continue;
+    const preferAllUnderSolo = root.name === 'soloRoot';
+    root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.geometry || !m.visible) return;
+      if (seen.has(m.uuid)) return;
+      const parentSkin =
+        typeof m.parent?.name === 'string' && m.parent.name.startsWith('skin_');
+      const sculptable =
+        preferAllUnderSolo ||
+        m.userData?.sculptable === true ||
+        m.name?.startsWith('prim_') ||
+        m.name?.startsWith('bond_') ||
+        parentSkin;
+      if (!sculptable) return;
+      seen.add(m.uuid);
+      out.push(m);
+    });
+  }
+  return out;
 }

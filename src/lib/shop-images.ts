@@ -15,9 +15,18 @@ const SHOP_PLACEHOLDERS: Record<string, string> = {
 const DEFAULT_SHOP_PLACEHOLDER =
   'https://placehold.co/400x400/0f172a/94a3b8/png?text=Kilrun';
 
-/** Maps broken relative shop paths to remote placeholders; passes through http(s) URLs. */
+/**
+ * Maps broken relative shop paths to remote placeholders; passes through
+ * http(s), data URLs, and local public paths (/uploads, /shop, etc.).
+ */
 export function resolveShopImageUrl(imageUrl: string | null | undefined): string | null {
   if (!imageUrl) return null;
-  if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
-  return SHOP_PLACEHOLDERS[imageUrl] ?? DEFAULT_SHOP_PLACEHOLDER;
+  const trimmed = imageUrl.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^data:image\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('/')) {
+    return SHOP_PLACEHOLDERS[trimmed] ?? trimmed;
+  }
+  return SHOP_PLACEHOLDERS[trimmed] ?? DEFAULT_SHOP_PLACEHOLDER;
 }

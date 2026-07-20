@@ -83,6 +83,7 @@ import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
 import {
   ensureStarterMap,
   exportJson,
+  getMapThumbnail,
   importJson,
   listMaps,
   loadMap,
@@ -103,6 +104,7 @@ import { ensureMapPlayerEntity } from './player-avatar';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { adminUpsertStoreItem } from '@/lib/social-actions';
 import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
+import { publishCloudMap } from '@/lib/game-map-actions';
 import {
   BUILTIN_TEXTURES,
   deleteCustomTexture,
@@ -421,13 +423,30 @@ export function MapEditor({
     persist();
     setActivePlayMapIdForMode(gameMode, mapId);
     setActivePlayId(mapId);
-    toast({
-      title: `“${doc.name}” is Active ${modeInfo.shortTitle} map`,
-      description:
-        gameMode === 'deathrun'
-          ? 'Rejoin Deathrun lobby/countdown so platforms reload for the match.'
-          : `${modeInfo.title} will load this map when that mode goes live.`,
-    });
+    const published = workingDoc();
+    void publishCloudMap({
+      localId: mapId,
+      name: published.name,
+      mode: gameMode,
+      document: published,
+      thumbnailDataUrl: getMapThumbnail(mapId),
+      setActive: true,
+    })
+      .then(() => {
+        toast({
+          title: `“${published.name}” is Active ${modeInfo.shortTitle} map`,
+          description: 'Published to cloud for all players. Rejoin lobby to reload.',
+        });
+      })
+      .catch((err) => {
+        console.warn('[publishToMatch cloud]', err);
+        toast({
+          title: `“${published.name}” is Active locally`,
+          description:
+            'Cloud publish failed — run Admin → Sync database schema if needed, then retry.',
+          variant: 'destructive',
+        });
+      });
   };
 
   const workingDoc = () => {

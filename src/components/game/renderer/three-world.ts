@@ -19,7 +19,7 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
   scene.background = new THREE.Color(0x081018);
   scene.fog = new THREE.FogExp2(0x0a1528, 0.026);
 
-  const camera = new THREE.PerspectiveCamera(48, 1, 0.15, 220);
+  const camera = new THREE.PerspectiveCamera(55, 1, 0.15, 220);
   camera.position.set(0, 6, -12);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -83,8 +83,17 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
   };
 }
 
+const _pivot = new THREE.Vector3();
+const _desired = new THREE.Vector3();
+const _forward = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
+
 /**
- * Free orbit 3rd-person: mouse moves yaw/pitch, character stays in lower-center.
+ * Fortnite-style over-shoulder 3rd person:
+ * - Pivot at chest/shoulder, camera offset to the right
+ * - Camera orientation follows yaw/pitch so screen-center (crosshair) aims into the world
+ * - Does NOT lookAt the player mesh (that pinned the reticle on the head)
  */
 export function updateFollowCamera(
   camera: THREE.PerspectiveCamera,
@@ -92,29 +101,36 @@ export function updateFollowCamera(
   yaw: number,
   pitch: number,
   dt: number,
-  zoomDistance = 9.2
+  zoomDistance = 5.8
 ) {
-  const safePitch = THREE.MathUtils.clamp(pitch, -0.35, 0.55);
+  const safePitch = THREE.MathUtils.clamp(pitch, -1.05, 0.85);
   const dist = zoomDistance;
-  const height = 2.85 + Math.sin(safePitch) * 2.4;
+  /** Chest / shoulder pivot — visual avatar is ~1.8 tall, feet at target.y */
+  const lookHeight = 1.32;
+  const shoulder = 0.58;
 
-  const behindX = -Math.sin(yaw) * dist * Math.cos(safePitch * 0.65);
-  const behindZ = -Math.cos(yaw) * dist * Math.cos(safePitch * 0.65);
+  const cosPitch = Math.cos(safePitch);
+  const sinPitch = Math.sin(safePitch);
+  const sinYaw = Math.sin(yaw);
+  const cosYaw = Math.cos(yaw);
 
-  const desired = new THREE.Vector3(
-    target.x + behindX,
-    target.y + height,
-    target.z + behindZ
-  );
+  // Aim forward in Three space (matches server aim: x=cos(yaw)*cos(pitch), y=sin(yaw)*cos(pitch), z=sin(pitch))
+  _forward.set(sinYaw * cosPitch, sinPitch, cosYaw * cosPitch);
+  _right.set(cosYaw, 0, -sinYaw);
 
-  const lerp = 1 - Math.pow(0.001, dt);
-  camera.position.lerp(desired, Math.min(1, lerp * 14));
+  _pivot.set(target.x, target.y + lookHeight, target.z);
 
-  const lookAhead = 1.4;
-  const lookAt = new THREE.Vector3(
-    target.x + Math.sin(yaw) * lookAhead,
-    target.y + 1.05,
-    target.z + Math.cos(yaw) * lookAhead
-  );
-  camera.lookAt(lookAt);
+  _desired
+    .copy(_pivot)
+    .addScaledVector(_forward, -dist)
+    .addScaledVector(_right, shoulder);
+  // Slight lift so the shoulder doesn't clip the lens at neutral pitch
+  _desired.y += 0.12;
+
+  const lerp = 1 - Math.pow(0.001, dt * 18);
+  camera.position.lerp(_desired, Math.min(1, lerp));
+
+  // Orient by aim angles — screen center = aim ray (crosshair is not stuck on the head)
+  _euler.set(-safePitch, yaw, 0);
+  camera.quaternion.setFromEuler(_euler);
 }

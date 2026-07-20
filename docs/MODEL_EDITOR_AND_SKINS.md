@@ -46,14 +46,25 @@ Model Editor (sculpt / catalog / upload GLB)
 | **Sculpt / Turn** | Paint clay vs orbit camera |
 | **Front / Side / Bottom / Top / Back** | Quick camera angles |
 | **Clay view** | Matcap-style shading while sculpting |
+| **Fullscreen sculpt** | Full button — Skin only + Sculpt; paint works on the part |
 | **Primitives + shape + Fit size** | Squish/expand cylinders, etc. |
+| **Insert & bond shapes** | Add spheres/boxes/cones onto a skin, then sculpt each piece |
 | **Blob Add / Remove / Smooth** | ZBrush-lite clay; Symmetry L/R; Undo/Redo |
 | **Solid / Cloth / Cape** | Material feel (+ light sway for cloth/cape) |
-| **Lock on body / Follow bone** | Exact place vs stick to skeleton |
+| **Lock on body / Follow bone** | Exact place vs stick to skeleton (optional bone picker) |
 | **Pair L/R** | Gloves / boots / horns mirror |
 | **Tail / Horn / Custom part** | Extra body attachments |
 | **Weapon combat panel** | Melee / Hitscan / Look only + range / cooldown |
 | **Shop thumbnail** | Live render of **the part** (not full avatar); no 3D shop inspect |
+
+### Player Model studio
+
+| Feature | How to use |
+|---|---|
+| **Mesh tab** | Recolor body meshes; Round+ / Squeeze / axis sliders on selected bone |
+| **Bones tab** | Select skeleton bones; +/- helper bones |
+| **Record tab** | Select bone → Record → move gizmo → Add to timeline → Save clip (keys only that bone) |
+| **Anims tab** | Bind / preview clips including recorded ones |
 
 ---
 
@@ -112,34 +123,30 @@ Model Editor (sculpt / catalog / upload GLB)
 
 These are intentional follow-ups — do not assume they work in production yet.
 
-### 1. Server-authoritative weapon combat
-- Send resolved weapon stats (or a `weaponId`) with attack input  
-- `DeathrunRoom` applies skin range/damage instead of only `HITSCAN_*` constants  
-- Validate cooldown server-side to prevent client spoofing  
+### 1. Signed loadouts from DB (anti-spoof)
+- Join currently sends client-packed skins/weapon with server clamps  
+- Stronger: issue HMAC-signed loadout from `User.equippedSkins` at matchmaking  
 
-### 2. Sync equipped skins to other players
-- Today: **local** player gets shop skins; remotes only see **map** `playerSkins`  
-- Need: join options or room state field with skin payload (or hash → CDN) for peers  
-
-### 3. Cloud MAIN map + skin asset storage
-- Map docs / large data-URL textures / GLBs are browser-local today  
-- Move published skins & maps to object storage; keep Mongo for metadata  
-
-### 4. Admin “Create Skins” without Model Editor
-- Slot-only create has **no mesh** — prefer **Publish to shop** from Model Editor  
-- Optional: block create unless `cosmeticConfig` is present  
-
-### 5. Animated weapon-only clips (optional polish)
+### 2. Animated weapon-only clips (optional polish)
 - Idle fidget / reload / sheathe on the weapon mesh only  
 - Still keep character Attack as the combat motion  
 
-### 6. Melee damage in Play Test / PvP modes
-- Play Test has no other players; damage slider is metadata for future Horde / Competitive  
+### 3. Melee damage in Play Test / PvP polish
+- Play Test has no other players; damage slider is metadata for Horde / Competitive  
 
-### 7. Prisma / schema
-- `User.equippedSkins` must exist on Mongo — use Admin **Sync database schema** if equip fails after deploy  
+### 4. Prisma / schema
+- After deploy: Admin **Sync database schema** so `GameMap` + `equippedSkins` exist on Mongo  
 
 ---
+
+## Shipped recently (PR upgrades)
+
+| Upgrade | Behavior |
+|---|---|
+| Remote equipped skins | Join sends `equippedSkinsJson`; remotes render peers' shop skins |
+| Server weapon combat | Per-player clamped `weaponRange` / `damage` / `cooldown` / cone |
+| Cloud Active maps | Admin Active publishes `GameMap`; matches prefer cloud over localStorage |
+| No empty skins | Cosmetics Studio → Skins creates primitives; slot-only create blocked |
 
 ## Quick smoke test
 

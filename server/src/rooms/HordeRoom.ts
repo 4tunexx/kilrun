@@ -7,8 +7,6 @@ import {
   type PlatformBlueprint,
 } from '../sim/platforms.js';
 import {
-  HITSCAN_DAMAGE,
-  HITSCAN_RANGE,
   LOBBY_COUNTDOWN_MS,
   MAX_ENERGY,
   MIN_PLAYERS_TO_START,
@@ -16,7 +14,6 @@ import {
   OBSTACLE_HIT_COOLDOWN_MS,
   PLAYER_HEIGHT,
   PLAYER_RADIUS,
-  SHOOT_COOLDOWN_MS,
   SPAWN_X,
   SPAWN_Z,
   TICK_DT_MS,
@@ -33,6 +30,7 @@ import {
   type WorldBounds,
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
+import { applyLoadoutToPlayer } from '../sim/loadout.js';
 
 interface JoinOptions {
   userId?: string;
@@ -40,6 +38,14 @@ interface JoinOptions {
   avatarUrl?: string;
   isAdmin?: boolean;
   kp?: number;
+  equippedSkinsJson?: string;
+  weaponCombat?: {
+    kind?: string;
+    range?: number;
+    damage?: number;
+    cooldownMs?: number;
+    coneRadians?: number;
+  };
 }
 
 interface SpawnPoint {
@@ -220,6 +226,7 @@ export class HordeRoom extends Room<RoomState> {
     player.avatarUrl = options.avatarUrl ?? '';
     player.role = 'survivor';
     player.kp = typeof options.kp === 'number' ? options.kp : 1000;
+    applyLoadoutToPlayer(player, options);
     player.energy = MAX_ENERGY;
     this.applySpawnPosition(player, this.state.players.size);
 
@@ -534,9 +541,10 @@ export class HordeRoom extends Room<RoomState> {
         this.damagePlayer(player, 100);
       }
 
-      if (input.shootPressed) {
+      if (input.shootPressed && player.weaponKind !== 'cosmetic') {
         const lastShot = this.lastShotAt.get(sessionId) ?? 0;
-        if (now - lastShot >= SHOOT_COOLDOWN_MS) {
+        const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
+        if (now - lastShot >= cooldown) {
           this.lastShotAt.set(sessionId, now);
           this.resolveSurvivorShot(player);
         }
@@ -578,11 +586,21 @@ export class HordeRoom extends Room<RoomState> {
   }
 
   private resolveSurvivorShot(shooter: PlayerState) {
+    if (shooter.weaponKind === 'cosmetic') return;
+    const range = shooter.weaponRange > 0 ? shooter.weaponRange : 14;
+    const damage = shooter.weaponDamage > 0 ? shooter.weaponDamage : 25;
+    const cone = shooter.weaponConeRadians > 0 ? shooter.weaponConeRadians : 0.18;
     let best: MonsterSim | null = null;
-    let bestDist = HITSCAN_RANGE;
+    let bestDist = range;
     for (const mon of this.monsters) {
       if (
-        !isHitByShot(shooter.x, shooter.y, shooter.aimAngle, mon.x, mon.y, HITSCAN_RANGE)
+        !isHitByShot(shooter.x, shooter.y, shooter.aimAngle, mon.x, mon.y, range, cone, {
+          shooterZ: shooter.z,
+          aimPitch: shooter.aimPitch,
+          targetZ: mon.z,
+          targetHeight: 1.4,
+          targetRadius: mon.radius,
+        })
       ) {
         continue;
       }
@@ -593,7 +611,7 @@ export class HordeRoom extends Room<RoomState> {
       }
     }
     if (!best) return;
-    best.hp -= HITSCAN_DAMAGE;
+    best.hp -= damage;
     if (best.hp <= 0) {
       this.killMonster(best.id);
     }

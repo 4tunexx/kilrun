@@ -51,7 +51,7 @@ function pruneExtraMeshes(root: THREE.Object3D) {
 export interface CharacterAvatarOptions {
   /** Map player entity — drives custom GLB + clip bindings. */
   avatarEntity?: EditorEntity | null;
-  /** Equipped shop skins (merged with entity.playerSkins). */
+  /** Purchased/equipped shop skins only (map editor skins are ignored in live play). */
   equippedSkins?: SkinAttachment[] | null;
 }
 
@@ -101,10 +101,7 @@ export class ThreeCharacter {
       this.loaded = true;
       this.root.visible = true;
 
-      const skins: SkinAttachment[] = [
-        ...(entity?.playerSkins ?? []),
-        ...(this.avatarOpts.equippedSkins ?? []),
-      ];
+      const skins: SkinAttachment[] = [...(this.avatarOpts.equippedSkins ?? [])];
       if (skins.length) {
         void applySkinAttachments(scene, skins);
       }
@@ -217,19 +214,16 @@ export class ThreeCharacter {
 
     this.root.position.copy(this.displayPos);
 
-    if (this.speed > 1.2) {
-      this.root.rotation.y = THREE.MathUtils.lerp(
-        this.root.rotation.y,
-        this.facing,
-        1 - Math.pow(0.001, dt * 10)
-      );
-    } else if (typeof cameraYaw === 'number') {
-      this.root.rotation.y = THREE.MathUtils.lerp(
-        this.root.rotation.y,
-        cameraYaw,
-        1 - Math.pow(0.001, dt * 8)
-      );
-    }
+    // Fortnite-style: body faces camera/aim yaw (strafe while moving). Fall back to move facing.
+    const aimYaw = typeof cameraYaw === 'number' ? cameraYaw : player.cameraYaw;
+    const wantYaw =
+      typeof aimYaw === 'number' && Number.isFinite(aimYaw) ? aimYaw : this.facing;
+    const turnRate = this.speed > 1.2 ? 12 : 10;
+    this.root.rotation.y = THREE.MathUtils.lerp(
+      this.root.rotation.y,
+      wantYaw,
+      1 - Math.pow(0.001, dt * turnRate)
+    );
 
     const justLanded = !this.wasGrounded && player.isGrounded;
     this.wasGrounded = player.isGrounded;

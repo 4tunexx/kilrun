@@ -38,6 +38,15 @@ import {
   type NicknameConfig,
   type NicknameEffect,
 } from '@/lib/cosmetics';
+import {
+  SKIN_ATTACH_SLOTS,
+  SKIN_PRIMITIVES,
+  defaultAttachment,
+  materialForFeel,
+  type SkinAttachSlot,
+  type SkinPrimitive,
+} from '@/lib/player-skins';
+import { captureSkinPartThumbnail } from '@/components/game/editor/skin-attachments';
 import { useToast } from '@/hooks/use-toast';
 
 function ShopMetaFields({
@@ -544,7 +553,148 @@ function NicknamePanel({ onCreated }: { onCreated?: () => void }) {
   );
 }
 
-/** Admin cosmetics studio: banners, avatar frames, nickname effects. */
+function SkinPanel({ onCreated }: { onCreated?: () => void }) {
+  const [slot, setSlot] = useState<SkinAttachSlot>('hat');
+  const [primitive, setPrimitive] = useState<SkinPrimitive>('sphere');
+  const [color, setColor] = useState('#c4a574');
+  const [itemName, setItemName] = useState('');
+  const [itemSku, setItemSku] = useState('');
+  const [vpPrice, setVpPrice] = useState(250);
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+
+  const meta = SKIN_ATTACH_SLOTS.find((s) => s.id === slot)!;
+
+  const save = async () => {
+    if (!itemName.trim() || !itemSku.trim()) return;
+    setSaving(true);
+    try {
+      const attachment = {
+        ...defaultAttachment(slot),
+        primitive,
+        material: materialForFeel(meta.defaultFeel, { color }),
+        color,
+      };
+      const preset = {
+        kind: 'player_skin' as const,
+        version: 3,
+        id: `skin_${itemSku.trim()}`,
+        name: itemName.trim(),
+        baseModelKey: 'default-mannequin',
+        primarySlot: slot,
+        attachments: [attachment],
+      };
+      let imageUrl: string | undefined;
+      try {
+        imageUrl = (await captureSkinPartThumbnail(attachment, 256)) ?? undefined;
+      } catch {
+        imageUrl = undefined;
+      }
+      await adminUpsertStoreItem({
+        itemName: itemName.trim(),
+        itemCategory: 'Skins',
+        itemSku: itemSku.trim(),
+        vpPrice,
+        imageUrl,
+        cosmeticSlot: meta.cosmeticSlot,
+        cosmeticConfig: preset,
+      });
+      toast({ title: `Skin “${itemName}” added to the shop` });
+      setItemName('');
+      setItemSku('');
+      onCreated?.();
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Failed to save',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <Label>Slot</Label>
+          <Select value={slot} onValueChange={(v) => setSlot(v as SkinAttachSlot)}>
+            <SelectTrigger className="bg-slate-900/50 border-slate-700">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SKIN_ATTACH_SLOTS.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>Primitive shape</Label>
+          <Select
+            value={primitive}
+            onValueChange={(v) => setPrimitive(v as SkinPrimitive)}
+          >
+            <SelectTrigger className="bg-slate-900/50 border-slate-700">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SKIN_PRIMITIVES.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label>Color</Label>
+          <input
+            type="color"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+            className="h-10 w-14 rounded border border-slate-700 cursor-pointer"
+          />
+        </div>
+        <p className="text-xs text-slate-400 leading-snug">
+          Quick shop skins without the Model Editor. For sculpted / bonded / uploaded meshes,
+          use Map Editor → Model Editor → Publish to shop.
+        </p>
+      </div>
+      <div className="space-y-4">
+        <div
+          className="flex items-center justify-center rounded-lg border border-slate-700/50 bg-slate-950/50 p-8 min-h-[120px]"
+          style={{ background: `radial-gradient(circle, ${color}55, transparent)` }}
+        >
+          <span className="text-sm font-bold uppercase tracking-wide text-slate-300">
+            {meta.label} · {primitive}
+          </span>
+        </div>
+        <ShopMetaFields
+          itemName={itemName}
+          setItemName={setItemName}
+          itemSku={itemSku}
+          setItemSku={setItemSku}
+          vpPrice={vpPrice}
+          setVpPrice={setVpPrice}
+          namePlaceholder="Bronze Helm"
+          skuPlaceholder="skin-bronze-helm"
+        />
+        <Button
+          className="w-full"
+          disabled={saving || !itemName.trim() || !itemSku.trim()}
+          onClick={() => void save()}
+        >
+          {saving ? 'Saving…' : 'Save skin to shop'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Admin cosmetics studio: banners, avatar frames, nickname effects, skins. */
 export function CosmeticsStudio({ onCreated }: { onCreated?: () => void }) {
   return (
     <Card className="bg-slate-800/40 border-slate-700/30">
@@ -559,6 +709,7 @@ export function CosmeticsStudio({ onCreated }: { onCreated?: () => void }) {
             <TabsTrigger value="banner">Banners</TabsTrigger>
             <TabsTrigger value="frame">Avatar frames</TabsTrigger>
             <TabsTrigger value="nickname">Nickname effects</TabsTrigger>
+            <TabsTrigger value="skins">Skins</TabsTrigger>
           </TabsList>
           <TabsContent value="banner">
             <BannerPanel onCreated={onCreated} />
@@ -568,6 +719,9 @@ export function CosmeticsStudio({ onCreated }: { onCreated?: () => void }) {
           </TabsContent>
           <TabsContent value="nickname">
             <NicknamePanel onCreated={onCreated} />
+          </TabsContent>
+          <TabsContent value="skins">
+            <SkinPanel onCreated={onCreated} />
           </TabsContent>
         </Tabs>
       </CardContent>
