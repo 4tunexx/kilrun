@@ -612,11 +612,12 @@ export function ModelSkinEditor({
           onChange={(rotation) => patchActive({ rotation })}
           step={5}
         />
-        <Vec3Fields
-          label="Scale"
-          value={activeAtt.scale}
+
+        {/* Fit size — expand/shrink until it matches the body part */}
+        <SizeFitControls
+          scale={activeAtt.scale}
           onChange={(scale) => patchActive({ scale })}
-          step={0.05}
+          slotLabel={SKIN_ATTACH_SLOTS.find((s) => s.id === slot)?.label ?? slot}
         />
 
         <div className="flex gap-2">
@@ -818,6 +819,131 @@ function ShapeFields({
             </>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+function SizeFitControls({
+  scale,
+  onChange,
+  slotLabel,
+}: {
+  scale: [number, number, number];
+  onChange: (s: [number, number, number]) => void;
+  slotLabel: string;
+}) {
+  const [showAxes, setShowAxes] = useState(false);
+  const uniform = Math.max(
+    0.05,
+    (Math.abs(scale[0]) + Math.abs(scale[1]) + Math.abs(scale[2])) / 3
+  );
+
+  const setUniform = (s: number) => {
+    const v = Math.min(5, Math.max(0.15, s));
+    onChange([v, v, v]);
+  };
+
+  const setAxis = (i: 0 | 1 | 2, v: number) => {
+    const next = [...scale] as [number, number, number];
+    next[i] = Math.min(5, Math.max(0.05, v));
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-2.5 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] uppercase tracking-wider text-emerald-200/90 font-bold">
+          Fit size · {slotLabel}
+        </p>
+        <span className="text-[11px] tabular-nums text-emerald-100/80 font-semibold">
+          {uniform.toFixed(2)}×
+        </span>
+      </div>
+      <p className="text-[10px] text-white/40 leading-snug">
+        Drag to expand until it matches the body. This size is saved with the skin.
+      </p>
+
+      <label className="flex items-center gap-2">
+        <span className="text-[10px] text-white/45 w-10 shrink-0">Size</span>
+        <input
+          type="range"
+          min={0.25}
+          max={3.5}
+          step={0.02}
+          value={Math.min(3.5, Math.max(0.25, uniform))}
+          onChange={(e) => setUniform(Number(e.target.value))}
+          className="flex-1 h-2 accent-emerald-400 cursor-pointer"
+        />
+      </label>
+
+      <div className="flex flex-wrap gap-1.5">
+        {[
+          { label: 'Tiny', v: 0.6 },
+          { label: 'Small', v: 0.85 },
+          { label: 'Fit', v: 1.15 },
+          { label: 'Bigger', v: 1.5 },
+          { label: 'Huge', v: 2.2 },
+        ].map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            onClick={() => setUniform(p.v)}
+            className={`px-2 py-1 rounded text-[10px] font-bold border ${
+              Math.abs(uniform - p.v) < 0.08
+                ? 'bg-emerald-500/30 border-emerald-400/50 text-emerald-50'
+                : 'border-white/10 text-white/55 hover:bg-white/5'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setUniform(uniform + 0.15)}
+          className="px-2 py-1 rounded text-[10px] font-bold border border-white/10 text-white/70 hover:bg-white/5"
+          title="Grow a bit"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() => setUniform(uniform - 0.15)}
+          className="px-2 py-1 rounded text-[10px] font-bold border border-white/10 text-white/70 hover:bg-white/5"
+          title="Shrink a bit"
+        >
+          −
+        </button>
+      </div>
+
+      <button
+        type="button"
+        className="text-[10px] text-sky-300/90 hover:text-sky-200"
+        onClick={() => setShowAxes((v) => !v)}
+      >
+        {showAxes ? 'Hide' : 'Show'} per-axis scale (X / Y / Z)
+      </button>
+
+      {showAxes && (
+        <div className="space-y-1.5 pt-1 border-t border-white/10">
+          {(['X width', 'Y height', 'Z depth'] as const).map((label, i) => (
+            <label key={label} className="flex items-center gap-2">
+              <span className="text-[10px] text-white/45 w-16 shrink-0">{label}</span>
+              <input
+                type="range"
+                min={0.15}
+                max={3.5}
+                step={0.02}
+                value={Math.min(3.5, Math.max(0.15, Math.abs(scale[i])))}
+                onChange={(e) => setAxis(i as 0 | 1 | 2, Number(e.target.value))}
+                className="flex-1 h-1.5 accent-sky-400 cursor-pointer"
+              />
+              <span className="w-9 text-right text-[10px] tabular-nums text-white/55">
+                {scale[i].toFixed(2)}
+              </span>
+            </label>
+          ))}
+        </div>
       )}
     </div>
   );

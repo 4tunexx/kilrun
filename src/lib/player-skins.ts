@@ -96,8 +96,8 @@ export const SKIN_ATTACH_SLOTS: {
     boneHints: ['head', 'hat', 'skull'],
     cosmeticSlot: 'skin_hat',
     defaultPrimitive: 'cylinder',
-    defaultShape: { radiusTop: 0.28, radiusBottom: 0.32, height: 0.22, radialSegments: 24 },
-    defaultScale: [1, 1, 1],
+    defaultShape: { radiusTop: 0.3, radiusBottom: 0.34, height: 0.24, radialSegments: 24 },
+    defaultScale: [1.05, 1.05, 1.05],
   },
   {
     id: 'face',
@@ -107,8 +107,8 @@ export const SKIN_ATTACH_SLOTS: {
     boneHints: ['head', 'face', 'jaw'],
     cosmeticSlot: 'skin_face',
     defaultPrimitive: 'box',
-    defaultShape: { width: 0.35, height: 0.18, depth: 0.08 },
-    defaultScale: [1, 1, 1],
+    defaultShape: { width: 0.42, height: 0.28, depth: 0.12 },
+    defaultScale: [1.15, 1.15, 1.15],
   },
   {
     id: 'torso',
@@ -151,8 +151,8 @@ export const SKIN_ATTACH_SLOTS: {
     boneHints: ['hand', 'wrist', 'glove'],
     cosmeticSlot: 'skin_gloves',
     defaultPrimitive: 'sphere',
-    defaultShape: { radius: 0.1, radialSegments: 16 },
-    defaultScale: [1, 1, 1],
+    defaultShape: { radius: 0.12, radialSegments: 16 },
+    defaultScale: [1.2, 1.2, 1.2],
   },
   {
     id: 'weapon',
