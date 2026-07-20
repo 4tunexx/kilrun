@@ -10,6 +10,8 @@ export interface SculptStrokeOptions {
   radius: number;
   /** 0–1 strength. */
   strength: number;
+  /** Mirror dab across local X (left/right symmetry). */
+  symmetryX?: boolean;
 }
 
 const _localHit = new THREE.Vector3();
@@ -35,29 +37,45 @@ export function applySculptStroke(
   const inv = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
   _localHit.copy(worldHit).applyMatrix4(inv);
 
-  // Approximate local radius from world radius using average scale
+  let changed = applySculptDabLocal(mesh, pos, geo, _localHit.clone(), opts);
+  if (opts.symmetryX) {
+    const mirrored = _localHit.clone();
+    mirrored.x *= -1;
+    changed = applySculptDabLocal(mesh, pos, geo, mirrored, opts) || changed;
+  }
+
+  if (changed) {
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+  }
+  return changed;
+}
+
+function applySculptDabLocal(
+  mesh: THREE.Mesh,
+  pos: THREE.BufferAttribute,
+  geo: THREE.BufferGeometry,
+  localHit: THREE.Vector3,
+  opts: SculptStrokeOptions
+): boolean {
   const sx = mesh.getWorldScale(_tmp).x || 1;
   const localRadius = Math.max(0.001, opts.radius / Math.max(0.001, Math.abs(sx)));
   const radiusSq = localRadius * localRadius;
   const strength = Math.max(0.01, Math.min(1, opts.strength)) * 0.08;
 
-  // Normals for add/remove
   if (!geo.attributes.normal) geo.computeVertexNormals();
   const nrm = geo.attributes.normal as THREE.BufferAttribute;
 
   let changed = false;
 
   if (opts.brush === 'smooth') {
-    // Two-pass Laplacian-ish smooth toward neighbor average (use nearby verts in brush)
     const indices: number[] = [];
     for (let i = 0; i < pos.count; i++) {
       _worldV.fromBufferAttribute(pos, i);
-      if (_worldV.distanceToSquared(_localHit) <= radiusSq) indices.push(i);
+      if (_worldV.distanceToSquared(localHit) <= radiusSq) indices.push(i);
     }
     if (indices.length < 2) return false;
-    const originals = indices.map((i) =>
-      new THREE.Vector3().fromBufferAttribute(pos, i)
-    );
+    const originals = indices.map((i) => new THREE.Vector3().fromBufferAttribute(pos, i));
     for (let k = 0; k < indices.length; k++) {
       const i = indices[k];
       _avg.set(0, 0, 0);
@@ -70,8 +88,7 @@ export function applySculptStroke(
       if (!n) continue;
       _avg.multiplyScalar(1 / n);
       const cur = originals[k];
-      const fall =
-        1 - Math.min(1, cur.distanceTo(_localHit) / localRadius);
+      const fall = 1 - Math.min(1, cur.distanceTo(localHit) / localRadius);
       const t = strength * 2.2 * fall * fall;
       pos.setXYZ(
         i,
@@ -85,11 +102,11 @@ export function applySculptStroke(
     const sign = opts.brush === 'add' ? 1 : -1;
     for (let i = 0; i < pos.count; i++) {
       _worldV.fromBufferAttribute(pos, i);
-      const dSq = _worldV.distanceToSquared(_localHit);
+      const dSq = _worldV.distanceToSquared(localHit);
       if (dSq > radiusSq) continue;
       const d = Math.sqrt(dSq);
       const fall = 1 - d / localRadius;
-      const w = fall * fall; // soft brush
+      const w = fall * fall;
       _normal.fromBufferAttribute(nrm, i).normalize();
       pos.setXYZ(
         i,
@@ -99,11 +116,6 @@ export function applySculptStroke(
       );
       changed = true;
     }
-  }
-
-  if (changed) {
-    pos.needsUpdate = true;
-    geo.computeVertexNormals();
   }
   return changed;
 }

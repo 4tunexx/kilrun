@@ -19,6 +19,9 @@ import {
   CirclePlus,
   CircleMinus,
   Waves,
+  Undo2,
+  Redo2,
+  FlipHorizontal,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { EditorEntity } from './map-document';
@@ -32,6 +35,7 @@ import {
 } from './skin-attachments';
 import {
   applySculptStroke,
+  applySculptDataToGeometry,
   findSculptMesh,
   readSculptData,
 } from './skin-sculpt';
@@ -98,6 +102,9 @@ export function ModelSkinEditor({
   const [blobBrush, setBlobBrush] = useState<SkinSculptBrush | null>('add');
   const [brushRadius, setBrushRadius] = useState(0.12);
   const [brushStrength, setBrushStrength] = useState(0.55);
+  const [symmetryX, setSymmetryX] = useState(true);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const baseKey = baseModelKeyFromEntity(entity);
 
   const activeAtt =
@@ -141,6 +148,10 @@ export function ModelSkinEditor({
                 )
               );
             },
+            onHistoryChange: (u, r) => {
+              setCanUndo(u);
+              setCanRedo(r);
+            },
           });
         }
         previewRef.current.setAvatar(loaded.scene);
@@ -171,10 +182,15 @@ export function ModelSkinEditor({
   useEffect(() => {
     previewRef.current?.setBlobBrush(
       blobBrush
-        ? { brush: blobBrush, radius: brushRadius, strength: brushStrength }
+        ? {
+            brush: blobBrush,
+            radius: brushRadius,
+            strength: brushStrength,
+            symmetryX,
+          }
         : null
     );
-  }, [blobBrush, brushRadius, brushStrength]);
+  }, [blobBrush, brushRadius, brushStrength, symmetryX]);
 
   useEffect(() => {
     return () => {
@@ -350,14 +366,6 @@ export function ModelSkinEditor({
         <button
           type="button"
           className="w-8 h-8 rounded-lg flex items-center justify-center text-white/60 hover:bg-white/10"
-          title={showAvatar ? 'Hide body (skin only)' : 'Show body'}
-          onClick={() => setShowAvatar((v) => !v)}
-        >
-          {showAvatar ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-        </button>
-        <button
-          type="button"
-          className="w-8 h-8 rounded-lg flex items-center justify-center text-white/60 hover:bg-white/10"
           onClick={onClose}
           aria-label="Close"
         >
@@ -375,9 +383,34 @@ export function ModelSkinEditor({
         {error && (
           <p className="absolute bottom-2 left-2 right-2 text-[10px] text-red-300">{error}</p>
         )}
-        <p className="absolute top-2 left-2 text-[9px] uppercase tracking-wider text-white/40 bg-black/50 px-1.5 py-0.5 rounded">
-          {showAvatar ? 'On body' : 'Skin only'}
-        </p>
+      </div>
+
+      {/* Clear body / skin-only toggle */}
+      <div className="shrink-0 flex border-b border-white/10 bg-[#0e1520]">
+        <button
+          type="button"
+          onClick={() => setShowAvatar(true)}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold uppercase tracking-wide border-r border-white/10 ${
+            showAvatar
+              ? 'bg-sky-500/25 text-sky-100'
+              : 'text-white/45 hover:bg-white/5'
+          }`}
+        >
+          <Eye className="w-3.5 h-3.5" />
+          On body
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowAvatar(false)}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold uppercase tracking-wide ${
+            !showAvatar
+              ? 'bg-amber-500/25 text-amber-100'
+              : 'text-white/45 hover:bg-white/5'
+          }`}
+        >
+          <EyeOff className="w-3.5 h-3.5" />
+          Skin only
+        </button>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
@@ -475,8 +508,8 @@ export function ModelSkinEditor({
                   Blob sculpt (paint on mesh)
                 </p>
                 <p className="text-[10px] text-white/40 leading-snug">
-                  Drag on the preview to add or remove clay. Tip: hide body (eye icon) for a clearer
-                  view. Works on sculpt primitives.
+                  Switch to <span className="text-amber-200/80">Skin only</span> above, then drag on
+                  the hat/part to add or remove clay.
                 </p>
                 <div className="flex gap-1.5">
                   {(
@@ -505,6 +538,18 @@ export function ModelSkinEditor({
                     </button>
                   ))}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setSymmetryX((v) => !v)}
+                  className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[10px] font-bold border ${
+                    symmetryX
+                      ? 'bg-sky-500/25 border-sky-400/50 text-sky-100'
+                      : 'border-white/10 text-white/50'
+                  }`}
+                >
+                  <FlipHorizontal className="w-3.5 h-3.5" />
+                  Symmetry {symmetryX ? 'ON' : 'OFF'} (mirror L/R)
+                </button>
                 <SliderField
                   label="Brush"
                   value={brushRadius}
@@ -521,6 +566,28 @@ export function ModelSkinEditor({
                   step={0.05}
                   onChange={setBrushStrength}
                 />
+                <div className="flex gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={!canUndo}
+                    onClick={() => previewRef.current?.undoSculpt()}
+                  >
+                    <Undo2 className="w-3.5 h-3.5 mr-1" /> Undo
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1"
+                    disabled={!canRedo}
+                    onClick={() => previewRef.current?.redoSculpt()}
+                  >
+                    <Redo2 className="w-3.5 h-3.5 mr-1" /> Redo
+                  </Button>
+                </div>
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -528,7 +595,10 @@ export function ModelSkinEditor({
                     variant="secondary"
                     className="flex-1"
                     disabled={!activeAtt.sculpt}
-                    onClick={() => patchActive({ sculpt: undefined })}
+                    onClick={() => {
+                      patchActive({ sculpt: undefined });
+                      previewRef.current?.clearSculptHistory();
+                    }}
                   >
                     Reset clay
                   </Button>
@@ -1137,17 +1207,30 @@ class SkinPreview {
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
   private painting = false;
-  private brush: { brush: SkinSculptBrush; radius: number; strength: number } | null = null;
+  private brush: {
+    brush: SkinSculptBrush;
+    radius: number;
+    strength: number;
+    symmetryX?: boolean;
+  } | null = null;
   private onSculptCommit?: (data: { positions: number[]; count: number }) => void;
+  private onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void;
   private commitTimer: number | null = null;
   private spinPaused = false;
+  private undoStack: { positions: number[]; count: number }[] = [];
+  private redoStack: { positions: number[]; count: number }[] = [];
+  private strokeStartSnapshot: { positions: number[]; count: number } | null = null;
 
   constructor(
     host: HTMLElement,
-    opts?: { onSculptCommit?: (data: { positions: number[]; count: number }) => void }
+    opts?: {
+      onSculptCommit?: (data: { positions: number[]; count: number }) => void;
+      onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void;
+    }
   ) {
     this.host = host;
     this.onSculptCommit = opts?.onSculptCommit;
+    this.onHistoryChange = opts?.onHistoryChange;
     this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
     this.camera.position.set(0, 1.35, 3.0);
     this.camera.lookAt(0, 1.1, 0);
@@ -1200,17 +1283,56 @@ class SkinPreview {
   }
 
   setBlobBrush(
-    cfg: { brush: SkinSculptBrush; radius: number; strength: number } | null
+    cfg: {
+      brush: SkinSculptBrush;
+      radius: number;
+      strength: number;
+      symmetryX?: boolean;
+    } | null
   ) {
     this.brush = cfg;
     this.spinPaused = Boolean(cfg);
     this.renderer.domElement.style.cursor = cfg ? 'crosshair' : 'default';
   }
 
+  private emitHistory() {
+    this.onHistoryChange?.(this.undoStack.length > 0, this.redoStack.length > 0);
+  }
+
+  clearSculptHistory() {
+    this.undoStack = [];
+    this.redoStack = [];
+    this.emitHistory();
+  }
+
+  undoSculpt() {
+    const mesh = findSculptMesh(this.soloRoot);
+    if (!mesh || !this.undoStack.length) return;
+    const current = readSculptData(mesh);
+    if (current) this.redoStack.push(current);
+    const prev = this.undoStack.pop()!;
+    applySculptDataToGeometry(mesh.geometry as THREE.BufferGeometry, prev);
+    this.onSculptCommit?.(prev);
+    this.emitHistory();
+  }
+
+  redoSculpt() {
+    const mesh = findSculptMesh(this.soloRoot);
+    if (!mesh || !this.redoStack.length) return;
+    const current = readSculptData(mesh);
+    if (current) this.undoStack.push(current);
+    const next = this.redoStack.pop()!;
+    applySculptDataToGeometry(mesh.geometry as THREE.BufferGeometry, next);
+    this.onSculptCommit?.(next);
+    this.emitHistory();
+  }
+
   private onPointerDown = (e: PointerEvent) => {
     if (!this.brush) return;
     e.preventDefault();
     this.painting = true;
+    const mesh = findSculptMesh(this.soloRoot);
+    this.strokeStartSnapshot = mesh ? readSculptData(mesh) : null;
     this.renderer.domElement.setPointerCapture?.(e.pointerId);
     this.paintAt(e.clientX, e.clientY);
   };
@@ -1229,14 +1351,19 @@ class SkinPreview {
     } catch {
       /* ignore */
     }
+    if (this.strokeStartSnapshot) {
+      this.undoStack.push(this.strokeStartSnapshot);
+      if (this.undoStack.length > 40) this.undoStack.shift();
+      this.redoStack = [];
+      this.strokeStartSnapshot = null;
+      this.emitHistory();
+    }
     this.flushSculptCommit();
   };
 
   private paintAt(clientX: number, clientY: number) {
     if (!this.brush) return;
-    const targetRoot = this.showBody ? this.avatar : this.soloRoot;
-    if (!targetRoot) return;
-    const mesh = findSculptMesh(this.soloRoot.visible ? this.soloRoot : targetRoot);
+    const mesh = findSculptMesh(this.soloRoot);
     if (!mesh) return;
 
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -1251,6 +1378,7 @@ class SkinPreview {
       brush: this.brush.brush,
       radius: this.brush.radius,
       strength: this.brush.strength,
+      symmetryX: Boolean(this.brush.symmetryX),
     });
   }
 
