@@ -23,6 +23,9 @@ import {
   mapDocToSimPlatforms,
   mapDocToWorldBounds,
 } from './prefab-storage';
+import { loadPlayerAvatar } from './player-avatar';
+import { normalizeCharacter } from '../renderer/asset-loader';
+import { suggestPlayerBindings } from './map-document';
 
 /**
  * Play Test uses the same pad export + platformer step as Deathrun match
@@ -104,6 +107,8 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     }
     let finishedLocal = false;
     let checkpoint: { x: number; y: number; z: number } | null = null;
+    let wasGrounded = true;
+    let landUntil = 0;
 
     const resize = () => {
       const w = Math.max(1, host.clientWidth);
@@ -119,8 +124,45 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     const loadAll = async () => {
       for (const ent of doc.entities) {
         if (disposed) return;
-        const src = resolveModelSrc(ent.model, ent.customModelUrl);
         try {
+          if (ent.kind === 'player') {
+            const loaded = await loadPlayerAvatar(ent);
+            if (disposed) return;
+            const root = loaded.scene;
+            normalizeCharacter(root, 1.75);
+            root.position.set(...ent.position);
+            root.rotation.set(
+              THREE.MathUtils.degToRad(ent.rotation[0]),
+              THREE.MathUtils.degToRad(ent.rotation[1]),
+              THREE.MathUtils.degToRad(ent.rotation[2])
+            );
+            root.scale.multiplyScalar(ent.scale[1] || 1);
+            root.userData.entityId = ent.id;
+            scene.add(root);
+            roots.set(ent.id, root);
+            director.register(ent.id, root, loaded.animations);
+            // Fill bindings in-memory if empty so locomotion works this session
+            if (!ent.playerAnims || Object.keys(ent.playerAnims).length === 0) {
+              ent.playerAnims = suggestPlayerBindings(loaded.clipNames);
+            }
+            if (!ent.animation?.availableClips?.length) {
+              ent.animation = {
+                ...(ent.animation ?? {
+                  availableClips: [],
+                  trigger: 'none',
+                  radius: 2.5,
+                  loopActive: false,
+                  loopDefault: true,
+                }),
+                availableClips: loaded.clipNames,
+              };
+            }
+            playerRoot = root;
+            playerId = ent.id;
+            continue;
+          }
+
+          const src = resolveModelSrc(ent.model, ent.customModelUrl);
           if (src) {
             const { root, clips } = await loadAnimatedPrefab(src);
             root.position.set(...ent.position);
@@ -134,11 +176,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
             scene.add(root);
             roots.set(ent.id, root);
             director.register(ent.id, root, clips);
-            if (ent.kind === 'player') {
-              playerRoot = root;
-              playerId = ent.id;
-              camera.position.set(ent.position[0], ent.position[1] + 1.6, ent.position[2] + 4);
-            } else if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
+            if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
               director.playDefault(ent);
             }
           } else if (
@@ -327,6 +365,9 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         playerRoot.position.set(tx, ty, tz);
         playerRoot.rotation.y = yaw;
         const pe = doc.entities.find((e) => e.id === playerId);
+        const justLanded = !wasGrounded && body.isGrounded;
+        wasGrounded = body.isGrounded;
+        if (justLanded) landUntil = performance.now() + 280;
         director.updatePlayer(playerId, pe?.playerAnims, {
           moving: Math.abs(moveX) + Math.abs(moveY) > 0.05,
           sprint,
@@ -334,6 +375,8 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
           crouch,
           moveX: wishStrafe,
           moveZ: wishFwd,
+          alive: hpLocal > 0,
+          justLanded: performance.now() < landUntil,
         });
       }
 

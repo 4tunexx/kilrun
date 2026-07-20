@@ -283,11 +283,12 @@ Authoritative loop: clients send **intent only** (`input`); server steps at ~30 
 | Progress HUD Start→Finish | `courseStartX/FinishX` | Custom-map aware |
 | MAIN toast (not alert) | `useToast` | Rejoin reminder |
 | Unit tests | `prefab-storage.test.ts` | 5 cases |
-| Mobile FABs | Start / Finish / Props | Collapsed + visible chrome |
+| Mobile FABs | Start / Finish / Props / Avatar | Collapsed + visible chrome |
+| **Player Model studio** | Toolbar + side panel | Live preview, clip bind (walk/jump/die…), GLB upload; drives Play Test + match |
 
 ### Still missing (next)
 
-1. **Server MAIN + map document sync** — other clients may miss overlay meshes/lights.  
+1. **Server MAIN + map document sync** — other clients may miss overlay meshes/lights / custom avatars.  
 2. **Timed / moving traps** + authoritative buttons.  
 3. **Client prediction**.  
 4. **Slopes / stair baker / conveyors**.  
@@ -305,12 +306,13 @@ Authoritative loop: clients send **intent only** (`input`); server steps at ~30 
 ## Staff workflow (current)
 
 1. Admin → Map Editor  
-2. Place **Start** + floors/solids + hazards/jump pads + **Finish**  
-3. On mobile: **Hide UI**, place with FABs, tap **Props** when selected  
-4. **Play Test** to verify gaps/finish (match-like physics)  
-5. Save → **Set as MAIN** (toast)  
-6. Join Deathrun from **that same browser** while still in lobby/countdown so `loadCustomMap` fires  
-7. Mark walls **Solid** so corridors contain players  
+2. Open **Player Model** — pick mannequin/upload GLB, bind walk/jump/die, preview  
+3. Place **Start** + floors/solids + hazards/jump pads + **Finish**  
+4. On mobile: **Hide UI**, place with FABs, tap **Avatar** / **Props**  
+5. **Play Test** to verify gaps/finish/anims (match-like physics)  
+6. Save → **Set as MAIN** (toast)  
+7. Join Deathrun from **that same browser** while still in lobby/countdown so `loadCustomMap` fires  
+8. Mark walls **Solid** so corridors contain players  
 
 ---
 
@@ -323,5 +325,6 @@ Authoritative loop: clients send **intent only** (`input`); server steps at ~30 
 | 2026-07-20 | Part I: Solid / Jump pad / authoritative hazards / Light bulb shipped; checklist boxes updated; remaining gaps restated. |
 | 2026-07-20 | Start + Finish entities, trapper spawn, dynamic world bounds; publish validation requires Start/Finish. |
 | 2026-07-20 | Wall boxes, jump cut, checkpoints, play-test parity, role-gate, HUD anchors, unit tests, mobile FABs; audit checklist refreshed. |
+| 2026-07-20 | Player Model studio: side panel, die/land slots, match/Play Test honor map avatar bindings. |
 
 *Re-run this audit after cloud MAIN sync lands.*

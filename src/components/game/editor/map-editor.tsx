@@ -42,6 +42,7 @@ import {
   Lightbulb,
   Rocket,
   FlagTriangleRight,
+  PersonStanding,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -54,6 +55,7 @@ import {
   ensureJumpPad,
   ensureLight,
   entityExportsAsPlatform,
+  findPlayerEntity,
   generateId,
 } from './map-document';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
@@ -68,6 +70,8 @@ import {
 } from './map-storage';
 import { createEditorViewport, type EditorViewportApi, type TransformMode } from './editor-viewport';
 import { MapPlayPreview } from './map-play-preview';
+import { PlayerModelStudio } from './player-model-studio';
+import { ensureMapPlayerEntity } from './player-avatar';
 import {
   BUILTIN_TEXTURES,
   deleteCustomTexture,
@@ -162,6 +166,7 @@ export function MapEditor({
   const [propsOpen, setPropsOpen] = useState(!mobileFirst);
   /** Bottom transform/place toolbar. */
   const [toolsOpen, setToolsOpen] = useState(!mobileFirst);
+  const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
 
@@ -509,6 +514,42 @@ export function MapEditor({
     }));
   };
 
+  const patchEntityById = (id: string, patch: Partial<EditorEntity>) => {
+    scheduleHistory();
+    setDoc((d) => {
+      const entities = d.entities.map((e) => (e.id === id ? { ...e, ...patch } : e));
+      const next = { ...d, entities };
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+    if (id === selectedId) {
+      apiRef.current?.updateSelected(patch);
+    }
+  };
+
+  const openPlayerStudio = () => {
+    const ensured = ensureMapPlayerEntity(docRef.current);
+    if (ensured.created) {
+      scheduleHistory();
+      setDoc(ensured.doc);
+      docRef.current = ensured.doc;
+      apiRef.current?.setDoc(ensured.doc);
+      toast({
+        title: 'Player avatar added',
+        description: 'Configure model and animations in the studio panel.',
+      });
+    }
+    setSelectedId(ensured.entity.id);
+    apiRef.current?.setSelectedId(ensured.entity.id);
+    setPlayerStudioOpen(true);
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(false);
+    setToolsOpen(false);
+  };
+
+  const playerAvatar = findPlayerEntity(doc);
+
   const wireTrapToButton = (trapId: string, buttonId: string) => {
     scheduleHistory();
     setDoc((d) => {
@@ -631,6 +672,16 @@ export function MapEditor({
                 <FlagTriangleRight className="w-4 h-4" />
                 Finish
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  openPlayerStudio();
+                }}
+                className="flex items-center gap-1.5 rounded-xl border border-sky-400/60 bg-sky-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
+              >
+                <PersonStanding className="w-4 h-4" />
+                Avatar
+              </button>
               {selected && (
                 <button
                   type="button"
@@ -728,6 +779,16 @@ export function MapEditor({
           onClick={startPlay}
         >
           <Play className="w-4 h-4 mr-1" /> Play Test
+        </Button>
+        <Button
+          size="sm"
+          variant={playerStudioOpen ? 'default' : 'secondary'}
+          className={`shrink-0 ${playerStudioOpen ? 'bg-sky-600 hover:bg-sky-500 text-white' : ''}`}
+          onClick={() => (playerStudioOpen ? setPlayerStudioOpen(false) : openPlayerStudio())}
+          title="Player Model studio — inspect avatar & bind animations"
+        >
+          <PersonStanding className="w-4 h-4 mr-1" />
+          {isMobile ? 'Avatar' : 'Player Model'}
         </Button>
         <Button
           size="sm"
@@ -1274,8 +1335,9 @@ export function MapEditor({
         </div>
         )}
 
-        {/* Viewport */}
-        <div className="flex-1 relative min-w-0">
+        {/* Viewport + optional Player Model studio */}
+        <div className="flex-1 relative min-w-0 flex">
+          <div className="flex-1 relative min-w-0">
           <div ref={hostRef} className="absolute inset-0" />
 
           {freeFly && !uiCollapsed && (
@@ -1406,8 +1468,15 @@ export function MapEditor({
               <Flag className="w-4 h-4 text-red-400" />
             </ToolBtn>
             <ToolBtn
+              active={playerStudioOpen}
+              onClick={() => (playerStudioOpen ? setPlayerStudioOpen(false) : openPlayerStudio())}
+              title="Player Model studio"
+            >
+              <PersonStanding className="w-4 h-4 text-sky-300" />
+            </ToolBtn>
+            <ToolBtn
               onClick={() => apiRef.current?.placeEntity('player', brush ?? 'figurine')}
-              title="Player entity"
+              title="Place player entity in map"
             >
               <User className="w-4 h-4 text-sky-300" />
             </ToolBtn>
@@ -1446,7 +1515,7 @@ export function MapEditor({
           </div>
           )}
 
-          {!uiCollapsed && selected && !propsOpen && (
+          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && (
             <button
               type="button"
               onClick={() => setPropsOpen(true)}
@@ -1456,7 +1525,7 @@ export function MapEditor({
             </button>
           )}
 
-          {!uiCollapsed && selected && propsOpen && (
+          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && (
             <div
               className={`absolute z-[80] bg-black/80 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm overflow-y-auto ${
                 isMobile
@@ -1559,6 +1628,7 @@ export function MapEditor({
                   onChange={patchSelected}
                   onPreview={(which) => apiRef.current?.previewAnim(which)}
                   onWireTrap={wireTrapToButton}
+                  onOpenPlayerStudio={openPlayerStudio}
                 />
               )}
 
@@ -1854,6 +1924,21 @@ export function MapEditor({
                 </Button>
               )}
             </div>
+          )}
+          </div>
+
+          {playerStudioOpen && playerAvatar && (
+            <PlayerModelStudio
+              entity={playerAvatar}
+              isMobile={isMobile}
+              onClose={() => setPlayerStudioOpen(false)}
+              onFocusInMap={() => {
+                setSelectedId(playerAvatar.id);
+                apiRef.current?.setSelectedId(playerAvatar.id);
+                apiRef.current?.focusSelected();
+              }}
+              onChange={(patch) => patchEntityById(playerAvatar.id, patch)}
+            />
           )}
         </div>
       </div>

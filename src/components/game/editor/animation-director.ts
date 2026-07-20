@@ -97,11 +97,22 @@ export class AnimationDirector {
       crouch: boolean;
       moveX: number; // -1 left … +1 right (camera relative wish)
       moveZ: number; // -1 back … +1 forward
+      /** When false, play die once. */
+      alive?: boolean;
+      /** Rising edge of grounded after air time. */
+      justLanded?: boolean;
     }
   ) {
     if (!bindings) return;
+    if (state.alive === false) {
+      const clip = bindings.die || bindings.idle;
+      this.play(entityId, clip, false);
+      return;
+    }
     let slot: PlayerAnimSlot = 'idle';
-    if (!state.grounded) {
+    if (state.justLanded && bindings.land) {
+      slot = 'land';
+    } else if (!state.grounded) {
       slot = state.moveZ !== 0 || state.moving ? 'jump' : 'fall';
     } else if (state.crouch) {
       slot = 'crouch';
@@ -115,7 +126,8 @@ export class AnimationDirector {
       }
     }
     const clip = bindings[slot] || bindings.idle;
-    this.play(entityId, clip, true);
+    const loop = slot !== 'land' && slot !== 'jump';
+    this.play(entityId, clip, loop);
   }
 
   /**

@@ -72,6 +72,7 @@ export function instantiatePrefab(
     animation: e.animation
       ? { ...e.animation, availableClips: [...(e.animation.availableClips ?? [])] }
       : undefined,
+    playerAnims: e.playerAnims ? { ...e.playerAnims } : undefined,
     hazard: e.hazard ? { ...e.hazard } : undefined,
     jumpPad: e.jumpPad ? { ...e.jumpPad } : undefined,
     light: e.light ? { ...e.light } : undefined,

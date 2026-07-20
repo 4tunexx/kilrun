@@ -169,7 +169,12 @@ export default function KilrunEngine({
 
     const spawnCharacter = (sessionId: string, username: string) => {
       if (characters.has(sessionId)) return;
-      const view = new ThreeCharacter(username, sessionId === connectionRef.current?.sessionId);
+      const avatarEntity = customDocRef.current?.entities.find((e) => e.kind === 'player');
+      const view = new ThreeCharacter(
+        username,
+        sessionId === connectionRef.current?.sessionId,
+        { avatarEntity }
+      );
       characters.set(sessionId, view);
       world.scene.add(view.root);
     };

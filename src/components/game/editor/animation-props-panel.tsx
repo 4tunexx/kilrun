@@ -2,7 +2,7 @@
 
 import React from 'react';
 import type { EditorEntity, EntityAnimation, PlayerAnimBindings } from './map-document';
-import { PLAYER_ANIM_SLOTS, ensureAnimation } from './map-document';
+import { PLAYER_ANIM_SLOTS, ensureAnimation, suggestPlayerBindings } from './map-document';
 import { AnimationDirector } from './animation-director';
 
 export function AnimationPropsPanel({
@@ -11,6 +11,7 @@ export function AnimationPropsPanel({
   onChange,
   onPreview,
   onWireTrap,
+  onOpenPlayerStudio,
 }: {
   entity: EditorEntity;
   allEntities: EditorEntity[];
@@ -18,6 +19,8 @@ export function AnimationPropsPanel({
   onPreview?: (which: 'default' | 'active') => void;
   /** When a button picks a trap, wire trap.listenTo → button */
   onWireTrap?: (trapId: string, buttonId: string) => void;
+  /** Open dedicated Player Model side panel */
+  onOpenPlayerStudio?: () => void;
 }) {
   const anim = ensureAnimation(entity);
   const clips = anim.availableClips;
@@ -31,22 +34,38 @@ export function AnimationPropsPanel({
     <div className="space-y-2 border-t border-white/10 pt-2 mt-2">
       <p className="text-[10px] tracking-widest text-white/50 uppercase">Animation</p>
 
-      {!entity.model && !entity.customModelUrl ? (
+      {!entity.model && !entity.customModelUrl && entity.kind !== 'player' ? (
         <p className="text-[11px] text-amber-200/80">Assign a model to scan for clips.</p>
-      ) : !hasClips ? (
+      ) : !hasClips && entity.kind !== 'player' ? (
         <p className="text-[11px] text-white/45">
           No clips in this GLB (static mesh). Upload/select an animated model to see options.
         </p>
-      ) : (
+      ) : hasClips ? (
         <p className="text-[11px] text-emerald-300/90">{clips.length} clips found</p>
-      )}
+      ) : null}
 
       {entity.kind === 'player' ? (
-        <PlayerBindingsEditor
-          clips={clips}
-          bindings={entity.playerAnims ?? {}}
-          onChange={(playerAnims) => onChange({ playerAnims })}
-        />
+        <div className="space-y-2">
+          <p className="text-[11px] text-white/55 leading-snug">
+            Use the <b className="text-sky-200">Player Model</b> studio beside the map to inspect the
+            avatar and bind walk / jump / die clips.
+          </p>
+          {onOpenPlayerStudio && (
+            <button
+              type="button"
+              className="w-full text-xs py-2 rounded-lg bg-sky-600/40 hover:bg-sky-500/50 font-semibold"
+              onClick={onOpenPlayerStudio}
+            >
+              Open Player Model studio
+            </button>
+          )}
+          <PlayerBindingsEditor
+            clips={clips}
+            bindings={entity.playerAnims ?? {}}
+            onChange={(playerAnims) => onChange({ playerAnims })}
+            compact
+          />
+        </div>
       ) : (
         <>
           <label className="block text-xs text-white/60">
@@ -238,17 +257,27 @@ function PlayerBindingsEditor({
   clips,
   bindings,
   onChange,
+  compact,
 }: {
   clips: string[];
   bindings: PlayerAnimBindings;
   onChange: (b: PlayerAnimBindings) => void;
+  compact?: boolean;
 }) {
+  const slots = compact
+    ? PLAYER_ANIM_SLOTS.filter((s) =>
+        ['idle', 'walk', 'run', 'jump', 'die'].includes(s.id)
+      )
+    : PLAYER_ANIM_SLOTS;
+
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] text-white/55">
-        Map each player action to a clip from this model ({clips.length} available).
-      </p>
-      {PLAYER_ANIM_SLOTS.map(({ id, label }) => (
+      {!compact && (
+        <p className="text-[11px] text-white/55">
+          Map each player action to a clip from this model ({clips.length} available).
+        </p>
+      )}
+      {slots.map(({ id, label }) => (
         <label key={id} className="block text-xs text-white/60">
           {label}
           <select
@@ -272,22 +301,7 @@ function PlayerBindingsEditor({
         <button
           type="button"
           className="w-full text-xs py-1 rounded bg-white/10 hover:bg-white/20"
-          onClick={() => {
-            const lower = clips.map((c) => ({ c, l: c.toLowerCase() }));
-            const find = (...keys: string[]) =>
-              lower.find((x) => keys.some((k) => x.l.includes(k)))?.c;
-            onChange({
-              idle: find('idle', 'stand') ?? clips[0],
-              walk: find('walk', 'run') ?? clips[1] ?? clips[0],
-              run: find('run', 'sprint') ?? find('walk') ?? clips[0],
-              jump: find('jump', 'hop') ?? clips[0],
-              fall: find('fall', 'air') ?? find('jump') ?? clips[0],
-              crouch: find('crouch', 'sneak') ?? clips[0],
-              strafe_left: find('left', 'strafe') ?? find('walk') ?? clips[0],
-              strafe_right: find('right', 'strafe') ?? find('walk') ?? clips[0],
-              back: find('back', 'backward') ?? find('walk') ?? clips[0],
-            });
-          }}
+          onClick={() => onChange(suggestPlayerBindings(clips))}
         >
           Auto-bind by name
         </button>

@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import type { NetPlayerState } from '../net/types';
-import { loadCharacterPrefab, normalizeCharacter } from '../renderer/asset-loader';
+import type { EditorEntity, PlayerAnimBindings, PlayerAnimSlot } from '../editor/map-document';
+import { suggestPlayerBindings } from '../editor/map-document';
+import { loadPlayerAvatar } from '../editor/player-avatar';
+import { normalizeCharacter } from '../renderer/asset-loader';
 import { toThree } from '../renderer/coords';
 
 function pickClip(clips: THREE.AnimationClip[], patterns: string[]): THREE.AnimationClip | null {
@@ -24,11 +27,9 @@ function pruneExtraMeshes(root: THREE.Object3D) {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
     if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) return;
-    // Non-skinned meshes on mannequins are usually hulls / LODs → hide them
     mesh.visible = false;
   });
 
-  // If multiple skinned meshes, keep the largest only (avoids double mannequin)
   if (skinnedCount > 1) {
     const skinned: THREE.SkinnedMesh[] = [];
     root.traverse((o) => {
@@ -45,6 +46,11 @@ function pruneExtraMeshes(root: THREE.Object3D) {
   }
 }
 
+export interface CharacterAvatarOptions {
+  /** Map player entity — drives custom GLB + clip bindings. */
+  avatarEntity?: EditorEntity | null;
+}
+
 export class ThreeCharacter {
   public readonly root = new THREE.Group();
   private mixer: THREE.AnimationMixer | null = null;
@@ -57,15 +63,21 @@ export class ThreeCharacter {
   private facing = 0;
   private loaded = false;
   private disposed = false;
+  private bindings: PlayerAnimBindings = {};
+  private wasGrounded = true;
+  private landUntil = 0;
+  private avatarOpts: CharacterAvatarOptions;
 
-  constructor(_username: string, _isLocal: boolean) {
+  constructor(_username: string, _isLocal: boolean, avatar?: CharacterAvatarOptions) {
+    this.avatarOpts = avatar ?? {};
     this.root.visible = false;
     void this.load();
   }
 
   private async load() {
     try {
-      const { scene, animations } = await loadCharacterPrefab();
+      const entity = this.avatarOpts.avatarEntity ?? null;
+      const { scene, animations, clipNames } = await loadPlayerAvatar(entity);
       if (this.disposed) return;
 
       while (this.root.children.length) {
@@ -73,27 +85,48 @@ export class ThreeCharacter {
       }
       normalizeCharacter(scene, 1.8);
       pruneExtraMeshes(scene);
+      const scale = entity?.scale?.[1];
+      if (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) {
+        scene.scale.multiplyScalar(scale);
+      }
       this.root.add(scene);
       this.loaded = true;
       this.root.visible = true;
 
       this.mixer = new THREE.AnimationMixer(scene);
-      const idle = pickClip(animations, ['idle', 'stand', 'breath']) ?? animations[0];
-      const walk = pickClip(animations, ['walk', 'walking']) ?? idle;
-      const run = pickClip(animations, ['run', 'sprint', 'running']) ?? walk;
-      const jump = pickClip(animations, ['jump', 'fall', 'air']) ?? idle;
+      const byName = new Map(animations.map((c) => [c.name || '(unnamed)', c]));
 
-      const bind = (key: string, clip: THREE.AnimationClip | null | undefined) => {
-        if (!clip || !this.mixer) return;
+      const authored =
+        entity?.playerAnims && Object.keys(entity.playerAnims).length > 0
+          ? entity.playerAnims
+          : suggestPlayerBindings(clipNames);
+      this.bindings = authored;
+
+      const bindSlot = (slot: PlayerAnimSlot, fallbackPatterns: string[], loop = true) => {
+        if (!this.mixer) return;
+        const clipName = authored[slot];
+        let clip = clipName ? byName.get(clipName) : undefined;
+        if (!clip) clip = pickClip(animations, fallbackPatterns) ?? undefined;
+        if (!clip && animations[0]) clip = animations[0];
+        if (!clip) return;
         const action = this.mixer.clipAction(clip);
         action.enabled = true;
-        action.setLoop(THREE.LoopRepeat, Infinity);
-        this.actions.set(key, action);
+        action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+        action.clampWhenFinished = !loop;
+        this.actions.set(slot, action);
       };
-      bind('idle', idle);
-      bind('walk', walk);
-      bind('run', run);
-      bind('jump', jump);
+
+      bindSlot('idle', ['idle', 'stand', 'breath']);
+      bindSlot('walk', ['walk', 'walking']);
+      bindSlot('run', ['run', 'sprint', 'running']);
+      bindSlot('jump', ['jump', 'hop'], false);
+      bindSlot('fall', ['fall', 'air', 'falling']);
+      bindSlot('land', ['land', 'landing'], false);
+      bindSlot('crouch', ['crouch', 'sneak', 'duck']);
+      bindSlot('strafe_left', ['left', 'strafe']);
+      bindSlot('strafe_right', ['right', 'strafe']);
+      bindSlot('back', ['back', 'backward']);
+      bindSlot('die', ['die', 'death', 'dead'], false);
 
       this.actions.get('idle')?.reset().play();
       this.current = 'idle';
@@ -113,12 +146,21 @@ export class ThreeCharacter {
     }
   }
 
-  private play(name: string) {
-    if (name === this.current || !this.actions.has(name)) return;
+  private play(name: string, loop = true) {
+    if (!this.actions.has(name)) {
+      if (name !== 'idle' && this.actions.has('idle')) {
+        this.play('idle', true);
+      }
+      return;
+    }
+    if (name === this.current) return;
     const next = this.actions.get(name)!;
     const prev = this.actions.get(this.current);
     if (prev) prev.fadeOut(0.12);
-    next.reset().fadeIn(0.12).play();
+    next.reset();
+    next.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+    next.clampWhenFinished = !loop;
+    next.fadeIn(0.12).play();
     this.current = name;
   }
 
@@ -132,7 +174,6 @@ export class ThreeCharacter {
       this.displayPos.copy(this.targetPos);
       this.hasTarget = true;
     } else {
-      // Snap if teleported / huge desync (stops rubber-band glitch trails)
       if (this.displayPos.distanceTo(this.targetPos) > 6) {
         this.displayPos.copy(this.targetPos);
       } else {
@@ -163,13 +204,28 @@ export class ThreeCharacter {
       );
     }
 
-    this.root.visible = this.loaded && (player.isAlive || player.hasFinished);
+    const justLanded = !this.wasGrounded && player.isGrounded;
+    this.wasGrounded = player.isGrounded;
+    if (justLanded) this.landUntil = performance.now() + 280;
 
-    if (!player.isAlive) this.play('idle');
-    else if (!player.isGrounded) this.play('jump');
-    else if (this.speed > 6 || player.isSprinting) this.play('run');
-    else if (this.speed > 0.8) this.play('walk');
-    else this.play('idle');
+    // Always show loaded mesh (die clip needs corpse visible)
+    this.root.visible = this.loaded;
+
+    if (!player.isAlive) {
+      this.play('die', false);
+    } else if (performance.now() < this.landUntil && this.actions.has('land')) {
+      this.play('land', false);
+    } else if (!player.isGrounded) {
+      this.play(player.vz > 0.5 ? 'jump' : 'fall', false);
+    } else if (player.isCrouching) {
+      this.play('crouch');
+    } else if (this.speed > 6 || player.isSprinting) {
+      this.play('run');
+    } else if (this.speed > 0.8) {
+      this.play('walk');
+    } else {
+      this.play('idle');
+    }
 
     this.mixer?.update(dt);
   }

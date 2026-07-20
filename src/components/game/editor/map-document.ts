@@ -25,7 +25,7 @@ export type AnimTrigger =
   | 'signal';
 
 /**
- * Player locomotion slots → clip names from the model's animation list.
+ * Player locomotion / life slots → clip names from the model's animation list.
  * Leave a slot empty to fall back / stay on idle.
  */
 export type PlayerAnimSlot =
@@ -34,24 +34,56 @@ export type PlayerAnimSlot =
   | 'run'
   | 'jump'
   | 'fall'
+  | 'land'
   | 'crouch'
   | 'strafe_left'
   | 'strafe_right'
-  | 'back';
+  | 'back'
+  | 'die';
 
-export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string }[] = [
-  { id: 'idle', label: 'Idle' },
-  { id: 'walk', label: 'Walk / Forward' },
-  { id: 'run', label: 'Run / Sprint' },
-  { id: 'jump', label: 'Jump' },
-  { id: 'fall', label: 'Fall / Air' },
-  { id: 'crouch', label: 'Crouch' },
+export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string; hint?: string }[] = [
+  { id: 'idle', label: 'Idle', hint: 'Standing still' },
+  { id: 'walk', label: 'Walk / Forward', hint: 'Moving forward' },
+  { id: 'run', label: 'Run / Sprint', hint: 'Sprint held' },
+  { id: 'jump', label: 'Jump', hint: 'Leaving the ground' },
+  { id: 'fall', label: 'Fall / Air', hint: 'In air, not jumping up' },
+  { id: 'land', label: 'Land', hint: 'Touching down after a fall' },
+  { id: 'crouch', label: 'Crouch', hint: 'Ctrl / C held' },
   { id: 'strafe_left', label: 'Strafe Left (A)' },
   { id: 'strafe_right', label: 'Strafe Right (D)' },
   { id: 'back', label: 'Walk Back (S)' },
+  { id: 'die', label: 'Die / Eliminated', hint: 'Plays once on death' },
 ];
 
 export type PlayerAnimBindings = Partial<Record<PlayerAnimSlot, string>>;
+
+/** Fuzzy-match clip names into locomotion / life slots. */
+export function suggestPlayerBindings(clips: string[]): PlayerAnimBindings {
+  if (!clips.length) return {};
+  const lower = clips.map((c) => ({ c, l: c.toLowerCase() }));
+  const find = (...keys: string[]) =>
+    lower.find((x) => keys.some((k) => x.l.includes(k)))?.c;
+  const idle = find('idle', 'stand', 'breath') ?? clips[0];
+  const walk = find('walk', 'walking') ?? find('run') ?? clips[1] ?? clips[0];
+  return {
+    idle,
+    walk,
+    run: find('run', 'sprint', 'running') ?? walk,
+    jump: find('jump', 'hop', 'leap') ?? idle,
+    fall: find('fall', 'air', 'falling') ?? find('jump') ?? idle,
+    land: find('land', 'landing') ?? idle,
+    crouch: find('crouch', 'sneak', 'duck') ?? idle,
+    strafe_left: find('left', 'strafe_l', 'strafe left') ?? walk,
+    strafe_right: find('right', 'strafe_r', 'strafe right') ?? walk,
+    back: find('back', 'backward', 'reverse') ?? walk,
+    die: find('die', 'death', 'dead', 'elim') ?? idle,
+  };
+}
+
+/** First player avatar entity on the map (if any). */
+export function findPlayerEntity(doc: MapDocument): EditorEntity | undefined {
+  return doc.entities.find((e) => e.kind === 'player');
+}
 
 export interface EntityAnimation {
   /** Clip names discovered from the GLB (auto-filled when model loads). */
