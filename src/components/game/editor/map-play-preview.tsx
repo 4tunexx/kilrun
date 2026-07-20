@@ -23,13 +23,15 @@ import {
   mapDocToSimPlatforms,
   mapDocToWorldBounds,
 } from './prefab-storage';
-import { loadPlayerAvatar } from './player-avatar';
+import { loadPlayerAvatar, getMapPlayerAvatar } from './player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import { suggestPlayerBindings } from './map-document';
+import { updateFollowCamera } from '../renderer/three-world';
 
 /**
  * Play Test uses the same pad export + platformer step as Deathrun match
  * (coyote, jump cut, jump pads, solid wall boxes, finishes).
+ * Camera is 3rd-person so the configured Player Model is visible.
  */
 export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -49,13 +51,12 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     scene.fog = new THREE.FogExp2(env.fogColor || '#0c1830', env.fogDensity ?? 0.022);
 
     const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 300);
-    const runner = doc.entities.find(
-      (e) => e.kind === 'start' || e.kind === 'spawn_runner' || e.kind === 'player'
-    );
-    if (runner) {
-      camera.position.set(runner.position[0], runner.position[1] + 1.6, runner.position[2]);
+    const spawnPt = mapDocSpawnPoints(doc).runner;
+    if (spawnPt) {
+      const [sx, sy, sz] = simToThree(spawnPt.x, spawnPt.y, spawnPt.z);
+      camera.position.set(sx, sy + 4, sz - 8);
     } else {
-      camera.position.set(0, 2, 4);
+      camera.position.set(0, 5, -9);
     }
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -103,12 +104,15 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     };
     if (spawn) {
       const [tx, ty, tz] = simToThree(body.x, body.y, body.z);
-      camera.position.set(tx, ty + 1.6, tz);
+      camera.position.set(tx - Math.sin(0) * 9, ty + 4, tz - Math.cos(0) * 9);
     }
     let finishedLocal = false;
     let checkpoint: { x: number; y: number; z: number } | null = null;
     let wasGrounded = true;
     let landUntil = 0;
+    // Mutable avatar bindings used by the locomotion director
+    let avatarEntity = getMapPlayerAvatar(doc) ?? null;
+    let avatarBindings = avatarEntity?.playerAnims;
 
     const resize = () => {
       const w = Math.max(1, host.clientWidth);
@@ -122,46 +126,51 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     ro.observe(host);
 
     const loadAll = async () => {
+      // Always spawn a controllable 3rd-person avatar (studio config or default mannequin)
+      try {
+        const loaded = await loadPlayerAvatar(avatarEntity);
+        if (disposed) return;
+        const root = loaded.scene;
+        normalizeCharacter(root, 1.75);
+        const scaleY = avatarEntity?.scale?.[1] || 1;
+        root.scale.multiplyScalar(scaleY);
+        const [px, py, pz] = simToThree(body.x, body.y, body.z);
+        root.position.set(px, py, pz);
+        root.userData.entityId = avatarEntity?.id ?? '__play_avatar__';
+        root.userData.isPlayAvatar = true;
+        scene.add(root);
+        playerRoot = root;
+        playerId = avatarEntity?.id ?? '__play_avatar__';
+        director.register(playerId, root, loaded.animations);
+        if (!avatarBindings || Object.keys(avatarBindings).length === 0) {
+          avatarBindings = suggestPlayerBindings(loaded.clipNames);
+        }
+        if (avatarEntity) {
+          if (!avatarEntity.playerAnims || Object.keys(avatarEntity.playerAnims).length === 0) {
+            avatarEntity.playerAnims = avatarBindings;
+          }
+          if (!avatarEntity.animation?.availableClips?.length) {
+            avatarEntity.animation = {
+              ...(avatarEntity.animation ?? {
+                availableClips: [],
+                trigger: 'none',
+                radius: 2.5,
+                loopActive: false,
+                loopDefault: true,
+              }),
+              availableClips: loaded.clipNames,
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('[PlayPreview] avatar load failed', err);
+      }
+
       for (const ent of doc.entities) {
         if (disposed) return;
+        // Skip map player entity — we already spawned the playable avatar above
+        if (ent.kind === 'player') continue;
         try {
-          if (ent.kind === 'player') {
-            const loaded = await loadPlayerAvatar(ent);
-            if (disposed) return;
-            const root = loaded.scene;
-            normalizeCharacter(root, 1.75);
-            root.position.set(...ent.position);
-            root.rotation.set(
-              THREE.MathUtils.degToRad(ent.rotation[0]),
-              THREE.MathUtils.degToRad(ent.rotation[1]),
-              THREE.MathUtils.degToRad(ent.rotation[2])
-            );
-            root.scale.multiplyScalar(ent.scale[1] || 1);
-            root.userData.entityId = ent.id;
-            scene.add(root);
-            roots.set(ent.id, root);
-            director.register(ent.id, root, loaded.animations);
-            // Fill bindings in-memory if empty so locomotion works this session
-            if (!ent.playerAnims || Object.keys(ent.playerAnims).length === 0) {
-              ent.playerAnims = suggestPlayerBindings(loaded.clipNames);
-            }
-            if (!ent.animation?.availableClips?.length) {
-              ent.animation = {
-                ...(ent.animation ?? {
-                  availableClips: [],
-                  trigger: 'none',
-                  radius: 2.5,
-                  loopActive: false,
-                  loopDefault: true,
-                }),
-                availableClips: loaded.clipNames,
-              };
-            }
-            playerRoot = root;
-            playerId = ent.id;
-            continue;
-          }
-
           const src = resolveModelSrc(ent.model, ent.customModelUrl);
           if (src) {
             const { root, clips } = await loadAnimatedPrefab(src);
@@ -241,9 +250,9 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
     const onMove = (e: MouseEvent) => {
-      yaw -= (e.movementX || 0) * 0.0025;
-      pitch -= (e.movementY || 0) * 0.0025;
-      pitch = THREE.MathUtils.clamp(pitch, -1.4, 1.4);
+      yaw -= (e.movementX || 0) * 0.002;
+      pitch -= (e.movementY || 0) * 0.002;
+      pitch = THREE.MathUtils.clamp(pitch, -0.35, 0.55);
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -266,9 +275,9 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       const moveStick = joy?.getMoveVector() ?? { x: 0, y: 0 };
       const lookStick = joy?.getAimVector() ?? { x: 0, y: 0 };
       if (lookStick.x || lookStick.y) {
-        yaw -= lookStick.x * 2.2 * dt;
-        pitch -= lookStick.y * 1.8 * dt;
-        pitch = THREE.MathUtils.clamp(pitch, -1.4, 1.4);
+        yaw -= lookStick.x * 1.1 * dt;
+        pitch -= lookStick.y * 0.9 * dt;
+        pitch = THREE.MathUtils.clamp(pitch, -0.35, 0.55);
       }
 
       const sprint =
@@ -352,23 +361,18 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       }
 
       const [tx, ty, tz] = simToThree(body.x, body.y, body.z);
-      camera.position.set(tx, ty + 1.55, tz);
-      camera.lookAt(
-        camera.position.x + Math.sin(yaw) * Math.cos(pitch),
-        camera.position.y + Math.sin(pitch),
-        camera.position.z + Math.cos(yaw) * Math.cos(pitch)
-      );
-
       playerPos.set(tx, ty, tz);
+
+      // 3rd-person follow — same feel as Deathrun match
+      updateFollowCamera(camera, playerPos, yaw, pitch, dt, 8.4);
 
       if (playerRoot && playerId) {
         playerRoot.position.set(tx, ty, tz);
         playerRoot.rotation.y = yaw;
-        const pe = doc.entities.find((e) => e.id === playerId);
         const justLanded = !wasGrounded && body.isGrounded;
         wasGrounded = body.isGrounded;
         if (justLanded) landUntil = performance.now() + 280;
-        director.updatePlayer(playerId, pe?.playerAnims, {
+        director.updatePlayer(playerId, avatarBindings ?? avatarEntity?.playerAnims, {
           moving: Math.abs(moveX) + Math.abs(moveY) > 0.05,
           sprint,
           grounded: body.isGrounded,
@@ -441,8 +445,8 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         </span>
         <span className="text-[10px] sm:text-xs text-white/50 truncate min-w-0">
           {isTouch
-            ? 'Sticks · Jump/Sprint · match physics'
-            : 'WASD · Space jump · E · match physics'}
+            ? '3rd person · Sticks · Jump/Sprint'
+            : '3rd person · WASD · Space jump · mouse look'}
         </span>
         <div className="ml-4 flex items-center gap-2 text-xs">
           <span className="text-white/50">HP</span>

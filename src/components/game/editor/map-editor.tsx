@@ -38,7 +38,6 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronUp,
-  PanelLeftClose,
   Lightbulb,
   Rocket,
   FlagTriangleRight,
@@ -170,6 +169,7 @@ export function MapEditor({
   /** Bottom transform/place toolbar. */
   const [toolsOpen, setToolsOpen] = useState(!mobileFirst);
   const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
+  const [showAllCollisionGizmos, setShowAllCollisionGizmos] = useState(false);
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
 
@@ -583,6 +583,13 @@ export function MapEditor({
 
   const startPlay = () => {
     if (freeFly) apiRef.current?.setFreeFly(false);
+    // Ensure a player avatar exists so Play Test can show 3rd-person character
+    const ensured = ensureMapPlayerEntity(docRef.current);
+    if (ensured.created) {
+      setDoc(ensured.doc);
+      docRef.current = ensured.doc;
+      apiRef.current?.setDoc(ensured.doc);
+    }
     persist();
     setPlayTest(true);
   };
@@ -707,19 +714,17 @@ export function MapEditor({
       {/* Mobile quick access while chrome is visible */}
       {!uiCollapsed && isMobile && (
         <div className="fixed top-14 left-3 z-[140] flex flex-col gap-2 pointer-events-auto max-h-[50vh] overflow-y-auto">
-          <button
-            type="button"
-            onClick={() => setSidebarOpen((v) => !v)}
-            className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold uppercase tracking-wide shadow-lg active:scale-95 ${
-              sidebarOpen
-                ? 'border-amber-400/60 bg-amber-500/30 text-white'
-                : 'border-white/25 bg-black/75 text-white/90 backdrop-blur'
-            }`}
-            title={sidebarOpen ? 'Close library drawer' : 'Open library drawer'}
-          >
-            {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-            Library
-          </button>
+          {!sidebarOpen && (
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-white/25 bg-black/75 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white/90 shadow-lg active:scale-95 backdrop-blur"
+              title="Open library drawer"
+            >
+              <ChevronRight className="w-4 h-4" />
+              Library
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -743,6 +748,19 @@ export function MapEditor({
             Finish
           </button>
         </div>
+      )}
+
+      {/* Desktop: reopen library when collapsed */}
+      {!uiCollapsed && !isMobile && !sidebarOpen && (
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(true)}
+          className="fixed top-16 left-0 z-[140] flex h-12 w-7 items-center justify-center rounded-r-lg border border-l-0 border-white/20 bg-[#121a24] text-white/80 shadow-lg hover:bg-cyan-500/20 hover:text-cyan-200"
+          title="Expand model library"
+          aria-label="Expand model library"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
       )}
 
       {/* Top bar */}
@@ -884,7 +902,7 @@ export function MapEditor({
           />
         )}
 
-        {!uiCollapsed && (!isMobile || sidebarOpen) && (
+        {!uiCollapsed && sidebarOpen && (
         <div
           className={`border-r border-white/10 bg-[#0f1620] flex flex-col items-center py-2 gap-1 z-[70] ${
             isMobile
@@ -912,33 +930,42 @@ export function MapEditor({
               }`}
               onClick={() => {
                 setTab(id);
-                if (isMobile) setSidebarOpen(true);
+                setSidebarOpen(true);
               }}
             >
               <Icon className="w-4 h-4" />
             </button>
           ))}
-          {isMobile && (
-            <button
-              type="button"
-              title="Close library"
-              className="mt-auto w-8 h-8 rounded flex items-center justify-center text-white/60 hover:text-white"
-              onClick={() => setSidebarOpen(false)}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            title="Collapse library"
+            className="mt-auto w-8 h-8 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Collapse model panel"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
         </div>
         )}
 
-        {!uiCollapsed && (!isMobile || sidebarOpen) && (
+        {!uiCollapsed && sidebarOpen && (
         <div
-          className={`border-r border-white/10 bg-[#121a24] flex flex-col min-h-0 z-[70] ${
+          className={`border-r border-white/10 bg-[#121a24] flex flex-col min-h-0 z-[70] relative ${
             isMobile
               ? 'absolute left-10 top-0 bottom-0 w-[min(18rem,calc(100vw-2.5rem))] shadow-2xl'
               : 'w-72 relative'
           }`}
         >
+          {/* Edge arrow to collapse the model / library panel */}
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            className="absolute -right-3 top-1/2 z-[80] flex h-14 w-6 -translate-y-1/2 items-center justify-center rounded-r-md border border-l-0 border-white/25 bg-[#1a2433] text-white/85 shadow-md hover:bg-cyan-500/25 hover:text-cyan-100 active:scale-95"
+            title="Collapse model panel"
+            aria-label="Collapse model panel"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
           {tab === 'assets' && (
             <>
               <div className="p-2 border-b border-white/10 space-y-1">
@@ -1401,6 +1428,7 @@ export function MapEditor({
               : selected
                 ? ` · sel: ${selected.name}`
                 : ''}
+            {selected && entityExportsAsPlatform(selected) ? ' · green pad = solid' : ''}
           </div>
           )}
 
@@ -1445,6 +1473,17 @@ export function MapEditor({
               title="Measure distance (click two points)"
             >
               <Ruler className="w-4 h-4" />
+            </ToolBtn>
+            <ToolBtn
+              active={showAllCollisionGizmos}
+              onClick={() => {
+                const next = !showAllCollisionGizmos;
+                setShowAllCollisionGizmos(next);
+                apiRef.current?.setShowAllCollisionGizmos(next);
+              }}
+              title="Show all solid/collision pads (green) — not selection"
+            >
+              <span className="text-[9px] font-bold text-emerald-300">COL</span>
             </ToolBtn>
             <input
               type="number"
@@ -2125,6 +2164,20 @@ export function MapEditor({
                   Clear texture override
                 </Button>
               )}
+              <div className="border-t border-white/10 pt-2 mt-1 sticky bottom-0 bg-black/90 -mx-1 px-1 pb-1">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="w-full min-h-11 text-sm font-bold"
+                  onClick={() => {
+                    apiRef.current?.deleteSelected();
+                    setPropsOpen(false);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4 mr-1.5" />
+                  Delete
+                </Button>
+              </div>
             </div>
           )}
           </div>

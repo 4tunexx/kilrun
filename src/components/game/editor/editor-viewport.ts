@@ -87,6 +87,8 @@ export interface EditorViewportApi {
   setSnapY: (on: boolean) => void;
   setFreeFly: (on: boolean) => void;
   isFreeFly: () => boolean;
+  setShowAllCollisionGizmos: (on: boolean) => void;
+  getShowAllCollisionGizmos: () => boolean;
   setMeasureMode: (on: boolean) => void;
   isMeasureMode: () => boolean;
   applyEnvironment: (env: MapEnvironment) => void;
@@ -134,6 +136,8 @@ export function createEditorViewport(
   let gridSize = doc.gridSize || 1;
   let shiftHeld = false;
   let freeFly = false;
+  /** When false, solid/hazard gizmos only draw for the current selection (less clutter). */
+  let showAllCollisionGizmos = false;
   let measureMode = false;
   let measureA: THREE.Vector3 | null = null;
   const keys = new Set<string>();
@@ -518,9 +522,17 @@ export function createEditorViewport(
         c.geometry?.dispose?.();
       }
     }
+    const selectedSet = new Set(
+      selectedIds.length ? selectedIds : selectedId ? [selectedId] : []
+    );
     for (const ent of doc.entities) {
+      const isSelected = selectedSet.has(ent.id);
+      // Green/red wire pads are collision helpers — not multi-select.
+      // Default: only the selection, so the scene isn't covered in green boxes.
+      const drawCollision = showAllCollisionGizmos || isSelected;
+
       const isHz = ent.kind === 'hazard' || ent.hazard?.enabled;
-      if (isHz) {
+      if (drawCollision && isHz) {
         const box = new THREE.Mesh(
           new THREE.BoxGeometry(
             Math.max(0.5, Math.abs(ent.scale[0]) * 1.6),
@@ -545,7 +557,7 @@ export function createEditorViewport(
       }
 
       const showSolid = entityExportsAsPlatform(ent);
-      if (showSolid && !isHz) {
+      if (drawCollision && showSolid && !isHz) {
         const pad = new THREE.Mesh(
           new THREE.BoxGeometry(
             Math.max(0.5, Math.abs(ent.scale[0]) * 2),
@@ -564,7 +576,7 @@ export function createEditorViewport(
         gizmoGroup.add(pad);
       }
 
-      // Trap / door ← button links
+      // Trap / door ← button links (always visible so wiring stays clear)
       const listen = ent.animation?.listenToEntityId;
       const activates = ent.animation?.activatesEntityIds ?? [];
       const pairs: [string, string][] = [];
@@ -613,6 +625,7 @@ export function createEditorViewport(
       selectedId = null;
       selectedIds = [];
       transform.detach();
+      refreshGizmos();
       handlers.onSelect(null);
       handlers.onSelectionChange?.([]);
       return;
@@ -630,6 +643,7 @@ export function createEditorViewport(
     }
     if (selectedId && roots.has(selectedId) && !freeFly) transform.attach(roots.get(selectedId)!);
     else transform.detach();
+    refreshGizmos();
     handlers.onSelect(selectedId);
     handlers.onSelectionChange?.(selectedIds);
   }
@@ -804,6 +818,7 @@ export function createEditorViewport(
     if (selectedId && roots.has(selectedId) && !freeFly) transform.attach(roots.get(selectedId)!);
     handlers.onSelect(selectedId);
     handlers.onSelectionChange?.(selectedIds);
+    refreshGizmos();
   };
 
   const onPointerUp = (ev: PointerEvent) => {
@@ -907,8 +922,8 @@ export function createEditorViewport(
       return;
     }
     if (!freeFly) return;
-    yaw -= (ev.movementX || 0) * 0.0025;
-    pitch -= (ev.movementY || 0) * 0.0025;
+    yaw -= (ev.movementX || 0) * 0.0016;
+    pitch -= (ev.movementY || 0) * 0.0016;
     pitch = THREE.MathUtils.clamp(pitch, -1.4, 1.4);
   };
 
@@ -938,16 +953,17 @@ export function createEditorViewport(
     const dt = Math.min(clock.getDelta(), 0.05);
 
     if (freeFly) {
-      // Look stick (mobile) — apply before building direction
+      // Look stick (mobile) — gentle so you don't whip around and get lost
       if (touchAxes.lookX || touchAxes.lookY) {
-        yaw -= touchAxes.lookX * 2.2 * dt;
-        pitch -= touchAxes.lookY * 1.8 * dt;
+        yaw -= touchAxes.lookX * 0.85 * dt;
+        pitch -= touchAxes.lookY * 0.7 * dt;
         pitch = THREE.MathUtils.clamp(pitch, -1.45, 1.45);
       }
 
       const sprint =
         keys.has('ShiftLeft') || keys.has('ShiftRight') || touchAxes.sprint;
-      const speed = (sprint ? 28 : 12) * dt;
+      // Slow, smooth fly — sprint still faster but controlled
+      const speed = (sprint ? 9 : 4.2) * dt;
       // Fly toward where the camera points (pitch included) so looking down flies down
       const forward = new THREE.Vector3(
         Math.sin(yaw) * Math.cos(pitch),
@@ -964,8 +980,8 @@ export function createEditorViewport(
       if (keys.has('KeyC') || keys.has('KeyZ')) camera.position.y -= speed;
 
       // Right stick: Y = forward/back along look, X = strafe
-      if (touchAxes.moveY) camera.position.addScaledVector(forward, -touchAxes.moveY * speed * 1.35);
-      if (touchAxes.moveX) camera.position.addScaledVector(right, -touchAxes.moveX * speed * 1.35);
+      if (touchAxes.moveY) camera.position.addScaledVector(forward, -touchAxes.moveY * speed);
+      if (touchAxes.moveX) camera.position.addScaledVector(right, -touchAxes.moveX * speed);
 
       const look = new THREE.Vector3(
         camera.position.x + forward.x,
@@ -974,13 +990,13 @@ export function createEditorViewport(
       );
       camera.lookAt(look);
     } else {
-      // Orbit look via left stick when not free-flying
+      // Orbit look via left stick when not free-flying — keep mild
       if (touchAxes.lookX || touchAxes.lookY) {
         const offset = new THREE.Vector3().subVectors(camera.position, orbit.target);
         const sph = new THREE.Spherical().setFromVector3(offset);
-        sph.theta -= touchAxes.lookX * 2.0 * dt;
+        sph.theta -= touchAxes.lookX * 0.85 * dt;
         sph.phi = THREE.MathUtils.clamp(
-          sph.phi + touchAxes.lookY * 1.6 * dt,
+          sph.phi + touchAxes.lookY * 0.7 * dt,
           0.15,
           Math.PI - 0.15
         );
@@ -1012,6 +1028,7 @@ export function createEditorViewport(
       selectedId = ids[ids.length - 1] ?? null;
       if (selectedId && roots.has(selectedId) && !freeFly) transform.attach(roots.get(selectedId)!);
       else transform.detach();
+      refreshGizmos();
       handlers.onSelect(selectedId);
       handlers.onSelectionChange?.(selectedIds);
     },
@@ -1036,6 +1053,11 @@ export function createEditorViewport(
     },
     setFreeFly,
     isFreeFly: () => freeFly,
+    setShowAllCollisionGizmos: (on) => {
+      showAllCollisionGizmos = on;
+      refreshGizmos();
+    },
+    getShowAllCollisionGizmos: () => showAllCollisionGizmos,
     setMeasureMode: (on) => {
       measureMode = on;
       measureA = null;
@@ -1104,6 +1126,7 @@ export function createEditorViewport(
         selectedIds = copies.map((c) => c.id);
         selectedId = selectedIds[0] ?? null;
         if (selectedId) transform.attach(roots.get(selectedId)!);
+        refreshGizmos();
         handlers.onSelect(selectedId);
         handlers.onSelectionChange?.(selectedIds);
         handlers.onDocChange(doc);
