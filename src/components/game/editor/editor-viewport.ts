@@ -301,6 +301,18 @@ export function createEditorViewport(
     const ent = doc.entities.find((x) => x.id === selectedId);
     const obj = roots.get(selectedId);
     if (!ent || !obj) return;
+    const layer = layerMeta(ent.layerId);
+    if (layer?.locked) {
+      // Locked build level — snap visual back to stored pose and ignore the drag.
+      obj.position.set(...ent.position);
+      obj.rotation.set(
+        THREE.MathUtils.degToRad(ent.rotation[0]),
+        THREE.MathUtils.degToRad(ent.rotation[1]),
+        THREE.MathUtils.degToRad(ent.rotation[2])
+      );
+      obj.scale.set(...ent.scale);
+      return;
+    }
     if (gridSnap && transform.mode === 'translate') {
       obj.position.x = snapToGrid(obj.position.x, gridSize);
       obj.position.z = snapToGrid(obj.position.z, gridSize);
@@ -715,6 +727,19 @@ export function createEditorViewport(
     }
   }
 
+  function attachSelectionGizmo() {
+    if (!selectedId || !roots.has(selectedId) || freeFly) {
+      transform.detach();
+      return;
+    }
+    const selEnt = doc.entities.find((e) => e.id === selectedId);
+    if (selEnt && layerMeta(selEnt.layerId)?.locked) {
+      transform.detach();
+      return;
+    }
+    transform.attach(roots.get(selectedId)!);
+  }
+
   async function rebuildAll() {
     const keep = new Set(doc.entities.map((e) => e.id));
     roots.forEach((obj, id) => {
@@ -727,8 +752,7 @@ export function createEditorViewport(
     });
     await Promise.all(doc.entities.map((e) => syncEntity(e)));
     refreshGizmos();
-    if (selectedId && roots.has(selectedId)) transform.attach(roots.get(selectedId)!);
-    else transform.detach();
+    attachSelectionGizmo();
   }
 
   void rebuildAll();
@@ -754,8 +778,9 @@ export function createEditorViewport(
       selectedId = id;
       selectedIds = [id];
     }
-    if (selectedId && roots.has(selectedId) && !freeFly) transform.attach(roots.get(selectedId)!);
-    else transform.detach();
+    if (selectedId && roots.has(selectedId) && !freeFly) {
+      attachSelectionGizmo();
+    } else transform.detach();
     refreshGizmos();
     handlers.onSelect(selectedId);
     handlers.onSelectionChange?.(selectedIds);
@@ -870,9 +895,10 @@ export function createEditorViewport(
       waveAnchor: kind === 'wave_anchor' ? defaultWaveAnchor() : undefined,
     };
     doc = { ...doc, entities: [...doc.entities, ent] };
+    // Sync React state immediately so a concurrent setDoc cannot wipe the new entity.
+    handlers.onDocChange(doc);
     void syncEntity(ent).then(() => {
       select(ent.id);
-      handlers.onDocChange(doc);
     });
     handlers.onPlaceResult?.('ok', layer?.name);
     return 'ok';
@@ -974,7 +1000,7 @@ export function createEditorViewport(
     }
     selectedIds = picked;
     selectedId = picked[picked.length - 1];
-    if (selectedId && roots.has(selectedId) && !freeFly) transform.attach(roots.get(selectedId)!);
+    attachSelectionGizmo();
     handlers.onSelect(selectedId);
     handlers.onSelectionChange?.(selectedIds);
     refreshGizmos();
@@ -1041,6 +1067,11 @@ export function createEditorViewport(
 
     // Prefab stamp wins over brush paint (armed from Prefabs tab).
     if (groundHits[0] && stampEntitiesQueue?.length) {
+      const stampLayer = layerMeta(activeLayerId);
+      if (stampLayer?.locked) {
+        handlers.onPlaceResult?.('locked', stampLayer.name);
+        return;
+      }
       const placedPt = pickPlacePoint(true);
       const p = placedPt?.point ?? groundHits[0].point;
       let x = p.x;
@@ -1067,9 +1098,9 @@ export function createEditorViewport(
       }));
       doc = { ...doc, entities: [...doc.entities, ...placed] };
       stampEntitiesQueue = null;
+      handlers.onDocChange(doc);
       void Promise.all(placed.map((e) => syncEntity(e))).then(() => {
         select(placed[0]?.id ?? null);
-        handlers.onDocChange(doc);
       });
       return;
     }
@@ -1249,8 +1280,7 @@ export function createEditorViewport(
     setSelectedIds: (ids) => {
       selectedIds = ids;
       selectedId = ids[ids.length - 1] ?? null;
-      if (selectedId && roots.has(selectedId) && !freeFly) transform.attach(roots.get(selectedId)!);
-      else transform.detach();
+      attachSelectionGizmo();
       refreshGizmos();
       handlers.onSelect(selectedId);
       handlers.onSelectionChange?.(selectedIds);
@@ -1350,14 +1380,19 @@ export function createEditorViewport(
         });
       }
       doc = { ...doc, entities: [...doc.entities, ...copies] };
+      handlers.onDocChange(doc);
       void Promise.all(copies.map((c) => syncEntity(c))).then(() => {
         selectedIds = copies.map((c) => c.id);
         selectedId = selectedIds[0] ?? null;
-        if (selectedId) transform.attach(roots.get(selectedId)!);
+        if (selectedId && roots.has(selectedId) && !freeFly) {
+          const selEnt = doc.entities.find((e) => e.id === selectedId);
+          const locked = selEnt ? Boolean(layerMeta(selEnt.layerId)?.locked) : false;
+          if (!locked) transform.attach(roots.get(selectedId)!);
+          else transform.detach();
+        }
         refreshGizmos();
         handlers.onSelect(selectedId);
         handlers.onSelectionChange?.(selectedIds);
-        handlers.onDocChange(doc);
       });
     },
     focusSelected: () => {
@@ -1432,6 +1467,16 @@ export function createEditorViewport(
     deleteSelected: () => {
       const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
       if (!ids.length) return;
+      const lockedHit = ids
+        .map((id) => doc.entities.find((e) => e.id === id))
+        .find((e) => e && layerMeta(e.layerId)?.locked);
+      if (lockedHit) {
+        handlers.onPlaceResult?.(
+          'locked',
+          layerMeta(lockedHit.layerId)?.name
+        );
+        return;
+      }
       doc = { ...doc, entities: doc.entities.filter((e) => !ids.includes(e.id)) };
       ids.forEach((id) => {
         director.unregister(id);

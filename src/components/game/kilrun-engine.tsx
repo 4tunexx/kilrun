@@ -510,7 +510,7 @@ export default function KilrunEngine({
           onExit={onExit}
         />
 
-        {editorOpen && (
+        {editorOpen && isAdmin && (
           <MapEditor
             isAdmin={isAdmin}
             onClose={() => {

@@ -155,15 +155,36 @@ export function saveMap(
   writeIndex(index);
 }
 
+function normalizeMapDocument(doc: MapDocument): MapDocument {
+  doc.gameMode = getMapGameMode(doc);
+  doc.environment = ensureEnvironment(doc) as MapEnvironment;
+  if (!Array.isArray(doc.layers) || doc.layers.length === 0) {
+    doc.layers = [
+      { id: 'layer_floor', name: 'Floor', visible: true, locked: false, order: 0 },
+      { id: 'layer_props', name: 'Props', visible: true, locked: false, order: 1 },
+      { id: 'layer_spawns', name: 'Spawns', visible: true, locked: false, order: 2 },
+    ];
+  }
+  const floorId = doc.layers[0]?.id;
+  if (floorId && Array.isArray(doc.entities)) {
+    doc.entities = doc.entities.map((e) => ({
+      ...e,
+      layerId: e.layerId || floorId,
+    }));
+  }
+  if (typeof doc.gridSize !== 'number' || !(doc.gridSize > 0)) {
+    doc.gridSize = 1;
+  }
+  if (!Array.isArray(doc.entities)) doc.entities = [];
+  return doc;
+}
+
 export function loadMap(id: string): MapDocument | null {
   try {
     const raw = localStorage.getItem(DOC_PREFIX + id);
     if (!raw) return null;
     const doc = JSON.parse(raw) as MapDocument;
-    if (!doc.gameMode) {
-      doc.gameMode = 'deathrun';
-    }
-    return doc;
+    return normalizeMapDocument(doc);
   } catch {
     return null;
   }
@@ -263,9 +284,7 @@ export function importJson(text: string): MapDocument {
   if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.entities)) {
     throw new Error('Invalid map JSON');
   }
-  parsed.gameMode = getMapGameMode(parsed);
-  parsed.environment = ensureEnvironment(parsed) as MapEnvironment;
-  return parsed;
+  return normalizeMapDocument(parsed);
 }
 
 export function formatBytes(n?: number): string {

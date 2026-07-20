@@ -242,14 +242,20 @@ export function ModelSkinEditor({
   }, [clayView]);
 
   useEffect(() => {
-    // Expand/collapse changes host size — ResizeObserver usually catches it; nudge once.
+    // Expand/collapse changes host size — force WebGL resize after layout.
     const id = requestAnimationFrame(() => {
       const host = canvasHostRef.current;
-      if (!host || !previewRef.current) return;
-      // SkinPreview observes host; toggling class updates layout next frame.
+      if (!host) return;
       void host.offsetHeight;
+      previewRef.current?.forceResize();
     });
-    return () => cancelAnimationFrame(id);
+    const id2 = requestAnimationFrame(() => {
+      previewRef.current?.forceResize();
+    });
+    return () => {
+      cancelAnimationFrame(id);
+      cancelAnimationFrame(id2);
+    };
   }, [previewExpanded]);
 
   useEffect(() => {
@@ -2115,6 +2121,15 @@ class SkinPreview {
     this.applyCameraFromSpherical();
   }
 
+  forceResize() {
+    const w = this.host.clientWidth || 320;
+    const h = this.host.clientHeight || 208;
+    if (w < 2 || h < 2) return;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h, false);
+  }
+
   private frameSoloPart() {
     this.soloRoot.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(this.soloRoot);
@@ -2291,6 +2306,7 @@ class SkinPreview {
     if (!mesh) return;
 
     const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return;
     this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);

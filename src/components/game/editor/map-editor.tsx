@@ -204,6 +204,7 @@ export function MapEditor({
   const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
   const [modelEditorOpen, setModelEditorOpen] = useState(false);
   const [showAllCollisionGizmos, setShowAllCollisionGizmos] = useState(false);
+  const lastLockedToastAt = useRef(0);
   const cameraBeforePlayRef = useRef<EditorCameraState | null>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
@@ -222,7 +223,11 @@ export function MapEditor({
 
   const selected = doc.entities.find((e) => e.id === selectedId) ?? null;
   const env = ensureEnvironment(doc);
-  const maps = listMaps();
+  const [mapListTick, setMapListTick] = useState(0);
+  const maps = useMemo(() => {
+    void mapListTick;
+    return listMaps();
+  }, [mapListTick]);
 
   const historyAnchor = useRef<MapDocument | null>(null);
   const historyTimer = useRef<number | null>(null);
@@ -331,17 +336,20 @@ export function MapEditor({
         const merged = { ...next, environment: ensureEnvironment(next) };
         docRef.current = merged;
         setDoc(merged);
+        setDirty(true);
       },
       onFreeFlyChange: setFreeFly,
       onMeasureChange: setMeasureDist,
       onPlaceResult: (result, layerName) => {
-        if (result === 'locked') {
-          toast({
-            title: 'Build level locked',
-            description: `“${layerName ?? 'This level'}” is locked — unlock it in Layers, or Build here on another level.`,
-            variant: 'destructive',
-          });
-        }
+        if (result !== 'locked') return;
+        const now = Date.now();
+        if (now - lastLockedToastAt.current < 1600) return;
+        lastLockedToastAt.current = now;
+        toast({
+          title: 'Build level locked',
+          description: `“${layerName ?? 'This level'}” is locked — unlock it in Layers, or Build here on another level.`,
+          variant: 'destructive',
+        });
       },
     });
     apiRef.current = api;
@@ -433,7 +441,7 @@ export function MapEditor({
   };
 
   const isDirty = () => snapshotMapDoc(workingDoc()) !== lastSavedRef.current;
-  const dirty = isDirty();
+  const [dirty, setDirty] = useState(false);
 
   const clearHistory = () => {
     undoStack.current = [];
@@ -445,6 +453,7 @@ export function MapEditor({
 
   const markClean = (next: MapDocument) => {
     lastSavedRef.current = snapshotMapDoc(next);
+    setDirty(false);
   };
 
   const persist = (opts?: { quiet?: boolean }) => {
@@ -455,6 +464,7 @@ export function MapEditor({
       setDoc(next);
       docRef.current = next;
       markClean(next);
+      setMapListTick((t) => t + 1);
       void import('./map-thumbnail').then(({ ensureMapThumbnail }) =>
         ensureMapThumbnail(mapId, { force: true })
       );
@@ -542,6 +552,7 @@ export function MapEditor({
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if ((e.target as HTMLElement)?.isContentEditable) return;
       if (playTest) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
@@ -563,24 +574,6 @@ export function MapEditor({
         return;
       }
 
-      if (e.key === 'w' || e.key === 'W') {
-        if (!freeFly) setMode('translate');
-      }
-      if ((e.key === 'e' || e.key === 'E') && !freeFly) setMode('rotate');
-      if ((e.key === 'r' || e.key === 'R') && !freeFly) setMode('scale');
-      if ((e.key === 'v' || e.key === 'V') && !freeFly) setEditTool('select');
-      if ((e.key === 'b' || e.key === 'B') && !freeFly) {
-        setEditTool('brush');
-        if (!brush) setBrush('floor-square');
-      }
-      if (e.key === 'g' || e.key === 'G') setGridSnap((v) => !v);
-      if (e.key === 'f' || e.key === 'F') apiRef.current?.focusSelected();
-      if (e.key === 'Delete' || e.key === 'Backspace') apiRef.current?.deleteSelected();
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        const axis = e.shiftKey ? 'z' : 'x';
-        apiRef.current?.duplicateSelected(axis);
-      }
       if (e.key === 'Escape') {
         e.preventDefault();
         if (freeFly) {
@@ -594,6 +587,27 @@ export function MapEditor({
           return;
         }
         requestClose();
+        return;
+      }
+
+      // Placement / edit shortcuts off while free-flying
+      if (freeFly) return;
+
+      if (e.key === 'w' || e.key === 'W') setMode('translate');
+      if (e.key === 'e' || e.key === 'E') setMode('rotate');
+      if (e.key === 'r' || e.key === 'R') setMode('scale');
+      if (e.key === 'v' || e.key === 'V') setEditTool('select');
+      if (e.key === 'b' || e.key === 'B') {
+        setEditTool('brush');
+        if (!brush) setBrush('floor-square');
+      }
+      if (e.key === 'g' || e.key === 'G') setGridSnap((v) => !v);
+      if (e.key === 'f' || e.key === 'F') apiRef.current?.focusSelected();
+      if (e.key === 'Delete' || e.key === 'Backspace') apiRef.current?.deleteSelected();
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        const axis = e.shiftKey ? 'z' : 'x';
+        apiRef.current?.duplicateSelected(axis);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -636,7 +650,7 @@ export function MapEditor({
   };
 
   const sortedLayers = useMemo(
-    () => doc.layers.slice().sort((a, b) => a.order - b.order),
+    () => (doc.layers ?? []).slice().sort((a, b) => a.order - b.order),
     [doc.layers]
   );
   const activeLayer = doc.layers.find((l) => l.id === activeLayerId) ?? sortedLayers[0] ?? null;
@@ -820,12 +834,13 @@ export function MapEditor({
     <div className="fixed inset-0 z-[9999] bg-[#0d121a] text-white flex flex-col">
       {isTouch && (
         <>
+          {/* Joystick layer stays under chrome (z-[120]+) so Tools / Levels stay clickable */}
           <div
             ref={touchLayerRef}
-            className="fixed inset-0 z-[50] touch-none"
+            className="fixed inset-0 z-[40] touch-none"
             style={{ pointerEvents: freeFly ? 'auto' : 'none' }}
           />
-          <div className="fixed inset-0 z-[51] pointer-events-none">
+          <div className="fixed inset-0 z-[41] pointer-events-none">
             <JoystickOverlay joystickRef={joystickRef} enabled={freeFly} />
           </div>
           <div
@@ -1048,7 +1063,10 @@ export function MapEditor({
         <input
           className="ml-2 bg-black/40 border border-white/10 rounded px-2 py-1 text-sm w-40 sm:w-56 shrink-0"
           value={doc.name}
-          onChange={(e) => setDoc((d) => ({ ...d, name: e.target.value }))}
+          onChange={(e) => {
+            setDoc((d) => ({ ...d, name: e.target.value }));
+            setDirty(true);
+          }}
         />
         <select
           className="bg-black/40 border border-white/10 rounded px-2 py-1 text-sm shrink-0"
@@ -1860,7 +1878,7 @@ export function MapEditor({
           {/* Quick level strip — switch / hide build levels without opening the sidebar */}
           {!uiCollapsed && sortedLayers.length > 0 && (
             <div
-              className={`absolute z-[80] flex items-center gap-1 max-w-[min(92vw,28rem)] overflow-x-auto rounded-xl border border-white/15 bg-black/75 px-1.5 py-1 backdrop-blur ${
+              className={`absolute z-[85] flex items-center gap-1 max-w-[min(70vw,22rem)] overflow-x-auto rounded-xl border border-white/15 bg-black/75 px-1.5 py-1 backdrop-blur ${
                 toolsOpen
                   ? 'bottom-[4.25rem] left-1/2 -translate-x-1/2'
                   : 'bottom-14 left-1/2 -translate-x-1/2'
@@ -1926,7 +1944,7 @@ export function MapEditor({
           <button
             type="button"
             onClick={() => setToolsOpen((v) => !v)}
-            className="absolute bottom-3 left-3 z-[80] flex items-center gap-1 rounded-xl border border-white/20 bg-black/75 px-2.5 py-2 text-[10px] font-bold uppercase tracking-wide text-white/90 backdrop-blur active:scale-95"
+            className="absolute bottom-3 left-3 z-[90] flex items-center gap-1 rounded-xl border border-white/20 bg-black/75 px-2.5 py-2 text-[10px] font-bold uppercase tracking-wide text-white/90 backdrop-blur active:scale-95"
             title={toolsOpen ? 'Hide tool bar' : 'Show tool bar'}
           >
             {toolsOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
@@ -1935,7 +1953,7 @@ export function MapEditor({
           )}
 
           {!uiCollapsed && toolsOpen && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 border border-white/15 rounded-xl px-2 py-1.5 backdrop-blur z-[80] max-w-[calc(100vw-7rem)] overflow-x-auto">
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 border border-white/15 rounded-xl px-2 py-1.5 backdrop-blur z-[90] max-w-[calc(100vw-7rem)] overflow-x-auto">
             <ToolBtn
               active={editTool === 'select'}
               onClick={() => setEditTool('select')}
