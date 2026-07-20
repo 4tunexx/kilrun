@@ -13,50 +13,20 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { getSiteSettings } from '@/lib/progression-actions';
 import { resolveGameDisabled } from '@/lib/branding';
+import { KILRUN_MODE_INFO, type KilrunMode } from '@/lib/game-modes';
 
-export type KilrunMode = 'deathrun' | 'horde' | 'competitive';
+export type { KilrunMode };
 
 interface ModeDefinition {
   id: KilrunMode;
   icon: typeof Skull;
-  title: string;
-  description: string;
-  players: string;
-  accent: string;
   isLive: boolean;
 }
 
 const modes: ModeDefinition[] = [
-  {
-    id: 'deathrun',
-    icon: Skull,
-    title: 'Deathrun',
-    description:
-      'Platformer Deathrun: jump floating pads, dodge traps, manage Energy. One player may become the Trapper — runners race the course to the finish.',
-    players: 'Up to 8',
-    accent: 'from-orange-500/20 to-cyan-500/20 border-orange-500/40',
-    isLive: true,
-  },
-  {
-    id: 'horde',
-    icon: Users,
-    title: 'Horde Mode',
-    description:
-      'Solo or co-op. Survive escalating waves of AI enemies for as long as you can.',
-    players: 'Solo / Co-op',
-    accent: 'from-purple-500/10 to-slate-500/10 border-purple-500/20',
-    isLive: false,
-  },
-  {
-    id: 'competitive',
-    icon: Swords,
-    title: 'Competitive 4v4',
-    description:
-      'Team elimination. Wipe out the enemy squad before they wipe out yours.',
-    players: '4v4',
-    accent: 'from-red-500/10 to-slate-500/10 border-red-500/20',
-    isLive: false,
-  },
+  { id: 'deathrun', icon: Skull, isLive: true },
+  { id: 'horde', icon: Users, isLive: false },
+  { id: 'competitive', icon: Swords, isLive: false },
 ];
 
 interface PlayViewProps {
@@ -80,59 +50,50 @@ export default function PlayView({ onPlay }: PlayViewProps) {
   }, []);
 
   return (
-    <div className="px-4 sm:px-12 py-8">
-      <div className="mb-8">
-        <h2 className="text-2xl sm:text-3xl font-black">Select Mode</h2>
-        <p className="text-slate-400 mt-2">
-          Jump into a live match or check out what&apos;s coming next.
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold tracking-tight text-slate-100">Play</h2>
+        <p className="text-sm text-slate-400 mt-1">
+          Pick a mode. Deathrun is live — Horde and Competitive maps can already be authored in
+          Admin → Map Editor.
         </p>
       </div>
 
       {gameDisabled && (
-        <Card className="mb-6 bg-red-950/40 border-red-500/40">
-          <CardContent className="py-4 flex items-start gap-3">
-            <Ban className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold text-red-200">Game temporarily disabled</p>
-              <p className="text-sm text-red-200/80">
-                {disabledMsg || 'Kilrun is offline for maintenance.'}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 flex gap-2">
+          <Ban className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>{disabledMsg || 'Matches are temporarily disabled.'}</span>
+        </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="grid gap-4 md:grid-cols-3">
         {modes.map((mode) => {
+          const info = KILRUN_MODE_INFO[mode.id];
+          const Icon = mode.icon;
           const canPlay = mode.isLive && !gameDisabled;
           return (
             <Card
               key={mode.id}
-              className={`bg-gradient-to-br ${mode.accent} backdrop-blur-sm overflow-hidden group transition-all ${
-                canPlay ? 'hover:scale-[1.03] hover:border-primary/80' : 'opacity-70'
-              }`}
+              className={`bg-gradient-to-br border ${info.accentClass} bg-slate-900/60`}
             >
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="p-3 bg-slate-900/60 rounded-full">
-                    <mode.icon className="w-7 h-7 text-primary" />
-                  </div>
-                  {canPlay ? (
-                    <Badge>Live</Badge>
-                  ) : (
-                    <Badge variant="outline" className="gap-1">
-                      <Lock className="w-3 h-3" />
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Icon className="h-5 w-5" />
+                    {info.title}
+                  </CardTitle>
+                  {!canPlay && (
+                    <Badge variant="secondary" className="text-[10px]">
                       {gameDisabled && mode.isLive ? 'Disabled' : 'Soon'}
                     </Badge>
                   )}
                 </div>
-                <CardTitle className="text-2xl mt-4">{mode.title}</CardTitle>
-                <CardDescription className="text-slate-300">
-                  {mode.description}
+                <CardDescription className="text-slate-300/90">
+                  {info.description}
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <p className="text-sm text-slate-400 mb-4">{mode.players} players</p>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-slate-400">{info.players}</p>
                 <Button
                   className="w-full"
                   disabled={!canPlay}
@@ -140,10 +101,12 @@ export default function PlayView({ onPlay }: PlayViewProps) {
                 >
                   {canPlay ? (
                     <>
-                      Play <ArrowRight className="ml-2 w-4 h-4" />
+                      Queue <ArrowRight className="h-4 w-4 ml-1" />
                     </>
                   ) : (
-                    'Unavailable'
+                    <>
+                      <Lock className="h-4 w-4 mr-1" /> Coming soon
+                    </>
                   )}
                 </Button>
               </CardContent>

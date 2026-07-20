@@ -68,6 +68,11 @@ export function getLevelProgress(xp: number) {
   return { level, xpIntoLevel, xpForNextLevel, percent };
 }
 
+/**
+ * @deprecated Prefer `getRankForKp` from `@/lib/kp`.
+ * Kept for legacy call sites that still pass account level; maps level bands
+ * onto the same rank names as a soft fallback when KP is unavailable.
+ */
 export function getRankForLevel(level: number): string {
   if (level >= 50) return 'Immortal';
   if (level >= 40) return 'Diamond';
@@ -77,3 +82,5 @@ export function getRankForLevel(level: number): string {
   if (level >= 5) return 'Bronze';
   return 'Unranked';
 }
+
+export { getRankForKp, KP_DEFAULT } from '@/lib/kp';

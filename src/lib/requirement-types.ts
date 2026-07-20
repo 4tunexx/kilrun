@@ -79,6 +79,48 @@ export const REQUIREMENT_TYPES: RequirementType[] = [
     description: 'Runner rounds ending in elimination before the finish line.',
     category: 'game',
   },
+  {
+    value: 'horde_runs',
+    label: 'Horde matches played',
+    description: 'Total Horde mode matches completed.',
+    category: 'game',
+  },
+  {
+    value: 'horde_wins',
+    label: 'Horde matches survived',
+    description: 'Horde matches finished without a wipe (win / survived).',
+    category: 'game',
+  },
+  {
+    value: 'horde_waves',
+    label: 'Horde waves cleared',
+    description: 'Total enemy waves cleared across Horde matches.',
+    category: 'game',
+  },
+  {
+    value: 'horde_kills',
+    label: 'Horde monster kills',
+    description: 'Total monsters killed in Horde mode.',
+    category: 'game',
+  },
+  {
+    value: 'competitive_runs',
+    label: 'Competitive matches played',
+    description: 'Total Competitive 4v4 matches completed.',
+    category: 'game',
+  },
+  {
+    value: 'competitive_wins',
+    label: 'Competitive matches won',
+    description: 'Competitive 4v4 matches won by your team.',
+    category: 'game',
+  },
+  {
+    value: 'kp',
+    label: 'Killrun Points (KP)',
+    description: 'Competitive Elo-style rating that determines your rank.',
+    category: 'progression',
+  },
 
   // Progression / leveling
   {
@@ -255,6 +297,18 @@ export const REQUIREMENT_TYPES: RequirementType[] = [
     value: 'daily_runs',
     label: 'Daily Deathrun match',
     description: 'Play a Deathrun match today.',
+    category: 'daily',
+  },
+  {
+    value: 'daily_horde',
+    label: 'Daily Horde match',
+    description: 'Play a Horde mode match today.',
+    category: 'daily',
+  },
+  {
+    value: 'daily_competitive',
+    label: 'Daily Competitive match',
+    description: 'Play a Competitive 4v4 match today.',
     category: 'daily',
   },
   {

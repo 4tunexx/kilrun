@@ -8,9 +8,15 @@ import {
   DEFAULT_ENVIRONMENT,
   defaultAnimation,
   defaultHazard,
+  defaultHealthFloor,
   defaultLight,
+  defaultMonsterSpawn,
+  defaultRedZone,
+  defaultRevive,
+  defaultWaveAnchor,
   ensureLight,
   entityExportsAsPlatform,
+  entityKindLabel,
   generateId,
   snapToGrid,
   ensureEnvironment,
@@ -100,7 +106,16 @@ export interface EditorViewportApi {
   setMeasureMode: (on: boolean) => void;
   isMeasureMode: () => boolean;
   applyEnvironment: (env: MapEnvironment) => void;
-  placeSpawn: (kind: 'spawn_runner' | 'spawn_trapper' | 'start' | 'finish') => void;
+  placeSpawn: (
+    kind:
+      | 'spawn_runner'
+      | 'spawn_trapper'
+      | 'start'
+      | 'finish'
+      | 'spawn_monster'
+      | 'spawn_team_a'
+      | 'spawn_team_b'
+  ) => void;
   placeEntity: (kind: EditorEntity['kind'], model?: string) => void;
   stampEntities: (entities: EditorEntity[]) => void;
   duplicateSelected: (axis?: 'x' | 'y' | 'z') => void;
@@ -408,35 +423,37 @@ export function createEditorViewport(
   }
 
   function makeSpawnMarker(
-    kind: 'spawn_runner' | 'spawn_trapper' | 'start' | 'finish',
+    kind: string,
     color: string
   ): THREE.Object3D {
     const g = new THREE.Group();
-    if (kind === 'finish') {
+    if (kind === 'finish' || kind === 'health_floor' || kind === 'revive_pad' || kind === 'red_zone') {
       const pad = new THREE.Mesh(
         new THREE.BoxGeometry(1.6, 0.12, 1.6),
         new THREE.MeshStandardMaterial({
           color,
           emissive: color,
-          emissiveIntensity: 0.55,
+          emissiveIntensity: kind === 'red_zone' ? 0.7 : 0.55,
           transparent: true,
           opacity: 0.9,
         })
       );
       pad.position.y = 0.06;
       g.add(pad);
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.05, 0.05, 1.4, 8),
-        new THREE.MeshStandardMaterial({ color: 0xf8fafc })
-      );
-      pole.position.set(0.55, 0.75, 0.55);
-      g.add(pole);
-      const flag = new THREE.Mesh(
-        new THREE.BoxGeometry(0.55, 0.35, 0.04),
-        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4 })
-      );
-      flag.position.set(0.85, 1.25, 0.55);
-      g.add(flag);
+      if (kind === 'finish') {
+        const pole = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.05, 0.05, 1.4, 8),
+          new THREE.MeshStandardMaterial({ color: 0xf8fafc })
+        );
+        pole.position.set(0.55, 0.75, 0.55);
+        g.add(pole);
+        const flag = new THREE.Mesh(
+          new THREE.BoxGeometry(0.55, 0.35, 0.04),
+          new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4 })
+        );
+        flag.position.set(0.85, 1.25, 0.55);
+        g.add(flag);
+      }
     } else {
       const body = new THREE.Mesh(
         new THREE.ConeGeometry(0.45, 1.4, 12),
@@ -522,17 +539,32 @@ export function createEditorViewport(
         ent.kind === 'spawn_runner' ||
         ent.kind === 'spawn_trapper' ||
         ent.kind === 'start' ||
-        ent.kind === 'finish'
+        ent.kind === 'finish' ||
+        ent.kind === 'spawn_monster' ||
+        ent.kind === 'spawn_team_a' ||
+        ent.kind === 'spawn_team_b' ||
+        ent.kind === 'red_zone' ||
+        ent.kind === 'revive_pad' ||
+        ent.kind === 'health_floor' ||
+        ent.kind === 'wave_anchor'
       ) {
-        root = makeSpawnMarker(
-          ent.kind,
-          ent.color ??
-            (ent.kind === 'finish'
-              ? '#fbbf24'
-              : ent.kind === 'spawn_trapper'
-                ? '#ef4444'
-                : '#22c55e')
-        );
+        const fallbackColor =
+          ent.kind === 'finish'
+            ? '#fbbf24'
+            : ent.kind === 'spawn_trapper' || ent.kind === 'spawn_monster' || ent.kind === 'red_zone'
+              ? '#ef4444'
+              : ent.kind === 'spawn_team_a'
+                ? '#38bdf8'
+                : ent.kind === 'spawn_team_b'
+                  ? '#f97316'
+                  : ent.kind === 'health_floor'
+                    ? '#34d399'
+                    : ent.kind === 'revive_pad'
+                      ? '#60a5fa'
+                      : ent.kind === 'wave_anchor'
+                        ? '#fbbf24'
+                        : '#22c55e';
+        root = makeSpawnMarker(ent.kind, ent.color ?? fallbackColor);
       } else if (ent.kind === 'button') {
         root = new THREE.Mesh(
           new THREE.CylinderGeometry(0.45, 0.5, 0.2, 16),
@@ -749,62 +781,78 @@ export function createEditorViewport(
         ? brush ?? undefined
         : undefined);
 
+    const padKinds =
+      kind === 'finish' ||
+      kind === 'health_floor' ||
+      kind === 'revive_pad' ||
+      kind === 'red_zone';
+
+    const defaultColor =
+      kind === 'spawn_runner' || kind === 'start'
+        ? '#22c55e'
+        : kind === 'spawn_trapper' || kind === 'spawn_monster' || kind === 'red_zone'
+          ? '#ef4444'
+          : kind === 'finish' || kind === 'wave_anchor'
+            ? '#fbbf24'
+            : kind === 'button'
+              ? '#fbbf24'
+              : kind === 'trap'
+                ? '#a78bfa'
+                : kind === 'hazard'
+                  ? '#ef4444'
+                  : kind === 'light'
+                    ? '#ffe9a8'
+                    : kind === 'spawn_team_a'
+                      ? '#38bdf8'
+                      : kind === 'spawn_team_b'
+                        ? '#f97316'
+                        : kind === 'health_floor'
+                          ? '#34d399'
+                          : kind === 'revive_pad'
+                            ? '#60a5fa'
+                            : undefined;
+
+    const defaultModel =
+      kind === 'light'
+        ? undefined
+        : kind === 'start' ||
+            kind === 'spawn_runner' ||
+            kind === 'spawn_trapper' ||
+            kind === 'spawn_monster' ||
+            kind === 'spawn_team_a' ||
+            kind === 'spawn_team_b'
+          ? modelName ?? (kind === 'spawn_trapper' || kind === 'spawn_monster' ? 'figurine-large' : 'figurine')
+          : kind === 'finish' ||
+              kind === 'health_floor' ||
+              kind === 'revive_pad' ||
+              kind === 'red_zone'
+            ? modelName ?? 'floor-square'
+            : kind === 'wave_anchor'
+              ? modelName ?? 'target-a-square'
+              : modelName;
+
     const ent: EditorEntity = {
       id: generateId(),
-      name:
-        kind === 'player'
-          ? 'Player'
-          : kind === 'button'
-            ? 'Button'
-            : kind === 'trap'
-              ? 'Trap'
-              : kind === 'hazard'
-                ? 'Death Zone'
-                : kind === 'light'
-                  ? 'Light Bulb'
-                  : kind === 'start'
-                    ? 'Start'
-                    : kind === 'finish'
-                      ? 'Finish'
-                      : kind.startsWith('spawn')
-                        ? kind
-                        : modelName ?? 'Entity',
+      name: entityKindLabel(kind),
       kind,
-      model:
-        kind === 'light'
-          ? undefined
-          : kind === 'start'
-            ? modelName ?? 'figurine'
-            : kind === 'finish'
-              ? modelName ?? 'floor-square'
-              : modelName,
+      model: defaultModel,
       layerId: activeLayerId,
-      position: [x, kind === 'finish' ? Math.max(0, y) : y, z],
+      position: [x, padKinds ? Math.max(0, y) : y, z],
       rotation: [0, 0, 0],
-      scale: kind === 'finish' ? [2, 1, 2] : [1, 1, 1],
-      color:
-        kind === 'spawn_runner' || kind === 'start'
-          ? '#22c55e'
-          : kind === 'spawn_trapper'
-            ? '#ef4444'
-            : kind === 'finish'
-              ? '#fbbf24'
-              : kind === 'button'
-                ? '#fbbf24'
-                : kind === 'trap'
-                  ? '#a78bfa'
-                  : kind === 'hazard'
-                    ? '#ef4444'
-                    : kind === 'light'
-                      ? '#ffe9a8'
-                      : undefined,
+      scale: padKinds ? [2, 1, 2] : [1, 1, 1],
+      color: defaultColor,
       opacity: 1,
       visible: true,
-      solid: kind === 'finish' ? true : undefined,
+      solid: padKinds && kind !== 'red_zone' ? true : undefined,
       animation: defaultAnimation(),
       playerAnims: kind === 'player' ? {} : undefined,
       hazard: kind === 'hazard' ? defaultHazard() : undefined,
       light: kind === 'light' ? defaultLight() : undefined,
+      monsterSpawn: kind === 'spawn_monster' ? defaultMonsterSpawn() : undefined,
+      redZone: kind === 'red_zone' ? defaultRedZone() : undefined,
+      revive: kind === 'revive_pad' ? defaultRevive() : undefined,
+      healthFloor: kind === 'health_floor' ? defaultHealthFloor() : undefined,
+      waveAnchor: kind === 'wave_anchor' ? defaultWaveAnchor() : undefined,
     };
     doc = { ...doc, entities: [...doc.entities, ent] };
     void syncEntity(ent).then(() => {
@@ -1168,7 +1216,7 @@ export function createEditorViewport(
       const model =
         kind === 'finish'
           ? 'floor-square'
-          : kind === 'spawn_trapper'
+          : kind === 'spawn_trapper' || kind === 'spawn_monster'
             ? 'figurine-large'
             : 'figurine';
       placeAt(p, kind, model);

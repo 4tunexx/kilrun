@@ -44,6 +44,9 @@ import {
   PersonStanding,
   Home,
   Shirt,
+  Heart,
+  HeartPulse,
+  Bug,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -53,14 +56,23 @@ import {
   ensureAnimation,
   ensureEnvironment,
   ensureHazard,
+  ensureHealthFloor,
   ensureJumpPad,
   ensureLight,
+  ensureMonsterSpawn,
+  ensureRedZone,
+  ensureRevive,
   ensureSurface,
   ensureTeleport,
+  ensureWaveAnchor,
   entityExportsAsPlatform,
+  entityKindLabel,
+  entityKindsForMode,
   findPlayerEntity,
   generateId,
+  getMapGameMode,
 } from './map-document';
+import { KILRUN_MODE_INFO } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
 import {
   ensureStarterMap,
@@ -101,11 +113,11 @@ import {
 import {
   bakeStairsToPads,
   deletePrefab,
-  getActivePlayMapId,
+  getActivePlayMapIdForMode,
   instantiatePrefab,
   listPrefabs,
   savePrefab,
-  setActivePlayMapId,
+  setActivePlayMapIdForMode,
   type PrefabStamp,
 } from './prefab-storage';
 import { formatValidationSummary, validateMapForPublish } from './map-validate';
@@ -251,8 +263,12 @@ export function MapEditor({
   useEffect(() => {
     setCustomTextures(listCustomTextures());
     setPrefabs(listPrefabs());
-    setActivePlayId(getActivePlayMapId());
+    setActivePlayId(getActivePlayMapIdForMode(getMapGameMode(doc)));
   }, []);
+
+  const gameMode = getMapGameMode(doc);
+  const modeInfo = KILRUN_MODE_INFO[gameMode];
+  const kindOptions = entityKindsForMode(gameMode);
 
   // Mobile: start with menus tucked away so the viewport is usable for placing.
   useEffect(() => {
@@ -375,11 +391,14 @@ export function MapEditor({
       if (!ok) return;
     }
     persist();
-    setActivePlayMapId(mapId);
+    setActivePlayMapIdForMode(gameMode, mapId);
     setActivePlayId(mapId);
     toast({
-      title: `“${doc.name}” is MAIN`,
-      description: 'Rejoin Deathrun lobby/countdown so platforms reload for the match.',
+      title: `“${doc.name}” is Active ${modeInfo.shortTitle} map`,
+      description:
+        gameMode === 'deathrun'
+          ? 'Rejoin Deathrun lobby/countdown so platforms reload for the match.'
+          : `${modeInfo.title} will load this map when that mode goes live.`,
     });
   };
 
@@ -388,6 +407,7 @@ export function MapEditor({
     return {
       ...latest,
       name: docRef.current.name,
+      gameMode: getMapGameMode(docRef.current),
       environment: ensureEnvironment(latest),
     };
   };
@@ -834,6 +854,12 @@ export function MapEditor({
       {!uiCollapsed && (
       <div className="h-12 border-b border-white/10 flex items-center gap-2 px-3 bg-[#121a24] relative z-[60] overflow-x-auto shrink-0">
         <span className="text-xs font-bold tracking-widest text-cyan-300/90 uppercase shrink-0">Map Editor</span>
+        <span
+          className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded shrink-0 ${modeInfo.badgeClass}`}
+          title={modeInfo.editorBlurb}
+        >
+          {modeInfo.shortTitle}
+        </span>
         <input
           className="ml-2 bg-black/40 border border-white/10 rounded px-2 py-1 text-sm w-40 sm:w-56 shrink-0"
           value={doc.name}
@@ -852,9 +878,12 @@ export function MapEditor({
             docRef.current = withEnv;
             markClean(withEnv);
             apiRef.current?.setDoc(withEnv);
+            setActivePlayId(getActivePlayMapIdForMode(getMapGameMode(withEnv)));
           }}
         >
-          {maps.map((m) => (
+          {maps
+            .filter((m) => (m.gameMode ?? 'deathrun') === gameMode)
+            .map((m) => (
             <option key={m.id} value={m.id}>
               {m.name}
             </option>
@@ -1586,12 +1615,86 @@ export function MapEditor({
             <ToolBtn onClick={() => apiRef.current?.placeSpawn('start')} title="Start (player spawn)">
               <Flag className="w-4 h-4 text-emerald-400" />
             </ToolBtn>
-            <ToolBtn onClick={() => apiRef.current?.placeSpawn('finish')} title="Finish (touch to win)">
-              <FlagTriangleRight className="w-4 h-4 text-amber-300" />
-            </ToolBtn>
-            <ToolBtn onClick={() => apiRef.current?.placeSpawn('spawn_trapper')} title="Trapper spawn">
-              <Flag className="w-4 h-4 text-red-400" />
-            </ToolBtn>
+            {gameMode === 'deathrun' && (
+              <>
+                <ToolBtn onClick={() => apiRef.current?.placeSpawn('finish')} title="Finish (touch to win)">
+                  <FlagTriangleRight className="w-4 h-4 text-amber-300" />
+                </ToolBtn>
+                <ToolBtn onClick={() => apiRef.current?.placeSpawn('spawn_trapper')} title="Trapper spawn">
+                  <Flag className="w-4 h-4 text-red-400" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => apiRef.current?.placeEntity('button', brush ?? undefined)}
+                  title="Button entity"
+                >
+                  <CircleDot className="w-4 h-4 text-amber-300" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => apiRef.current?.placeEntity('trap', brush ?? 'target-a-square')}
+                  title="Trap (link from button)"
+                >
+                  <Zap className="w-4 h-4 text-violet-300" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() =>
+                    apiRef.current?.placeEntity('hazard', brush ?? 'floor-square')
+                  }
+                  title="Death zone"
+                >
+                  <Skull className="w-4 h-4 text-red-400" />
+                </ToolBtn>
+              </>
+            )}
+            {gameMode === 'horde' && (
+              <>
+                <ToolBtn
+                  onClick={() => apiRef.current?.placeSpawn('spawn_monster')}
+                  title="Monster spawn"
+                >
+                  <Bug className="w-4 h-4 text-rose-400" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => apiRef.current?.placeEntity('red_zone', brush ?? 'floor-square')}
+                  title="Red zone"
+                >
+                  <Skull className="w-4 h-4 text-red-400" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => apiRef.current?.placeEntity('health_floor', brush ?? 'floor-square')}
+                  title="Health floor"
+                >
+                  <Heart className="w-4 h-4 text-emerald-400" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => apiRef.current?.placeEntity('revive_pad', brush ?? 'floor-square')}
+                  title="Revive pad"
+                >
+                  <HeartPulse className="w-4 h-4 text-sky-400" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => apiRef.current?.placeEntity('wave_anchor')}
+                  title="Wave anchor"
+                >
+                  <Zap className="w-4 h-4 text-amber-300" />
+                </ToolBtn>
+              </>
+            )}
+            {gameMode === 'competitive' && (
+              <>
+                <ToolBtn
+                  onClick={() => apiRef.current?.placeSpawn('spawn_team_a')}
+                  title="Team A spawn"
+                >
+                  <Flag className="w-4 h-4 text-sky-400" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => apiRef.current?.placeSpawn('spawn_team_b')}
+                  title="Team B spawn"
+                >
+                  <Flag className="w-4 h-4 text-orange-400" />
+                </ToolBtn>
+              </>
+            )}
             <ToolBtn
               active={playerStudioOpen}
               onClick={() => (playerStudioOpen ? setPlayerStudioOpen(false) : openPlayerStudio())}
@@ -1611,26 +1714,6 @@ export function MapEditor({
               title="Place player entity in map"
             >
               <User className="w-4 h-4 text-sky-300" />
-            </ToolBtn>
-            <ToolBtn
-              onClick={() => apiRef.current?.placeEntity('button', brush ?? undefined)}
-              title="Button entity"
-            >
-              <CircleDot className="w-4 h-4 text-amber-300" />
-            </ToolBtn>
-            <ToolBtn
-              onClick={() => apiRef.current?.placeEntity('trap', brush ?? 'target-a-square')}
-              title="Trap (link from button)"
-            >
-              <Zap className="w-4 h-4 text-violet-300" />
-            </ToolBtn>
-            <ToolBtn
-              onClick={() =>
-                apiRef.current?.placeEntity('hazard', brush ?? 'floor-square')
-              }
-              title="Death zone"
-            >
-              <Skull className="w-4 h-4 text-red-400" />
             </ToolBtn>
             <ToolBtn
               onClick={() => apiRef.current?.placeEntity('light')}
@@ -1693,17 +1776,11 @@ export function MapEditor({
                     patchSelected({ kind: e.target.value as EditorEntity['kind'] })
                   }
                 >
-                  <option value="prop">Prop</option>
-                  <option value="start">Start (spawn)</option>
-                  <option value="finish">Finish</option>
-                  <option value="trap">Trap (activatable)</option>
-                  <option value="hazard">Death zone</option>
-                  <option value="light">Light bulb</option>
-                  <option value="player">Player</option>
-                  <option value="button">Button</option>
-                  <option value="spawn_runner">Spawn Runner (legacy)</option>
-                  <option value="spawn_trapper">Spawn Trapper</option>
-                  <option value="checkpoint">Checkpoint</option>
+                  {kindOptions.map((k) => (
+                    <option key={k} value={k}>
+                      {entityKindLabel(k)}
+                    </option>
+                  ))}
                 </select>
               </label>
 
@@ -1947,6 +2024,322 @@ export function MapEditor({
                       Bake stairs → solid steps
                     </button>
                   )}
+                </div>
+              )}
+
+              {selected.kind === 'spawn_monster' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-rose-300/80 uppercase">
+                    Monster spawn
+                  </p>
+                  <label className="block text-xs text-white/60">
+                    Type
+                    <select
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureMonsterSpawn(selected).monsterType}
+                      onChange={(e) =>
+                        patchSelected({
+                          monsterSpawn: {
+                            ...ensureMonsterSpawn(selected),
+                            monsterType: e.target.value as
+                              | 'basic'
+                              | 'fast'
+                              | 'brute'
+                              | 'boss',
+                          },
+                        })
+                      }
+                    >
+                      <option value="basic">Basic</option>
+                      <option value="fast">Fast</option>
+                      <option value="brute">Brute</option>
+                      <option value="boss">Boss</option>
+                    </select>
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Wave min
+                    <input
+                      type="number"
+                      min={1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureMonsterSpawn(selected).waveMin}
+                      onChange={(e) =>
+                        patchSelected({
+                          monsterSpawn: {
+                            ...ensureMonsterSpawn(selected),
+                            waveMin: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Wave max (0 = ∞)
+                    <input
+                      type="number"
+                      min={0}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureMonsterSpawn(selected).waveMax}
+                      onChange={(e) =>
+                        patchSelected({
+                          monsterSpawn: {
+                            ...ensureMonsterSpawn(selected),
+                            waveMax: Math.max(0, Number(e.target.value) || 0),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Count / wave
+                    <input
+                      type="number"
+                      min={1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureMonsterSpawn(selected).countPerWave}
+                      onChange={(e) =>
+                        patchSelected({
+                          monsterSpawn: {
+                            ...ensureMonsterSpawn(selected),
+                            countPerWave: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Spawn interval (sec)
+                    <input
+                      type="number"
+                      min={0.2}
+                      step={0.1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureMonsterSpawn(selected).spawnIntervalSec}
+                      onChange={(e) =>
+                        patchSelected({
+                          monsterSpawn: {
+                            ...ensureMonsterSpawn(selected),
+                            spawnIntervalSec: Math.max(0.2, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              )}
+
+              {selected.kind === 'red_zone' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-red-300/80 uppercase">Red zone</p>
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={ensureRedZone(selected).instantKill}
+                      onChange={(e) =>
+                        patchSelected({
+                          redZone: { ...ensureRedZone(selected), instantKill: e.target.checked },
+                        })
+                      }
+                    />
+                    Instant kill
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Damage / tick
+                    <input
+                      type="number"
+                      min={1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureRedZone(selected).damagePerTick}
+                      onChange={(e) =>
+                        patchSelected({
+                          redZone: {
+                            ...ensureRedZone(selected),
+                            damagePerTick: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Interval (ms)
+                    <input
+                      type="number"
+                      min={100}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureRedZone(selected).intervalMs}
+                      onChange={(e) =>
+                        patchSelected({
+                          redZone: {
+                            ...ensureRedZone(selected),
+                            intervalMs: Math.max(100, Number(e.target.value) || 500),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              )}
+
+              {selected.kind === 'health_floor' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-emerald-300/80 uppercase">
+                    Health floor
+                  </p>
+                  <label className="block text-xs text-white/60">
+                    Heal / tick
+                    <input
+                      type="number"
+                      min={1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureHealthFloor(selected).healPerTick}
+                      onChange={(e) =>
+                        patchSelected({
+                          healthFloor: {
+                            ...ensureHealthFloor(selected),
+                            healPerTick: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Interval (ms)
+                    <input
+                      type="number"
+                      min={100}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureHealthFloor(selected).intervalMs}
+                      onChange={(e) =>
+                        patchSelected({
+                          healthFloor: {
+                            ...ensureHealthFloor(selected),
+                            intervalMs: Math.max(100, Number(e.target.value) || 500),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Max heal % (100 = full)
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureHealthFloor(selected).maxHealPercent}
+                      onChange={(e) =>
+                        patchSelected({
+                          healthFloor: {
+                            ...ensureHealthFloor(selected),
+                            maxHealPercent: Math.min(
+                              100,
+                              Math.max(1, Number(e.target.value) || 100)
+                            ),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              )}
+
+              {selected.kind === 'revive_pad' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-sky-300/80 uppercase">
+                    Revive pad
+                  </p>
+                  <label className="block text-xs text-white/60">
+                    Revive time (ms)
+                    <input
+                      type="number"
+                      min={500}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureRevive(selected).reviveTimeMs}
+                      onChange={(e) =>
+                        patchSelected({
+                          revive: {
+                            ...ensureRevive(selected),
+                            reviveTimeMs: Math.max(500, Number(e.target.value) || 4000),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Capacity
+                    <input
+                      type="number"
+                      min={1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureRevive(selected).capacity}
+                      onChange={(e) =>
+                        patchSelected({
+                          revive: {
+                            ...ensureRevive(selected),
+                            capacity: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              )}
+
+              {selected.kind === 'wave_anchor' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-amber-300/80 uppercase">
+                    Wave anchor
+                  </p>
+                  <label className="block text-xs text-white/60">
+                    Wave number
+                    <input
+                      type="number"
+                      min={1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureWaveAnchor(selected).waveNumber}
+                      onChange={(e) =>
+                        patchSelected({
+                          waveAnchor: {
+                            ...ensureWaveAnchor(selected),
+                            waveNumber: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Difficulty ×
+                    <input
+                      type="number"
+                      min={0.1}
+                      step={0.1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureWaveAnchor(selected).difficultyMultiplier}
+                      onChange={(e) =>
+                        patchSelected({
+                          waveAnchor: {
+                            ...ensureWaveAnchor(selected),
+                            difficultyMultiplier: Math.max(0.1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Label
+                    <input
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureWaveAnchor(selected).label ?? ''}
+                      onChange={(e) =>
+                        patchSelected({
+                          waveAnchor: {
+                            ...ensureWaveAnchor(selected),
+                            label: e.target.value || undefined,
+                          },
+                        })
+                      }
+                    />
+                  </label>
                 </div>
               )}
 

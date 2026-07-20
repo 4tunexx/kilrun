@@ -1,5 +1,7 @@
 import type { MapDocument, MapEnvironment } from './map-document';
-import { createEmptyMap, ensureEnvironment } from './map-document';
+import { createEmptyMap, ensureEnvironment, getMapGameMode } from './map-document';
+import type { KilrunMode } from '@/lib/game-modes';
+import { normalizeKilrunMode } from '@/lib/game-modes';
 
 const INDEX_KEY = 'kilrun.mapIndex.v1';
 const DOC_PREFIX = 'kilrun.mapDoc.v1.';
@@ -10,6 +12,7 @@ export interface MapListItem {
   name: string;
   updatedAt: string;
   createdAt?: string;
+  gameMode?: KilrunMode;
   entityCount?: number;
   floorCount?: number;
   trapCount?: number;
@@ -28,6 +31,7 @@ export interface MapStats {
   sizeBytes: number;
   createdAt?: string;
   updatedAt?: string;
+  gameMode: KilrunMode;
 }
 
 function readIndex(): MapListItem[] {
@@ -52,7 +56,7 @@ export function computeMapStats(doc: MapDocument, json?: string): MapStats {
     floorCount: ents.filter((e) => e.model?.includes('floor')).length,
     trapCount: ents.filter((e) => e.kind === 'trap').length,
     hazardCount: ents.filter(
-      (e) => e.kind === 'hazard' || e.hazard?.enabled
+      (e) => e.kind === 'hazard' || e.hazard?.enabled || e.kind === 'red_zone'
     ).length,
     buttonCount: ents.filter((e) => e.kind === 'button').length,
     spawnCount: ents.filter(
@@ -60,11 +64,15 @@ export function computeMapStats(doc: MapDocument, json?: string): MapStats {
         e.kind === 'start' ||
         e.kind === 'finish' ||
         e.kind === 'spawn_runner' ||
-        e.kind === 'spawn_trapper'
+        e.kind === 'spawn_trapper' ||
+        e.kind === 'spawn_monster' ||
+        e.kind === 'spawn_team_a' ||
+        e.kind === 'spawn_team_b'
     ).length,
     sizeBytes: new Blob([serialized]).size,
     createdAt: doc.meta?.createdAt,
     updatedAt: doc.meta?.updatedAt,
+    gameMode: getMapGameMode(doc),
   };
 }
 
@@ -73,6 +81,7 @@ function indexEntryFromDoc(id: string, doc: MapDocument, serialized: string): Ma
   return {
     id,
     name: doc.name,
+    gameMode: stats.gameMode,
     updatedAt: doc.meta?.updatedAt ?? new Date().toISOString(),
     createdAt: doc.meta?.createdAt,
     entityCount: stats.entityCount,
@@ -85,14 +94,15 @@ function indexEntryFromDoc(id: string, doc: MapDocument, serialized: string): Ma
 }
 
 /** Rebuild missing stats on older index rows. */
-export function listMaps(): MapListItem[] {
+export function listMaps(filterMode?: KilrunMode): MapListItem[] {
   const index = readIndex();
   let dirty = false;
   const enriched = index.map((item) => {
     if (
       item.entityCount != null &&
       item.sizeBytes != null &&
-      item.createdAt
+      item.createdAt &&
+      item.gameMode
     ) {
       return {
         ...item,
@@ -105,7 +115,9 @@ export function listMaps(): MapListItem[] {
     return indexEntryFromDoc(item.id, doc, JSON.stringify(doc));
   });
   if (dirty) writeIndex(enriched);
-  return enriched.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const sorted = enriched.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  if (!filterMode) return sorted;
+  return sorted.filter((m) => normalizeKilrunMode(m.gameMode) === filterMode);
 }
 
 export function saveMap(
@@ -116,6 +128,7 @@ export function saveMap(
   const updatedAt = new Date().toISOString();
   const next: MapDocument = {
     ...doc,
+    gameMode: getMapGameMode(doc),
     environment: ensureEnvironment(doc),
     meta: { ...doc.meta, updatedAt, createdAt: doc.meta?.createdAt ?? updatedAt },
   };
@@ -136,7 +149,12 @@ export function saveMap(
 export function loadMap(id: string): MapDocument | null {
   try {
     const raw = localStorage.getItem(DOC_PREFIX + id);
-    return raw ? (JSON.parse(raw) as MapDocument) : null;
+    if (!raw) return null;
+    const doc = JSON.parse(raw) as MapDocument;
+    if (!doc.gameMode) {
+      doc.gameMode = 'deathrun';
+    }
+    return doc;
   } catch {
     return null;
   }
@@ -161,6 +179,7 @@ export function duplicateMap(id: string, newName?: string): string | null {
   const copy: MapDocument = {
     ...doc,
     name: newName ?? `${doc.name} Copy`,
+    gameMode: getMapGameMode(doc),
     meta: { createdAt: now, updatedAt: now },
   };
   const thumb = getMapThumbnail(id);
@@ -168,15 +187,22 @@ export function duplicateMap(id: string, newName?: string): string | null {
   return newId;
 }
 
-export function createNewMap(name = 'Untitled Map'): { id: string; doc: MapDocument } {
+export function createNewMap(
+  name = 'Untitled Map',
+  gameMode: KilrunMode = 'deathrun'
+): { id: string; doc: MapDocument } {
   const id = `map_${Date.now().toString(36)}`;
-  const doc = createEmptyMap(name);
+  const doc = createEmptyMap(name, gameMode);
   saveMap(id, doc);
   return { id, doc };
 }
 
 /** Ensure older maps without floors get starter pads so Deathrun + thumbs work. */
 export function ensureStarterFloors(doc: MapDocument): MapDocument {
+  const mode = getMapGameMode(doc);
+  // Horde / competitive templates already ship with arena floors.
+  if (mode !== 'deathrun') return doc;
+
   const hasFloor = (doc.entities ?? []).some((e) => e.model?.includes('floor'));
   if (hasFloor) return doc;
 
@@ -197,6 +223,7 @@ export function ensureStarterFloors(doc: MapDocument): MapDocument {
 
   return {
     ...doc,
+    gameMode: mode,
     entities: [
       mkFloor('Start Floor', 0, [2, 1, 2]),
       mkFloor('Course Floor', 8, [1.5, 1, 1.5]),
@@ -227,11 +254,13 @@ export function importJson(text: string): MapDocument {
   if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.entities)) {
     throw new Error('Invalid map JSON');
   }
+  parsed.gameMode = getMapGameMode(parsed);
+  parsed.environment = ensureEnvironment(parsed) as MapEnvironment;
   return parsed;
 }
 
-export function formatBytes(n: number | undefined): string {
-  if (n == null || n <= 0) return '—';
+export function formatBytes(n?: number): string {
+  if (n == null || !Number.isFinite(n) || n <= 0) return '—';
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
@@ -243,7 +272,7 @@ export function ensureStarterMap(): { id: string; doc: MapDocument } {
     const doc = loadMap(existing.id);
     if (doc) return { id: existing.id, doc };
   }
-  return createNewMap('Deathrun Prototype 1');
+  return createNewMap('Deathrun Prototype 1', 'deathrun');
 }
 
 /** Mood / sky+fog+floor packages for World tab. */

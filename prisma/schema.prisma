@@ -18,6 +18,9 @@ model User {
   avatarUrl   String
   vpCurrency  Int      @default(0)
   xpProgress  Int      @default(0)
+  /// Killrun Points — competitive Elo-style rating (Faceit / ESEA style).
+  /// Profile `currentRank` is derived from KP via getRankForKp().
+  kp          Int      @default(1000)
   currentRank String   @default("Unranked")
   role        String   @default("player")
   bio         String   @default("")
@@ -117,11 +120,16 @@ model MatchResult {
   outcome  String
   xpEarned Int
   vpEarned Int
+  /// Competitive KP delta applied for this match (can be negative).
+  kpDelta  Int      @default(0)
+  /// Extra mode stats (waves cleared, kills, rounds won, …) as JSON.
+  stats    Json?
   playedAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
+  @@index([userId, mode])
 }
 
 model StoreItem {

@@ -9,7 +9,8 @@ import {
   missionPeriodKey,
   startOfLocalDay,
 } from '@/lib/daily-missions';
-import { getLevelFromXp, getLevelProgress, getRankForLevel } from '@/lib/progression';
+import { getLevelFromXp, getLevelProgress } from '@/lib/progression';
+import { getRankForKp, KP_DEFAULT, clampKp } from '@/lib/kp';
 import { canAccessAdmin } from '@/lib/roles';
 
 export type WebsiteActionMetric =
@@ -27,6 +28,8 @@ export type WebsiteActionMetric =
   | 'daily_chat'
   | 'daily_forum'
   | 'daily_runs'
+  | 'daily_horde'
+  | 'daily_competitive'
   | 'daily_leaderboard'
   | 'cosmetics_equipped'
   | 'cosmetics_deleted'
@@ -67,7 +70,7 @@ async function notify(
   });
 }
 
-/** Grant XP, update rank, notify on level-up. */
+/** Grant XP and notify on level-up. Rank is driven by KP, not XP level. */
 export async function grantXp(userId: string, amount: number, reason?: string) {
   if (amount <= 0) return null;
   const before = await prisma.user.findUnique({ where: { id: userId } });
@@ -81,13 +84,6 @@ export async function grantXp(userId: string, amount: number, reason?: string) {
     },
   });
   const nextLevel = getLevelFromXp(updated.xpProgress);
-  const rank = getRankForLevel(nextLevel);
-  if (rank !== updated.currentRank) {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { currentRank: rank },
-    });
-  }
 
   if (nextLevel > prevLevel) {
     await notify(
@@ -101,6 +97,75 @@ export async function grantXp(userId: string, amount: number, reason?: string) {
   }
 
   return { xpProgress: updated.xpProgress, level: nextLevel, prevLevel };
+}
+
+/**
+ * Apply a KP delta, sync `currentRank` from the new KP, and optionally notify
+ * on rank-up / rank-down.
+ */
+const KP_RANK_ORDER = [
+  'Unranked',
+  'Bronze',
+  'Silver',
+  'Gold',
+  'Platinum',
+  'Diamond',
+  'Immortal',
+];
+
+export async function applyKpDelta(
+  userId: string,
+  delta: number,
+  reason?: string
+): Promise<{ kp: number; rank: string; prevRank: string; delta: number } | null> {
+  if (!delta) return null;
+  const before = await prisma.user.findUnique({ where: { id: userId } });
+  if (!before) return null;
+
+  const prevKp = typeof (before as { kp?: number }).kp === 'number' ? (before as { kp: number }).kp : KP_DEFAULT;
+  const nextKp = clampKp(prevKp + delta);
+  const prevRank = before.currentRank || getRankForKp(prevKp);
+  const nextRank = getRankForKp(nextKp);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      kp: nextKp,
+      currentRank: nextRank,
+    },
+  });
+
+  if (nextRank !== prevRank) {
+    const up = KP_RANK_ORDER.indexOf(nextRank) > KP_RANK_ORDER.indexOf(prevRank);
+    await notify(
+      userId,
+      up ? `Rank up — ${nextRank}` : `Rank dropped — ${nextRank}`,
+      reason
+        ? `${delta > 0 ? '+' : ''}${delta} KP → ${nextRank}. (${reason})`
+        : `${delta > 0 ? '+' : ''}${delta} KP → ${nextRank}.`,
+      'rank_change'
+    );
+  }
+
+  return { kp: nextKp, rank: nextRank, prevRank, delta };
+}
+
+/** Ensure user.kp exists and currentRank matches KP (migration / backfill). */
+export async function syncRankFromKp(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) return null;
+  const kp =
+    typeof (user as { kp?: number }).kp === 'number'
+      ? (user as { kp: number }).kp
+      : KP_DEFAULT;
+  const rank = getRankForKp(kp);
+  if (user.currentRank !== rank || (user as { kp?: number }).kp == null) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { kp, currentRank: rank },
+    });
+  }
+  return { kp, rank };
 }
 
 /** Ensure the 5 built-in daily templates exist (won't overwrite admin edits). */
@@ -243,11 +308,53 @@ export async function progressMissions(
 async function metricCount(userId: string, metric: string): Promise<number> {
   switch (metric) {
     case 'runs':
-      return prisma.matchResult.count({ where: { userId } });
+      return prisma.matchResult.count({ where: { userId, mode: 'deathrun' } });
     case 'wins':
       return prisma.matchResult.count({
-        where: { userId, outcome: { in: ['win', 'survived'] } },
+        where: {
+          userId,
+          mode: 'deathrun',
+          outcome: { in: ['win', 'survived'] },
+        },
       });
+    case 'horde_runs':
+      return prisma.matchResult.count({ where: { userId, mode: 'horde' } });
+    case 'horde_wins':
+      return prisma.matchResult.count({
+        where: { userId, mode: 'horde', outcome: { in: ['win', 'survived'] } },
+      });
+    case 'horde_waves': {
+      const rows = await prisma.matchResult.findMany({
+        where: { userId, mode: 'horde' },
+        select: { stats: true },
+      });
+      return rows.reduce((sum, r) => {
+        const s = r.stats as { wavesCleared?: number } | null;
+        return sum + (typeof s?.wavesCleared === 'number' ? s.wavesCleared : 0);
+      }, 0);
+    }
+    case 'horde_kills': {
+      const rows = await prisma.matchResult.findMany({
+        where: { userId, mode: 'horde' },
+        select: { stats: true },
+      });
+      return rows.reduce((sum, r) => {
+        const s = r.stats as { kills?: number } | null;
+        return sum + (typeof s?.kills === 'number' ? s.kills : 0);
+      }, 0);
+    }
+    case 'competitive_runs':
+      return prisma.matchResult.count({ where: { userId, mode: 'competitive' } });
+    case 'competitive_wins':
+      return prisma.matchResult.count({
+        where: { userId, mode: 'competitive', outcome: 'win' },
+      });
+    case 'kp': {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      return typeof (u as { kp?: number } | null)?.kp === 'number'
+        ? (u as { kp: number }).kp
+        : KP_DEFAULT;
+    }
     case 'distance': {
       const stats = await prisma.matchStat.findMany({ where: { userId } });
       return stats.reduce((s, r) => s + r.distance, 0);
@@ -371,7 +478,27 @@ async function metricCount(userId: string, metric: string): Promise<number> {
     }
     case 'daily_runs':
       return prisma.matchResult.count({
-        where: { userId, playedAt: { gte: startOfLocalDay() } },
+        where: {
+          userId,
+          mode: 'deathrun',
+          playedAt: { gte: startOfLocalDay() },
+        },
+      });
+    case 'daily_horde':
+      return prisma.matchResult.count({
+        where: {
+          userId,
+          mode: 'horde',
+          playedAt: { gte: startOfLocalDay() },
+        },
+      });
+    case 'daily_competitive':
+      return prisma.matchResult.count({
+        where: {
+          userId,
+          mode: 'competitive',
+          playedAt: { gte: startOfLocalDay() },
+        },
       });
     case 'daily_leaderboard': {
       const u = await prisma.user.findUnique({ where: { id: userId } });
@@ -492,23 +619,51 @@ export async function tryUnlockBadge(userId: string, metric: string, _delta = 1)
 /** After a match: XP already granted separately; progress game missions + achievements. */
 export async function processMatchProgression(input: {
   userId: string;
+  mode?: 'deathrun' | 'horde' | 'competitive';
   outcome: string;
-  role?: 'trapper' | 'runner';
+  role?: 'trapper' | 'runner' | 'survivor' | 'team_a' | 'team_b';
   score?: number;
   distance?: number;
+  wavesCleared?: number;
+  kills?: number;
 }) {
+  const mode = input.mode ?? 'deathrun';
   await ensurePlayerMissions(input.userId);
-  await progressMissions(input.userId, 'runs', 1);
-  await processWebsiteAction(input.userId, 'daily_runs');
-  if (input.outcome === 'win' || input.outcome === 'survived') {
-    await progressMissions(input.userId, 'wins', 1);
+
+  if (mode === 'deathrun') {
+    await progressMissions(input.userId, 'runs', 1);
+    await processWebsiteAction(input.userId, 'daily_runs');
+    if (input.outcome === 'win' || input.outcome === 'survived') {
+      await progressMissions(input.userId, 'wins', 1);
+    }
+    if (input.role === 'trapper' && input.outcome === 'win') {
+      await progressMissions(input.userId, 'trapper_wins', 1);
+    }
+    if (input.role === 'runner' && input.outcome === 'survived') {
+      await progressMissions(input.userId, 'runner_survives', 1);
+    }
+  } else if (mode === 'horde') {
+    await progressMissions(input.userId, 'horde_runs', 1);
+    await processWebsiteAction(input.userId, 'daily_horde');
+    if (input.outcome === 'win' || input.outcome === 'survived') {
+      await progressMissions(input.userId, 'horde_wins', 1);
+    }
+    if (input.wavesCleared && input.wavesCleared > 0) {
+      await progressMissions(input.userId, 'horde_waves', input.wavesCleared);
+    }
+    if (input.kills && input.kills > 0) {
+      await progressMissions(input.userId, 'horde_kills', input.kills);
+    }
+  } else if (mode === 'competitive') {
+    await progressMissions(input.userId, 'competitive_runs', 1);
+    await processWebsiteAction(input.userId, 'daily_competitive');
+    if (input.outcome === 'win') {
+      await progressMissions(input.userId, 'competitive_wins', 1);
+    }
+    await tryUnlockAchievement(input.userId, 'kp');
+    await tryUnlockBadge(input.userId, 'kp');
   }
-  if (input.role === 'trapper' && input.outcome === 'win') {
-    await progressMissions(input.userId, 'trapper_wins', 1);
-  }
-  if (input.role === 'runner' && input.outcome === 'survived') {
-    await progressMissions(input.userId, 'runner_survives', 1);
-  }
+
   if (input.outcome === 'loss') {
     await progressMissions(input.userId, 'losses', 1);
   }
@@ -551,11 +706,22 @@ export async function processMatchProgression(input: {
   await tryUnlockAchievement(input.userId, 'runner_survives');
   await tryUnlockAchievement(input.userId, 'losses');
   await tryUnlockAchievement(input.userId, 'eliminated');
+  await tryUnlockAchievement(input.userId, 'horde_runs');
+  await tryUnlockAchievement(input.userId, 'horde_wins');
+  await tryUnlockAchievement(input.userId, 'horde_waves');
+  await tryUnlockAchievement(input.userId, 'horde_kills');
+  await tryUnlockAchievement(input.userId, 'competitive_runs');
+  await tryUnlockAchievement(input.userId, 'competitive_wins');
   await tryUnlockBadge(input.userId, 'runs');
   await tryUnlockBadge(input.userId, 'wins');
   await tryUnlockBadge(input.userId, 'level');
   await tryUnlockBadge(input.userId, 'trapper_wins');
   await tryUnlockBadge(input.userId, 'runner_survives');
+  await tryUnlockBadge(input.userId, 'horde_runs');
+  await tryUnlockBadge(input.userId, 'horde_wins');
+  await tryUnlockBadge(input.userId, 'horde_waves');
+  await tryUnlockBadge(input.userId, 'competitive_wins');
+  await tryUnlockBadge(input.userId, 'kp');
 }
 
 const SYNC_FROM_TOTAL_METRICS = new Set<WebsiteActionMetric>([
@@ -573,6 +739,8 @@ const SYNC_FROM_TOTAL_METRICS = new Set<WebsiteActionMetric>([
   'daily_chat',
   'daily_forum',
   'daily_runs',
+  'daily_horde',
+  'daily_competitive',
   'daily_leaderboard',
   'reputation',
 ]);
@@ -689,6 +857,21 @@ export async function getLivePlayerState(userId?: string) {
     }),
   ]);
   const progress = getLevelProgress(user.xpProgress);
+  const userKp =
+    typeof (user as { kp?: number }).kp === 'number'
+      ? (user as { kp: number }).kp
+      : KP_DEFAULT;
+  // Keep profile rank aligned with KP (ranks are competitive, not XP level).
+  const kpRank = getRankForKp(userKp);
+  if (user.currentRank !== kpRank || (user as { kp?: number }).kp == null) {
+    await prisma.user
+      .update({
+        where: { id: user.id },
+        data: { kp: userKp, currentRank: kpRank },
+      })
+      .catch(() => {});
+  }
+
   const today = missionPeriodKey();
   const dailyMissions = await prisma.activeMission.findMany({
     where: {
@@ -714,7 +897,8 @@ export async function getLivePlayerState(userId?: string) {
     id: user.id,
     xpProgress: user.xpProgress,
     vpCurrency: user.vpCurrency,
-    currentRank: user.currentRank,
+    kp: userKp,
+    currentRank: kpRank,
     role: user.role,
     isVip: user.isVip,
     emailVerified: user.emailVerified,
