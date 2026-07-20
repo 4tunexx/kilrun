@@ -14,7 +14,7 @@ import {
   Zap,
   MailX,
   Swords,
-  Crown,
+  Gem,
   Trophy,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -479,7 +479,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                       rank={ranked?.currentRank || 'Unranked'}
                       size={22}
                     />
-                    <Crown className="h-4 w-4 text-yellow-400" />
+                    <Gem className="h-4 w-4 text-amber-300 fill-amber-400/40" />
                   </div>
                   <p className="text-xl font-black text-yellow-400">
                     {ranked?.currentRank || 'Unranked'}

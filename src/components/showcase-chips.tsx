@@ -5,7 +5,7 @@ import {
   Award,
   ChevronLeft,
   ChevronRight,
-  Crown,
+  Gem,
   Package,
   ThumbsUp,
   Trophy,
@@ -28,7 +28,7 @@ import {
 import { cn } from '@/lib/utils';
 
 const TYPE_ICONS: Record<ShowcaseItemType, LucideIcon> = {
-  rank: Crown,
+  rank: Gem,
   badge: Award,
   achievement: Trophy,
   inventory: Package,
