@@ -129,6 +129,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     id: 'match',
     title: 'Playing in Deathrun',
     paragraphs: [
+      'Green wire pads on solids are collision helpers (not multi-select). They only show on the selected object unless you turn on COL in Tools.',
       'Set as Active Match Map stores which JSON Deathrun should use. Floor pieces convert to collision platforms; runner spawn becomes start.',
       'Decorative props, traps, and buttons appear from your map overlay on the client. Restart / rejoin the match after publishing so the server reloads platforms.',
     ],
