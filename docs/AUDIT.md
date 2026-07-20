@@ -10,7 +10,7 @@ _Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6
 
 1. Admin → **Dashboard → Sync database schema** (`2026-07-20-rank-config-mm`)
 2. Admin → **Dashboard → Seed progression** (Horde / Competitive missions, achievements, badges)
-3. **Restart Colyseus** game server (rooms + `filterBy(['rankKey'])` for Ranked)
+3. **Restart Colyseus** — Admin → Dashboard → **Restart Colyseus** (or redeploy the game server). Requires `GAME_SERVER_ADMIN_SECRET` on both web + game server.
 4. Map Editor: set **Active** map for Deathrun / Horde / Competitive
 
 ---
