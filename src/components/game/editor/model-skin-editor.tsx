@@ -26,6 +26,8 @@ import {
   Paintbrush,
   RotateCw,
   Aperture,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { EditorEntity } from './map-document';
@@ -130,6 +132,7 @@ export function ModelSkinEditor({
   const [showAvatar, setShowAvatar] = useState(true);
   const [viewDragMode, setViewDragMode] = useState<ViewDragMode>('turn');
   const [clayView, setClayView] = useState(false);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const [sourceMode, setSourceMode] = useState<SourceMode>('sculpt');
   const [blobBrush, setBlobBrush] = useState<SkinSculptBrush | null>('add');
   const [brushRadius, setBrushRadius] = useState(0.12);
@@ -237,6 +240,23 @@ export function ModelSkinEditor({
   useEffect(() => {
     previewRef.current?.setClayView(clayView);
   }, [clayView]);
+
+  useEffect(() => {
+    // Expand/collapse changes host size — force WebGL resize after layout.
+    const id = requestAnimationFrame(() => {
+      const host = canvasHostRef.current;
+      if (!host) return;
+      void host.offsetHeight;
+      previewRef.current?.forceResize();
+    });
+    const id2 = requestAnimationFrame(() => {
+      previewRef.current?.forceResize();
+    });
+    return () => {
+      cancelAnimationFrame(id);
+      cancelAnimationFrame(id2);
+    };
+  }, [previewExpanded]);
 
   useEffect(() => {
     return () => {
@@ -452,19 +472,28 @@ export function ModelSkinEditor({
         </button>
       </div>
 
-      <div className="relative h-56 shrink-0 border-b border-white/10 bg-[#0a1018]">
-        <div ref={canvasHostRef} className="absolute inset-0" />
+      <div
+        className={
+          previewExpanded
+            ? 'fixed inset-0 z-[200] flex flex-col bg-[#0a1018]'
+            : 'relative h-56 shrink-0 border-b border-white/10 bg-[#0a1018]'
+        }
+      >
+        <div
+          ref={canvasHostRef}
+          className={previewExpanded ? 'absolute inset-0' : 'absolute inset-0'}
+        />
         {loading && (
           <p className="absolute inset-0 flex items-center justify-center text-xs text-white/50">
             Loading…
           </p>
         )}
         {error && (
-          <p className="absolute bottom-2 left-2 right-2 text-[10px] text-red-300">{error}</p>
+          <p className="absolute bottom-2 left-2 right-2 text-[10px] text-red-300 z-10">{error}</p>
         )}
         {/* Sculpt vs Turn camera — overlays the live preview */}
         <div className="absolute top-2 left-2 right-2 flex flex-col gap-1.5 z-10 pointer-events-none">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <div className="flex rounded-lg overflow-hidden border border-white/20 bg-black/65 pointer-events-auto shadow-lg">
               <button
                 type="button"
@@ -491,7 +520,7 @@ export function ModelSkinEditor({
                     ? 'bg-sky-500/40 text-sky-50'
                     : 'text-white/55 hover:bg-white/10'
                 }`}
-                title="Drag to orbit · scroll to zoom · shift-drag to pan"
+                title="Drag to orbit · scroll / pinch to zoom · shift-drag to pan"
               >
                 <Move3d className="w-3 h-3" />
                 Turn
@@ -512,6 +541,36 @@ export function ModelSkinEditor({
             </button>
             <button
               type="button"
+              onClick={() => {
+                const next = !previewExpanded;
+                setPreviewExpanded(next);
+                if (next) {
+                  setViewDragMode('sculpt');
+                  if (!blobBrush) setBlobBrush('add');
+                  setShowAvatar(false);
+                  setClayView(true);
+                }
+              }}
+              className={`h-8 px-2 rounded-lg border text-[10px] font-bold uppercase pointer-events-auto flex items-center gap-1 ${
+                previewExpanded
+                  ? 'border-cyan-400/50 bg-cyan-500/30 text-cyan-50'
+                  : 'border-white/20 bg-black/65 text-white/65 hover:bg-white/10'
+              }`}
+              title={
+                previewExpanded
+                  ? 'Exit fullscreen sculpt'
+                  : 'Fullscreen sculpt — great for tablets'
+              }
+            >
+              {previewExpanded ? (
+                <Minimize2 className="w-3.5 h-3.5" />
+              ) : (
+                <Maximize2 className="w-3.5 h-3.5" />
+              )}
+              {previewExpanded ? 'Exit' : 'Full'}
+            </button>
+            <button
+              type="button"
               onClick={() => previewRef.current?.resetCamera()}
               className="ml-auto w-8 h-8 rounded-lg border border-white/20 bg-black/65 text-white/70 hover:bg-white/10 pointer-events-auto flex items-center justify-center"
               title="Reset camera"
@@ -520,35 +579,161 @@ export function ModelSkinEditor({
               <RotateCw className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="flex gap-1 pointer-events-auto">
-            {(
-              [
-                ['front', 'Front'],
-                ['side', 'Side'],
-                ['bottom', 'Bottom'],
-                ['top', 'Top'],
-                ['back', 'Back'],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setViewDragMode('turn');
-                  previewRef.current?.setCameraPreset(id);
-                }}
-                className="px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-wide border border-white/15 bg-black/55 text-white/60 hover:bg-white/10 hover:text-white/90"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          {!previewExpanded && (
+            <div className="flex gap-1 pointer-events-auto">
+              {(
+                [
+                  ['front', 'Front'],
+                  ['side', 'Side'],
+                  ['bottom', 'Bottom'],
+                  ['top', 'Top'],
+                  ['back', 'Back'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setViewDragMode('turn');
+                    previewRef.current?.setCameraPreset(id);
+                  }}
+                  className="px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-wide border border-white/15 bg-black/55 text-white/60 hover:bg-white/10 hover:text-white/90"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <p className="absolute bottom-1.5 left-2 right-2 text-[9px] text-white/40 pointer-events-none truncate">
-          {viewDragMode === 'turn'
-            ? 'Turn: drag orbit · scroll zoom · shift-pan · use Front/Bottom/Side for quick angles'
-            : 'Sculpt: drag on mesh · Clay helps read form · Turn to see underside'}
-        </p>
+
+        {/* Fullscreen sculpt dock — brushes + size on tablet without leaving the canvas */}
+        {previewExpanded && (
+          <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-2 right-2 z-20 pointer-events-none">
+            <div className="mx-auto max-w-lg rounded-2xl border border-white/15 bg-black/80 backdrop-blur-md p-2.5 space-y-2 pointer-events-auto shadow-2xl">
+              <div className="flex gap-1.5">
+                {(
+                  [
+                    ['add', 'Add', CirclePlus],
+                    ['remove', 'Carve', CircleMinus],
+                    ['smooth', 'Smooth', Waves],
+                  ] as const
+                ).map(([id, label, Icon]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      setBlobBrush(id);
+                      setViewDragMode('sculpt');
+                      setShowAvatar(false);
+                    }}
+                    className={`flex-1 flex items-center justify-center gap-1 py-2.5 rounded-xl text-[11px] font-bold border ${
+                      blobBrush === id && viewDragMode === 'sculpt'
+                        ? 'bg-fuchsia-500/35 border-fuchsia-400/60 text-fuchsia-50'
+                        : 'border-white/10 text-white/60'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-1.5">
+                {(
+                  [
+                    ['front', 'F'],
+                    ['side', 'S'],
+                    ['bottom', 'Bot'],
+                    ['top', 'Top'],
+                    ['back', 'B'],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      setViewDragMode('turn');
+                      previewRef.current?.setCameraPreset(id);
+                    }}
+                    className="flex-1 py-1.5 rounded-lg text-[9px] font-bold uppercase border border-white/10 text-white/55"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label className="flex items-center gap-2 text-[10px] text-white/50">
+                <span className="w-10 shrink-0">Size</span>
+                <input
+                  type="range"
+                  min={0.04}
+                  max={0.35}
+                  step={0.01}
+                  value={brushRadius}
+                  onChange={(e) => setBrushRadius(Number(e.target.value))}
+                  className="flex-1 accent-fuchsia-400"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-[10px] text-white/50">
+                <span className="w-10 shrink-0">Power</span>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={brushStrength}
+                  onChange={(e) => setBrushStrength(Number(e.target.value))}
+                  className="flex-1 accent-fuchsia-400"
+                />
+              </label>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSymmetryX((v) => !v)}
+                  className={`flex-1 py-2 rounded-xl text-[10px] font-bold border ${
+                    symmetryX
+                      ? 'bg-sky-500/25 border-sky-400/50 text-sky-100'
+                      : 'border-white/10 text-white/50'
+                  }`}
+                >
+                  Sym {symmetryX ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  type="button"
+                  disabled={!canUndo}
+                  onClick={() => previewRef.current?.undoSculpt()}
+                  className="flex-1 py-2 rounded-xl text-[10px] font-bold border border-white/10 text-white/60 disabled:opacity-40"
+                >
+                  Undo
+                </button>
+                <button
+                  type="button"
+                  disabled={!canRedo}
+                  onClick={() => previewRef.current?.redoSculpt()}
+                  className="flex-1 py-2 rounded-xl text-[10px] font-bold border border-white/10 text-white/60 disabled:opacity-40"
+                >
+                  Redo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewExpanded(false)}
+                  className="px-3 py-2 rounded-xl text-[10px] font-bold border border-cyan-400/40 bg-cyan-500/20 text-cyan-50"
+                >
+                  Done
+                </button>
+              </div>
+              <p className="text-[9px] text-white/35 text-center">
+                Pinch to zoom · one finger sculpt · Turn to orbit · safe for tablet detail work
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!previewExpanded && (
+          <p className="absolute bottom-1.5 left-2 right-2 text-[9px] text-white/40 pointer-events-none truncate">
+            {viewDragMode === 'turn'
+              ? 'Turn: drag orbit · scroll/pinch zoom · shift-pan · Front/Bottom/Side for angles'
+              : 'Sculpt: drag to add clay · pinch zoom · Full for tablet fullscreen'}
+          </p>
+        )}
       </div>
 
       {/* Clear body / skin-only toggle */}
@@ -646,8 +831,9 @@ export function ModelSkinEditor({
             <Plus className="w-3.5 h-3.5 mr-1" /> Add custom body part
           </Button>
           <p className="text-[10px] text-white/35 mt-1 leading-snug">
-            Tail, horn, or custom — squish a cylinder, place with Offset, pick Solid / Cloth / Cape.
-            Placement on the body is the same in gameplay.
+            Tail, horn, or any custom piece — pick a body slot above, then use{' '}
+            <b className="text-white/70">Place on player</b> (X/Y/Z) if it sits wrong. Same
+            placement in gameplay.
           </p>
         </div>
 
@@ -1007,26 +1193,61 @@ export function ModelSkinEditor({
             />
           )}
           <p className="text-[10px] text-white/35">
-            Upload a PNG/JPG for the hat/gear surface, or use pattern colors above.
+            Upload a PNG/JPG for this part&apos;s surface, or use pattern colors above.
           </p>
         </div>
 
-        <Vec3Fields
-          label="Offset (character place — same in game)"
-          value={activeAtt.position}
-          onChange={(position) => patchActive({ position })}
-          step={0.05}
-        />
-        <Vec3Fields
-          label="Rotation °"
-          value={activeAtt.rotation}
-          onChange={(rotation) => patchActive({ rotation })}
-          step={5}
-        />
+        {/* Place any selected part on the player (hat, face, torso, pants, boots, gloves, weapon, custom…) */}
+        <div className="space-y-2 rounded-lg border border-amber-400/25 bg-amber-500/5 p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] uppercase tracking-wider text-amber-200/90 font-bold">
+              Place on player · {slotMeta?.label ?? slot}
+            </p>
+            {!showAvatar && (
+              <button
+                type="button"
+                className="text-[9px] font-bold uppercase text-sky-300 hover:text-sky-100"
+                onClick={() => setShowAvatar(true)}
+              >
+                Show on body
+              </button>
+            )}
+          </div>
+          <p className="text-[9px] text-white/40 leading-snug">
+            Slide X / Y / Z to move this part if it sits wrong. Works for every body slot and custom
+            addons — not only hats. Use <b className="text-white/70">On body</b> to preview.
+          </p>
+          <Vec3Sliders
+            label="Position"
+            value={activeAtt.position}
+            onChange={(position) => {
+              if (!showAvatar) setShowAvatar(true);
+              patchActive({ position });
+            }}
+            mins={[-1.5, -0.25, -1.5]}
+            maxs={[1.5, 2.2, 1.5]}
+            step={0.01}
+            resetTo={slotMeta?.defaultOffset ?? [0, 1, 0]}
+            resetLabel="Reset to slot default"
+          />
+          <Vec3Sliders
+            label="Rotation °"
+            value={activeAtt.rotation}
+            onChange={(rotation) => {
+              if (!showAvatar) setShowAvatar(true);
+              patchActive({ rotation });
+            }}
+            mins={[-180, -180, -180]}
+            maxs={[180, 180, 180]}
+            step={1}
+            resetTo={[0, 0, 0]}
+            resetLabel="Reset rotation"
+          />
+        </div>
 
         {/* Attach mode + pair mirror */}
         <div className="space-y-2 rounded-lg border border-white/10 bg-black/25 p-2.5">
-          <p className="text-[10px] uppercase tracking-wider text-white/45">Placement</p>
+          <p className="text-[10px] uppercase tracking-wider text-white/45">Placement mode</p>
           <div className="flex gap-1.5">
             {(
               [
@@ -1567,24 +1788,49 @@ function SliderField({
   );
 }
 
-function Vec3Fields({
+function Vec3Sliders({
   label,
   value,
   onChange,
+  mins,
+  maxs,
   step,
+  resetTo,
+  resetLabel,
 }: {
   label: string;
   value: [number, number, number];
   onChange: (v: [number, number, number]) => void;
+  mins: [number, number, number];
+  maxs: [number, number, number];
   step: number;
+  resetTo?: [number, number, number];
+  resetLabel?: string;
 }) {
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       <p className="text-[10px] uppercase tracking-wider text-white/45">{label}</p>
-      <div className="grid grid-cols-3 gap-1.5">
-        {(['X', 'Y', 'Z'] as const).map((axis, i) => (
-          <label key={axis} className="text-[10px] text-white/40">
-            {axis}
+      {(['X', 'Y', 'Z'] as const).map((axis, i) => {
+        const min = mins[i];
+        const max = maxs[i];
+        const clamped = Math.min(max, Math.max(min, value[i]));
+        const outOfRange = value[i] < min - 1e-6 || value[i] > max + 1e-6;
+        return (
+          <label key={axis} className="flex items-center gap-2 text-[10px] text-white/50">
+            <span className="w-4 shrink-0 font-bold text-white/70">{axis}</span>
+            <input
+              type="range"
+              min={min}
+              max={max}
+              step={step}
+              value={clamped}
+              onChange={(e) => {
+                const next = [...value] as [number, number, number];
+                next[i] = Number(e.target.value);
+                onChange(next);
+              }}
+              className="flex-1 accent-amber-400 h-2"
+            />
             <input
               type="number"
               step={step}
@@ -1594,11 +1840,22 @@ function Vec3Fields({
                 next[i] = Number(e.target.value) || 0;
                 onChange(next);
               }}
-              className="mt-0.5 w-full rounded bg-black/40 border border-white/10 px-1.5 py-1 text-xs text-white"
+              className={`w-14 shrink-0 rounded bg-black/40 border px-1 py-0.5 text-[10px] tabular-nums text-white text-right ${
+                outOfRange ? 'border-amber-400/60' : 'border-white/10'
+              }`}
             />
           </label>
-        ))}
-      </div>
+        );
+      })}
+      {resetTo && (
+        <button
+          type="button"
+          className="text-[9px] text-white/40 hover:text-amber-200"
+          onClick={() => onChange([...resetTo] as [number, number, number])}
+        >
+          {resetLabel ?? 'Reset'}
+        </button>
+      )}
     </div>
   );
 }
@@ -1640,6 +1897,10 @@ class SkinPreview {
   private clayView = false;
   private clayBackup = new Map<string, THREE.Material | THREE.Material[]>();
   private skinClock = 0;
+  /** Active pointers for pinch-zoom (mobile). */
+  private activePointers = new Map<number, { x: number; y: number }>();
+  private pinchStartDist = 0;
+  private pinchStartRadius = 3;
 
   constructor(
     host: HTMLElement,
@@ -1696,16 +1957,7 @@ class SkinPreview {
       if (this.disposed) return;
       this.raf = requestAnimationFrame(tick);
       this.skinClock += 1 / 60;
-      // Gentle spin only in sculpt idle (not while turning camera or painting)
-      if (
-        this.viewDragMode === 'sculpt' &&
-        !this.painting &&
-        !this.orbiting &&
-        !this.panning
-      ) {
-        const spin = this.showBody ? this.avatar : this.soloRoot;
-        if (spin) spin.rotation.y += 0.004;
-      }
+      // No idle spin — spinning under the brush tore clay and left holes.
       if (this.avatar && this.showBody) {
         tickSkinAttachments(this.avatar, 1 / 60, this.skinClock);
       }
@@ -1869,6 +2121,15 @@ class SkinPreview {
     this.applyCameraFromSpherical();
   }
 
+  forceResize() {
+    const w = this.host.clientWidth || 320;
+    const h = this.host.clientHeight || 208;
+    if (w < 2 || h < 2) return;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h, false);
+  }
+
   private frameSoloPart() {
     this.soloRoot.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(this.soloRoot);
@@ -1892,8 +2153,29 @@ class SkinPreview {
 
   private onPointerDown = (e: PointerEvent) => {
     e.preventDefault();
+    this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     this.lastPointerX = e.clientX;
     this.lastPointerY = e.clientY;
+
+    // Two-finger pinch zoom (mobile) — release capture so both fingers track.
+    if (this.activePointers.size === 2) {
+      this.painting = false;
+      this.orbiting = false;
+      this.panning = false;
+      for (const id of this.activePointers.keys()) {
+        try {
+          this.renderer.domElement.releasePointerCapture?.(id);
+        } catch {
+          /* ignore */
+        }
+      }
+      const pts = [...this.activePointers.values()];
+      this.pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      this.pinchStartRadius = this.spherical.radius;
+      this.updateCursor();
+      return;
+    }
+
     this.renderer.domElement.setPointerCapture?.(e.pointerId);
 
     if (this.viewDragMode === 'turn' || e.shiftKey || e.button === 1 || e.button === 2) {
@@ -1912,6 +2194,26 @@ class SkinPreview {
   };
 
   private onPointerMove = (e: PointerEvent) => {
+    if (this.activePointers.has(e.pointerId)) {
+      this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
+    // Pinch zoom while two fingers are down
+    if (this.activePointers.size >= 2) {
+      e.preventDefault();
+      const pts = [...this.activePointers.values()];
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (this.pinchStartDist > 4) {
+        const scale = this.pinchStartDist / Math.max(4, dist);
+        this.spherical.radius = Math.min(
+          12,
+          Math.max(0.25, this.pinchStartRadius * scale)
+        );
+        this.applyCameraFromSpherical();
+      }
+      return;
+    }
+
     const dx = e.clientX - this.lastPointerX;
     const dy = e.clientY - this.lastPointerY;
     this.lastPointerX = e.clientX;
@@ -1946,6 +2248,11 @@ class SkinPreview {
   };
 
   private onPointerUp = (e: PointerEvent) => {
+    this.activePointers.delete(e.pointerId);
+    if (this.activePointers.size < 2) {
+      this.pinchStartDist = 0;
+    }
+
     if (this.orbiting || this.panning) {
       this.orbiting = false;
       this.panning = false;
@@ -1958,7 +2265,14 @@ class SkinPreview {
       return;
     }
 
-    if (!this.painting) return;
+    if (!this.painting) {
+      try {
+        this.renderer.domElement.releasePointerCapture?.(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     this.painting = false;
     try {
       this.renderer.domElement.releasePointerCapture?.(e.pointerId);
@@ -1992,6 +2306,7 @@ class SkinPreview {
     if (!mesh) return;
 
     const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return;
     this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);

@@ -1,5 +1,6 @@
 /**
  * ZBrush-lite blob sculpt: add / remove / smooth on a skin mesh.
+ * Add uses a coherent brush-region normal so clay piles without tearing holes.
  */
 import * as THREE from 'three';
 import type { SkinSculptBrush, SkinSculptData } from '@/lib/player-skins';
@@ -15,10 +16,11 @@ export interface SculptStrokeOptions {
 }
 
 const _localHit = new THREE.Vector3();
-const _worldV = new THREE.Vector3();
+const _vert = new THREE.Vector3();
 const _normal = new THREE.Vector3();
 const _avg = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
+const _dir = new THREE.Vector3();
 
 /**
  * Apply one sculpt dab at a world-space hit point on the mesh.
@@ -61,35 +63,42 @@ function applySculptDabLocal(
   const sx = mesh.getWorldScale(_tmp).x || 1;
   const localRadius = Math.max(0.001, opts.radius / Math.max(0.001, Math.abs(sx)));
   const radiusSq = localRadius * localRadius;
-  const strength = Math.max(0.01, Math.min(1, opts.strength)) * 0.08;
+  // Gentler per-dab so repeated Add piles clay instead of shredding faces.
+  const strength = Math.max(0.01, Math.min(1, opts.strength)) * 0.045;
 
   if (!geo.attributes.normal) geo.computeVertexNormals();
   const nrm = geo.attributes.normal as THREE.BufferAttribute;
 
+  const indices: number[] = [];
+  for (let i = 0; i < pos.count; i++) {
+    _vert.fromBufferAttribute(pos, i);
+    if (_vert.distanceToSquared(localHit) <= radiusSq) indices.push(i);
+  }
+  if (indices.length < 2) return false;
+
   let changed = false;
 
   if (opts.brush === 'smooth') {
-    const indices: number[] = [];
-    for (let i = 0; i < pos.count; i++) {
-      _worldV.fromBufferAttribute(pos, i);
-      if (_worldV.distanceToSquared(localHit) <= radiusSq) indices.push(i);
-    }
-    if (indices.length < 2) return false;
+    // Distance-weighted local laplacian — softens bumps without collapsing to a void.
     const originals = indices.map((i) => new THREE.Vector3().fromBufferAttribute(pos, i));
     for (let k = 0; k < indices.length; k++) {
       const i = indices[k];
+      const cur = originals[k];
       _avg.set(0, 0, 0);
-      let n = 0;
+      let wSum = 0;
       for (let j = 0; j < indices.length; j++) {
         if (j === k) continue;
-        _avg.add(originals[j]);
-        n += 1;
+        const other = originals[j];
+        const d = cur.distanceTo(other);
+        if (d > localRadius || d < 1e-8) continue;
+        const w = 1 - d / localRadius;
+        _avg.addScaledVector(other, w * w);
+        wSum += w * w;
       }
-      if (!n) continue;
-      _avg.multiplyScalar(1 / n);
-      const cur = originals[k];
+      if (wSum < 1e-6) continue;
+      _avg.multiplyScalar(1 / wSum);
       const fall = 1 - Math.min(1, cur.distanceTo(localHit) / localRadius);
-      const t = strength * 2.2 * fall * fall;
+      const t = Math.min(0.45, strength * 1.6 * fall * fall);
       pos.setXYZ(
         i,
         cur.x + (_avg.x - cur.x) * t,
@@ -100,19 +109,41 @@ function applySculptDabLocal(
     }
   } else {
     const sign = opts.brush === 'add' ? 1 : -1;
-    for (let i = 0; i < pos.count; i++) {
-      _worldV.fromBufferAttribute(pos, i);
-      const dSq = _worldV.distanceToSquared(localHit);
-      if (dSq > radiusSq) continue;
-      const d = Math.sqrt(dSq);
+    // One coherent push direction for the whole dab (avoids inverted normals tearing holes).
+    _avg.set(0, 0, 0);
+    let nCount = 0;
+    for (const i of indices) {
+      _normal.fromBufferAttribute(nrm, i);
+      if (!_normal.lengthSq()) continue;
+      _avg.add(_normal);
+      nCount += 1;
+    }
+    if (nCount > 0) _avg.normalize();
+    else _avg.set(0, 1, 0);
+
+    for (const i of indices) {
+      _vert.fromBufferAttribute(pos, i);
+      const d = _vert.distanceTo(localHit);
       const fall = 1 - d / localRadius;
-      const w = fall * fall;
-      _normal.fromBufferAttribute(nrm, i).normalize();
+      // Smooth clay falloff (cubic) — soft edges, solid mound in the center.
+      const w = fall * fall * (3 - 2 * fall);
+
+      // Blend region normal with gentle inflate so volume grows outward, not inward.
+      _dir.copy(_vert).sub(localHit);
+      if (_dir.lengthSq() < 1e-10) {
+        _dir.copy(_avg);
+      } else {
+        _dir.normalize();
+        // Prefer outward: if inflate points against the surface, flip it.
+        if (_dir.dot(_avg) < 0) _dir.multiplyScalar(-1);
+      }
+      _dir.multiplyScalar(0.35).addScaledVector(_avg, 0.65).normalize();
+
       pos.setXYZ(
         i,
-        _worldV.x + _normal.x * strength * w * sign,
-        _worldV.y + _normal.y * strength * w * sign,
-        _worldV.z + _normal.z * strength * w * sign
+        _vert.x + _dir.x * strength * w * sign,
+        _vert.y + _dir.y * strength * w * sign,
+        _vert.z + _dir.z * strength * w * sign
       );
       changed = true;
     }

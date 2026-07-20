@@ -34,6 +34,10 @@ import {
   Ruler,
   Menu,
   EyeOff,
+  Eye,
+  Lock,
+  Unlock,
+  Focus,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -200,6 +204,7 @@ export function MapEditor({
   const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
   const [modelEditorOpen, setModelEditorOpen] = useState(false);
   const [showAllCollisionGizmos, setShowAllCollisionGizmos] = useState(false);
+  const lastLockedToastAt = useRef(0);
   const cameraBeforePlayRef = useRef<EditorCameraState | null>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
@@ -218,7 +223,11 @@ export function MapEditor({
 
   const selected = doc.entities.find((e) => e.id === selectedId) ?? null;
   const env = ensureEnvironment(doc);
-  const maps = listMaps();
+  const [mapListTick, setMapListTick] = useState(0);
+  const maps = useMemo(() => {
+    void mapListTick;
+    return listMaps();
+  }, [mapListTick]);
 
   const historyAnchor = useRef<MapDocument | null>(null);
   const historyTimer = useRef<number | null>(null);
@@ -327,9 +336,21 @@ export function MapEditor({
         const merged = { ...next, environment: ensureEnvironment(next) };
         docRef.current = merged;
         setDoc(merged);
+        setDirty(true);
       },
       onFreeFlyChange: setFreeFly,
       onMeasureChange: setMeasureDist,
+      onPlaceResult: (result, layerName) => {
+        if (result !== 'locked') return;
+        const now = Date.now();
+        if (now - lastLockedToastAt.current < 1600) return;
+        lastLockedToastAt.current = now;
+        toast({
+          title: 'Build level locked',
+          description: `“${layerName ?? 'This level'}” is locked — unlock it in Layers, or Build here on another level.`,
+          variant: 'destructive',
+        });
+      },
     });
     apiRef.current = api;
     api.setBrush(brush);
@@ -420,22 +441,45 @@ export function MapEditor({
   };
 
   const isDirty = () => snapshotMapDoc(workingDoc()) !== lastSavedRef.current;
+  const [dirty, setDirty] = useState(false);
+
+  const clearHistory = () => {
+    undoStack.current = [];
+    redoStack.current = [];
+    historyAnchor.current = null;
+    setCanUndo(false);
+    setCanRedo(false);
+  };
 
   const markClean = (next: MapDocument) => {
     lastSavedRef.current = snapshotMapDoc(next);
+    setDirty(false);
   };
 
-  const persist = () => {
-    const next = workingDoc();
-    const liveThumb = apiRef.current?.captureThumbnail() ?? null;
-    saveMap(mapId, next, { thumbnailDataUrl: liveThumb });
-    setDoc(next);
-    docRef.current = next;
-    markClean(next);
-    // Prefer a framed overview thumb for the library card
-    void import('./map-thumbnail').then(({ ensureMapThumbnail }) =>
-      ensureMapThumbnail(mapId, { force: true })
-    );
+  const persist = (opts?: { quiet?: boolean }) => {
+    try {
+      const next = workingDoc();
+      const liveThumb = apiRef.current?.captureThumbnail() ?? null;
+      saveMap(mapId, next, { thumbnailDataUrl: liveThumb });
+      setDoc(next);
+      docRef.current = next;
+      markClean(next);
+      setMapListTick((t) => t + 1);
+      void import('./map-thumbnail').then(({ ensureMapThumbnail }) =>
+        ensureMapThumbnail(mapId, { force: true })
+      );
+      if (!opts?.quiet) {
+        toast({ title: 'Map saved', description: `“${next.name}” stored in this browser.` });
+      }
+      return true;
+    } catch (err) {
+      toast({
+        title: 'Save failed',
+        description: err instanceof Error ? err.message : 'Could not save map',
+        variant: 'destructive',
+      });
+      return false;
+    }
   };
 
   const requestClose = () => {
@@ -462,6 +506,29 @@ export function MapEditor({
     };
   }, []);
 
+  // Warn before closing the tab with unsaved creator work
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (snapshotMapDoc(workingDoc()) === lastSavedRef.current) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Autosave every 30s while dirty — creator engine must not lose work
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (playTest) return;
+      if (snapshotMapDoc(workingDoc()) === lastSavedRef.current) return;
+      persist({ quiet: true });
+    }, 30_000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapId, playTest]);
+
   useEffect(() => {
     apiRef.current?.setBrush(brush);
   }, [brush]);
@@ -485,6 +552,7 @@ export function MapEditor({
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if ((e.target as HTMLElement)?.isContentEditable) return;
       if (playTest) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
@@ -506,24 +574,6 @@ export function MapEditor({
         return;
       }
 
-      if (e.key === 'w' || e.key === 'W') {
-        if (!freeFly) setMode('translate');
-      }
-      if ((e.key === 'e' || e.key === 'E') && !freeFly) setMode('rotate');
-      if ((e.key === 'r' || e.key === 'R') && !freeFly) setMode('scale');
-      if ((e.key === 'v' || e.key === 'V') && !freeFly) setEditTool('select');
-      if ((e.key === 'b' || e.key === 'B') && !freeFly) {
-        setEditTool('brush');
-        if (!brush) setBrush('floor-square');
-      }
-      if (e.key === 'g' || e.key === 'G') setGridSnap((v) => !v);
-      if (e.key === 'f' || e.key === 'F') apiRef.current?.focusSelected();
-      if (e.key === 'Delete' || e.key === 'Backspace') apiRef.current?.deleteSelected();
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        const axis = e.shiftKey ? 'z' : 'x';
-        apiRef.current?.duplicateSelected(axis);
-      }
       if (e.key === 'Escape') {
         e.preventDefault();
         if (freeFly) {
@@ -537,6 +587,27 @@ export function MapEditor({
           return;
         }
         requestClose();
+        return;
+      }
+
+      // Placement / edit shortcuts off while free-flying
+      if (freeFly) return;
+
+      if (e.key === 'w' || e.key === 'W') setMode('translate');
+      if (e.key === 'e' || e.key === 'E') setMode('rotate');
+      if (e.key === 'r' || e.key === 'R') setMode('scale');
+      if (e.key === 'v' || e.key === 'V') setEditTool('select');
+      if (e.key === 'b' || e.key === 'B') {
+        setEditTool('brush');
+        if (!brush) setBrush('floor-square');
+      }
+      if (e.key === 'g' || e.key === 'G') setGridSnap((v) => !v);
+      if (e.key === 'f' || e.key === 'F') apiRef.current?.focusSelected();
+      if (e.key === 'Delete' || e.key === 'Backspace') apiRef.current?.deleteSelected();
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        const axis = e.shiftKey ? 'z' : 'x';
+        apiRef.current?.duplicateSelected(axis);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -576,6 +647,72 @@ export function MapEditor({
     if (id === selectedId) {
       apiRef.current?.updateSelected(patch);
     }
+  };
+
+  const sortedLayers = useMemo(
+    () => (doc.layers ?? []).slice().sort((a, b) => a.order - b.order),
+    [doc.layers]
+  );
+  const activeLayer = doc.layers.find((l) => l.id === activeLayerId) ?? sortedLayers[0] ?? null;
+
+  const applyDocLayers = (
+    layersOrFn: typeof doc.layers | ((prev: typeof doc.layers) => typeof doc.layers)
+  ) => {
+    scheduleHistory();
+    setDoc((d) => {
+      const layers = typeof layersOrFn === 'function' ? layersOrFn(d.layers) : layersOrFn;
+      const next = { ...d, layers };
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+  };
+
+  const setLayerFlag = (
+    id: string,
+    patch: Partial<{ visible: boolean; locked: boolean; name: string }>
+  ) => {
+    applyDocLayers((layers) => layers.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  };
+
+  /** Hide every layer except this one — inspect a single build level. */
+  const soloLayer = (id: string) => {
+    applyDocLayers((layers) => layers.map((l) => ({ ...l, visible: l.id === id })));
+    setActiveLayerId(id);
+  };
+
+  const showAllLayers = () => {
+    applyDocLayers((layers) => layers.map((l) => ({ ...l, visible: true })));
+  };
+
+  const moveSelectionToLayer = (layerId: string) => {
+    const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+    if (!ids.length) return;
+    scheduleHistory();
+    setDoc((d) => {
+      const entities = d.entities.map((e) =>
+        ids.includes(e.id) ? { ...e, layerId } : e
+      );
+      const next = { ...d, entities };
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+  };
+
+  const addBuildLevel = () => {
+    const layer = {
+      id: generateId('layer'),
+      name: '',
+      visible: true,
+      locked: false,
+      order: 0,
+    };
+    applyDocLayers((layers) => {
+      const order = layers.length ? Math.max(...layers.map((l) => l.order)) + 1 : 0;
+      layer.name = `Level ${order}`;
+      layer.order = order;
+      return [...layers, layer];
+    });
+    setActiveLayerId(layer.id);
   };
 
   const openPlayerStudio = () => {
@@ -697,12 +834,13 @@ export function MapEditor({
     <div className="fixed inset-0 z-[9999] bg-[#0d121a] text-white flex flex-col">
       {isTouch && (
         <>
+          {/* Joystick layer stays under chrome (z-[120]+) so Tools / Levels stay clickable */}
           <div
             ref={touchLayerRef}
-            className="fixed inset-0 z-[50] touch-none"
+            className="fixed inset-0 z-[40] touch-none"
             style={{ pointerEvents: freeFly ? 'auto' : 'none' }}
           />
-          <div className="fixed inset-0 z-[51] pointer-events-none">
+          <div className="fixed inset-0 z-[41] pointer-events-none">
             <JoystickOverlay joystickRef={joystickRef} enabled={freeFly} />
           </div>
           <div
@@ -752,6 +890,19 @@ export function MapEditor({
           >
             <Menu className="w-4 h-4" />
             Menus
+          </button>
+          <button
+            type="button"
+            onClick={() => persist()}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 ${
+              dirty
+                ? 'border-amber-400/70 bg-amber-500/45'
+                : 'border-white/25 bg-black/70'
+            }`}
+            title={dirty ? 'Unsaved changes — tap to save' : 'Saved'}
+          >
+            <Save className="w-4 h-4" />
+            {dirty ? 'Save •' : 'Save'}
           </button>
           {(isMobile || isTouch) && (
             <>
@@ -912,7 +1063,10 @@ export function MapEditor({
         <input
           className="ml-2 bg-black/40 border border-white/10 rounded px-2 py-1 text-sm w-40 sm:w-56 shrink-0"
           value={doc.name}
-          onChange={(e) => setDoc((d) => ({ ...d, name: e.target.value }))}
+          onChange={(e) => {
+            setDoc((d) => ({ ...d, name: e.target.value }));
+            setDirty(true);
+          }}
         />
         <select
           className="bg-black/40 border border-white/10 rounded px-2 py-1 text-sm shrink-0"
@@ -921,11 +1075,18 @@ export function MapEditor({
             const id = e.target.value;
             const loaded = loadMap(id);
             if (!loaded) return;
+            if (isDirty()) {
+              const ok = confirm(
+                'You have unsaved changes on this map.\n\nOK = discard and switch\nCancel = stay'
+              );
+              if (!ok) return;
+            }
             const withEnv = { ...loaded, environment: ensureEnvironment(loaded) };
             setMapId(id);
             setDoc(withEnv);
             docRef.current = withEnv;
             markClean(withEnv);
+            clearHistory();
             apiRef.current?.setDoc(withEnv);
             setActivePlayId(getActivePlayMapIdForMode(getMapGameMode(withEnv)));
           }}
@@ -1008,8 +1169,14 @@ export function MapEditor({
         </Button>
 
         <div className="flex-1 min-w-2" />
-        <Button size="sm" variant="secondary" className="shrink-0" onClick={persist}>
-          <Save className="w-4 h-4 mr-1" /> Save
+        <Button
+          size="sm"
+          variant="secondary"
+          className={`shrink-0 ${dirty ? 'border border-amber-400/60 text-amber-100 bg-amber-500/15' : ''}`}
+          onClick={() => persist()}
+          title={dirty ? 'Unsaved changes — click to save' : 'Saved'}
+        >
+          <Save className="w-4 h-4 mr-1" /> {dirty ? 'Save •' : 'Save'}
         </Button>
         <Button size="sm" variant="secondary" className="shrink-0" onClick={doExport}>
           <Download className="w-4 h-4 mr-1" /> Export
@@ -1026,6 +1193,15 @@ export function MapEditor({
             const f = e.target.files?.[0];
             if (!f) return;
             try {
+              if (isDirty()) {
+                const ok = confirm(
+                  'Import replaces the current map in the editor.\n\nOK = continue (save first if you need this map)\nCancel = abort'
+                );
+                if (!ok) {
+                  e.target.value = '';
+                  return;
+                }
+              }
               const parsed = importJson(await f.text());
               const withEnv = { ...parsed, environment: ensureEnvironment(parsed) };
               const id = `map_${Date.now().toString(36)}`;
@@ -1034,11 +1210,21 @@ export function MapEditor({
               setDoc(withEnv);
               docRef.current = withEnv;
               markClean(withEnv);
+              clearHistory();
               apiRef.current?.setDoc(withEnv);
+              toast({
+                title: 'Map imported',
+                description: `“${withEnv.name}” ready to edit.`,
+              });
             } catch (err) {
               console.error(err);
-              alert('Invalid map JSON');
+              toast({
+                title: 'Import failed',
+                description: err instanceof Error ? err.message : 'Invalid map JSON',
+                variant: 'destructive',
+              });
             }
+            e.target.value = '';
           }}
         />
         <Button size="sm" variant="destructive" className="shrink-0" onClick={requestClose} title="Exit (Esc)">
@@ -1196,7 +1382,7 @@ export function MapEditor({
               </div>
               <p className="text-[10px] text-white/40 p-2 border-t border-white/10">
                 {editTool === 'brush'
-                  ? 'Brush: click ground to paint. Click same model to select it. Alt+click stacks on top.'
+                  ? 'Brush: click ground to paint. Click same model to select it. Alt+click stacks on top (Alt+drag = box select).'
                   : 'Select: click objects to pick them. Pick a model or Brush to paint.'}{' '}
                 Orbit drag = move view. Ctrl = free fly.
               </p>
@@ -1205,80 +1391,137 @@ export function MapEditor({
 
           {tab === 'layers' && (
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              {doc.layers
-                .slice()
-                .sort((a, b) => a.order - b.order)
-                .map((layer) => (
+              <div className="rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-2.5 space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-cyan-200">
+                  Build by level
+                </p>
+                <p className="text-[10px] text-white/45 leading-snug">
+                  Paint floors on <b className="text-white/70">Level 0 / Floor</b>, then switch to
+                  Level 1 for props, traps, etc. Tap the eye to hide a level and check the layout.
+                  Active layer (cyan) is where new pieces go.
+                </p>
+                <div className="flex gap-1.5 pt-0.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1 text-[10px] h-8"
+                    onClick={showAllLayers}
+                  >
+                    <Eye className="w-3.5 h-3.5 mr-1" /> Show all
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="flex-1 text-[10px] h-8"
+                    onClick={addBuildLevel}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1" /> Add level
+                  </Button>
+                </div>
+              </div>
+
+              {sortedLayers.map((layer, index) => {
+                const count = doc.entities.filter((e) => e.layerId === layer.id).length;
+                const isActive = activeLayerId === layer.id;
+                return (
                   <div
                     key={layer.id}
-                    className={`rounded border p-2 ${
-                      activeLayerId === layer.id ? 'border-cyan-400 bg-cyan-500/10' : 'border-white/10'
+                    className={`rounded-xl border p-2.5 space-y-2 ${
+                      isActive
+                        ? 'border-cyan-400 bg-cyan-500/10'
+                        : layer.visible
+                          ? 'border-white/10 bg-black/20'
+                          : 'border-white/5 bg-black/40 opacity-70'
                     }`}
                   >
-                    <button
-                      type="button"
-                      className="w-full text-left font-semibold text-sm"
-                      onClick={() => setActiveLayerId(layer.id)}
-                    >
-                      {layer.name}
-                    </button>
-                    <div className="flex gap-2 mt-1 text-xs">
-                      <label className="flex items-center gap-1">
-                        <input
-                          type="checkbox"
-                          checked={layer.visible}
-                          onChange={(e) => {
-                            const next = {
-                              ...doc,
-                              layers: doc.layers.map((l) =>
-                                l.id === layer.id ? { ...l, visible: e.target.checked } : l
-                              ),
-                            };
-                            setDoc(next);
-                            apiRef.current?.setDoc(next);
-                          }}
-                        />
-                        Visible
-                      </label>
-                      <label className="flex items-center gap-1">
-                        <input
-                          type="checkbox"
-                          checked={layer.locked}
-                          onChange={(e) => {
-                            const next = {
-                              ...doc,
-                              layers: doc.layers.map((l) =>
-                                l.id === layer.id ? { ...l, locked: e.target.checked } : l
-                              ),
-                            };
-                            setDoc(next);
-                            apiRef.current?.setDoc(next);
-                          }}
-                        />
-                        Locked
-                      </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveLayerId(layer.id)}
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${
+                          isActive
+                            ? 'bg-cyan-500/40 text-cyan-50'
+                            : 'bg-white/10 text-white/70 hover:bg-white/15'
+                        }`}
+                        title={`Build on level ${index}`}
+                      >
+                        {index}
+                      </button>
+                      <input
+                        className="min-w-0 flex-1 bg-transparent border-b border-transparent focus:border-white/20 text-sm font-semibold text-white outline-none py-0.5"
+                        value={layer.name}
+                        onChange={(e) => setLayerFlag(layer.id, { name: e.target.value })}
+                        onFocus={() => setActiveLayerId(layer.id)}
+                        aria-label={`Rename level ${index}`}
+                      />
+                      <span className="text-[10px] tabular-nums text-white/35 shrink-0">
+                        {count}
+                      </span>
                     </div>
+
+                    <div className="flex flex-wrap gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setActiveLayerId(layer.id)}
+                        className={`flex-1 min-w-[4.5rem] px-2 py-1.5 rounded-md text-[10px] font-bold uppercase border ${
+                          isActive
+                            ? 'border-cyan-400/60 bg-cyan-500/25 text-cyan-50'
+                            : 'border-white/10 text-white/55 hover:bg-white/5'
+                        }`}
+                      >
+                        Build here
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLayerFlag(layer.id, { visible: !layer.visible })}
+                        className={`w-9 h-8 rounded-md flex items-center justify-center border ${
+                          layer.visible
+                            ? 'border-white/15 text-emerald-300 hover:bg-white/5'
+                            : 'border-white/10 text-white/35 hover:bg-white/5'
+                        }`}
+                        title={layer.visible ? 'Hide this level' : 'Show this level'}
+                      >
+                        {layer.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLayerFlag(layer.id, { locked: !layer.locked })}
+                        className={`w-9 h-8 rounded-md flex items-center justify-center border ${
+                          layer.locked
+                            ? 'border-amber-400/40 text-amber-200 bg-amber-500/10'
+                            : 'border-white/10 text-white/35 hover:bg-white/5'
+                        }`}
+                        title={layer.locked ? 'Unlock (allow place/edit)' : 'Lock (no place/edit)'}
+                      >
+                        {layer.locked ? (
+                          <Lock className="w-3.5 h-3.5" />
+                        ) : (
+                          <Unlock className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => soloLayer(layer.id)}
+                        className="w-9 h-8 rounded-md flex items-center justify-center border border-white/10 text-white/55 hover:bg-white/5"
+                        title="Solo — hide every other level"
+                      >
+                        <Focus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {(selectedId || selectedIds.length > 0) && (
+                      <button
+                        type="button"
+                        onClick={() => moveSelectionToLayer(layer.id)}
+                        className="w-full text-[10px] py-1 rounded-md border border-white/10 text-white/50 hover:bg-white/5 hover:text-white/80"
+                      >
+                        Move selection → this level
+                      </button>
+                    )}
                   </div>
-                ))}
-              <Button
-                size="sm"
-                className="w-full"
-                onClick={() => {
-                  const layer = {
-                    id: generateId('layer'),
-                    name: `Layer ${doc.layers.length + 1}`,
-                    visible: true,
-                    locked: false,
-                    order: doc.layers.length,
-                  };
-                  const next = { ...doc, layers: [...doc.layers, layer] };
-                  setDoc(next);
-                  setActiveLayerId(layer.id);
-                  apiRef.current?.setDoc(next);
-                }}
-              >
-                <Plus className="w-4 h-4 mr-1" /> New Layer
-              </Button>
+                );
+              })}
             </div>
           )}
 
@@ -1333,8 +1576,13 @@ export function MapEditor({
                   try {
                     savePrefab(prefabName.trim() || 'Prefab', ents);
                     setPrefabs(listPrefabs());
+                    toast({ title: 'Prefab saved', description: prefabName.trim() || 'Prefab' });
                   } catch (err) {
-                    alert(err instanceof Error ? err.message : 'Could not save prefab');
+                    toast({
+                      title: 'Prefab failed',
+                      description: err instanceof Error ? err.message : 'Could not save prefab',
+                      variant: 'destructive',
+                    });
                   }
                 }}
               >
@@ -1574,6 +1822,7 @@ export function MapEditor({
                 <>
                   <p>· Tap <b className="text-white">Hide UI</b> for a clear place canvas</p>
                   <p>· <b className="text-white">Select</b> (arrow) picks objects · <b className="text-white">Brush</b> paints</p>
+                  <p>· <b className="text-white">Level</b> strip: paint Floor (0) then Props (1); eye hides a level</p>
                   <p>· <b className="text-white">Library</b> picks a model then arm Brush · tap ground</p>
                   <p>· <b className="text-white">Fly</b> for joysticks · <b className="text-white">Edit</b> to place</p>
                   <p>· Set <b className="text-white">MAIN map</b> so Deathrun loads it</p>
@@ -1581,6 +1830,7 @@ export function MapEditor({
               ) : (
                 <>
                   <p>· <b className="text-white">Select (V)</b> picks objects · <b className="text-white">Brush (B)</b> paints</p>
+                  <p>· Build by <b className="text-white">Level</b>: Floor 0 → Props 1; eye toggles visibility</p>
                   <p>· Pick a model to arm Brush, click ground to place (drag = orbit)</p>
                   <p>· Same model click selects it · <b className="text-white">Alt+click</b> stacks</p>
                   <p>· <b className="text-white">Ctrl</b> free fly · <b className="text-white">G</b> snap · <b className="text-white">W/E/R</b> gizmo</p>
@@ -1608,6 +1858,9 @@ export function MapEditor({
             {doc.entities.length} entities · grid {doc.gridSize}
             {gridSnap ? ' · snap' : ''}
             {snapY ? 'Y' : ''}
+            {activeLayer
+              ? ` · L${sortedLayers.findIndex((l) => l.id === activeLayer.id)}:${activeLayer.name}`
+              : ''}
             {editTool === 'brush' && brush
               ? ` · brush: ${brush}`
               : editTool === 'brush'
@@ -1622,11 +1875,76 @@ export function MapEditor({
           </div>
           )}
 
+          {/* Quick level strip — switch / hide build levels without opening the sidebar */}
+          {!uiCollapsed && sortedLayers.length > 0 && (
+            <div
+              className={`absolute z-[85] flex items-center gap-1 max-w-[min(70vw,22rem)] overflow-x-auto rounded-xl border border-white/15 bg-black/75 px-1.5 py-1 backdrop-blur ${
+                toolsOpen
+                  ? 'bottom-[4.25rem] left-1/2 -translate-x-1/2'
+                  : 'bottom-14 left-1/2 -translate-x-1/2'
+              }`}
+            >
+              <span className="text-[9px] font-bold uppercase tracking-wide text-white/40 px-1 shrink-0">
+                Level
+              </span>
+              {sortedLayers.map((layer, index) => {
+                const isActive = activeLayerId === layer.id;
+                return (
+                  <div
+                    key={layer.id}
+                    className={`flex items-center rounded-lg border shrink-0 ${
+                      isActive
+                        ? 'border-cyan-400/60 bg-cyan-500/25'
+                        : layer.visible
+                          ? 'border-white/10 bg-white/5'
+                          : 'border-white/5 bg-black/40 opacity-60'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveLayerId(layer.id);
+                        setTab('layers');
+                      }}
+                      className="px-2 py-1 text-[10px] font-bold text-white/85"
+                      title={`Build on ${layer.name} (level ${index})`}
+                    >
+                      {index}
+                      <span className="ml-1 font-medium text-white/50 hidden sm:inline">
+                        {layer.name}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLayerFlag(layer.id, { visible: !layer.visible })}
+                      className="w-7 h-7 flex items-center justify-center border-l border-white/10 text-white/50 hover:text-white/90"
+                      title={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
+                    >
+                      {layer.visible ? (
+                        <Eye className="w-3 h-3 text-emerald-300" />
+                      ) : (
+                        <EyeOff className="w-3 h-3" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                onClick={addBuildLevel}
+                className="w-7 h-7 shrink-0 rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:bg-white/10"
+                title="Add build level"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {!uiCollapsed && (
           <button
             type="button"
             onClick={() => setToolsOpen((v) => !v)}
-            className="absolute bottom-3 left-3 z-[80] flex items-center gap-1 rounded-xl border border-white/20 bg-black/75 px-2.5 py-2 text-[10px] font-bold uppercase tracking-wide text-white/90 backdrop-blur active:scale-95"
+            className="absolute bottom-3 left-3 z-[90] flex items-center gap-1 rounded-xl border border-white/20 bg-black/75 px-2.5 py-2 text-[10px] font-bold uppercase tracking-wide text-white/90 backdrop-blur active:scale-95"
             title={toolsOpen ? 'Hide tool bar' : 'Show tool bar'}
           >
             {toolsOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
@@ -1635,7 +1953,7 @@ export function MapEditor({
           )}
 
           {!uiCollapsed && toolsOpen && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 border border-white/15 rounded-xl px-2 py-1.5 backdrop-blur z-[80] max-w-[calc(100vw-7rem)] overflow-x-auto">
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 border border-white/15 rounded-xl px-2 py-1.5 backdrop-blur z-[90] max-w-[calc(100vw-7rem)] overflow-x-auto">
             <ToolBtn
               active={editTool === 'select'}
               onClick={() => setEditTool('select')}

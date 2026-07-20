@@ -17,8 +17,8 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'welcome',
     title: 'Welcome to the Map Editor',
-    body: 'This editor is how you build Deathrun courses — floors, props, spawns, buttons, and animated doors. You can follow this short tour or skip and read the full HELP tab anytime.',
-    tip: 'Tip: press the ? button anytime to reopen tips.',
+    body: 'Admin creator tool for Kilrun courses — floors by level, props, spawns, skins, prefabs. Play Test, then Set as MAIN so matches load your map.',
+    tip: 'Tip: Save often (autosave runs too). Hide UI for a clear canvas; Level strip switches Floor → Props.',
   },
   {
     id: 'place',
@@ -36,7 +36,8 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'layers',
     title: 'Layers',
-    body: 'Use Floor / Props / Spawns layers so you can lock or hide groups. New Layer stacks “above” for decoration. Active layer is where new pieces go.',
+    body: 'Build by level: Floor (0) for platforms, Props (1) for decoration, Spawns (2) for starts. Use Build here to paint onto a level, the eye to hide it while you check the course, and Solo to inspect one level alone. Add Level for more floors stacked above.',
+    tip: 'The Level strip under the viewport switches and hides levels without opening the sidebar.',
     tab: 'layers',
   },
   {
@@ -76,8 +77,9 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     id: 'overview',
     title: 'Overview',
     paragraphs: [
-      'The map editor lets you build 3D Deathrun levels with Kenney prototype models, custom GLBs, lighting/sky settings, and animation triggers.',
-      'Maps save locally in your browser (Save / Export JSON). You can Import JSON on another machine.',
+      'Admin map editor: build 3D courses with Kenney / custom GLBs, lighting, animation triggers, prefabs, and skins — then Play Test and Set as MAIN for a mode.',
+      'Maps save in this browser (Save / Export JSON). Autosave runs every 30s while you have unsaved changes. Import JSON to move a map between admin machines.',
+      'Build solid: use Levels (Floor 0 → Props 1), lock finished levels, validate before MAIN, keep embeds small, and Play Test before you ship.',
     ],
   },
   {
@@ -85,7 +87,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     title: 'Camera & controls',
     paragraphs: [
       'Orbit: drag with left mouse (short click places in Brush mode; long drag orbits). Scroll to zoom.',
-      'Tools: Select (V) picks objects without placing. Brush (B) paints the active model from Assets. In Brush, click the same model on its cell to select it; Alt+click stacks on top.',
+      'Tools: Select (V) picks objects without placing. Brush (B) paints the active model from Assets. In Brush, click the same model on its cell to select it; Alt+click stacks on top. Alt+drag = box select.',
       'Free Fly (Ctrl): WASD move, mouse look, Space up, C down. Placement disabled. Ctrl again to exit.',
       'W / E / R = translate / rotate / scale. G = grid snap. F = focus selection. Alt+drag = box select. Measure tool = click two ground points.',
       'Ctrl+D duplicate +X, Ctrl+Shift+D +Z. Ctrl+Z / Ctrl+Y undo/redo. Ctrl+S save. Red wire boxes = death zones; yellow lines = button→trap links.',
@@ -95,8 +97,8 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     id: 'building',
     title: 'Building a course',
     paragraphs: [
-      '1) Place a spawn pad near the origin. 2) Lay floor-square / floor-small-square stepping stones with gaps. 3) Add columns and props for read. 4) Place Runner + Trapper spawns. 5) Play Test. 6) Save and Set Active Match Map.',
-      'Use Layers: Floor locked when dressing Props. Snap size 1 is great for modular floors; 0.5 for fine work.',
+      '1) Place a spawn pad near the origin. 2) Lay floor-square / floor-small-square stepping stones with gaps on Floor (level 0). 3) Switch to Props (level 1) for columns and dressing — hide Floor with the eye to check silhouettes. 4) Place Runner + Trapper spawns. 5) Play Test. 6) Save and Set Active Match Map.',
+      'Use Layers / the Level strip: lock Floor when dressing Props. Solo a level to inspect it alone. Snap size 1 is great for modular floors; 0.5 for fine work.',
     ],
   },
   {
