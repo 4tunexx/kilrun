@@ -23,14 +23,14 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'place',
     title: 'Place models',
-    body: 'Open Assets, click a floor (e.g. floor-square), then click the ground grid to place. Dragging the mouse orbits the camera and will not place. Use “Select only” if you only want to pick objects.',
-    tip: 'Ctrl = Free Fly (WASD + mouse). Placement is off while flying.',
+    body: 'Open Assets, click a floor (e.g. floor-square) to arm the Brush, then click the ground to paint. Use the arrow Select tool (V) on the bottom bar to pick objects without placing. In Brush mode, clicking the same model on its cell selects it; Alt+click stacks another on top.',
+    tip: 'Ctrl = Free Fly (WASD + mouse). Placement is off while flying. B toggles Brush.',
     tab: 'assets',
   },
   {
     id: 'transform',
     title: 'Move, rotate, scale',
-    body: 'Click an object to select it. Use W (move), E (rotate), R (scale), or the bottom toolbar. Numbers in Properties are exact. G toggles grid snap; enable Y snap to also snap height.',
+    body: 'Use Select (V) then click an object. W (move), E (rotate), R (scale), or the bottom toolbar. Numbers in Properties are exact. G toggles grid snap; enable Y snap to also snap height.',
     tip: 'F focuses the camera on your selection. Delete removes it. Ctrl+Z undoes.',
   },
   {
@@ -84,7 +84,8 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     id: 'camera',
     title: 'Camera & controls',
     paragraphs: [
-      'Orbit: drag with left mouse (short click places; long drag orbits). Scroll to zoom.',
+      'Orbit: drag with left mouse (short click places in Brush mode; long drag orbits). Scroll to zoom.',
+      'Tools: Select (V) picks objects without placing. Brush (B) paints the active model from Assets. In Brush, click the same model on its cell to select it; Alt+click stacks on top.',
       'Free Fly (Ctrl): WASD move, mouse look, Space up, C down. Placement disabled. Ctrl again to exit.',
       'W / E / R = translate / rotate / scale. G = grid snap. F = focus selection. Alt+drag = box select. Measure tool = click two ground points.',
       'Ctrl+D duplicate +X, Ctrl+Shift+D +Z. Ctrl+Z / Ctrl+Y undo/redo. Ctrl+S save. Red wire boxes = death zones; yellow lines = button→trap links.',

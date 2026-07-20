@@ -47,6 +47,8 @@ import {
   Heart,
   HeartPulse,
   Bug,
+  MousePointer2,
+  Paintbrush,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -85,6 +87,7 @@ import {
 } from './map-storage';
 import {
   createEditorViewport,
+  type EditTool,
   type EditorCameraState,
   type EditorViewportApi,
   type TransformMode,
@@ -158,7 +161,10 @@ export function MapEditor({
   }));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<SidebarTab>('assets');
+  /** Active placeable model (kept while in Select so Brush can resume). */
   const [brush, setBrush] = useState<string | null>('floor-square');
+  /** Select = pick objects; Brush = paint/place. Defaults to Select so clicks don't stack. */
+  const [editTool, setEditTool] = useState<EditTool>('select');
   const [mode, setMode] = useState<TransformMode>('translate');
   const [gridSnap, setGridSnap] = useState(true);
   const [query, setQuery] = useState('');
@@ -327,6 +333,7 @@ export function MapEditor({
     });
     apiRef.current = api;
     api.setBrush(brush);
+    api.setEditTool(editTool);
     api.setActiveLayerId(activeLayerId);
     if (detectTouchDevice()) {
       // Mobile defaults to free-fly so joysticks control look + move immediately
@@ -459,6 +466,9 @@ export function MapEditor({
     apiRef.current?.setBrush(brush);
   }, [brush]);
   useEffect(() => {
+    apiRef.current?.setEditTool(editTool);
+  }, [editTool]);
+  useEffect(() => {
     apiRef.current?.setActiveLayerId(activeLayerId);
   }, [activeLayerId]);
   useEffect(() => {
@@ -501,6 +511,11 @@ export function MapEditor({
       }
       if ((e.key === 'e' || e.key === 'E') && !freeFly) setMode('rotate');
       if ((e.key === 'r' || e.key === 'R') && !freeFly) setMode('scale');
+      if ((e.key === 'v' || e.key === 'V') && !freeFly) setEditTool('select');
+      if ((e.key === 'b' || e.key === 'B') && !freeFly) {
+        setEditTool('brush');
+        if (!brush) setBrush('floor-square');
+      }
       if (e.key === 'g' || e.key === 'G') setGridSnap((v) => !v);
       if (e.key === 'f' || e.key === 'F') apiRef.current?.focusSelected();
       if (e.key === 'Delete' || e.key === 'Backspace') apiRef.current?.deleteSelected();
@@ -527,7 +542,7 @@ export function MapEditor({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onClose, selectedId, selectedIds, freeFly, playTest, mapId]);
+  }, [onClose, selectedId, selectedIds, freeFly, playTest, mapId, brush]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1115,15 +1130,37 @@ export function MapEditor({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
-                <button
-                  type="button"
-                  className={`text-xs px-2 py-1 rounded border w-full ${
-                    brush === null ? 'border-amber-400 text-amber-200' : 'border-white/10 text-white/50'
-                  }`}
-                  onClick={() => setBrush(null)}
-                >
-                  Select only (no place)
-                </button>
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    className={`text-xs px-2 py-1.5 rounded border flex items-center justify-center gap-1 ${
+                      editTool === 'select'
+                        ? 'border-amber-400 text-amber-200 bg-amber-500/10'
+                        : 'border-white/10 text-white/50'
+                    }`}
+                    onClick={() => setEditTool('select')}
+                    title="Select objects (V) — click without placing"
+                  >
+                    <MousePointer2 className="w-3 h-3" />
+                    Select
+                  </button>
+                  <button
+                    type="button"
+                    className={`text-xs px-2 py-1.5 rounded border flex items-center justify-center gap-1 ${
+                      editTool === 'brush'
+                        ? 'border-cyan-400 text-cyan-200 bg-cyan-500/10'
+                        : 'border-white/10 text-white/50'
+                    }`}
+                    onClick={() => {
+                      setEditTool('brush');
+                      if (!brush) setBrush('floor-square');
+                    }}
+                    title="Brush paint (B) — click ground to place"
+                  >
+                    <Paintbrush className="w-3 h-3" />
+                    Brush
+                  </button>
+                </div>
               </div>
               <div className="flex-1 overflow-y-auto p-2 grid grid-cols-2 gap-2 content-start">
                 {filtered.map((name) => (
@@ -1132,6 +1169,7 @@ export function MapEditor({
                     type="button"
                     onClick={() => {
                       setBrush(name);
+                      setEditTool('brush');
                       // Free the canvas after picking a brush on mobile.
                       if (isMobile) {
                         setSidebarOpen(false);
@@ -1139,7 +1177,11 @@ export function MapEditor({
                       }
                     }}
                     className={`rounded border p-1 text-left ${
-                      brush === name ? 'border-cyan-400 bg-cyan-500/10' : 'border-white/10 hover:border-white/30'
+                      brush === name && editTool === 'brush'
+                        ? 'border-cyan-400 bg-cyan-500/10'
+                        : brush === name
+                          ? 'border-white/30 bg-white/5'
+                          : 'border-white/10 hover:border-white/30'
                     }`}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1153,7 +1195,10 @@ export function MapEditor({
                 ))}
               </div>
               <p className="text-[10px] text-white/40 p-2 border-t border-white/10">
-                Click ground to place. Orbit drag = move view (won&apos;t place). Ctrl = free fly.
+                {editTool === 'brush'
+                  ? 'Brush: click ground to paint. Click same model to select it. Alt+click stacks on top.'
+                  : 'Select: click objects to pick them. Pick a model or Brush to paint.'}{' '}
+                Orbit drag = move view. Ctrl = free fly.
               </p>
             </>
           )}
@@ -1528,16 +1573,17 @@ export function MapEditor({
               {isTouch || isMobile ? (
                 <>
                   <p>· Tap <b className="text-white">Hide UI</b> for a clear place canvas</p>
-                  <p>· <b className="text-white">Library</b> opens assets; pick a model then tap ground</p>
+                  <p>· <b className="text-white">Select</b> (arrow) picks objects · <b className="text-white">Brush</b> paints</p>
+                  <p>· <b className="text-white">Library</b> picks a model then arm Brush · tap ground</p>
                   <p>· <b className="text-white">Fly</b> for joysticks · <b className="text-white">Edit</b> to place</p>
                   <p>· Set <b className="text-white">MAIN map</b> so Deathrun loads it</p>
                 </>
               ) : (
                 <>
-                  <p>· Pick a model, click ground to place (drag = orbit, no place)</p>
-                  <p>· <b className="text-white">Ctrl</b> free fly · look down + W flies down</p>
-                  <p>· <b className="text-white">G</b> snap · <b className="text-white">F</b> focus · <b className="text-white">W/E/R</b> gizmo</p>
-                  <p>· <b className="text-white">Ctrl+D</b> duplicate · <b className="text-white">Ctrl+Z</b> undo</p>
+                  <p>· <b className="text-white">Select (V)</b> picks objects · <b className="text-white">Brush (B)</b> paints</p>
+                  <p>· Pick a model to arm Brush, click ground to place (drag = orbit)</p>
+                  <p>· Same model click selects it · <b className="text-white">Alt+click</b> stacks</p>
+                  <p>· <b className="text-white">Ctrl</b> free fly · <b className="text-white">G</b> snap · <b className="text-white">W/E/R</b> gizmo</p>
                   <p>· Set as <b className="text-white">MAIN map</b> for Deathrun Play</p>
                 </>
               )}
@@ -1562,7 +1608,11 @@ export function MapEditor({
             {doc.entities.length} entities · grid {doc.gridSize}
             {gridSnap ? ' · snap' : ''}
             {snapY ? 'Y' : ''}
-            {brush ? ` · brush: ${brush}` : ' · select only'}
+            {editTool === 'brush' && brush
+              ? ` · brush: ${brush}`
+              : editTool === 'brush'
+                ? ' · brush (pick a model)'
+                : ' · select'}
             {selectedIds.length > 1
               ? ` · multi: ${selectedIds.length}`
               : selected
@@ -1586,6 +1636,28 @@ export function MapEditor({
 
           {!uiCollapsed && toolsOpen && (
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 border border-white/15 rounded-xl px-2 py-1.5 backdrop-blur z-[80] max-w-[calc(100vw-7rem)] overflow-x-auto">
+            <ToolBtn
+              active={editTool === 'select'}
+              onClick={() => setEditTool('select')}
+              title="Select (V) — click objects without placing"
+            >
+              <MousePointer2 className="w-4 h-4" />
+            </ToolBtn>
+            <ToolBtn
+              active={editTool === 'brush'}
+              onClick={() => {
+                setEditTool('brush');
+                if (!brush) setBrush('floor-square');
+              }}
+              title={
+                brush
+                  ? `Brush paint (B) — place ${brush}. Alt+click stacks on same model.`
+                  : 'Brush paint (B) — pick a model in Assets'
+              }
+            >
+              <Paintbrush className="w-4 h-4" />
+            </ToolBtn>
+            <div className="w-px h-6 bg-white/15 mx-1" />
             <ToolBtn active={mode === 'translate'} onClick={() => setMode('translate')} title="Move (W)">
               <Move3d className="w-4 h-4" />
             </ToolBtn>

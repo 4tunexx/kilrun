@@ -86,6 +86,9 @@ export interface EditorCameraState {
   pitch: number;
 }
 
+/** Primary pointer tool: Select picks objects; Brush paints/places the active model. */
+export type EditTool = 'select' | 'brush';
+
 export interface EditorViewportApi {
   setDoc: (doc: MapDocument) => void;
   getDoc: () => MapDocument;
@@ -94,6 +97,8 @@ export interface EditorViewportApi {
   getSelectedIds: () => string[];
   setSelectedIds: (ids: string[]) => void;
   setBrush: (model: string | null) => void;
+  setEditTool: (tool: EditTool) => void;
+  getEditTool: () => EditTool;
   setActiveLayerId: (id: string) => void;
   setTransformMode: (mode: TransformMode) => void;
   setGridSnap: (on: boolean) => void;
@@ -159,6 +164,8 @@ export function createEditorViewport(
   let selectedId: string | null = null;
   let selectedIds: string[] = [];
   let brush: string | null = 'floor-square';
+  /** Select = pick/transform only; Brush = paint/place active model. */
+  let editTool: EditTool = 'select';
   let stampEntitiesQueue: EditorEntity[] | null = null;
   let activeLayerId = doc.layers[0]?.id ?? '';
   let gridSnap = true;
@@ -205,7 +212,7 @@ export function createEditorViewport(
     width: '100%',
     height: '100%',
     display: 'block',
-    cursor: 'crosshair',
+    cursor: 'default',
   });
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -861,11 +868,18 @@ export function createEditorViewport(
     });
   }
 
+  function updateCursor() {
+    if (freeFly) renderer.domElement.style.cursor = 'none';
+    else if (measureMode) renderer.domElement.style.cursor = 'cell';
+    else if (editTool === 'select') renderer.domElement.style.cursor = 'default';
+    else renderer.domElement.style.cursor = 'crosshair';
+  }
+
   function setFreeFly(on: boolean) {
     freeFly = on;
     orbit.enabled = !on;
     transform.enabled = !on;
-    renderer.domElement.style.cursor = on ? 'none' : 'crosshair';
+    updateCursor();
     if (on) {
       transform.detach();
       // Sync yaw/pitch from camera
@@ -994,24 +1008,14 @@ export function createEditorViewport(
     const pickables = Array.from(roots.values()).filter((r) => r.visible);
     const hits = raycaster.intersectObjects(pickables, true);
 
-    // With a brush active, place on mesh tops / ground (stack) instead of only selecting
-    if (brush && !measureMode && !ev.shiftKey) {
-      const placed = pickPlacePoint(true);
-      if (placed) {
-        placeAt(placed.point, 'prop', brush);
-        return;
-      }
-    }
-
+    let hitEntityId: string | null = null;
     if (hits.length) {
       let o: THREE.Object3D | null = hits[0].object;
       while (o && !o.userData.entityId) o = o.parent;
-      if (o?.userData.entityId) {
-        select(o.userData.entityId as string, ev.shiftKey);
-        return;
-      }
+      if (o?.userData.entityId) hitEntityId = o.userData.entityId as string;
     }
 
+    // Prefab stamp wins over brush paint (armed from Prefabs tab).
     if (groundHits[0] && stampEntitiesQueue?.length) {
       const placedPt = pickPlacePoint(true);
       const p = placedPt?.point ?? groundHits[0].point;
@@ -1045,7 +1049,54 @@ export function createEditorViewport(
       return;
     }
 
-    if (groundHits[0] && brush && !measureMode) {
+    // Brush paint: place on ground / stack. Select tool never places.
+    // Same-model click on that object's own cell → select (not stack). Alt = force stack.
+    const canPaint =
+      editTool === 'brush' && Boolean(brush) && !measureMode && !ev.shiftKey;
+    if (canPaint && brush) {
+      if (hitEntityId && !ev.altKey) {
+        const ent = doc.entities.find((e) => e.id === hitEntityId);
+        if (ent?.model === brush) {
+          const placed = pickPlacePoint(true);
+          if (placed) {
+            let px = placed.point.x;
+            let pz = placed.point.z;
+            if (gridSnap) {
+              px = snapToGrid(px, gridSize);
+              pz = snapToGrid(pz, gridSize);
+            }
+            const ex = gridSnap ? snapToGrid(ent.position[0], gridSize) : ent.position[0];
+            const ez = gridSnap ? snapToGrid(ent.position[2], gridSize) : ent.position[2];
+            const cellTol = Math.max(0.2, gridSize * 0.45);
+            const sameCell = Math.abs(px - ex) < cellTol && Math.abs(pz - ez) < cellTol;
+            if (sameCell) {
+              select(hitEntityId, false);
+              return;
+            }
+            // Ray grazed this mesh but snaps to a neighbor cell — paint there.
+            placeAt(new THREE.Vector3(px, 0, pz), 'prop', brush);
+            return;
+          }
+        }
+      }
+      const placed = pickPlacePoint(true);
+      if (placed) {
+        placeAt(placed.point, 'prop', brush);
+        return;
+      }
+    }
+
+    if (hitEntityId) {
+      select(hitEntityId, ev.shiftKey);
+      return;
+    }
+
+    if (
+      groundHits[0] &&
+      editTool === 'brush' &&
+      brush &&
+      !measureMode
+    ) {
       placeAt(groundHits[0].point, 'prop', brush);
     } else if (!ev.shiftKey) {
       select(null);
@@ -1183,6 +1234,11 @@ export function createEditorViewport(
       brush = m;
       if (m) stampEntitiesQueue = null;
     },
+    setEditTool: (tool) => {
+      editTool = tool;
+      updateCursor();
+    },
+    getEditTool: () => editTool,
     setActiveLayerId: (id) => {
       activeLayerId = id;
     },
@@ -1210,7 +1266,7 @@ export function createEditorViewport(
       measureA = null;
       while (measureGroup.children.length) measureGroup.remove(measureGroup.children[0]);
       handlers.onMeasureChange?.(null);
-      renderer.domElement.style.cursor = on ? 'cell' : freeFly ? 'none' : 'crosshair';
+      updateCursor();
     },
     isMeasureMode: () => measureMode,
     applyEnvironment: (env) => {
@@ -1240,7 +1296,7 @@ export function createEditorViewport(
     },
     stampEntities: (entities) => {
       stampEntitiesQueue = entities;
-      brush = null;
+      // Keep brush model armed; stamp is handled before paint on click.
     },
     duplicateSelected: (axis = 'x') => {
       if (!selectedIds.length && !selectedId) return;
