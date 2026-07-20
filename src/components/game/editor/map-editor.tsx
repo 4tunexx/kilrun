@@ -34,6 +34,10 @@ import {
   Ruler,
   Menu,
   EyeOff,
+  Eye,
+  Lock,
+  Unlock,
+  Focus,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -576,6 +580,65 @@ export function MapEditor({
     if (id === selectedId) {
       apiRef.current?.updateSelected(patch);
     }
+  };
+
+  const sortedLayers = useMemo(
+    () => doc.layers.slice().sort((a, b) => a.order - b.order),
+    [doc.layers]
+  );
+  const activeLayer = doc.layers.find((l) => l.id === activeLayerId) ?? sortedLayers[0] ?? null;
+
+  const applyDocLayers = (layers: typeof doc.layers) => {
+    scheduleHistory();
+    const next = { ...doc, layers };
+    setDoc(next);
+    apiRef.current?.setDoc(next);
+  };
+
+  const setLayerFlag = (
+    id: string,
+    patch: Partial<{ visible: boolean; locked: boolean; name: string }>
+  ) => {
+    applyDocLayers(doc.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  };
+
+  /** Hide every layer except this one — inspect a single build level. */
+  const soloLayer = (id: string) => {
+    applyDocLayers(doc.layers.map((l) => ({ ...l, visible: l.id === id })));
+    setActiveLayerId(id);
+  };
+
+  const showAllLayers = () => {
+    applyDocLayers(doc.layers.map((l) => ({ ...l, visible: true })));
+  };
+
+  const moveSelectionToLayer = (layerId: string) => {
+    const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+    if (!ids.length) return;
+    scheduleHistory();
+    setDoc((d) => {
+      const entities = d.entities.map((e) =>
+        ids.includes(e.id) ? { ...e, layerId } : e
+      );
+      const next = { ...d, entities };
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+  };
+
+  const addBuildLevel = () => {
+    const order = doc.layers.length
+      ? Math.max(...doc.layers.map((l) => l.order)) + 1
+      : 0;
+    const layer = {
+      id: generateId('layer'),
+      name: `Level ${order}`,
+      visible: true,
+      locked: false,
+      order,
+    };
+    applyDocLayers([...doc.layers, layer]);
+    setActiveLayerId(layer.id);
   };
 
   const openPlayerStudio = () => {
@@ -1205,80 +1268,137 @@ export function MapEditor({
 
           {tab === 'layers' && (
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              {doc.layers
-                .slice()
-                .sort((a, b) => a.order - b.order)
-                .map((layer) => (
+              <div className="rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-2.5 space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-cyan-200">
+                  Build by level
+                </p>
+                <p className="text-[10px] text-white/45 leading-snug">
+                  Paint floors on <b className="text-white/70">Level 0 / Floor</b>, then switch to
+                  Level 1 for props, traps, etc. Tap the eye to hide a level and check the layout.
+                  Active layer (cyan) is where new pieces go.
+                </p>
+                <div className="flex gap-1.5 pt-0.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1 text-[10px] h-8"
+                    onClick={showAllLayers}
+                  >
+                    <Eye className="w-3.5 h-3.5 mr-1" /> Show all
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="flex-1 text-[10px] h-8"
+                    onClick={addBuildLevel}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1" /> Add level
+                  </Button>
+                </div>
+              </div>
+
+              {sortedLayers.map((layer, index) => {
+                const count = doc.entities.filter((e) => e.layerId === layer.id).length;
+                const isActive = activeLayerId === layer.id;
+                return (
                   <div
                     key={layer.id}
-                    className={`rounded border p-2 ${
-                      activeLayerId === layer.id ? 'border-cyan-400 bg-cyan-500/10' : 'border-white/10'
+                    className={`rounded-xl border p-2.5 space-y-2 ${
+                      isActive
+                        ? 'border-cyan-400 bg-cyan-500/10'
+                        : layer.visible
+                          ? 'border-white/10 bg-black/20'
+                          : 'border-white/5 bg-black/40 opacity-70'
                     }`}
                   >
-                    <button
-                      type="button"
-                      className="w-full text-left font-semibold text-sm"
-                      onClick={() => setActiveLayerId(layer.id)}
-                    >
-                      {layer.name}
-                    </button>
-                    <div className="flex gap-2 mt-1 text-xs">
-                      <label className="flex items-center gap-1">
-                        <input
-                          type="checkbox"
-                          checked={layer.visible}
-                          onChange={(e) => {
-                            const next = {
-                              ...doc,
-                              layers: doc.layers.map((l) =>
-                                l.id === layer.id ? { ...l, visible: e.target.checked } : l
-                              ),
-                            };
-                            setDoc(next);
-                            apiRef.current?.setDoc(next);
-                          }}
-                        />
-                        Visible
-                      </label>
-                      <label className="flex items-center gap-1">
-                        <input
-                          type="checkbox"
-                          checked={layer.locked}
-                          onChange={(e) => {
-                            const next = {
-                              ...doc,
-                              layers: doc.layers.map((l) =>
-                                l.id === layer.id ? { ...l, locked: e.target.checked } : l
-                              ),
-                            };
-                            setDoc(next);
-                            apiRef.current?.setDoc(next);
-                          }}
-                        />
-                        Locked
-                      </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveLayerId(layer.id)}
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${
+                          isActive
+                            ? 'bg-cyan-500/40 text-cyan-50'
+                            : 'bg-white/10 text-white/70 hover:bg-white/15'
+                        }`}
+                        title={`Build on level ${index}`}
+                      >
+                        {index}
+                      </button>
+                      <input
+                        className="min-w-0 flex-1 bg-transparent border-b border-transparent focus:border-white/20 text-sm font-semibold text-white outline-none py-0.5"
+                        value={layer.name}
+                        onChange={(e) => setLayerFlag(layer.id, { name: e.target.value })}
+                        onFocus={() => setActiveLayerId(layer.id)}
+                        aria-label={`Rename level ${index}`}
+                      />
+                      <span className="text-[10px] tabular-nums text-white/35 shrink-0">
+                        {count}
+                      </span>
                     </div>
+
+                    <div className="flex flex-wrap gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setActiveLayerId(layer.id)}
+                        className={`flex-1 min-w-[4.5rem] px-2 py-1.5 rounded-md text-[10px] font-bold uppercase border ${
+                          isActive
+                            ? 'border-cyan-400/60 bg-cyan-500/25 text-cyan-50'
+                            : 'border-white/10 text-white/55 hover:bg-white/5'
+                        }`}
+                      >
+                        Build here
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLayerFlag(layer.id, { visible: !layer.visible })}
+                        className={`w-9 h-8 rounded-md flex items-center justify-center border ${
+                          layer.visible
+                            ? 'border-white/15 text-emerald-300 hover:bg-white/5'
+                            : 'border-white/10 text-white/35 hover:bg-white/5'
+                        }`}
+                        title={layer.visible ? 'Hide this level' : 'Show this level'}
+                      >
+                        {layer.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLayerFlag(layer.id, { locked: !layer.locked })}
+                        className={`w-9 h-8 rounded-md flex items-center justify-center border ${
+                          layer.locked
+                            ? 'border-amber-400/40 text-amber-200 bg-amber-500/10'
+                            : 'border-white/10 text-white/35 hover:bg-white/5'
+                        }`}
+                        title={layer.locked ? 'Unlock (allow place/edit)' : 'Lock (no place/edit)'}
+                      >
+                        {layer.locked ? (
+                          <Lock className="w-3.5 h-3.5" />
+                        ) : (
+                          <Unlock className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => soloLayer(layer.id)}
+                        className="w-9 h-8 rounded-md flex items-center justify-center border border-white/10 text-white/55 hover:bg-white/5"
+                        title="Solo — hide every other level"
+                      >
+                        <Focus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {(selectedId || selectedIds.length > 0) && (
+                      <button
+                        type="button"
+                        onClick={() => moveSelectionToLayer(layer.id)}
+                        className="w-full text-[10px] py-1 rounded-md border border-white/10 text-white/50 hover:bg-white/5 hover:text-white/80"
+                      >
+                        Move selection → this level
+                      </button>
+                    )}
                   </div>
-                ))}
-              <Button
-                size="sm"
-                className="w-full"
-                onClick={() => {
-                  const layer = {
-                    id: generateId('layer'),
-                    name: `Layer ${doc.layers.length + 1}`,
-                    visible: true,
-                    locked: false,
-                    order: doc.layers.length,
-                  };
-                  const next = { ...doc, layers: [...doc.layers, layer] };
-                  setDoc(next);
-                  setActiveLayerId(layer.id);
-                  apiRef.current?.setDoc(next);
-                }}
-              >
-                <Plus className="w-4 h-4 mr-1" /> New Layer
-              </Button>
+                );
+              })}
             </div>
           )}
 
@@ -1574,6 +1694,7 @@ export function MapEditor({
                 <>
                   <p>· Tap <b className="text-white">Hide UI</b> for a clear place canvas</p>
                   <p>· <b className="text-white">Select</b> (arrow) picks objects · <b className="text-white">Brush</b> paints</p>
+                  <p>· <b className="text-white">Level</b> strip: paint Floor (0) then Props (1); eye hides a level</p>
                   <p>· <b className="text-white">Library</b> picks a model then arm Brush · tap ground</p>
                   <p>· <b className="text-white">Fly</b> for joysticks · <b className="text-white">Edit</b> to place</p>
                   <p>· Set <b className="text-white">MAIN map</b> so Deathrun loads it</p>
@@ -1581,6 +1702,7 @@ export function MapEditor({
               ) : (
                 <>
                   <p>· <b className="text-white">Select (V)</b> picks objects · <b className="text-white">Brush (B)</b> paints</p>
+                  <p>· Build by <b className="text-white">Level</b>: Floor 0 → Props 1; eye toggles visibility</p>
                   <p>· Pick a model to arm Brush, click ground to place (drag = orbit)</p>
                   <p>· Same model click selects it · <b className="text-white">Alt+click</b> stacks</p>
                   <p>· <b className="text-white">Ctrl</b> free fly · <b className="text-white">G</b> snap · <b className="text-white">W/E/R</b> gizmo</p>
@@ -1608,6 +1730,9 @@ export function MapEditor({
             {doc.entities.length} entities · grid {doc.gridSize}
             {gridSnap ? ' · snap' : ''}
             {snapY ? 'Y' : ''}
+            {activeLayer
+              ? ` · L${sortedLayers.findIndex((l) => l.id === activeLayer.id)}:${activeLayer.name}`
+              : ''}
             {editTool === 'brush' && brush
               ? ` · brush: ${brush}`
               : editTool === 'brush'
@@ -1620,6 +1745,71 @@ export function MapEditor({
                 : ''}
             {selected && entityExportsAsPlatform(selected) ? ' · green pad = solid' : ''}
           </div>
+          )}
+
+          {/* Quick level strip — switch / hide build levels without opening the sidebar */}
+          {!uiCollapsed && sortedLayers.length > 0 && (
+            <div
+              className={`absolute z-[80] flex items-center gap-1 max-w-[min(92vw,28rem)] overflow-x-auto rounded-xl border border-white/15 bg-black/75 px-1.5 py-1 backdrop-blur ${
+                toolsOpen
+                  ? 'bottom-[4.25rem] left-1/2 -translate-x-1/2'
+                  : 'bottom-14 left-1/2 -translate-x-1/2'
+              }`}
+            >
+              <span className="text-[9px] font-bold uppercase tracking-wide text-white/40 px-1 shrink-0">
+                Level
+              </span>
+              {sortedLayers.map((layer, index) => {
+                const isActive = activeLayerId === layer.id;
+                return (
+                  <div
+                    key={layer.id}
+                    className={`flex items-center rounded-lg border shrink-0 ${
+                      isActive
+                        ? 'border-cyan-400/60 bg-cyan-500/25'
+                        : layer.visible
+                          ? 'border-white/10 bg-white/5'
+                          : 'border-white/5 bg-black/40 opacity-60'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveLayerId(layer.id);
+                        setTab('layers');
+                      }}
+                      className="px-2 py-1 text-[10px] font-bold text-white/85"
+                      title={`Build on ${layer.name} (level ${index})`}
+                    >
+                      {index}
+                      <span className="ml-1 font-medium text-white/50 hidden sm:inline">
+                        {layer.name}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLayerFlag(layer.id, { visible: !layer.visible })}
+                      className="w-7 h-7 flex items-center justify-center border-l border-white/10 text-white/50 hover:text-white/90"
+                      title={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
+                    >
+                      {layer.visible ? (
+                        <Eye className="w-3 h-3 text-emerald-300" />
+                      ) : (
+                        <EyeOff className="w-3 h-3" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                onClick={addBuildLevel}
+                className="w-7 h-7 shrink-0 rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:bg-white/10"
+                title="Add build level"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
           )}
 
           {!uiCollapsed && (

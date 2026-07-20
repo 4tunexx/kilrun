@@ -36,7 +36,8 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'layers',
     title: 'Layers',
-    body: 'Use Floor / Props / Spawns layers so you can lock or hide groups. New Layer stacks “above” for decoration. Active layer is where new pieces go.',
+    body: 'Build by level: Floor (0) for platforms, Props (1) for decoration, Spawns (2) for starts. Use Build here to paint onto a level, the eye to hide it while you check the course, and Solo to inspect one level alone. Add Level for more floors stacked above.',
+    tip: 'The Level strip under the viewport switches and hides levels without opening the sidebar.',
     tab: 'layers',
   },
   {
@@ -95,8 +96,8 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     id: 'building',
     title: 'Building a course',
     paragraphs: [
-      '1) Place a spawn pad near the origin. 2) Lay floor-square / floor-small-square stepping stones with gaps. 3) Add columns and props for read. 4) Place Runner + Trapper spawns. 5) Play Test. 6) Save and Set Active Match Map.',
-      'Use Layers: Floor locked when dressing Props. Snap size 1 is great for modular floors; 0.5 for fine work.',
+      '1) Place a spawn pad near the origin. 2) Lay floor-square / floor-small-square stepping stones with gaps on Floor (level 0). 3) Switch to Props (level 1) for columns and dressing — hide Floor with the eye to check silhouettes. 4) Place Runner + Trapper spawns. 5) Play Test. 6) Save and Set Active Match Map.',
+      'Use Layers / the Level strip: lock Floor when dressing Props. Solo a level to inspect it alone. Snap size 1 is great for modular floors; 0.5 for fine work.',
     ],
   },
   {
