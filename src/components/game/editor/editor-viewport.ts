@@ -157,6 +157,8 @@ export function createEditorViewport(
     onDocChange: (doc: MapDocument) => void;
     onFreeFlyChange?: (on: boolean) => void;
     onMeasureChange?: (distance: number | null) => void;
+    /** Fired when place is blocked (e.g. locked build level). */
+    onPlaceResult?: (result: 'locked' | 'ok', layerName?: string) => void;
   }
 ): EditorViewportApi {
   let doc: MapDocument = structuredClone(initial);
@@ -759,9 +761,12 @@ export function createEditorViewport(
     handlers.onSelectionChange?.(selectedIds);
   }
 
-  function placeAt(point: THREE.Vector3, kind: EditorEntity['kind'] = 'prop', model?: string) {
+  function placeAt(point: THREE.Vector3, kind: EditorEntity['kind'] = 'prop', model?: string): 'ok' | 'locked' {
     const layer = layerMeta(activeLayerId);
-    if (layer?.locked) return;
+    if (layer?.locked) {
+      handlers.onPlaceResult?.('locked', layer.name);
+      return 'locked';
+    }
 
     let x = point.x;
     let z = point.z;
@@ -869,6 +874,8 @@ export function createEditorViewport(
       select(ent.id);
       handlers.onDocChange(doc);
     });
+    handlers.onPlaceResult?.('ok', layer?.name);
+    return 'ok';
   }
 
   function updateCursor() {

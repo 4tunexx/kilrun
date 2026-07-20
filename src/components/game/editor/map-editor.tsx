@@ -334,6 +334,15 @@ export function MapEditor({
       },
       onFreeFlyChange: setFreeFly,
       onMeasureChange: setMeasureDist,
+      onPlaceResult: (result, layerName) => {
+        if (result === 'locked') {
+          toast({
+            title: 'Build level locked',
+            description: `“${layerName ?? 'This level'}” is locked — unlock it in Layers, or Build here on another level.`,
+            variant: 'destructive',
+          });
+        }
+      },
     });
     apiRef.current = api;
     api.setBrush(brush);
@@ -424,22 +433,43 @@ export function MapEditor({
   };
 
   const isDirty = () => snapshotMapDoc(workingDoc()) !== lastSavedRef.current;
+  const dirty = isDirty();
+
+  const clearHistory = () => {
+    undoStack.current = [];
+    redoStack.current = [];
+    historyAnchor.current = null;
+    setCanUndo(false);
+    setCanRedo(false);
+  };
 
   const markClean = (next: MapDocument) => {
     lastSavedRef.current = snapshotMapDoc(next);
   };
 
-  const persist = () => {
-    const next = workingDoc();
-    const liveThumb = apiRef.current?.captureThumbnail() ?? null;
-    saveMap(mapId, next, { thumbnailDataUrl: liveThumb });
-    setDoc(next);
-    docRef.current = next;
-    markClean(next);
-    // Prefer a framed overview thumb for the library card
-    void import('./map-thumbnail').then(({ ensureMapThumbnail }) =>
-      ensureMapThumbnail(mapId, { force: true })
-    );
+  const persist = (opts?: { quiet?: boolean }) => {
+    try {
+      const next = workingDoc();
+      const liveThumb = apiRef.current?.captureThumbnail() ?? null;
+      saveMap(mapId, next, { thumbnailDataUrl: liveThumb });
+      setDoc(next);
+      docRef.current = next;
+      markClean(next);
+      void import('./map-thumbnail').then(({ ensureMapThumbnail }) =>
+        ensureMapThumbnail(mapId, { force: true })
+      );
+      if (!opts?.quiet) {
+        toast({ title: 'Map saved', description: `“${next.name}” stored in this browser.` });
+      }
+      return true;
+    } catch (err) {
+      toast({
+        title: 'Save failed',
+        description: err instanceof Error ? err.message : 'Could not save map',
+        variant: 'destructive',
+      });
+      return false;
+    }
   };
 
   const requestClose = () => {
@@ -465,6 +495,29 @@ export function MapEditor({
       document.body.style.overflow = prevOverflow;
     };
   }, []);
+
+  // Warn before closing the tab with unsaved creator work
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (snapshotMapDoc(workingDoc()) === lastSavedRef.current) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Autosave every 30s while dirty — creator engine must not lose work
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (playTest) return;
+      if (snapshotMapDoc(workingDoc()) === lastSavedRef.current) return;
+      persist({ quiet: true });
+    }, 30_000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapId, playTest]);
 
   useEffect(() => {
     apiRef.current?.setBrush(brush);
@@ -588,28 +641,33 @@ export function MapEditor({
   );
   const activeLayer = doc.layers.find((l) => l.id === activeLayerId) ?? sortedLayers[0] ?? null;
 
-  const applyDocLayers = (layers: typeof doc.layers) => {
+  const applyDocLayers = (
+    layersOrFn: typeof doc.layers | ((prev: typeof doc.layers) => typeof doc.layers)
+  ) => {
     scheduleHistory();
-    const next = { ...doc, layers };
-    setDoc(next);
-    apiRef.current?.setDoc(next);
+    setDoc((d) => {
+      const layers = typeof layersOrFn === 'function' ? layersOrFn(d.layers) : layersOrFn;
+      const next = { ...d, layers };
+      apiRef.current?.setDoc(next);
+      return next;
+    });
   };
 
   const setLayerFlag = (
     id: string,
     patch: Partial<{ visible: boolean; locked: boolean; name: string }>
   ) => {
-    applyDocLayers(doc.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+    applyDocLayers((layers) => layers.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   };
 
   /** Hide every layer except this one — inspect a single build level. */
   const soloLayer = (id: string) => {
-    applyDocLayers(doc.layers.map((l) => ({ ...l, visible: l.id === id })));
+    applyDocLayers((layers) => layers.map((l) => ({ ...l, visible: l.id === id })));
     setActiveLayerId(id);
   };
 
   const showAllLayers = () => {
-    applyDocLayers(doc.layers.map((l) => ({ ...l, visible: true })));
+    applyDocLayers((layers) => layers.map((l) => ({ ...l, visible: true })));
   };
 
   const moveSelectionToLayer = (layerId: string) => {
@@ -627,17 +685,19 @@ export function MapEditor({
   };
 
   const addBuildLevel = () => {
-    const order = doc.layers.length
-      ? Math.max(...doc.layers.map((l) => l.order)) + 1
-      : 0;
     const layer = {
       id: generateId('layer'),
-      name: `Level ${order}`,
+      name: '',
       visible: true,
       locked: false,
-      order,
+      order: 0,
     };
-    applyDocLayers([...doc.layers, layer]);
+    applyDocLayers((layers) => {
+      const order = layers.length ? Math.max(...layers.map((l) => l.order)) + 1 : 0;
+      layer.name = `Level ${order}`;
+      layer.order = order;
+      return [...layers, layer];
+    });
     setActiveLayerId(layer.id);
   };
 
@@ -816,6 +876,19 @@ export function MapEditor({
             <Menu className="w-4 h-4" />
             Menus
           </button>
+          <button
+            type="button"
+            onClick={() => persist()}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 ${
+              dirty
+                ? 'border-amber-400/70 bg-amber-500/45'
+                : 'border-white/25 bg-black/70'
+            }`}
+            title={dirty ? 'Unsaved changes — tap to save' : 'Saved'}
+          >
+            <Save className="w-4 h-4" />
+            {dirty ? 'Save •' : 'Save'}
+          </button>
           {(isMobile || isTouch) && (
             <>
               <button
@@ -984,11 +1057,18 @@ export function MapEditor({
             const id = e.target.value;
             const loaded = loadMap(id);
             if (!loaded) return;
+            if (isDirty()) {
+              const ok = confirm(
+                'You have unsaved changes on this map.\n\nOK = discard and switch\nCancel = stay'
+              );
+              if (!ok) return;
+            }
             const withEnv = { ...loaded, environment: ensureEnvironment(loaded) };
             setMapId(id);
             setDoc(withEnv);
             docRef.current = withEnv;
             markClean(withEnv);
+            clearHistory();
             apiRef.current?.setDoc(withEnv);
             setActivePlayId(getActivePlayMapIdForMode(getMapGameMode(withEnv)));
           }}
@@ -1071,8 +1151,14 @@ export function MapEditor({
         </Button>
 
         <div className="flex-1 min-w-2" />
-        <Button size="sm" variant="secondary" className="shrink-0" onClick={persist}>
-          <Save className="w-4 h-4 mr-1" /> Save
+        <Button
+          size="sm"
+          variant="secondary"
+          className={`shrink-0 ${dirty ? 'border border-amber-400/60 text-amber-100 bg-amber-500/15' : ''}`}
+          onClick={() => persist()}
+          title={dirty ? 'Unsaved changes — click to save' : 'Saved'}
+        >
+          <Save className="w-4 h-4 mr-1" /> {dirty ? 'Save •' : 'Save'}
         </Button>
         <Button size="sm" variant="secondary" className="shrink-0" onClick={doExport}>
           <Download className="w-4 h-4 mr-1" /> Export
@@ -1089,6 +1175,15 @@ export function MapEditor({
             const f = e.target.files?.[0];
             if (!f) return;
             try {
+              if (isDirty()) {
+                const ok = confirm(
+                  'Import replaces the current map in the editor.\n\nOK = continue (save first if you need this map)\nCancel = abort'
+                );
+                if (!ok) {
+                  e.target.value = '';
+                  return;
+                }
+              }
               const parsed = importJson(await f.text());
               const withEnv = { ...parsed, environment: ensureEnvironment(parsed) };
               const id = `map_${Date.now().toString(36)}`;
@@ -1097,11 +1192,21 @@ export function MapEditor({
               setDoc(withEnv);
               docRef.current = withEnv;
               markClean(withEnv);
+              clearHistory();
               apiRef.current?.setDoc(withEnv);
+              toast({
+                title: 'Map imported',
+                description: `“${withEnv.name}” ready to edit.`,
+              });
             } catch (err) {
               console.error(err);
-              alert('Invalid map JSON');
+              toast({
+                title: 'Import failed',
+                description: err instanceof Error ? err.message : 'Invalid map JSON',
+                variant: 'destructive',
+              });
             }
+            e.target.value = '';
           }}
         />
         <Button size="sm" variant="destructive" className="shrink-0" onClick={requestClose} title="Exit (Esc)">
@@ -1453,8 +1558,13 @@ export function MapEditor({
                   try {
                     savePrefab(prefabName.trim() || 'Prefab', ents);
                     setPrefabs(listPrefabs());
+                    toast({ title: 'Prefab saved', description: prefabName.trim() || 'Prefab' });
                   } catch (err) {
-                    alert(err instanceof Error ? err.message : 'Could not save prefab');
+                    toast({
+                      title: 'Prefab failed',
+                      description: err instanceof Error ? err.message : 'Could not save prefab',
+                      variant: 'destructive',
+                    });
                   }
                 }}
               >

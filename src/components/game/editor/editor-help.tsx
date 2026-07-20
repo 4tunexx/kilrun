@@ -16,9 +16,9 @@ export interface TutorialStep {
 export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'welcome',
-    title: 'Welcome to the Map Editor',
-    body: 'This editor is how you build Deathrun courses — floors, props, spawns, buttons, and animated doors. You can follow this short tour or skip and read the full HELP tab anytime.',
-    tip: 'Tip: press the ? button anytime to reopen tips.',
+    title: 'Welcome to the Creator Engine',
+    body: 'This Map Editor is Kilrun’s main creator tool — build courses by level, sculpt skins, stamp prefabs, Play Test, then Set as MAIN to ship into play. Treat every map like content you will publish.',
+    tip: 'Tip: Save often (autosave runs too). Hide UI for a clear canvas; Level strip switches Floor → Props.',
   },
   {
     id: 'place',
@@ -75,10 +75,11 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[] = [
   {
     id: 'overview',
-    title: 'Overview',
+    title: 'Overview — Creator Engine',
     paragraphs: [
-      'The map editor lets you build 3D Deathrun levels with Kenney prototype models, custom GLBs, lighting/sky settings, and animation triggers.',
-      'Maps save locally in your browser (Save / Export JSON). You can Import JSON on another machine.',
+      'The map editor is the main Kilrun creator engine: build 3D courses with Kenney / custom GLBs, lighting, animation triggers, prefabs, and skins — then Play Test and publish as the Active (MAIN) map for a mode.',
+      'Maps save in this browser (Save / Export JSON). Import JSON to move a map between machines. Autosave runs every 30s while you have unsaved changes. Coming next for the creator platform: cloud publish, shared mod packs, and a gallery.',
+      'Build tough: use Levels (Floor 0 → Props 1), validate before MAIN, keep embeds small, and Play Test before you ship.',
     ],
   },
   {

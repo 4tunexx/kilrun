@@ -68,6 +68,7 @@ function validateDeathrunMap(doc: MapDocument): MapValidationIssue[] {
   }
 
   pushOrphanWarnings(ents, issues);
+  pushCreatorEngineChecks(doc, issues);
   return issues;
 }
 
@@ -113,6 +114,7 @@ function validateHordeMap(doc: MapDocument): MapValidationIssue[] {
   }
 
   pushOrphanWarnings(ents, issues);
+  pushCreatorEngineChecks(doc, issues);
   return issues;
 }
 
@@ -147,6 +149,7 @@ function validateCompetitiveMap(doc: MapDocument): MapValidationIssue[] {
   }
 
   pushOrphanWarnings(ents, issues);
+  pushCreatorEngineChecks(doc, issues);
   return issues;
 }
 
@@ -164,6 +167,54 @@ function pushOrphanWarnings(
     issues.push({
       level: 'warn',
       message: `${orphans.length} prop(s) are very far from origin — check heights.`,
+    });
+  }
+}
+
+/** Shared creator-engine checks for every mode before publish. */
+function pushCreatorEngineChecks(doc: MapDocument, issues: MapValidationIssue[]) {
+  const ents = doc.entities ?? [];
+  if (!doc.name?.trim()) {
+    issues.push({ level: 'error', message: 'Map needs a name before publish.' });
+  }
+  if (ents.length === 0) {
+    issues.push({ level: 'error', message: 'Map is empty — place at least one piece.' });
+  }
+  if (ents.length > 2500) {
+    issues.push({
+      level: 'error',
+      message: `Too many entities (${ents.length}). Cap is 2500 for stable play — split into levels or simplify.`,
+    });
+  } else if (ents.length > 1200) {
+    issues.push({
+      level: 'warn',
+      message: `Large map (${ents.length} entities) — may hitch on weaker devices.`,
+    });
+  }
+
+  let embeddedBytes = 0;
+  for (const e of ents) {
+    if (e.customModelUrl?.startsWith('data:')) embeddedBytes += e.customModelUrl.length;
+    if (e.textureUrl?.startsWith('data:')) embeddedBytes += e.textureUrl.length;
+  }
+  const mb = embeddedBytes / (1024 * 1024);
+  if (mb > 4) {
+    issues.push({
+      level: 'error',
+      message: `Embedded models/textures are ~${mb.toFixed(1)} MB — too large to publish from browser storage. Use smaller GLBs or external URLs.`,
+    });
+  } else if (mb > 1.5) {
+    issues.push({
+      level: 'warn',
+      message: `Embedded assets ~${mb.toFixed(1)} MB — close to browser save limits.`,
+    });
+  }
+
+  const layers = doc.layers ?? [];
+  if (layers.length > 0 && layers.every((l) => !l.visible)) {
+    issues.push({
+      level: 'warn',
+      message: 'All build levels are hidden — show at least one before playtesting.',
     });
   }
 }
