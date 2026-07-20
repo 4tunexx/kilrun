@@ -296,6 +296,8 @@ model SiteSettings {
   hubChromeJson      String  @default("{}")
   /// JSON: Premium pricing, offers, free Ranked week — see premium-config.ts.
   premiumConfigJson  String  @default("{}")
+  /// JSON: Competitive rank tiers (name, minKp, imageUrl) — see rank-config.ts.
+  rankConfigJson     String  @default("{}")
 }
 
 model GlobalChatMessage {

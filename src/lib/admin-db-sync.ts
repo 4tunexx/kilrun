@@ -16,7 +16,7 @@ import { writeAuditLog } from '@/lib/audit';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-20-premium-peak-config';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-20-rank-config-mm';
 
 async function requireAdmin() {
   const session = await auth();
@@ -54,7 +54,7 @@ export type AdminDbSyncResult = {
  * Call from Admin → Dashboard → Sync database schema (once after this deploy).
  *
  * Verifies: equippedSkins, kp, peakKp/peakRank, premiumExpiresAt,
- * MatchResult.kpDelta/stats, SiteSettings.premiumConfigJson.
+ * MatchResult.kpDelta/stats, SiteSettings.premiumConfigJson, rankConfigJson.
  */
 export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
   const staff = await requireAdmin();
@@ -247,6 +247,32 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`premiumConfigJson verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — SiteSettings.premiumConfigJson not writable. (${msg})`
+    );
+  }
+
+  // Runtime verify: SiteSettings.rankConfigJson (admin Ranks editor)
+  try {
+    const settings = await prisma.siteSettings.findUnique({
+      where: { singletonKey: 'default' },
+    });
+    const raw =
+      (settings as { rankConfigJson?: string } | null)?.rankConfigJson ?? '{}';
+    if (settings) {
+      await prisma.siteSettings.update({
+        where: { singletonKey: 'default' },
+        data: { rankConfigJson: raw },
+      });
+    } else {
+      await prisma.siteSettings.create({
+        data: { singletonKey: 'default', rankConfigJson: '{}' },
+      });
+    }
+    steps.push('rankConfigJson field verified (read/write OK)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`rankConfigJson verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — SiteSettings.rankConfigJson not writable. (${msg})`
     );
   }
 

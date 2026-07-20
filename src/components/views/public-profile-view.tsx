@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LevelBar } from '@/components/ui/level-bar';
+import { RankBadge } from '@/components/ui/rank-badge';
 import { AvatarWithFrame } from '@/components/avatar-with-frame';
 import { NicknameEffectText } from '@/components/nickname-effect';
 import {
@@ -482,7 +483,12 @@ export default function PublicProfileView({
                 <p className="text-xs text-slate-400">
                   {profile.isPremium ? 'Ranked rank' : 'Highest Ranked rank'}
                 </p>
-                <p className="text-lg font-bold text-yellow-400 flex items-center justify-center gap-1">
+                <p className="text-lg font-bold text-yellow-400 flex items-center justify-center gap-1.5">
+                  <RankBadge
+                    rank={profile.peakRank || profile.currentRank}
+                    imageUrl={profile.peakRankImage}
+                    size={22}
+                  />
                   <Crown className="h-4 w-4" /> {profile.peakRank || profile.currentRank}
                 </p>
                 {typeof profile.peakKp === 'number' && (

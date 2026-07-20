@@ -31,7 +31,9 @@ const gameServer = new Server({
 gameServer.define('deathrun', DeathrunRoom);
 gameServer.define('horde', HordeRoom);
 gameServer.define('competitive', CompetitiveRoom);
-gameServer.define('competitive_ranked', CompetitiveRoom);
+gameServer
+  .define('competitive_ranked', CompetitiveRoom)
+  .filterBy(['rankKey']);
 
 httpServer.listen(PORT, () => {
   // eslint-disable-next-line no-console

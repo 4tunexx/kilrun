@@ -1,47 +1,47 @@
 /**
  * Killrun Points (KP) — competitive Elo-style rating.
  * Ranks shown on profiles / leaderboards are derived from KP (Faceit / ESEA style).
+ * Tier thresholds/images can be overridden via SiteSettings.rankConfigJson.
  */
+
+import {
+  DEFAULT_RANK_TIERS,
+  getRankForKpWithTiers,
+  type RankTierDef,
+} from '@/lib/rank-config';
 
 export const KP_DEFAULT = 1000;
 export const KP_MIN = 0;
 export const KP_MAX = 5000;
 
 /** Rank tiers ordered low → high. Threshold = minimum KP for that rank. */
-export const KP_RANK_TIERS: { name: string; minKp: number }[] = [
-  { name: 'Unranked', minKp: 0 },
-  { name: 'Bronze', minKp: 800 },
-  { name: 'Silver', minKp: 1000 },
-  { name: 'Gold', minKp: 1200 },
-  { name: 'Platinum', minKp: 1400 },
-  { name: 'Diamond', minKp: 1600 },
-  { name: 'Immortal', minKp: 1800 },
-];
+export const KP_RANK_TIERS: RankTierDef[] = DEFAULT_RANK_TIERS.map((t) => ({
+  ...t,
+}));
 
-export function getRankForKp(kp: number): string {
-  const safe = Math.max(KP_MIN, Math.floor(kp));
-  let rank = KP_RANK_TIERS[0].name;
-  for (const tier of KP_RANK_TIERS) {
-    if (safe >= tier.minKp) rank = tier.name;
-  }
-  return rank;
+export function getRankForKp(kp: number, tiers: RankTierDef[] = KP_RANK_TIERS): string {
+  return getRankForKpWithTiers(kp, tiers.length ? tiers : KP_RANK_TIERS);
 }
 
 /** Progress toward the next KP rank (for UI bars). */
-export function getKpRankProgress(kp: number): {
+export function getKpRankProgress(
+  kp: number,
+  tiers: RankTierDef[] = KP_RANK_TIERS
+): {
   rank: string;
   nextRank: string | null;
   kpIntoRank: number;
   kpForNext: number;
   percent: number;
 } {
+  const list = tiers.length ? tiers : KP_RANK_TIERS;
   const safe = Math.max(KP_MIN, Math.floor(kp));
   let idx = 0;
-  for (let i = 0; i < KP_RANK_TIERS.length; i++) {
-    if (safe >= KP_RANK_TIERS[i].minKp) idx = i;
+  for (let i = 0; i < list.length; i++) {
+    if (safe >= list[i].minKp) idx = i;
   }
-  const current = KP_RANK_TIERS[idx];
-  const next = KP_RANK_TIERS[idx + 1] ?? null;
+  const current = list[idx];
+  const next = list[idx + 1] ?? null;
   if (!next) {
     return {
       rank: current.name,

@@ -1089,6 +1089,11 @@ export async function getSiteSettings() {
             (settings as { premiumConfigJson?: string }).premiumConfigJson ??
             '{}'
         ),
+        rankConfigJson: String(
+          doc.rankConfigJson ??
+            (settings as { rankConfigJson?: string }).rankConfigJson ??
+            '{}'
+        ),
       };
     }
   } catch {
@@ -1115,6 +1120,9 @@ export async function getSiteSettings() {
     premiumConfigJson: String(
       (settings as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
     ),
+    rankConfigJson: String(
+      (settings as { rankConfigJson?: string }).rankConfigJson ?? '{}'
+    ),
   };
 }
 
@@ -1136,6 +1144,7 @@ export async function updateSiteSettings(data: {
   hubNavJson?: string;
   hubChromeJson?: string;
   premiumConfigJson?: string;
+  rankConfigJson?: string;
 }) {
   const staff = await requireStaff();
   await getSiteSettings();
@@ -1157,6 +1166,7 @@ export async function updateSiteSettings(data: {
   const { serializePremiumConfig, parsePremiumConfig } = await import(
     '@/lib/premium-config'
   );
+  const { serializeRankConfig, parseRankConfig } = await import('@/lib/rank-config');
   const payload: Record<string, string | boolean | Date | null> = {};
 
   if (typeof data.logoUrl === 'string') {
@@ -1230,6 +1240,9 @@ export async function updateSiteSettings(data: {
     payload.premiumConfigJson = serializePremiumConfig(
       parsePremiumConfig(data.premiumConfigJson)
     );
+  }
+  if (typeof data.rankConfigJson === 'string') {
+    payload.rankConfigJson = serializeRankConfig(parseRankConfig(data.rankConfigJson));
   }
 
   let saved;

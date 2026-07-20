@@ -702,8 +702,10 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
           username={user.username}
           avatarUrl={user.avatarUrl}
           xpProgress={xpProgress}
-          isAdmin={user.role === 'admin'}
+          isAdmin={showAdmin}
           kp={kp}
+          isPremium={rankedAccess}
+          competitiveQueue={lobbyMode === 'competitive' ? competitiveQueue : 'casual'}
         />
       </ProfileNavigationProvider>
     );

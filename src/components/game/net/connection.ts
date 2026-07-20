@@ -19,6 +19,15 @@ export interface JoinOptions {
   isPremium?: boolean;
   /** Premium or free Ranked week. */
   rankedAccess?: boolean;
+  /**
+   * Ranked matchmaking bracket (tier name) or `open` for mixed lobby.
+   * Used with Colyseus filterBy on competitive_ranked.
+   */
+  rankKey?: string;
+  /** Seconds to wait for same-rank peers before falling back to open. */
+  mmWaitSec?: number;
+  /** Keep same-rank lobby if at least this many players. */
+  minSameRankPlayers?: number;
 }
 
 export type GameRoomName = 'deathrun' | 'horde' | 'competitive' | 'competitive_ranked';
@@ -50,6 +59,8 @@ function resolveGameServerUrl(): string {
 export class GameConnection {
   private client: Client;
   private room: Room | null = null;
+  private mmTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
 
   constructor(endpoint: string = resolveGameServerUrl()) {
     this.client = new Client(endpoint);
@@ -64,7 +75,62 @@ export class GameConnection {
     options: JoinOptions,
     callbacks: RoomCallbacks
   ): Promise<void> {
-    this.room = await this.client.joinOrCreate(roomName, options);
+    this.disposed = false;
+    const isRanked = roomName === 'competitive_ranked';
+    const preferredKey =
+      options.rankKey && options.rankKey !== 'open' ? options.rankKey : null;
+    const waitSec = Math.max(3, options.mmWaitSec ?? 12);
+    const minSame = Math.max(2, options.minSameRankPlayers ?? 4);
+
+    this.room = await this.client.joinOrCreate(roomName, {
+      ...options,
+      rankKey: preferredKey ?? 'open',
+    });
+    this.bindRoom(callbacks);
+
+    if (isRanked && preferredKey) {
+      this.mmTimer = setTimeout(() => {
+        void this.maybeFallbackToOpenLobby(roomName, options, callbacks, minSame);
+      }, waitSec * 1000);
+    }
+  }
+
+  private async maybeFallbackToOpenLobby(
+    roomName: GameRoomName,
+    options: JoinOptions,
+    callbacks: RoomCallbacks,
+    minSame: number
+  ) {
+    if (this.disposed || !this.room) return;
+    const state = this.room.state as unknown as NetRoomState;
+    if (state.phase !== 'lobby' && state.phase !== 'countdown') return;
+
+    let count = 0;
+    try {
+      const players = (this.room.state as { players?: { size?: number } }).players;
+      count = typeof players?.size === 'number' ? players.size : 0;
+    } catch {
+      count = 0;
+    }
+    if (count >= minSame) return;
+
+    try {
+      await this.room.leave();
+    } catch {
+      // ignore
+    }
+    this.room = null;
+    if (this.disposed) return;
+
+    this.room = await this.client.joinOrCreate(roomName, {
+      ...options,
+      rankKey: 'open',
+    });
+    this.bindRoom(callbacks);
+  }
+
+  private bindRoom(callbacks: RoomCallbacks) {
+    if (!this.room) return;
     const state = this.room.state as never;
     const $ = getStateCallbacks(this.room) as <T>(instance: T) => never;
     const proxy = $(state) as unknown as {
@@ -105,7 +171,8 @@ export class GameConnection {
     });
 
     const emitRoomChange = () => {
-      const s = this.room!.state as unknown as NetRoomState;
+      if (!this.room) return;
+      const s = this.room.state as unknown as NetRoomState;
       callbacks.onRoomChange?.({
         phase: s.phase,
         countdownMs: s.countdownMs,
@@ -268,6 +335,11 @@ export class GameConnection {
   }
 
   public disconnect(): void {
+    this.disposed = true;
+    if (this.mmTimer) {
+      clearTimeout(this.mmTimer);
+      this.mmTimer = null;
+    }
     this.room?.leave();
     this.room = null;
   }

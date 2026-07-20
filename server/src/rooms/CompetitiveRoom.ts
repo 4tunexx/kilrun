@@ -43,6 +43,10 @@ interface JoinOptions {
   isPremium?: boolean;
   /** Hub-granted Ranked access (Premium or free Ranked week). */
   rankedAccess?: boolean;
+  /** Matchmaking bracket — tier name or `open`. */
+  rankKey?: string;
+  mmWaitSec?: number;
+  minSameRankPlayers?: number;
 }
 
 interface SpawnPoint {
@@ -56,6 +60,8 @@ const ROUND_COUNTDOWN_MS = 4000;
 const MAX_ROUNDS = 6;
 const ROUNDS_TO_WIN = 4;
 const ROUND_TIME_MS = 120_000;
+const DEFAULT_MM_WAIT_MS = 12_000;
+const DEFAULT_MIN_SAME_RANK = 4;
 
 /**
  * Competitive 4v4 — best of 6 rounds (first to 4). Team elimination via hitscan.
@@ -79,11 +85,33 @@ export class CompetitiveRoom extends Room<RoomState> {
   private betweenRoundMs = 0;
   private matchStarted = false;
 
-  onCreate() {
+  private rankKey = 'open';
+  private mmWaitMs = DEFAULT_MM_WAIT_MS;
+  private minSameRank = DEFAULT_MIN_SAME_RANK;
+  private lobbyElapsedMs = 0;
+  private openedToAll = false;
+
+  onCreate(options: JoinOptions = {}) {
     this.setState(new RoomState());
     const named = String((this as unknown as { roomName?: string }).roomName ?? '');
     this.state.modeTag =
       named === 'competitive_ranked' ? 'competitive_ranked' : 'competitive';
+
+    this.rankKey =
+      typeof options.rankKey === 'string' && options.rankKey.trim()
+        ? options.rankKey.trim()
+        : 'open';
+    if (typeof options.mmWaitSec === 'number' && options.mmWaitSec > 0) {
+      this.mmWaitMs = Math.max(3000, options.mmWaitSec * 1000);
+    }
+    if (typeof options.minSameRankPlayers === 'number' && options.minSameRankPlayers > 0) {
+      this.minSameRank = Math.max(2, Math.floor(options.minSameRankPlayers));
+    }
+
+    if (this.state.modeTag === 'competitive_ranked') {
+      this.setMetadata({ rankKey: this.rankKey });
+    }
+
     this.state.platforms.push(
       ...createFromBlueprints([
         { x: 0, y: 0, z: 0, width: 18, depth: 22, kind: 'solid', height: 0.25 },
@@ -229,6 +257,22 @@ export class CompetitiveRoom extends Room<RoomState> {
   private update(dtMs: number) {
     switch (this.state.phase) {
       case 'lobby':
+        this.lobbyElapsedMs += dtMs;
+        // Same-rank bracket opens to everyone if not enough peers after wait.
+        if (
+          this.state.modeTag === 'competitive_ranked' &&
+          !this.openedToAll &&
+          this.rankKey !== 'open' &&
+          this.lobbyElapsedMs >= this.mmWaitMs &&
+          this.state.players.size < this.minSameRank
+        ) {
+          this.openedToAll = true;
+          this.rankKey = 'open';
+          this.setMetadata({ rankKey: 'open' });
+          console.log(
+            `[CompetitiveRoom] same-rank underfilled (${this.state.players.size}/${this.minSameRank}) — opened lobby`
+          );
+        }
         if (this.state.players.size >= MIN_PLAYERS_TO_START) {
           this.state.phase = 'countdown';
           this.state.countdownMs = LOBBY_COUNTDOWN_MS;
