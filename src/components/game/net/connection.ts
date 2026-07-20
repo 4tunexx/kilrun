@@ -11,6 +11,8 @@ export interface JoinOptions {
   userId: string;
   username: string;
   avatarUrl?: string;
+  /** Allows pushing MAIN custom maps into the room. */
+  isAdmin?: boolean;
 }
 
 export interface RoomCallbacks {
@@ -96,9 +98,19 @@ export class GameConnection {
         matchTimeRemainingMs: s.matchTimeRemainingMs,
         trapperSessionId: s.trapperSessionId,
         winnerRole: s.winnerRole,
+        courseStartX: s.courseStartX,
+        courseFinishX: s.courseFinishX,
       });
     };
-    ['phase', 'countdownMs', 'matchTimeRemainingMs', 'trapperSessionId', 'winnerRole'].forEach((field) => {
+    [
+      'phase',
+      'countdownMs',
+      'matchTimeRemainingMs',
+      'trapperSessionId',
+      'winnerRole',
+      'courseStartX',
+      'courseFinishX',
+    ].forEach((field) => {
       proxy.listen(field, emitRoomChange);
     });
     emitRoomChange();
@@ -115,9 +127,68 @@ export class GameConnection {
       z: number;
       width: number;
       depth: number;
-      kind?: 'solid' | 'checkpoint';
+      kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor';
+      boost?: number;
+      height?: number;
+      conveyorSpeed?: number;
+      conveyorDirX?: number;
+      conveyorDirY?: number;
+    }[];
+    obstacles?: {
+      id?: string;
+      kind?: 'saw' | 'laser' | 'crusher' | 'spike' | 'damage';
+      x: number;
+      y: number;
+      z: number;
+      width: number;
+      height: number;
+      intervalMs?: number;
+      activeMs?: number;
+      damage?: number;
+      alwaysActive?: boolean;
+      buttonControlled?: boolean;
+      instantKill?: boolean;
+    }[];
+    finishes?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      width: number;
+      depth: number;
+      height: number;
+    }[];
+    buttons?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      radius: number;
+      activatesObstacleIds: string[];
+      holdMs: number;
+      cooldownMs: number;
+    }[];
+    teleports?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      width: number;
+      depth: number;
+      height: number;
+      targetX: number;
+      targetY: number;
+      targetZ: number;
+      cooldownMs: number;
     }[];
     spawn?: { x: number; y: number; z: number };
+    trapperSpawn?: { x: number; y: number; z: number };
+    worldBounds?: {
+      minX: number;
+      maxX: number;
+      minY: number;
+      maxY: number;
+    };
   }): void {
     this.room?.send('loadCustomMap', payload);
   }

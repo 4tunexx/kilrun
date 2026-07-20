@@ -39,11 +39,27 @@ import {
   ChevronDown,
   ChevronUp,
   PanelLeftClose,
+  Lightbulb,
+  Rocket,
+  FlagTriangleRight,
+  PersonStanding,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useToast } from '@/hooks/use-toast';
 import type { EditorEntity, FloorPreset, MapDocument, SkyPreset } from './map-document';
-import { ensureAnimation, ensureEnvironment, ensureHazard, generateId } from './map-document';
+import {
+  ensureAnimation,
+  ensureEnvironment,
+  ensureHazard,
+  ensureJumpPad,
+  ensureLight,
+  ensureSurface,
+  ensureTeleport,
+  entityExportsAsPlatform,
+  findPlayerEntity,
+  generateId,
+} from './map-document';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
 import {
   ensureStarterMap,
@@ -56,6 +72,8 @@ import {
 } from './map-storage';
 import { createEditorViewport, type EditorViewportApi, type TransformMode } from './editor-viewport';
 import { MapPlayPreview } from './map-play-preview';
+import { PlayerModelStudio } from './player-model-studio';
+import { ensureMapPlayerEntity } from './player-avatar';
 import {
   BUILTIN_TEXTURES,
   deleteCustomTexture,
@@ -71,6 +89,7 @@ import {
   type TutorialStep,
 } from './editor-help';
 import {
+  bakeStairsToPads,
   deletePrefab,
   getActivePlayMapId,
   instantiatePrefab,
@@ -127,6 +146,7 @@ export function MapEditor({
   const [customTextures, setCustomTextures] = useState<CustomTexture[]>([]);
   const [snapY, setSnapY] = useState(false);
   const isMobile = useIsMobile();
+  const { toast } = useToast();
   const isTouch = typeof window !== 'undefined' && detectTouchDevice();
   const mobileFirst =
     typeof window !== 'undefined' &&
@@ -149,6 +169,7 @@ export function MapEditor({
   const [propsOpen, setPropsOpen] = useState(!mobileFirst);
   /** Bottom transform/place toolbar. */
   const [toolsOpen, setToolsOpen] = useState(!mobileFirst);
+  const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
 
@@ -327,7 +348,11 @@ export function MapEditor({
     const issues = validateMapForPublish(latest);
     const errs = issues.filter((i) => i.level === 'error');
     if (errs.length) {
-      alert(`Cannot publish:\n\n${formatValidationSummary(issues)}`);
+      toast({
+        title: 'Cannot set MAIN map',
+        description: formatValidationSummary(issues),
+        variant: 'destructive',
+      });
       return;
     }
     if (issues.length) {
@@ -339,9 +364,10 @@ export function MapEditor({
     persist();
     setActivePlayMapId(mapId);
     setActivePlayId(mapId);
-    alert(
-      `“${doc.name}” is now the MAIN Deathrun map.\nPress Play → Deathrun and the match will load this map.`
-    );
+    toast({
+      title: `“${doc.name}” is MAIN`,
+      description: 'Rejoin Deathrun lobby/countdown so platforms reload for the match.',
+    });
   };
 
   const workingDoc = () => {
@@ -491,6 +517,42 @@ export function MapEditor({
     }));
   };
 
+  const patchEntityById = (id: string, patch: Partial<EditorEntity>) => {
+    scheduleHistory();
+    setDoc((d) => {
+      const entities = d.entities.map((e) => (e.id === id ? { ...e, ...patch } : e));
+      const next = { ...d, entities };
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+    if (id === selectedId) {
+      apiRef.current?.updateSelected(patch);
+    }
+  };
+
+  const openPlayerStudio = () => {
+    const ensured = ensureMapPlayerEntity(docRef.current);
+    if (ensured.created) {
+      scheduleHistory();
+      setDoc(ensured.doc);
+      docRef.current = ensured.doc;
+      apiRef.current?.setDoc(ensured.doc);
+      toast({
+        title: 'Player avatar added',
+        description: 'Configure model and animations in the studio panel.',
+      });
+    }
+    setSelectedId(ensured.entity.id);
+    apiRef.current?.setSelectedId(ensured.entity.id);
+    setPlayerStudioOpen(true);
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(false);
+    setToolsOpen(false);
+  };
+
+  const playerAvatar = findPlayerEntity(doc);
+
   const wireTrapToButton = (trapId: string, buttonId: string) => {
     scheduleHistory();
     setDoc((d) => {
@@ -595,12 +657,56 @@ export function MapEditor({
             <Menu className="w-4 h-4" />
             Menus
           </button>
+          {(isMobile || isTouch) && (
+            <>
+              <button
+                type="button"
+                onClick={() => apiRef.current?.placeSpawn('start')}
+                className="flex items-center gap-1.5 rounded-xl border border-emerald-400/60 bg-emerald-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
+              >
+                <Flag className="w-4 h-4" />
+                Start
+              </button>
+              <button
+                type="button"
+                onClick={() => apiRef.current?.placeSpawn('finish')}
+                className="flex items-center gap-1.5 rounded-xl border border-amber-400/60 bg-amber-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
+              >
+                <FlagTriangleRight className="w-4 h-4" />
+                Finish
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  openPlayerStudio();
+                }}
+                className="flex items-center gap-1.5 rounded-xl border border-sky-400/60 bg-sky-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
+              >
+                <PersonStanding className="w-4 h-4" />
+                Avatar
+              </button>
+              {selected && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUiCollapsed(false);
+                    setPropsOpen(true);
+                    setToolsOpen(false);
+                    setSidebarOpen(false);
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-white/30 bg-black/75 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11 backdrop-blur"
+                >
+                  Props
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
 
       {/* Mobile quick access while chrome is visible */}
       {!uiCollapsed && isMobile && (
-        <div className="fixed top-14 left-3 z-[140] flex flex-col gap-2 pointer-events-auto">
+        <div className="fixed top-14 left-3 z-[140] flex flex-col gap-2 pointer-events-auto max-h-[50vh] overflow-y-auto">
           <button
             type="button"
             onClick={() => setSidebarOpen((v) => !v)}
@@ -613,6 +719,28 @@ export function MapEditor({
           >
             {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
             Library
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              apiRef.current?.placeSpawn('start');
+              collapseAllMenus();
+            }}
+            className="flex items-center gap-1.5 rounded-xl border border-emerald-400/50 bg-black/75 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-emerald-100 shadow-lg active:scale-95 min-h-11"
+          >
+            <Flag className="w-4 h-4" />
+            Start
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              apiRef.current?.placeSpawn('finish');
+              collapseAllMenus();
+            }}
+            className="flex items-center gap-1.5 rounded-xl border border-amber-400/50 bg-black/75 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-amber-100 shadow-lg active:scale-95 min-h-11"
+          >
+            <FlagTriangleRight className="w-4 h-4" />
+            Finish
           </button>
         </div>
       )}
@@ -654,6 +782,16 @@ export function MapEditor({
           onClick={startPlay}
         >
           <Play className="w-4 h-4 mr-1" /> Play Test
+        </Button>
+        <Button
+          size="sm"
+          variant={playerStudioOpen ? 'default' : 'secondary'}
+          className={`shrink-0 ${playerStudioOpen ? 'bg-sky-600 hover:bg-sky-500 text-white' : ''}`}
+          onClick={() => (playerStudioOpen ? setPlayerStudioOpen(false) : openPlayerStudio())}
+          title="Player Model studio — inspect avatar & bind animations"
+        >
+          <PersonStanding className="w-4 h-4 mr-1" />
+          {isMobile ? 'Avatar' : 'Player Model'}
         </Button>
         <Button
           size="sm"
@@ -1200,8 +1338,9 @@ export function MapEditor({
         </div>
         )}
 
-        {/* Viewport */}
-        <div className="flex-1 relative min-w-0">
+        {/* Viewport + optional Player Model studio */}
+        <div className="flex-1 relative min-w-0 flex">
+          <div className="flex-1 relative min-w-0">
           <div ref={hostRef} className="absolute inset-0" />
 
           {freeFly && !uiCollapsed && (
@@ -1322,15 +1461,25 @@ export function MapEditor({
             <ToolBtn onClick={() => apiRef.current?.focusSelected()} title="Focus selection (F)">
               <Crosshair className="w-4 h-4" />
             </ToolBtn>
-            <ToolBtn onClick={() => apiRef.current?.placeSpawn('spawn_runner')} title="Runner spawn">
+            <ToolBtn onClick={() => apiRef.current?.placeSpawn('start')} title="Start (player spawn)">
               <Flag className="w-4 h-4 text-emerald-400" />
+            </ToolBtn>
+            <ToolBtn onClick={() => apiRef.current?.placeSpawn('finish')} title="Finish (touch to win)">
+              <FlagTriangleRight className="w-4 h-4 text-amber-300" />
             </ToolBtn>
             <ToolBtn onClick={() => apiRef.current?.placeSpawn('spawn_trapper')} title="Trapper spawn">
               <Flag className="w-4 h-4 text-red-400" />
             </ToolBtn>
             <ToolBtn
+              active={playerStudioOpen}
+              onClick={() => (playerStudioOpen ? setPlayerStudioOpen(false) : openPlayerStudio())}
+              title="Player Model studio"
+            >
+              <PersonStanding className="w-4 h-4 text-sky-300" />
+            </ToolBtn>
+            <ToolBtn
               onClick={() => apiRef.current?.placeEntity('player', brush ?? 'figurine')}
-              title="Player entity"
+              title="Place player entity in map"
             >
               <User className="w-4 h-4 text-sky-300" />
             </ToolBtn>
@@ -1354,6 +1503,12 @@ export function MapEditor({
             >
               <Skull className="w-4 h-4 text-red-400" />
             </ToolBtn>
+            <ToolBtn
+              onClick={() => apiRef.current?.placeEntity('light')}
+              title="Light bulb"
+            >
+              <Lightbulb className="w-4 h-4 text-amber-200" />
+            </ToolBtn>
             <ToolBtn onClick={() => apiRef.current?.duplicateSelected()} title="Duplicate">
               <Copy className="w-4 h-4" />
             </ToolBtn>
@@ -1363,7 +1518,7 @@ export function MapEditor({
           </div>
           )}
 
-          {!uiCollapsed && selected && !propsOpen && (
+          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && (
             <button
               type="button"
               onClick={() => setPropsOpen(true)}
@@ -1373,11 +1528,11 @@ export function MapEditor({
             </button>
           )}
 
-          {!uiCollapsed && selected && propsOpen && (
+          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && (
             <div
               className={`absolute z-[80] bg-black/80 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm overflow-y-auto ${
                 isMobile
-                  ? 'left-3 right-3 bottom-16 top-auto max-h-[45vh] w-auto'
+                  ? 'left-3 right-3 bottom-[max(4.5rem,calc(env(safe-area-inset-bottom)+3.5rem))] top-auto max-h-[42vh] w-auto overscroll-contain'
                   : 'top-3 right-3 w-72 max-h-[calc(100%-6rem)]'
               }`}
             >
@@ -1410,144 +1565,497 @@ export function MapEditor({
                   }
                 >
                   <option value="prop">Prop</option>
+                  <option value="start">Start (spawn)</option>
+                  <option value="finish">Finish</option>
                   <option value="trap">Trap (activatable)</option>
                   <option value="hazard">Death zone</option>
+                  <option value="light">Light bulb</option>
                   <option value="player">Player</option>
                   <option value="button">Button</option>
-                  <option value="spawn_runner">Spawn Runner</option>
+                  <option value="spawn_runner">Spawn Runner (legacy)</option>
                   <option value="spawn_trapper">Spawn Trapper</option>
                   <option value="checkpoint">Checkpoint</option>
                 </select>
               </label>
-              <label className="block text-xs text-white/60">
-                Model
-                <select
-                  className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
-                  value={selected.model ?? ''}
-                  onChange={(e) =>
-                    patchSelected({
-                      model: e.target.value || undefined,
-                      customModelUrl: undefined,
-                    })
-                  }
-                >
-                  <option value="">— none —</option>
-                  {PROTOTYPE_MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-white/60">
-                Upload animated GLB
-                <input
-                  type="file"
-                  accept=".glb,.gltf,model/gltf-binary"
-                  className="mt-0.5 w-full text-[10px]"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (!f) return;
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      patchSelected({
-                        customModelUrl: String(reader.result),
-                        model: undefined,
-                        name: selected.name || f.name.replace(/\.(glb|gltf)$/i, ''),
-                      });
-                    };
-                    reader.readAsDataURL(f);
-                  }}
+
+              {selected.kind !== 'light' && (
+                <>
+                  <label className="block text-xs text-white/60">
+                    Model
+                    <select
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={selected.model ?? ''}
+                      onChange={(e) =>
+                        patchSelected({
+                          model: e.target.value || undefined,
+                          customModelUrl: undefined,
+                        })
+                      }
+                    >
+                      <option value="">— none —</option>
+                      {PROTOTYPE_MODELS.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Upload animated GLB
+                    <input
+                      type="file"
+                      accept=".glb,.gltf,model/gltf-binary"
+                      className="mt-0.5 w-full text-[10px]"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          patchSelected({
+                            customModelUrl: String(reader.result),
+                            model: undefined,
+                            name: selected.name || f.name.replace(/\.(glb|gltf)$/i, ''),
+                          });
+                        };
+                        reader.readAsDataURL(f);
+                      }}
+                    />
+                  </label>
+                </>
+              )}
+
+              {selected.kind !== 'light' && (
+                <AnimationPropsPanel
+                  entity={selected}
+                  allEntities={doc.entities}
+                  onChange={patchSelected}
+                  onPreview={(which) => apiRef.current?.previewAnim(which)}
+                  onWireTrap={wireTrapToButton}
+                  onOpenPlayerStudio={openPlayerStudio}
                 />
-              </label>
+              )}
 
-              <AnimationPropsPanel
-                entity={selected}
-                allEntities={doc.entities}
-                onChange={patchSelected}
-                onPreview={(which) => apiRef.current?.previewAnim(which)}
-                onWireTrap={wireTrapToButton}
-              />
+              {/* Gameplay: solid / jump pad / damage */}
+              {selected.kind !== 'light' &&
+                selected.kind !== 'spawn_runner' &&
+                selected.kind !== 'spawn_trapper' &&
+                selected.kind !== 'start' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-white/50 uppercase">
+                    Gameplay
+                  </p>
+                  {selected.kind === 'finish' && (
+                    <p className="text-[10px] text-amber-200/80">
+                      Runners finish when they step on or touch this volume.
+                    </p>
+                  )}
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={entityExportsAsPlatform(selected)}
+                      onChange={(e) =>
+                        patchSelected({
+                          solid: e.target.checked,
+                          ...(e.target.checked
+                            ? {}
+                            : { jumpPad: { ...ensureJumpPad(selected), enabled: false } }),
+                        })
+                      }
+                    />
+                    Solid (players can stand on it)
+                  </label>
+                  <p className="text-[10px] text-white/40">
+                    Floors/checkpoints are thin top pads. Tall solids (walls/columns) also block
+                    sideways. Turn on for crates/props you want walkable or blocking.
+                  </p>
 
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={ensureJumpPad(selected).enabled}
+                      onChange={(e) => {
+                        const jp = ensureJumpPad(selected);
+                        patchSelected({
+                          jumpPad: { ...jp, enabled: e.target.checked },
+                          solid: e.target.checked ? true : selected.solid,
+                        });
+                      }}
+                    />
+                    <Rocket className="w-3.5 h-3.5 text-sky-300" />
+                    Jump pad
+                  </label>
+                  {ensureJumpPad(selected).enabled && (
+                    <label className="block text-xs text-white/60">
+                      Boost ({ensureJumpPad(selected).boost})
+                      <input
+                        type="range"
+                        min={6}
+                        max={28}
+                        step={1}
+                        className="w-full"
+                        value={ensureJumpPad(selected).boost}
+                        onChange={(e) =>
+                          patchSelected({
+                            jumpPad: {
+                              enabled: true,
+                              boost: Number(e.target.value),
+                            },
+                            solid: true,
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={!!ensureSurface(selected).ice}
+                      onChange={(e) =>
+                        patchSelected({
+                          surface: { ...ensureSurface(selected), ice: e.target.checked },
+                          solid: true,
+                        })
+                      }
+                    />
+                    Ice (slippery)
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={!!ensureSurface(selected).conveyor}
+                      onChange={(e) =>
+                        patchSelected({
+                          surface: { ...ensureSurface(selected), conveyor: e.target.checked },
+                          solid: true,
+                        })
+                      }
+                    />
+                    Conveyor (push along facing)
+                  </label>
+                  {ensureSurface(selected).conveyor && (
+                    <label className="block text-xs text-white/60">
+                      Conveyor speed ({ensureSurface(selected).conveyorSpeed ?? 4})
+                      <input
+                        type="range"
+                        min={1}
+                        max={12}
+                        step={0.5}
+                        className="w-full"
+                        value={ensureSurface(selected).conveyorSpeed ?? 4}
+                        onChange={(e) =>
+                          patchSelected({
+                            surface: {
+                              ...ensureSurface(selected),
+                              conveyor: true,
+                              conveyorSpeed: Number(e.target.value),
+                            },
+                            solid: true,
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={!!ensureTeleport(selected).enabled}
+                      onChange={(e) =>
+                        patchSelected({
+                          teleport: { ...ensureTeleport(selected), enabled: e.target.checked },
+                        })
+                      }
+                    />
+                    Teleporter
+                  </label>
+                  {ensureTeleport(selected).enabled && (
+                    <label className="block text-xs text-white/60">
+                      Target entity
+                      <select
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                        value={ensureTeleport(selected).targetEntityId ?? ''}
+                        onChange={(e) =>
+                          patchSelected({
+                            teleport: {
+                              ...ensureTeleport(selected),
+                              enabled: true,
+                              targetEntityId: e.target.value || undefined,
+                            },
+                          })
+                        }
+                      >
+                        <option value="">— pick exit —</option>
+                        {doc.entities
+                          .filter((e) => e.id !== selected.id)
+                          .map((e) => (
+                            <option key={e.id} value={e.id}>
+                              {e.name} ({e.kind})
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  )}
+
+                  {(selected.model?.includes('stair') || selected.model?.includes('ramp')) && (
+                    <button
+                      type="button"
+                      className="w-full text-xs py-2 rounded-lg bg-violet-600/35 hover:bg-violet-500/45 font-semibold"
+                      onClick={() => {
+                        const pads = bakeStairsToPads(selected, 8);
+                        scheduleHistory();
+                        setDoc((d) => {
+                          const next = { ...d, entities: [...d.entities, ...pads] };
+                          apiRef.current?.setDoc(next);
+                          return next;
+                        });
+                        toast({
+                          title: `Baked ${pads.length} stair pads`,
+                          description: 'Thin solid steps added for climbable collision.',
+                        });
+                      }}
+                    >
+                      Bake stairs → solid steps
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {selected.kind === 'light' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-white/50 uppercase flex items-center gap-1">
+                    <Lightbulb className="w-3.5 h-3.5 text-amber-200" /> Light bulb
+                  </p>
+                  <label className="block text-xs text-white/60">
+                    Color
+                    <input
+                      type="color"
+                      className="mt-0.5 w-full h-8 bg-transparent"
+                      value={ensureLight(selected).color}
+                      onChange={(e) =>
+                        patchSelected({
+                          color: e.target.value,
+                          light: { ...ensureLight(selected), color: e.target.value },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Intensity ({ensureLight(selected).intensity.toFixed(1)})
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={5}
+                      step={0.1}
+                      className="w-full"
+                      value={ensureLight(selected).intensity}
+                      onChange={(e) =>
+                        patchSelected({
+                          light: {
+                            ...ensureLight(selected),
+                            intensity: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Distance ({ensureLight(selected).distance})
+                    <input
+                      type="range"
+                      min={2}
+                      max={60}
+                      step={1}
+                      className="w-full"
+                      value={ensureLight(selected).distance}
+                      onChange={(e) =>
+                        patchSelected({
+                          light: {
+                            ...ensureLight(selected),
+                            distance: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <p className="text-[10px] text-white/40">
+                    Lights are visual in editor + match overlay (client-side).
+                  </p>
+                </div>
+              )}
+
+              {selected.kind !== 'light' &&
+                selected.kind !== 'start' &&
+                selected.kind !== 'finish' &&
+                selected.kind !== 'spawn_runner' &&
+                selected.kind !== 'spawn_trapper' && (
               <div className="space-y-2 border-t border-white/10 pt-2">
-                <p className="text-[10px] tracking-widest text-white/50 uppercase">Death zone</p>
+                <p className="text-[10px] tracking-widest text-white/50 uppercase">
+                  {selected.kind === 'trap' ? 'Trap / timed hazard' : 'Death zone'}
+                </p>
                 <label className="flex items-center gap-2 text-xs text-white/70">
                   <input
                     type="checkbox"
-                    checked={ensureHazard(selected).enabled || selected.kind === 'hazard'}
+                    checked={
+                      ensureHazard(selected).enabled ||
+                      selected.kind === 'hazard' ||
+                      selected.kind === 'trap'
+                    }
                     onChange={(e) => {
                       const hz = ensureHazard(selected);
                       patchSelected({
-                        kind: e.target.checked && selected.kind === 'prop' ? 'hazard' : selected.kind,
+                        kind:
+                          e.target.checked && selected.kind === 'prop' ? 'hazard' : selected.kind,
                         hazard: { ...hz, enabled: e.target.checked },
                       });
                     }}
                   />
                   Damages player on touch
                 </label>
-                {(ensureHazard(selected).enabled || selected.kind === 'hazard') && (
+                {(ensureHazard(selected).enabled ||
+                  selected.kind === 'hazard' ||
+                  selected.kind === 'trap') && (
                   <>
+                    <label className="block text-xs text-white/60">
+                      Mode
+                      <select
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                        value={
+                          ensureHazard(selected).mode ??
+                          (selected.kind === 'trap' ? 'timed' : 'always')
+                        }
+                        onChange={(e) =>
+                          patchSelected({
+                            hazard: {
+                              ...ensureHazard(selected),
+                              enabled: true,
+                              mode: e.target.value as 'always' | 'timed' | 'button',
+                            },
+                          })
+                        }
+                      >
+                        <option value="always">Always on</option>
+                        <option value="timed">Timed pulse (auto)</option>
+                        <option value="button">Button-armed (starts off)</option>
+                      </select>
+                    </label>
+                    <label className="block text-xs text-white/60">
+                      Obstacle style
+                      <select
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                        value={ensureHazard(selected).obstacleKind ?? 'damage'}
+                        onChange={(e) =>
+                          patchSelected({
+                            hazard: {
+                              ...ensureHazard(selected),
+                              enabled: true,
+                              obstacleKind: e.target.value as
+                                | 'spike'
+                                | 'saw'
+                                | 'laser'
+                                | 'crusher'
+                                | 'damage',
+                            },
+                          })
+                        }
+                      >
+                        <option value="damage">Damage volume</option>
+                        <option value="spike">Spike</option>
+                        <option value="saw">Saw</option>
+                        <option value="laser">Laser</option>
+                        <option value="crusher">Crusher</option>
+                      </select>
+                    </label>
                     <label className="flex items-center gap-2 text-xs text-white/70">
                       <input
                         type="checkbox"
                         checked={ensureHazard(selected).instantKill}
                         onChange={(e) =>
                           patchSelected({
-                            hazard: { ...ensureHazard(selected), instantKill: e.target.checked, enabled: true },
+                            hazard: {
+                              ...ensureHazard(selected),
+                              instantKill: e.target.checked,
+                              enabled: true,
+                            },
                           })
                         }
                       />
                       Instant kill
                     </label>
                     {!ensureHazard(selected).instantKill && (
-                      <>
-                        <label className="block text-xs text-white/60">
-                          Damage per tick ({ensureHazard(selected).damage})
-                          <input
-                            type="range"
-                            min={1}
-                            max={100}
-                            className="w-full"
-                            value={ensureHazard(selected).damage}
-                            onChange={(e) =>
-                              patchSelected({
-                                hazard: {
-                                  ...ensureHazard(selected),
-                                  damage: Number(e.target.value),
-                                  enabled: true,
-                                },
-                              })
-                            }
-                          />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Interval ms ({ensureHazard(selected).intervalMs})
-                          <input
-                            type="range"
-                            min={100}
-                            max={2000}
-                            step={50}
-                            className="w-full"
-                            value={ensureHazard(selected).intervalMs}
-                            onChange={(e) =>
-                              patchSelected({
-                                hazard: {
-                                  ...ensureHazard(selected),
-                                  intervalMs: Number(e.target.value),
-                                  enabled: true,
-                                },
-                              })
-                            }
-                          />
-                        </label>
-                      </>
+                      <label className="block text-xs text-white/60">
+                        Damage ({ensureHazard(selected).damage})
+                        <input
+                          type="range"
+                          min={1}
+                          max={100}
+                          className="w-full"
+                          value={ensureHazard(selected).damage}
+                          onChange={(e) =>
+                            patchSelected({
+                              hazard: {
+                                ...ensureHazard(selected),
+                                damage: Number(e.target.value),
+                                enabled: true,
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    )}
+                    <label className="block text-xs text-white/60">
+                      {(ensureHazard(selected).mode ?? 'always') === 'always'
+                        ? `Tick cooldown ms (${ensureHazard(selected).intervalMs})`
+                        : `Off time ms (${ensureHazard(selected).intervalMs})`}
+                      <input
+                        type="range"
+                        min={100}
+                        max={5000}
+                        step={50}
+                        className="w-full"
+                        value={ensureHazard(selected).intervalMs}
+                        onChange={(e) =>
+                          patchSelected({
+                            hazard: {
+                              ...ensureHazard(selected),
+                              intervalMs: Number(e.target.value),
+                              enabled: true,
+                            },
+                          })
+                        }
+                      />
+                    </label>
+                    {(ensureHazard(selected).mode === 'timed' ||
+                      ensureHazard(selected).mode === 'button' ||
+                      (selected.kind === 'trap' && !ensureHazard(selected).mode)) && (
+                      <label className="block text-xs text-white/60">
+                        Active / on time ms ({ensureHazard(selected).activeMs ?? 900})
+                        <input
+                          type="range"
+                          min={200}
+                          max={5000}
+                          step={50}
+                          className="w-full"
+                          value={ensureHazard(selected).activeMs ?? 900}
+                          onChange={(e) =>
+                            patchSelected({
+                              hazard: {
+                                ...ensureHazard(selected),
+                                activeMs: Number(e.target.value),
+                                enabled: true,
+                              },
+                            })
+                          }
+                        />
+                      </label>
                     )}
                     <p className="text-[10px] text-white/40">
-                      Test in Play Test (HP bar). In Deathrun match, instant-kill zones remove the runner.
+                      Timed = auto pulse. Button = wire Button → Activates this trap, press E in match.
                     </p>
                   </>
                 )}
               </div>
+              )}
 
               <div className="grid grid-cols-3 gap-1 border-t border-white/10 pt-2">
                 {(['position', 'rotation', 'scale'] as const).map((key) => (
@@ -1618,6 +2126,21 @@ export function MapEditor({
                 </Button>
               )}
             </div>
+          )}
+          </div>
+
+          {playerStudioOpen && playerAvatar && (
+            <PlayerModelStudio
+              entity={playerAvatar}
+              isMobile={isMobile}
+              onClose={() => setPlayerStudioOpen(false)}
+              onFocusInMap={() => {
+                setSelectedId(playerAvatar.id);
+                apiRef.current?.setSelectedId(playerAvatar.id);
+                apiRef.current?.focusSelected();
+              }}
+              onChange={(patch) => patchEntityById(playerAvatar.id, patch)}
+            />
           )}
         </div>
       </div>

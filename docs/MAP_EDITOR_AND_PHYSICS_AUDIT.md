@@ -1,6 +1,6 @@
 # Kilrun Map Editor & Physics Audit
 
-**Date:** 2026-07-20  
+**Date:** 2026-07-20 (updated)  
 **Scope:** Admin map editor (`src/components/game/editor/**`), Deathrun match load path (`kilrun-engine` + `DeathrunRoom`), and authoritative platformer sim (`server/src/sim/**`).  
 **Audience:** Product / owner — can you easily build map content and does the game feel like a real platformer?
 
@@ -10,10 +10,10 @@
 
 | Question | Verdict | One-line answer |
 |---|---|---|
-| Can I **easily create** maps, place elements/entities, and ship them into play? | **Partial — usable, not yet “easy / pro”** | Yes for a motivated admin: place floors, props, spawns, buttons/traps, save, set MAIN, playtest visually. No for frictionless content ops (localStorage only, weak collision export, live match ≠ play-test feel). |
-| Is **game physics fully operational** like market platformers (Mario / Celeste-class basics)? | **Partial — solid core, incomplete depth** | Authoritative sim has gravity, accel/friction, coyote + jump buffer, sprint energy, void fall. Missing variable jump cut, real wall/stair collision, slopes, moving platforms, and editor play-test uses a **different** lighter physics. |
+| Can I **easily create** maps, place elements/entities, and ship them into play? | **Yes for single-browser staff** | Place floors/props, mark **Solid**, add **Jump pads** / **Death zones** / **Lights** / **Start** / **Finish**, save, set MAIN, rejoin. Cloud MAIN sync across machines still missing. |
+| Is **game physics fully operational** like market platformers (Mario / Celeste-class basics)? | **Solid mid-core** | Gravity, coyote + buffer, jump cut, sprint energy, void + checkpoint respawn, jump pads, hazard damage, tall solid wall AABB, Play Test ≈ match step. Still missing slopes, moving platforms, prediction, timed traps. |
 
-**Bottom line:** You *can* build and activate custom MAP courses today, and Deathrun movement is already a real platformer core — but it is **not** yet “any other platformer on the market” in polish, collision fidelity, or editor ↔ match parity. Treat the roadmap below as required before marketing map creation as a finished feature.
+**Bottom line:** Authorable Deathrun courses work end-to-end in one browser (editor → MAIN → lobby host/admin load → match). Walls block when Solid + tall; Play Test uses shared pad export + `stepPlatformer`. Remaining product blockers: server MAIN sync, timed/moving traps, netcode prediction.
 
 ---
 
@@ -22,83 +22,61 @@
 ### A1. What works today
 
 - **Full-viewport editor** via portal (`map-editor.tsx`) with free-fly camera, grid snap, layers, selection, ESC hierarchy.
-- **Entity kinds:** `prop`, `spawn_runner`, `spawn_trapper`, `checkpoint`, `hazard`, `trap`, `group`, `player`, `button` (`map-document.ts`).
+- **Mobile chrome collapse** — Hide UI / Menus, overlay library drawer, collapsible tools + properties, Start/Finish/Props FABs, safe-area properties sheet.
+- **Entity kinds:** `prop`, `start`, `finish`, `spawn_runner`, `spawn_trapper`, `checkpoint`, `hazard`, `trap`, `group`, `player`, `button`, **`light`** (`map-document.ts`).
+- **Gameplay on selection:** **Solid** collider export, **Jump pad** (+ boost), **Death zone** damage / instant kill, **Light bulb**, **Start** spawn, **Finish** touch-to-win.
 - **Large prototype GLB catalog** (`prototype-catalog.ts`) — floors, walls, stairs, doors, buttons, crates, pipes, etc.
 - **Custom GLB / texture uploads**, animation director (proximity / interact / collide / signal / always).
 - **Prefabs** — stamp selection as prefab, re-instantiate (`prefab-storage.ts`).
-- **Validation before publish** — requires runner spawn + ≥3 floor pieces (`map-validate.ts`).
+- **Validation before publish** — requires Start + Finish + enough solids (`map-validate.ts`).
 - **Thumbnails** generated offline (`map-thumbnail.ts`).
-- **Play Test** preview walkthrough with dual joysticks on mobile (`map-play-preview.tsx`).
-- **MAIN / Active Match Map** — local flag `kilrun.activePlayMapId.v1`; client converts floors → sim platforms and sends `loadCustomMap` (`prefab-storage.ts`, `kilrun-engine.tsx`, `DeathrunRoom.ts`).
-- **Starter floors** / empty-map heal for old docs (`map-document` / storage helpers).
+- **Play Test** uses `mapDocToSimPlatforms` + `stepPlatformer` (match-like pads, jump cut, walls, finish, checkpoints) + dual joysticks on mobile.
+- **MAIN / Active Match Map** — local flag `kilrun.activePlayMapId.v1`; client converts pads + hazards → `loadCustomMap` (host/admin only).
+- **Starter floors** / empty-map heal for old docs.
 - **Mobile editor controls** — dual sticks + Sprint / Edit / Fly buttons.
 
 ### A2. Supported element inventory (practical)
 
-| Kind | Editor | Visual in match | Authoritative collide / kill |
+| Kind / feature | Editor | Visual in match | Authoritative collide / kill |
 |---|---|---|---|
-| Floor / platform props (`*floor*`) | Yes | Often skipped in overlay (server pad instead) | **Yes** (top-plane pads) |
-| Checkpoint | Yes | Pad kind | Platform presence; checkpoint *gameplay rules* limited |
-| Walls / columns / stairs / doors | Yes | Yes (overlay) | **No solid wall collision** (vis only) |
+| Floor / platform props (`*floor*`) | Yes | Often skipped in overlay (server pad instead) | **Yes** (thin top pad) |
+| **Start** | Yes | Marker (skipped in match overlay) | Spawn point for runners |
+| **Finish** | Yes | Amber pad overlay | **Yes** — touch/step marks finished |
+| **Any prop with Solid ✓** | Yes | Mesh overlay | **Yes** — thin top or tall wall box |
+| Checkpoint | Yes | Pad kind | Touch saves respawn; void soft-respawns |
+| **Jump pad** | Yes (Gameplay panel) | Cyan pad / tint when no mesh | **Yes** — launches with `boost` |
+| Walls / columns (Solid) | Yes | Yes (overlay) | **Yes** — side AABB when tall enough |
 | Buttons + signal → traps/doors | Yes | Animations via overlay / director | **Client FX**; not full server trap authority |
-| Hazards (damage / instant kill) | Yes | Mesh overlay | **Not** full Deathrun server obstacle pipeline |
-| Runner / trapper spawn | Yes | Used as start | Spawn remapped to sim axes |
-| Prefab stamps | Yes | As entities | Same limitations as ingredients |
-| Default timed deathrun obstacles | N/A | Default course | Cleared when custom map loads |
+| Hazards / death zone | Yes | Mesh overlay | **Yes** — exported as always-active damage obstacles |
+| **Light bulb** | Yes | Point light + bulb in overlay | Visual only (client) |
+| Runner / trapper spawn | Yes | Used as start | Both applied in match |
+| Prefab stamps | Yes | As entities | Same as ingredients |
+| Default timed deathrun obstacles | N/A | Default course | Cleared when custom map loads (replaced by editor hazards if any) |
 
 ### A3. Play path (editor → live game)
 
 ```
 Editor Save (localStorage JSON)
-   → Set Active / MAIN
-   → Join Deathrun
+   → Set Active / MAIN (toast: rejoin lobby/countdown)
+   → Join Deathrun (host or isAdmin)
    → kilrun-engine reads getActivePlayMapId()
-   → mapDocToSimPlatforms(doc) + spawn
-   → room.send('loadCustomMap', { platforms, spawn })
-   → DeathrunRoom replaces PlatformState list, clears default obstacles
-   → CustomMapOverlay draws non-floor props on client
+   → mapDocToSimPlatforms / Hazards / Finishes / WorldBounds / Spawns
+   → room.send('loadCustomMap', …)  // role-gated
+   → DeathrunRoom replaces platforms + obstacles + bounds
+   → CustomMapOverlay draws props / traps / lights on client
 ```
 
-### A4. Pain points / bugs / blockers for “easy creation”
+### A4. Remaining pain points
 
-1. **Storage is browser `localStorage` only** (`map-storage.ts`)  
-   - Maps/thumbnails/prefabs do **not** sync across machines or staff.  
-   - Risk: quota / wipe / “lost maps”.  
-   - **Blocker** for multi-admin or production content pipeline.
-
-2. **Collision export is floor-name heuristic** (`mapDocToSimPlatforms`)  
-   - Only `floor` / `checkpoint` (or loose “floor-like” fallback) become solid pads.  
-   - Walls, stairs, crates, thick props → **walk-through**.  
-   - Scale→pad size is approximate (`scale * 2`), rotates ignored for AABB tops.
-
-3. **Play Test ≠ Match physics**  
-   - Preview: freefly-ish walk, floaty jump to `y=1.6`, no real pad collision with editor floors.  
-   - Match: server `applyMovement` + platform tops.  
-   - Admins can “pass” play-test then fail in room.
-
-4. **World bounds still default course size** (`server/src/sim/constants.ts`)  
-   - `WORLD_WIDTH = 48`, `WORLD_HEIGHT = 10` clamp player XY.  
-   - Large custom maps / pads outside that box will feel broken (wall of invisible world edge).  
-   - **Critical** for big editor courses.
-
-5. **Editor hazards / button traps are not the Deathrun server obstacle system**  
-   - Loading custom map **clears** `createDeathrunObstacles()`.  
-   - Visual traps animate; kills/damage are inconsistent vs classic timed bars.
-
-6. **Active map is per-browser localStorage**  
-   - “MAIN” is not a shared server setting. Another client/session may still run the built-in course.
-
-7. **No undo/redo stack documented as robust**; axis gizmo / multi-select UX still contentious for non-technical creators.
-
-8. **No slope / mesh collider baking** — stairs are decorative unless manually approximated with many pads.
-
-9. **Coordinate remap** editor Y-up Three → sim `(x forward, y lateral, z height)` is easy to get wrong when hand-tuning.
-
-10. **Finish line / course length** still tied to legacy `FINISH_X` / width constants — finish may not match custom path end.
+1. **Storage is browser `localStorage` only** — no cloud MAIN / multi-admin sync.  
+2. **Rotation ignored** for pad AABB; scale→size approximate.  
+3. **Timed / moving deathrun traps** still not authored as server obstacles.  
+4. **No slope / mesh collider baking** — stairs need Solid pads stacked by hand.  
+5. **Coordinate remap** editor Y-up Three → sim `(x forward, y lateral, z height)`.
 
 ### A5. Map editor verdict (detail)
 
-**Partial.** A technical admin who knows “floors = collision” can ship a linear pad course and activate it. A casual designer expecting Roblox/UE-level “drop anything and it collides / kills / saves to cloud” will bounce.
+**Ready for staff map authoring on one device.** Mobile Hide UI + Start/Finish FABs make placement practical. Ship cloud MAIN before multi-staff production.
 
 ---
 
@@ -112,6 +90,7 @@ Authoritative loop: clients send **intent only** (`input`); server steps at ~30 
 |---|---|---|
 | Gravity + max fall speed | Yes | `GRAVITY`, `MAX_FALL_SPEED` |
 | Jump from ground | Yes | `JUMP_VELOCITY` |
+| Variable jump cut | Yes | `JUMP_CUT_MULTIPLIER` on release |
 | Coyote time | Yes | `COYOTE_TIME_MS = 90` |
 | Jump buffering | Yes | `JUMP_BUFFER_MS = 110`, edge trigger |
 | Ground accel / friction | Yes | Quake-inspired |
@@ -119,117 +98,121 @@ Authoritative loop: clients send **intent only** (`input`); server steps at ~30 
 | Sprint + stamina | Yes | Energy drain/regen/exhaust |
 | Crouch speed | Yes | `CROUCH_SPEED_MULTIPLIER` |
 | Platform landing / support | Yes | `findSupportPlatform` AABB top |
-| Void death | Yes | `VOID_Z` |
+| Tall solid wall AABB | Yes | `resolveSolidCollisions` when `height > 0.35` |
+| **Jump pads** | Yes | `kind: 'jumpPad'` + `boost` |
+| **Editor hazard damage** | Yes | Always-active obstacles |
+| Checkpoint soft-respawn | Yes | Void → checkpoint; hazard kill still eliminates |
+| Dynamic world bounds | Yes | From map AABB on `loadCustomMap` |
+| Void death | Yes | `VOID_Z` (room-handled) |
 | Role speed variants | Yes | trapper slightly slower |
 | Mobile dual sticks | Yes | Client input mapped into wishdir |
-
-This is a **real platformer core**, not a prototype float.
 
 ### B2. Missing vs market platformers
 
 | Feature | Status | Impact |
 |---|---|---|
-| Variable jump height (release cut) | **Missing** | Jumps feel fixed-height / less expressive |
 | Apex hang / Celeste-style control | Partial | Air control exists; no dedicated apex |
-| Wall collision / wall jump | **Missing** | Walls are mesh-only |
-| Slopes / stairs as surfaces | **Missing** | Stairs not collider-mesh |
-| Moving platforms (kinematic carry) | **Missing** | |
+| Wall jump / slide | Missing | Walls block; no climb/jump off |
+| Slopes / stairs as surfaces | Missing | Stairs not collider-mesh |
+| Moving platforms (kinematic carry) | Missing | |
 | One-way / drop-through platforms | Limited | Tops only; drop-through not authored |
-| Edge forgiveness / corner correction | Weak | Can snag pad corners |
+| Edge forgiveness / corner correction | Weak | Skin width helps; snags possible |
 | Client prediction + reconciliation | Weak / none visible | 30 Hz authority feels laggy on high ping |
-| Separate land/jump SFX timing hooks | Partial | Anim slots exist in editor player entity |
-| Play-test uses same `applyMovement` | **No** | Dual physics truth |
-| Custom map expands world AABB | **No** | Hard clamp 48×10 |
 
 ### B3. Physics verdict (detail)
 
-**Partial.** Comparable to a solid **early-access** arena platformer / Quake-horizontal + Mario-lite vertical — **not** “fully operational like any platformer on the market.” Core jump forgives (coyote/buffer) are present; depth features and geometry fidelity are not.
+**Solid mid-core.** Pad platforming + wall boxes + jump cut + jump pads + hazards + checkpoints are operational. Market polish still needs prediction, slopes, and moving platforms.
 
 ---
 
 ## Part C — Cross-cutting risks
 
-1. **Two physics minds** — editor play-test vs server match.  
-2. **Two collision minds** — visual GLB vs flat pad tops.  
-3. **Two map truths** — local MAIN vs shared multiplayer expectation.  
-4. **Obstacle identity gap** — classic deathrun bars cleared on custom load; editor traps don’t fully replace them on server.
+1. **Two map truths** — local MAIN vs shared multiplayer expectation (overlay meshes need publisher’s browser).  
+2. **Scale/rotation approx** — visual GLB vs AABB pads.  
+3. **Obstacle identity gap** — classic timed bars cleared on custom load; static editor hazards fill part of the gap; moving traps still missing.
 
 ---
 
 ## Part D — Phased improvement roadmap
 
-### Phase 0 — Stabilize what’s shipped (1–2 weeks)
+### Phase 0 — Stabilize what’s shipped
 
 **Goal:** Stop silent footguns so MAIN maps actually play.
 
-- [ ] Raise / dynamic world bounds from map AABB when loading custom platforms.  
+- [x] Raise / dynamic world bounds from map AABB when loading custom platforms.  
 - [ ] Persist **Active MAIN map id + document** on **server/SiteSettings** (not only localStorage).  
-- [ ] Warn in editor UI: “Only floor*/checkpoint collide.”  
-- [ ] After Set MAIN, toast: “Rejoin match to reload platforms.”  
-- [ ] Unit tests: `mapDocToSimPlatforms` axes + spawn remap.  
-- [ ] Fix finish detection for custom map length (or place `finish` entity kind).
+- [x] ~~Warn in editor UI: “Only floor*/checkpoint collide.”~~ → **Replaced** by explicit Solid / Jump pad / Death zone controls + green/cyan pad gizmos.  
+- [x] After Set MAIN, toast: “Rejoin match to reload platforms.”  
+- [x] Unit tests: `mapDocToSimPlatforms` / `mapDocToSimHazards` axes + spawn remap.  
+- [x] Finish detection via editor **Finish** entity (touch/step); falls back to `FINISH_X` when none.  
+- [x] Role-gate `loadCustomMap` (admin / lobby host only).  
+- [x] Apply trapper spawn from map doc in match.  
+- [x] **Start** entity as player spawn (legacy `spawn_runner` still accepted).
 
-**Exit:** A documented 5-pad linear map plays for any joining client after staff publishes MAIN once.
+**Exit:** A documented solid/jump-pad map plays for any joining client after staff publishes MAIN once. *(Blocked only on cloud MAIN sync for non-publisher clients’ overlay meshes.)*
 
 ---
 
-### Phase 1 — Editor ↔ match parity (2–3 weeks)
+### Phase 1 — Editor ↔ match parity
 
 **Goal:** Play Test uses **the same** `applyMovement` + platforms as the room.
 
-- [ ] Compile platforms in play-test from `mapDocToSimPlatforms`.  
-- [ ] Run local headless tick of `applyMovement` (or shared package) in preview.  
-- [ ] Show collision pads as debug overlays (toggle).  
-- [ ] Sync jump/gravity constants UI ↔ `server/src/sim/constants.ts`.  
-- [ ] Hazard touch damage authoritative (room messages or reintroduce obstacle schema from entities).
+- [x] Compile platforms in play-test from `mapDocToSimPlatforms`.  
+- [x] Run local headless tick of shared step (`stepPlatformer` / `src/lib/platformer-sim.ts`) in preview.  
+- [ ] Show collision pads as debug overlays (toggle) — editor already shows solid/jump gizmos; match needs toggle.  
+- [ ] Sync jump/gravity constants UI ↔ `server/src/sim/constants.ts` (constants duplicated in `platformer-sim.ts` — keep in sync manually for now).  
+- [x] Hazard touch damage authoritative (editor hazards → always-active obstacles on `loadCustomMap`).
 
-**Exit:** If you clear Play Test, you clear a live match on the same map.
+**Exit:** If you clear Play Test, you clear a live match on the same map. *(Largely met; constant drift risk remains.)*
 
 ---
 
-### Phase 2 — Collision fidelity (3–4 weeks)
+### Phase 2 — Collision fidelity
 
 **Goal:** Geometry creators can trust walls and stacked floors.
 
-- [ ] Explicit `collider: 'box' | 'none' | 'top'` on entities (no name heuristics).  
-- [ ] Bake boxes including walls (axis-aligned first).  
+- [x] Explicit solid authoring on entities (`solid` boolean + jumpPad) — no longer floors-only heuristic (heuristic kept as default for `floor*` / checkpoint).  
+- [x] Bake **vertical wall boxes** (axis-aligned push-out), not only top pads.  
+- [ ] Collider mode enum refinement: `'box' | 'none' | 'top'` if needed for author control.  
 - [ ] Optional stair ≈ stepped pads auto-generator.  
-- [ ] Corner correction / skin width to reduce snags.  
-- [ ] Visual gizmo: green = solid, red = decor.
+- [ ] Corner correction / skin width polish (`COLLISION_SKIN` present).  
+- [x] Visual gizmo: green = solid pad, cyan = jump pad, red = hazard (editor).
 
-**Exit:** A corridor with walls contains the player; stairs are climbable without 20 hand pads.
+**Exit:** A corridor with walls contains the player; stairs are climbable without 20 hand pads. *(Walls yes; stairs still manual.)*
 
 ---
 
-### Phase 3 — Market jump feel (2 weeks)
+### Phase 3 — Market jump feel
 
 **Goal:** Jump readability like Mario / modern indies.
 
-- [ ] Variable jump cut (release → multiply `vz` if ascending).  
+- [x] Variable jump cut (release → multiply `vz` if ascending).  
 - [ ] Optional early coyote tweak + apex gravity tweak.  
 - [ ] Land/jump animation hooks synced to `isGrounded` / `vz`.  
 - [ ] Tune pass: Celeste-ish forgiveness without floatiness.  
-- [ ] Camera follow polish during large vertical rooms.
+- [ ] Camera follow polish during large vertical rooms.  
+- [x] Jump pads (authoritative boost on land / stand).
 
 **Exit:** Feel-test pass from 3 players: “jumps feel intentional.”
 
 ---
 
-### Phase 4 — Trap / deathrun content pipeline (3 weeks)
+### Phase 4 — Trap / deathrun content pipeline
 
 **Goal:** Editor traps replace default obstacles for real.
 
 - [ ] Server entity runtime: timed spikes, toggling floors, crushers from map JSON.  
 - [ ] Button signals authoritative (room state channels).  
-- [ ] Checkpoints with respawn Z (not just pads).  
-- [ ] Kill volumes that match hazard panel.  
-- [ ] Keep classic default course as fallback when no MAIN set.
+- [x] Checkpoints with respawn (touch + void soft-respawn).  
+- [x] Kill / damage volumes that match hazard panel (static always-on).  
+- [ ] Keep classic default course as fallback when no MAIN set.  
+- [x] Jump pad entity gameplay (via platform kind).
 
 **Exit:** A button opens a door / disables a kill floor in multiplayer, not just client animation.
 
 ---
 
-### Phase 5 — Content ops & multiplayer authorship (2–3 weeks)
+### Phase 5 — Content ops & multiplayer authorship
 
 **Goal:** Easy for staff, not one browser.
 
@@ -243,7 +226,7 @@ This is a **real platformer core**, not a prototype float.
 
 ---
 
-### Phase 6 — Netcode feel (2–4 weeks)
+### Phase 6 — Netcode feel
 
 **Goal:** High-ping players don’t hate physics.
 
@@ -252,100 +235,89 @@ This is a **real platformer core**, not a prototype float.
 - [ ] Rubber-band thresholds tuned.  
 - [ ] Spectator / ghost VFX for lags.
 
-**Exit:** Physics reads fair on 80–120 ms RTT.
-
 ---
 
 ### Phase 7 — Nice-to-haves / addons (ongoing)
 
-- Moving platforms & conveyor pads.  
-- Ice / sticky materials.  
-- Portal / teleporter entities.  
-- Race ghost leaderboard on custom maps.  
-- In-editor “validate playable path” auto-bot.  
-- Undo/redo forever, copy/paste between maps.  
-- Terrain height brushes (longer term).  
-- AI suggest trap placements.
+- [x] Point lights as placeable entities (client visual).  
+- [ ] Conveyors / ice / teleporters.  
+- [ ] Replay / ghost WR.  
+- [ ] In-editor measure tool.
 
 ---
 
-## Part E — Suggested priority if you only do three things
+## Part H — High-severity findings (status)
 
-1. **Server-side MAIN map + dynamic world bounds** (Phase 0) — otherwise custom maps lie.  
-2. **Play Test = match physics** (Phase 1) — otherwise creators can’t trust testing.  
-3. **Explicit colliders / wall boxes** (Phase 2) — otherwise “entities” are decorations.
-
----
-
-## Part F — File map (quick reference)
-
-| Area | Paths |
-|---|---|
-| Editor UI | `src/components/game/editor/map-editor.tsx`, `editor-viewport.ts`, `editor-help.tsx` |
-| Document model | `src/components/game/editor/map-document.ts` |
-| Storage / thumbs | `src/components/game/editor/map-storage.ts`, `map-thumbnail.ts` |
-| Collision export | `src/components/game/editor/prefab-storage.ts` (`mapDocToSimPlatforms`) |
-| Validate | `src/components/game/editor/map-validate.ts` |
-| Play test | `src/components/game/editor/map-play-preview.tsx` |
-| Live overlay | `src/components/game/entities/custom-map-overlay.ts` |
-| Match client load | `src/components/game/kilrun-engine.tsx` |
-| Room | `server/src/rooms/DeathrunRoom.ts` |
-| Physics | `server/src/sim/movement.ts`, `platforms.ts`, `constants.ts`, `collision.ts` |
-| Admin entry | `src/components/views/admin/admin-map-editor-panel.tsx` |
-
----
-
-## Part G — Honest answers to your questions
-
-### “Is it going to work for me — easy to create map elements / entities and play the actual game?”
-
-**Yes, with training wheels and rules.**  
-Use floor pieces for every standable surface, place a runner spawn, validate, set MAIN, rejoin Deathrun. Decor walls/doors look good but mostly don’t block. Do not trust Play Test alone.
-
-### “Make sure GAME physics is fully operational and works like any other platformer on market!”
-
-**Not yet fully.** Core pad platforming is operational and intentionally designed (coyote, buffer, friction, sprint). Market parity needs Phase 2–3 (colliders + variable jump) and preferably Phase 6 (prediction). Until then, call it **solid mid-core**, not AAA indie platformer feel.
-
----
-
-## Part H — Deep-dive addendum (post-audit review)
-
-Extra high-severity findings confirmed in a second pass of the editor + sim. Fold these into Phase 0–2 tickets.
-
-### H1. Map / multiplayer authenticity
-
-| Finding | Risk | Suggested phase |
+| Finding | Severity | Status |
 |---|---|---|
-| `loadCustomMap` is not role-gated — any lobby client can replace platforms | Griefing / overwrite | **Phase 0** |
-| MAIN map + overlay meshes live in **publisher’s** `localStorage`; other clients get pads (if pushed) but may miss props/traps | Visual desync | **Phase 0 / 5** |
-| Starter empty-map floors reach ~X=16 while finish is hardcoded `FINISH_X ≈ 46` | New maps “impossible” to finish | **Phase 0** |
-| Trapper spawn extracted but **never applied** in match (everyone uses runner spawn) | Role imbalance | **Phase 0** |
-| `group` entity kind has no place UI; `isAdmin` prop on `MapEditor` unused | Dead surface / weak guards | Phase 3 polish |
-| Checkpoints tagged on pads but **no respawn logic** in sim | Misleading kind | Phase 4 |
-| Custom map **clears** default timed obstacles with no authoring replacement | Empty deathrun | Phase 4 |
+| `loadCustomMap` not role-gated | Griefing | **Fixed** — host / `isAdmin` |
+| MAIN + overlay in publisher localStorage | Visual desync | Still open (Phase 5) |
+| Starter floors vs hardcoded finish | Impossible course | **Fixed** — Finish entity + dynamic HUD |
+| Trapper spawn unused | Role imbalance | **Fixed** |
+| Checkpoints no respawn | Misleading | **Fixed** — void soft-respawn |
+| No jump cut | Fixed-height | **Fixed** |
+| No side AABB | Walk through walls | **Fixed** for tall solids |
+| Play Test ≠ match | Creator lies | **Fixed** — shared step + pads |
+| Progress HUD hardcoded `FINISH_X` | Wrong % | **Fixed** — `courseStartX` / `courseFinishX` |
 
-### H2. Physics / input edge cases
+---
 
-| Finding | Risk | Suggested phase |
+## Part I — 2026-07-20 gameplay authoring update
+
+### Shipped in this pass
+
+| Feature | Where | Notes |
 |---|---|---|
-| No **jump cut** — `wasJumpHeld` only edges the buffer | Fixed-height only | **Phase 3** |
-| Jump can soft-fail when energy &lt; `JUMP_ENERGY_COST * 0.25` with little feedback | “Dead” Space bar | Phase 1 / 3 |
-| Short mobile jump taps can miss a 30 Hz send frame | Missed jumps | Phase 1 (press latch) |
-| No side/underside AABB push-out — walk through pad volumes; jump up through floors | Unfair / soft walls | **Phase 2** |
-| Horizontal velocity lives only in server `PlayerSimScratch` (not synced); clients lerp `x,y,z` | Laggy feel | Phase 6 |
-| Mobile has **no crouch** mapped | Feature gap | Phase 3 nice-to-have |
-| `findSupportPlatform` snap window can attach oddly near stacked pad edges | Snags / float | Phase 2 |
+| **Solid** toggle on selection | Properties → Gameplay | Thin floors + tall wall boxes |
+| **Jump pad** + boost slider | Properties → Gameplay | Platform `kind: 'jumpPad'` |
+| **Death zone** authoritative | `mapDocToSimHazards` | Always-active obstacles |
+| **Light bulb** entity | Toolbar + kind | PointLight in editor + overlay |
+| **Start** / **Finish** | Toolbar + kind | Spawn + touch-to-win; required to publish |
+| Trapper spawn applied | `DeathrunRoom` | Role-aware spawn |
+| Dynamic world bounds | `mapDocToWorldBounds` | Big maps clamp correctly |
+| Wall AABB + platform height | `resolveSolidCollisions` | Tall solids block sideways |
+| Variable jump cut | `movement.ts` / `platformer-sim` | Release shortens jump |
+| Checkpoint soft-respawn | Room + Play Test | Void → last checkpoint |
+| Role-gate `loadCustomMap` | Host / admin | Lobby passes `isAdmin` |
+| Play Test match physics | `platformer-sim.ts` | Pads, walls, finish, jump cut |
+| Progress HUD Start→Finish | `courseStartX/FinishX` | Custom-map aware |
+| MAIN toast (not alert) | `useToast` | Rejoin reminder |
+| Unit tests | `prefab-storage.test.ts` | 5 cases |
+| Mobile FABs | Start / Finish / Props / Avatar | Collapsed + visible chrome |
+| **Player Model studio** | Toolbar + side panel | Live preview, clip bind (walk/jump/die…), GLB upload; drives Play Test + match |
+| **Timed / button traps** | Hazard panel Mode | always / timed pulse / button-armed; spike/saw/laser kinds |
+| **Authoritative buttons** | Button → Activates | Press E near button arms linked traps in match |
+| **Ice / conveyor** | Gameplay panel | Slippery pads + push along facing |
+| **Teleporters** | Gameplay panel | Link A→B pads; touch to warp |
+| **Stair baker** | Stairs selection | Bake stairs → solid step pads |
 
-### H3. Solo-admin workflow that works *today*
+### Still missing (next)
 
-1. Admin → Map Editor → New  
-2. Place **many** `floor*` pieces long enough toward finish (~world X ~46)  
-3. Place **Runner Spawn**  
-4. Save → **Set as MAIN**  
-5. Join Deathrun from **that same browser** while still in lobby/countdown so `loadCustomMap` fires  
-6. Treat walls/stairs/doors as **decor only** until Phase 2  
+1. **Server MAIN + map document sync** — other clients may miss overlay meshes/lights / custom avatars.  
+2. **Moving platforms** (kinematic path).  
+3. **Client prediction**.  
+4. Shared constants package (avoid drift between server + `platformer-sim.ts`).
 
-Do **not** use Play Test alone to judge gap difficulty.
+### Suggested inclusion order
+
+1. Phase 5 cloud MAIN sync  
+2. Moving platforms  
+3. Phase 6 prediction  
+
+---
+
+## Staff workflow (current)
+
+1. Admin → Map Editor  
+2. Open **Player Model** — pick mannequin/upload GLB, bind walk/jump/die, preview  
+3. Place **Start** + floors/solids + hazards/jump pads + **Finish**  
+4. Add **timed traps** / **button-armed** kill floors; wire Button → Activates trap  
+5. Optional: ice, conveyor, teleporters; bake stairs for climbable collision  
+6. On mobile: **Hide UI**, place with FABs, tap **Avatar** / **Props**  
+7. **Play Test** to verify gaps/finish/anims (match-like physics)  
+8. Save → **Set as MAIN** (toast)  
+9. Join Deathrun from **that same browser** while still in lobby/countdown so `loadCustomMap` fires  
+10. Mark walls **Solid** so corridors contain players  
 
 ---
 
@@ -355,5 +327,10 @@ Do **not** use Play Test alone to judge gap difficulty.
 |---|---|
 | 2026-07-20 | Initial audit from codebase review; no runtime play session logged in this doc. |
 | 2026-07-20 | Added Part H deep-dive from follow-up editor + physics audits (security, finish/spawn gaps, jump/net edge cases). |
+| 2026-07-20 | Part I: Solid / Jump pad / authoritative hazards / Light bulb shipped; checklist boxes updated; remaining gaps restated. |
+| 2026-07-20 | Start + Finish entities, trapper spawn, dynamic world bounds; publish validation requires Start/Finish. |
+| 2026-07-20 | Wall boxes, jump cut, checkpoints, play-test parity, role-gate, HUD anchors, unit tests, mobile FABs; audit checklist refreshed. |
+| 2026-07-20 | Player Model studio: side panel, die/land slots, match/Play Test honor map avatar bindings. |
+| 2026-07-20 | Timed traps, button-armed hazards, ice/conveyor, teleporters, stair baker — dream-map deathrun loop. |
 
-*Re-run this audit after Phase 0–1 land; update verdicts in the table at the top.*
+*Re-run this audit after cloud MAIN sync lands.*

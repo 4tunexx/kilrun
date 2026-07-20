@@ -12,7 +12,9 @@ import {
   GROUND_ACCEL,
   GROUND_FRICTION,
   JUMP_BUFFER_MS,
+  JUMP_CUT_MULTIPLIER,
   JUMP_ENERGY_COST,
+  JUMP_PAD_BOOST,
   JUMP_VELOCITY,
   MAX_AIR_SPEED_MULT,
   MAX_ENERGY,
@@ -25,7 +27,7 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
 } from './constants.js';
-import { findSupportPlatform } from './platforms.js';
+import { findSupportPlatform, resolveSolidCollisions } from './platforms.js';
 
 export interface PlayerInput {
   moveX: number; // -1..1, camera-relative forward/back intent (world X after client rotates)
@@ -76,6 +78,20 @@ export function createSimScratch(): PlayerSimScratch {
   };
 }
 
+export interface WorldBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+export const DEFAULT_WORLD_BOUNDS: WorldBounds = {
+  minX: 0,
+  maxX: WORLD_WIDTH,
+  minY: 0,
+  maxY: WORLD_HEIGHT,
+};
+
 /**
  * Authoritative Deathrun platformer step — Quake-inspired accel/friction on
  * XY, gravity + coyote/buffer jump on Z, energy sprint. Shared by all modes.
@@ -85,7 +101,8 @@ export function applyMovement(
   input: PlayerInput,
   dtSeconds: number,
   platforms: Iterable<PlatformState>,
-  scratch: PlayerSimScratch
+  scratch: PlayerSimScratch,
+  bounds: WorldBounds = DEFAULT_WORLD_BOUNDS
 ): void {
   if (!player.isAlive || player.hasFinished) return;
 
@@ -140,13 +157,30 @@ export function applyMovement(
     scratch.coyoteMs = Math.max(0, scratch.coyoteMs - dtSeconds * 1000);
   }
 
-  // Jump buffer: edge-trigger on press.
+  // Jump pads: launch as soon as we would be standing on them.
+  if (grounded && support!.platform.kind === 'jumpPad') {
+    const boost =
+      support!.platform.boost > 0 ? support!.platform.boost : JUMP_PAD_BOOST;
+    player.vz = boost;
+    player.isGrounded = false;
+    scratch.coyoteMs = 0;
+    scratch.jumpBufferMs = 0;
+  }
+
+  // Jump buffer: edge-trigger on press; variable height on release.
   const jumpEdge = input.jumpPressed && !scratch.wasJumpHeld;
+  const jumpReleased = !input.jumpPressed && scratch.wasJumpHeld;
+  if (jumpReleased && player.vz > 0) {
+    player.vz *= JUMP_CUT_MULTIPLIER;
+  }
   scratch.wasJumpHeld = input.jumpPressed;
   if (jumpEdge) scratch.jumpBufferMs = JUMP_BUFFER_MS;
   else scratch.jumpBufferMs = Math.max(0, scratch.jumpBufferMs - dtSeconds * 1000);
 
-  const canJump = scratch.coyoteMs > 0 && scratch.jumpBufferMs > 0;
+  const canJump =
+    player.isGrounded &&
+    scratch.coyoteMs > 0 &&
+    scratch.jumpBufferMs > 0;
   if (canJump && player.energy >= JUMP_ENERGY_COST * 0.25) {
     player.vz = JUMP_VELOCITY;
     player.isGrounded = false;
@@ -157,10 +191,13 @@ export function applyMovement(
 
   // Horizontal accel
   if (grounded) {
+    const onIce = support!.platform.kind === 'ice';
+    const friction = onIce ? GROUND_FRICTION * 0.18 : GROUND_FRICTION;
+    const accel = onIce ? GROUND_ACCEL * 0.45 : GROUND_ACCEL;
     // Friction
     const speed = Math.hypot(scratch.velX, scratch.velY);
     if (speed > 0.01) {
-      const drop = Math.min(speed, GROUND_FRICTION * dtSeconds);
+      const drop = Math.min(speed, friction * dtSeconds);
       const scale = (speed - drop) / speed;
       scratch.velX *= scale;
       scratch.velY *= scale;
@@ -169,11 +206,20 @@ export function applyMovement(
       scratch.velY = 0;
     }
     // Accel toward wish
-    scratch.velX += wishX * GROUND_ACCEL * dtSeconds;
-    scratch.velY += wishY * GROUND_ACCEL * dtSeconds;
+    scratch.velX += wishX * accel * dtSeconds;
+    scratch.velY += wishY * accel * dtSeconds;
+
+    // Conveyor belt push
+    if (support!.platform.kind === 'conveyor' && support!.platform.conveyorSpeed > 0) {
+      const spd = support!.platform.conveyorSpeed;
+      scratch.velX += support!.platform.conveyorDirX * spd * dtSeconds * 2.2;
+      scratch.velY += support!.platform.conveyorDirY * spd * dtSeconds * 2.2;
+    }
+
     const newSpeed = Math.hypot(scratch.velX, scratch.velY);
-    if (newSpeed > maxSpeed && newSpeed > 0) {
-      const s = maxSpeed / newSpeed;
+    const speedCap = onIce ? maxSpeed * 1.35 : maxSpeed;
+    if (newSpeed > speedCap && newSpeed > 0) {
+      const s = speedCap / newSpeed;
       scratch.velX *= s;
       scratch.velY *= s;
     }
@@ -190,8 +236,24 @@ export function applyMovement(
     }
   }
 
-  player.x = clamp(player.x + scratch.velX * dtSeconds, PLAYER_RADIUS, WORLD_WIDTH - PLAYER_RADIUS);
-  player.y = clamp(player.y + scratch.velY * dtSeconds, PLAYER_RADIUS, WORLD_HEIGHT - PLAYER_RADIUS);
+  player.x = clamp(
+    player.x + scratch.velX * dtSeconds,
+    bounds.minX + PLAYER_RADIUS,
+    bounds.maxX - PLAYER_RADIUS
+  );
+  player.y = clamp(
+    player.y + scratch.velY * dtSeconds,
+    bounds.minY + PLAYER_RADIUS,
+    bounds.maxY - PLAYER_RADIUS
+  );
+
+  // Side / wall AABB push-out for tall solids
+  const pushed = resolveSolidCollisions(
+    { x: player.x, y: player.y, z: player.z },
+    platforms
+  );
+  player.x = clamp(pushed.x, bounds.minX + PLAYER_RADIUS, bounds.maxX - PLAYER_RADIUS);
+  player.y = clamp(pushed.y, bounds.minY + PLAYER_RADIUS, bounds.maxY - PLAYER_RADIUS);
 
   // Vertical
   if (!player.isGrounded) {
@@ -209,15 +271,20 @@ export function applyMovement(
     );
     if (land && player.vz <= 0 && player.z <= land.topZ + 0.05) {
       player.z = land.topZ;
-      player.vz = 0;
-      player.isGrounded = true;
-      scratch.coyoteMs = COYOTE_TIME_MS;
+      if (land.platform.kind === 'jumpPad') {
+        player.vz = land.platform.boost > 0 ? land.platform.boost : JUMP_PAD_BOOST;
+        player.isGrounded = false;
+        scratch.coyoteMs = 0;
+      } else {
+        player.vz = 0;
+        player.isGrounded = true;
+        scratch.coyoteMs = COYOTE_TIME_MS;
+      }
     }
   }
 
+  // Void fall is handled by the room (checkpoint soft-respawn vs eliminate).
   if (player.z < VOID_Z) {
-    player.health = 0;
-    player.isAlive = false;
     player.vz = 0;
   }
 }

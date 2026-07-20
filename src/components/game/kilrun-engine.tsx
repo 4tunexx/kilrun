@@ -32,7 +32,16 @@ import { MobilePlayGate } from './ui/mobile-play-gate';
 import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
 import dynamic from 'next/dynamic';
-import { getActivePlayMapId, mapDocSpawnPoints, mapDocToSimPlatforms } from './editor/prefab-storage';
+import {
+  getActivePlayMapId,
+  mapDocSpawnPoints,
+  mapDocToSimFinishes,
+  mapDocToSimHazards,
+  mapDocToSimPlatforms,
+  mapDocToSimButtons,
+  mapDocToSimTeleports,
+  mapDocToWorldBounds,
+} from './editor/prefab-storage';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
 
@@ -96,12 +105,23 @@ export default function KilrunEngine({
     const platforms = mapDocToSimPlatforms(doc);
     if (!platforms.length) return;
 
+    const obstacles = mapDocToSimHazards(doc);
+    const finishes = mapDocToSimFinishes(doc);
+    const buttons = mapDocToSimButtons(doc);
+    const teleports = mapDocToSimTeleports(doc);
     const spawns = mapDocSpawnPoints(doc);
+    const worldBounds = mapDocToWorldBounds(doc, platforms, finishes);
     customDocRef.current = doc;
     customLoadedRef.current = true;
     connectionRef.current.sendLoadCustomMap({
       platforms,
+      obstacles,
+      finishes,
+      buttons,
+      teleports,
       spawn: spawns.runner ?? undefined,
+      trapperSpawn: spawns.trapper ?? undefined,
+      worldBounds,
     });
   }, [room.phase, connectionRef, playerCount, connectionError]);
 
@@ -155,7 +175,12 @@ export default function KilrunEngine({
 
     const spawnCharacter = (sessionId: string, username: string) => {
       if (characters.has(sessionId)) return;
-      const view = new ThreeCharacter(username, sessionId === connectionRef.current?.sessionId);
+      const avatarEntity = customDocRef.current?.entities.find((e) => e.kind === 'player');
+      const view = new ThreeCharacter(
+        username,
+        sessionId === connectionRef.current?.sessionId,
+        { avatarEntity }
+      );
       characters.set(sessionId, view);
       world.scene.add(view.root);
     };

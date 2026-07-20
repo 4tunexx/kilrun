@@ -56,7 +56,11 @@ export function computeMapStats(doc: MapDocument, json?: string): MapStats {
     ).length,
     buttonCount: ents.filter((e) => e.kind === 'button').length,
     spawnCount: ents.filter(
-      (e) => e.kind === 'spawn_runner' || e.kind === 'spawn_trapper'
+      (e) =>
+        e.kind === 'start' ||
+        e.kind === 'finish' ||
+        e.kind === 'spawn_runner' ||
+        e.kind === 'spawn_trapper'
     ).length,
     sizeBytes: new Blob([serialized]).size,
     createdAt: doc.meta?.createdAt,

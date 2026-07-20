@@ -2,12 +2,15 @@ export type EditorEntityKind =
   | 'prop'
   | 'spawn_runner'
   | 'spawn_trapper'
+  | 'start'
+  | 'finish'
   | 'checkpoint'
   | 'hazard'
   | 'trap'
   | 'group'
   | 'player'
-  | 'button';
+  | 'button'
+  | 'light';
 
 export type SkyPreset = 'cavern' | 'dusk' | 'bright' | 'void' | 'custom';
 export type FloorPreset = 'grid' | 'void' | 'solid' | 'water';
@@ -22,7 +25,7 @@ export type AnimTrigger =
   | 'signal';
 
 /**
- * Player locomotion slots → clip names from the model's animation list.
+ * Player locomotion / life slots → clip names from the model's animation list.
  * Leave a slot empty to fall back / stay on idle.
  */
 export type PlayerAnimSlot =
@@ -31,24 +34,56 @@ export type PlayerAnimSlot =
   | 'run'
   | 'jump'
   | 'fall'
+  | 'land'
   | 'crouch'
   | 'strafe_left'
   | 'strafe_right'
-  | 'back';
+  | 'back'
+  | 'die';
 
-export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string }[] = [
-  { id: 'idle', label: 'Idle' },
-  { id: 'walk', label: 'Walk / Forward' },
-  { id: 'run', label: 'Run / Sprint' },
-  { id: 'jump', label: 'Jump' },
-  { id: 'fall', label: 'Fall / Air' },
-  { id: 'crouch', label: 'Crouch' },
+export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string; hint?: string }[] = [
+  { id: 'idle', label: 'Idle', hint: 'Standing still' },
+  { id: 'walk', label: 'Walk / Forward', hint: 'Moving forward' },
+  { id: 'run', label: 'Run / Sprint', hint: 'Sprint held' },
+  { id: 'jump', label: 'Jump', hint: 'Leaving the ground' },
+  { id: 'fall', label: 'Fall / Air', hint: 'In air, not jumping up' },
+  { id: 'land', label: 'Land', hint: 'Touching down after a fall' },
+  { id: 'crouch', label: 'Crouch', hint: 'Ctrl / C held' },
   { id: 'strafe_left', label: 'Strafe Left (A)' },
   { id: 'strafe_right', label: 'Strafe Right (D)' },
   { id: 'back', label: 'Walk Back (S)' },
+  { id: 'die', label: 'Die / Eliminated', hint: 'Plays once on death' },
 ];
 
 export type PlayerAnimBindings = Partial<Record<PlayerAnimSlot, string>>;
+
+/** Fuzzy-match clip names into locomotion / life slots. */
+export function suggestPlayerBindings(clips: string[]): PlayerAnimBindings {
+  if (!clips.length) return {};
+  const lower = clips.map((c) => ({ c, l: c.toLowerCase() }));
+  const find = (...keys: string[]) =>
+    lower.find((x) => keys.some((k) => x.l.includes(k)))?.c;
+  const idle = find('idle', 'stand', 'breath') ?? clips[0];
+  const walk = find('walk', 'walking') ?? find('run') ?? clips[1] ?? clips[0];
+  return {
+    idle,
+    walk,
+    run: find('run', 'sprint', 'running') ?? walk,
+    jump: find('jump', 'hop', 'leap') ?? idle,
+    fall: find('fall', 'air', 'falling') ?? find('jump') ?? idle,
+    land: find('land', 'landing') ?? idle,
+    crouch: find('crouch', 'sneak', 'duck') ?? idle,
+    strafe_left: find('left', 'strafe_l', 'strafe left') ?? walk,
+    strafe_right: find('right', 'strafe_r', 'strafe right') ?? walk,
+    back: find('back', 'backward', 'reverse') ?? walk,
+    die: find('die', 'death', 'dead', 'elim') ?? idle,
+  };
+}
+
+/** First player avatar entity on the map (if any). */
+export function findPlayerEntity(doc: MapDocument): EditorEntity | undefined {
+  return doc.entities.find((e) => e.kind === 'player');
+}
 
 export interface EntityAnimation {
   /** Clip names discovered from the GLB (auto-filled when model loads). */
@@ -80,10 +115,57 @@ export interface EntityHazard {
   enabled: boolean;
   /** HP removed each interval while touching */
   damage: number;
-  /** Milliseconds between damage ticks */
+  /**
+   * Always-on: cooldown between damage ticks.
+   * Timed: ms the trap stays OFF before next pulse.
+   */
   intervalMs: number;
   /** If true, touching instantly kills / max damage */
   instantKill: boolean;
+  /**
+   * always = permanent damage volume
+   * timed = auto pulse on/off
+   * button = starts off; activated by a wired Button
+   */
+  mode?: 'always' | 'timed' | 'button';
+  /** Timed / button: how long the trap stays ON (ms). */
+  activeMs?: number;
+  /** Visual / net obstacle kind */
+  obstacleKind?: 'spike' | 'saw' | 'laser' | 'crusher' | 'damage';
+}
+
+/** Launch player upward when they land / stand on this pad. */
+export interface EntityJumpPad {
+  enabled: boolean;
+  /** Vertical launch speed (sim vz). Default ~14. */
+  boost: number;
+}
+
+/** Walkable surface modifiers (ice / conveyor). */
+export interface EntitySurface {
+  /** Low friction — slippery. */
+  ice?: boolean;
+  /** Push the player while standing on this pad. */
+  conveyor?: boolean;
+  /** Push speed in world units / second. */
+  conveyorSpeed?: number;
+}
+
+/** Teleport pad — touching sends the player to the linked target. */
+export interface EntityTeleport {
+  enabled: boolean;
+  /** Other entity id (teleporter exit / marker). */
+  targetEntityId?: string;
+  cooldownMs?: number;
+}
+
+/** Point light for map atmosphere (client visual; not simulated). */
+export interface EntityLight {
+  color: string;
+  intensity: number;
+  /** Attenuation distance in world units */
+  distance: number;
+  castShadow?: boolean;
 }
 
 export interface EditorEntity {
@@ -107,6 +189,19 @@ export interface EditorEntity {
   playerAnims?: PlayerAnimBindings;
   /** Death zone / damage on touch */
   hazard?: EntityHazard;
+  /**
+   * Explicit standable collider for match export.
+   * When true, entity becomes a server platform pad (top-plane AABB).
+   */
+  solid?: boolean;
+  /** Bounce / launch pad gameplay */
+  jumpPad?: EntityJumpPad;
+  /** Ice / conveyor surface */
+  surface?: EntitySurface;
+  /** Teleport pad */
+  teleport?: EntityTeleport;
+  /** kind === 'light' settings */
+  light?: EntityLight;
 }
 
 export interface EditorLayer {
@@ -163,18 +258,116 @@ export function defaultHazard(): EntityHazard {
     damage: 25,
     intervalMs: 500,
     instantKill: false,
+    mode: 'always',
+    activeMs: 1000,
+    obstacleKind: 'damage',
   };
 }
 
 export function ensureHazard(ent: EditorEntity): EntityHazard {
-  if (ent.kind === 'hazard' && !ent.hazard) return defaultHazard();
+  const base =
+    ent.kind === 'hazard' && !ent.hazard
+      ? defaultHazard()
+      : ent.kind === 'trap' && !ent.hazard
+        ? {
+            enabled: true,
+            damage: 40,
+            intervalMs: 2000,
+            instantKill: false,
+            mode: 'timed' as const,
+            activeMs: 900,
+            obstacleKind: 'spike' as const,
+          }
+        : {
+            enabled: false,
+            damage: 25,
+            intervalMs: 500,
+            instantKill: false,
+            mode: 'always' as const,
+            activeMs: 1000,
+            obstacleKind: 'damage' as const,
+          };
   return {
-    enabled: false,
-    damage: 25,
-    intervalMs: 500,
-    instantKill: false,
+    ...base,
     ...ent.hazard,
   };
+}
+
+export function defaultJumpPad(): EntityJumpPad {
+  return { enabled: true, boost: 14 };
+}
+
+export function ensureJumpPad(ent: EditorEntity): EntityJumpPad {
+  return {
+    enabled: false,
+    boost: 14,
+    ...ent.jumpPad,
+  };
+}
+
+export function defaultSurface(): EntitySurface {
+  return { ice: false, conveyor: false, conveyorSpeed: 4 };
+}
+
+export function ensureSurface(ent: EditorEntity): EntitySurface {
+  return { ...defaultSurface(), ...ent.surface };
+}
+
+export function defaultTeleport(): EntityTeleport {
+  return { enabled: true, cooldownMs: 800 };
+}
+
+export function ensureTeleport(ent: EditorEntity): EntityTeleport {
+  return {
+    enabled: false,
+    cooldownMs: 800,
+    ...ent.teleport,
+  };
+}
+
+export function defaultLight(color = '#ffe9a8'): EntityLight {
+  return {
+    color,
+    intensity: 1.4,
+    distance: 18,
+    castShadow: false,
+  };
+}
+
+export function ensureLight(ent: EditorEntity): EntityLight {
+  return {
+    ...defaultLight(ent.color ?? '#ffe9a8'),
+    ...ent.light,
+  };
+}
+
+/** Whether this entity should export as a standable / jump-pad platform. */
+export function entityExportsAsPlatform(ent: EditorEntity): boolean {
+  if (ent.visible === false) return false;
+  if (
+    ent.kind === 'light' ||
+    ent.kind === 'spawn_runner' ||
+    ent.kind === 'spawn_trapper' ||
+    ent.kind === 'start' ||
+    ent.kind === 'button' ||
+    ent.kind === 'hazard' ||
+    ent.kind === 'trap'
+  ) {
+    return false;
+  }
+  // Finish pads are standable trigger volumes.
+  if (ent.kind === 'finish') return true;
+  // Jump pads / ice / conveyor always export (need a pad).
+  if (ent.jumpPad?.enabled) return true;
+  if (ent.surface?.ice || ent.surface?.conveyor) return true;
+  if (ent.teleport?.enabled) return true;
+  // Explicit authoring wins over name heuristics.
+  if (ent.solid === false) return false;
+  if (ent.solid === true) return true;
+  if (ent.kind === 'checkpoint') return true;
+  if (ent.model?.includes('floor')) return true;
+  if (ent.model?.startsWith('platform')) return true;
+  return false;
 }
 
 export function generateId(prefix = 'ent'): string {
@@ -240,8 +433,8 @@ export function createEmptyMap(name = 'Untitled Map'): MapDocument {
       },
       {
         id: generateId(),
-        name: 'Runner Spawn',
-        kind: 'spawn_runner',
+        name: 'Start',
+        kind: 'start',
         model: 'figurine',
         layerId: spawnsId,
         position: [0, 0.5, 2],
@@ -252,11 +445,24 @@ export function createEmptyMap(name = 'Untitled Map'): MapDocument {
       },
       {
         id: generateId(),
+        name: 'Finish',
+        kind: 'finish',
+        model: 'floor-square',
+        layerId: spawnsId,
+        position: [0, 0, 20],
+        rotation: [0, 0, 0],
+        scale: [2.2, 1, 2.2],
+        color: '#fbbf24',
+        solid: true,
+        animation: defaultAnimation(),
+      },
+      {
+        id: generateId(),
         name: 'Trapper Spawn',
         kind: 'spawn_trapper',
         model: 'figurine-large',
         layerId: spawnsId,
-        position: [0, 0.5, 20],
+        position: [4, 0.5, 10],
         rotation: [0, 180, 0],
         scale: [1, 1, 1],
         color: '#ef4444',
@@ -282,6 +488,10 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
       : undefined,
     playerAnims: ent.playerAnims ? { ...ent.playerAnims } : undefined,
     hazard: ent.hazard ? { ...ent.hazard } : undefined,
+    jumpPad: ent.jumpPad ? { ...ent.jumpPad } : undefined,
+    surface: ent.surface ? { ...ent.surface } : undefined,
+    teleport: ent.teleport ? { ...ent.teleport } : undefined,
+    light: ent.light ? { ...ent.light } : undefined,
   };
 }
 

@@ -1,4 +1,5 @@
 import type { MapDocument } from './map-document';
+import { entityExportsAsPlatform } from './map-document';
 
 export interface MapValidationIssue {
   level: 'error' | 'warn';
@@ -9,17 +10,29 @@ export function validateMapForPublish(doc: MapDocument): MapValidationIssue[] {
   const issues: MapValidationIssue[] = [];
   const ents = doc.entities ?? [];
 
-  const runners = ents.filter((e) => e.kind === 'spawn_runner');
+  const starts = ents.filter(
+    (e) => e.kind === 'start' || e.kind === 'spawn_runner' || e.kind === 'player'
+  );
+  const finishes = ents.filter((e) => e.kind === 'finish');
   const trappers = ents.filter((e) => e.kind === 'spawn_trapper');
-  const floors = ents.filter((e) => e.model?.includes('floor'));
+  const solids = ents.filter(entityExportsAsPlatform);
 
-  if (runners.length === 0) {
-    issues.push({ level: 'error', message: 'Add at least one Runner Spawn.' });
-  }
-  if (floors.length < 3) {
+  if (starts.length === 0) {
     issues.push({
       level: 'error',
-      message: `Need at least 3 floor pieces for collision (found ${floors.length}).`,
+      message: 'Add a Start entity (player spawn point).',
+    });
+  }
+  if (finishes.length === 0) {
+    issues.push({
+      level: 'error',
+      message: 'Add a Finish entity — runners win by touching it.',
+    });
+  }
+  if (solids.length < 3) {
+    issues.push({
+      level: 'error',
+      message: `Need at least 3 solid / floor pieces for collision (found ${solids.length}).`,
     });
   }
   if (trappers.length === 0) {

@@ -30,17 +30,22 @@ export interface NetPlayerState {
 
 export interface NetPlatformState {
   id: string;
-  kind: 'solid' | 'checkpoint';
+  kind: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor';
   x: number;
   y: number;
   z: number;
   width: number;
   depth: number;
+  height?: number;
+  boost?: number;
+  conveyorSpeed?: number;
+  conveyorDirX?: number;
+  conveyorDirY?: number;
 }
 
 export interface NetObstacleState {
   id: string;
-  kind: 'saw' | 'laser' | 'crusher' | 'spike';
+  kind: 'saw' | 'laser' | 'crusher' | 'spike' | 'damage';
   x: number;
   y: number;
   z: number;
@@ -49,6 +54,8 @@ export interface NetObstacleState {
   intervalMs: number;
   activeMs: number;
   active: boolean;
+  damage?: number;
+  alwaysActive?: boolean;
 }
 
 export interface NetRoomState {
@@ -57,6 +64,8 @@ export interface NetRoomState {
   matchTimeRemainingMs: number;
   trapperSessionId: string;
   winnerRole: string;
+  courseStartX?: number;
+  courseFinishX?: number;
 }
 
 export interface PlayerInputMessage {

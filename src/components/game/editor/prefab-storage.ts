@@ -1,5 +1,5 @@
 import type { EditorEntity, MapDocument } from './map-document';
-import { generateId } from './map-document';
+import { entityExportsAsPlatform, ensureHazard, generateId } from './map-document';
 
 const PREFAB_KEY = 'kilrun.prefabs.v1';
 export const ACTIVE_PLAY_MAP_KEY = 'kilrun.activePlayMapId.v1';
@@ -36,6 +36,11 @@ export function savePrefab(name: string, entities: EditorEntity[]): PrefabStamp 
       ? { ...e.animation, availableClips: [...e.animation.availableClips] }
       : undefined,
     playerAnims: e.playerAnims ? { ...e.playerAnims } : undefined,
+    hazard: e.hazard ? { ...e.hazard } : undefined,
+    jumpPad: e.jumpPad ? { ...e.jumpPad } : undefined,
+    surface: e.surface ? { ...e.surface } : undefined,
+    teleport: e.teleport ? { ...e.teleport } : undefined,
+    light: e.light ? { ...e.light } : undefined,
   }));
   const stamp: PrefabStamp = {
     id: `prefab_${Date.now().toString(36)}`,
@@ -69,6 +74,12 @@ export function instantiatePrefab(
     animation: e.animation
       ? { ...e.animation, availableClips: [...(e.animation.availableClips ?? [])] }
       : undefined,
+    playerAnims: e.playerAnims ? { ...e.playerAnims } : undefined,
+    hazard: e.hazard ? { ...e.hazard } : undefined,
+    jumpPad: e.jumpPad ? { ...e.jumpPad } : undefined,
+    surface: e.surface ? { ...e.surface } : undefined,
+    teleport: e.teleport ? { ...e.teleport } : undefined,
+    light: e.light ? { ...e.light } : undefined,
   }));
 }
 
@@ -84,50 +95,166 @@ export function getActivePlayMapId(): string | null {
 }
 
 /** Editor Three (Y-up) → server sim (x forward, y lateral, z height). */
+export type SimPlatformKind =
+  | 'solid'
+  | 'checkpoint'
+  | 'jumpPad'
+  | 'finish'
+  | 'ice'
+  | 'conveyor';
+
 export interface SimPlatformBlueprint {
   x: number;
   y: number;
   z: number;
   width: number;
   depth: number;
-  kind?: 'solid' | 'checkpoint';
+  kind?: SimPlatformKind;
+  boost?: number;
+  height?: number;
+  conveyorSpeed?: number;
+  conveyorDirX?: number;
+  conveyorDirY?: number;
+}
+
+export interface SimHazardBlueprint {
+  id: string;
+  kind?: 'saw' | 'laser' | 'crusher' | 'spike' | 'damage';
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  height: number;
+  damage: number;
+  intervalMs: number;
+  activeMs?: number;
+  alwaysActive: boolean;
+  buttonControlled?: boolean;
+  instantKill: boolean;
+}
+
+export interface SimFinishBlueprint {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  depth: number;
+  height: number;
+}
+
+export interface SimButtonBlueprint {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  activatesObstacleIds: string[];
+  holdMs: number;
+  cooldownMs: number;
+}
+
+export interface SimTeleportBlueprint {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  depth: number;
+  height: number;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+  cooldownMs: number;
+}
+
+export interface SimWorldBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+function entityToPad(e: EditorEntity): SimPlatformBlueprint {
+  const [tx, ty, tz] = e.position;
+  const sizeX = Math.max(1.2, Math.abs(e.scale[0]) * 2);
+  const sizeZ = Math.max(1.2, Math.abs(e.scale[2]) * 2);
+  const jump = e.jumpPad?.enabled;
+  const ice = !!e.surface?.ice;
+  const conveyor = !!e.surface?.conveyor;
+  let kind: SimPlatformKind = 'solid';
+  if (e.kind === 'finish') kind = 'finish';
+  else if (e.kind === 'checkpoint') kind = 'checkpoint';
+  else if (jump) kind = 'jumpPad';
+  else if (conveyor) kind = 'conveyor';
+  else if (ice) kind = 'ice';
+
+  const model = e.model ?? '';
+  const topOnly =
+    e.kind === 'finish' ||
+    e.kind === 'checkpoint' ||
+    jump ||
+    ice ||
+    conveyor ||
+    !!e.teleport?.enabled ||
+    model.includes('floor') ||
+    model.startsWith('platform');
+  const wallLike =
+    !topOnly &&
+    (model.startsWith('wall') ||
+      model.startsWith('column') ||
+      model.includes('door') ||
+      Math.abs(e.scale[1]) >= 1.15 ||
+      e.solid === true);
+  const height = topOnly
+    ? 0.25
+    : wallLike
+      ? Math.max(0.8, Math.abs(e.scale[1]) * 2)
+      : 0.45;
+  const topZ = topOnly ? ty : ty + height * 0.5;
+
+  const yaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
+  const dirSimX = Math.cos(yaw);
+  const dirSimY = Math.sin(yaw);
+
+  return {
+    x: tz,
+    y: tx,
+    z: topZ,
+    width: sizeZ,
+    depth: sizeX,
+    kind,
+    boost: jump ? Math.max(4, e.jumpPad?.boost ?? 14) : undefined,
+    height,
+    conveyorSpeed: conveyor ? Math.max(0.5, e.surface?.conveyorSpeed ?? 4) : undefined,
+    conveyorDirX: conveyor ? dirSimX : undefined,
+    conveyorDirY: conveyor ? dirSimY : undefined,
+  };
 }
 
 export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
-  const isFloorLike = (e: EditorEntity) =>
-    e.visible !== false &&
-    (e.kind === 'checkpoint' ||
-      !!e.model?.includes('floor') ||
-      !!e.model?.startsWith('platform') ||
-      (e.kind === 'prop' &&
+  const explicit = doc.entities.filter(entityExportsAsPlatform);
+  let source = explicit;
+  if (source.length === 0) {
+    source = doc.entities.filter(
+      (e) =>
+        e.visible !== false &&
+        e.kind !== 'light' &&
         !!e.model &&
         !e.model.startsWith('wall') &&
         !e.model.startsWith('column') &&
         !e.model.startsWith('pipe') &&
         !e.model.startsWith('figurine') &&
         !e.model.startsWith('door') &&
-        !e.model.startsWith('button')));
+        !e.model.startsWith('button')
+    );
+  }
 
-  const floors = doc.entities.filter(
-    (e) => e.visible !== false && (e.model?.includes('floor') || e.kind === 'checkpoint')
-  );
-  const source = floors.length > 0 ? floors : doc.entities.filter(isFloorLike);
-
-  const runner = doc.entities.find((e) => e.kind === 'spawn_runner' || e.kind === 'player');
-
-  const pads = source.map((e) => {
-    const [tx, ty, tz] = e.position;
-    const sizeX = Math.max(1.2, Math.abs(e.scale[0]) * 2);
-    const sizeZ = Math.max(1.2, Math.abs(e.scale[2]) * 2);
-    return {
-      x: tz,
-      y: tx,
-      z: ty,
-      width: sizeZ,
-      depth: sizeX,
-      kind: (e.kind === 'checkpoint' ? 'checkpoint' : 'solid') as 'solid' | 'checkpoint',
-    };
-  });
+  const runner =
+    doc.entities.find((e) => e.kind === 'start') ??
+    doc.entities.find((e) => e.kind === 'spawn_runner') ??
+    doc.entities.find((e) => e.kind === 'player');
+  const pads = source.map(entityToPad);
 
   if (pads.length === 0 && runner) {
     const [tx, ty, tz] = runner.position;
@@ -137,12 +264,190 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
   return pads;
 }
 
+export function mapDocToSimHazards(doc: MapDocument): SimHazardBlueprint[] {
+  return doc.entities
+    .filter((e) => {
+      if (e.visible === false) return false;
+      const hz = ensureHazard(e);
+      return e.kind === 'hazard' || e.kind === 'trap' || hz.enabled;
+    })
+    .map((e) => {
+      const hz = ensureHazard(e);
+      const [tx, ty, tz] = e.position;
+      const width = Math.max(1.2, Math.abs(e.scale[0]) * 2);
+      const depth = Math.max(1.2, Math.abs(e.scale[2]) * 2);
+      const height = Math.max(1.2, Math.abs(e.scale[1]) * 2);
+      const mode = hz.mode ?? (e.kind === 'trap' ? 'timed' : 'always');
+      return {
+        id: e.id,
+        kind: hz.obstacleKind ?? (e.kind === 'trap' ? 'spike' : 'damage'),
+        x: tz,
+        y: tx,
+        z: ty,
+        width: Math.max(width, depth),
+        height,
+        damage: hz.instantKill ? 999 : Math.max(1, hz.damage),
+        intervalMs: Math.max(100, hz.intervalMs),
+        activeMs: Math.max(100, hz.activeMs ?? (mode === 'timed' ? 900 : 1500)),
+        alwaysActive: mode === 'always',
+        buttonControlled: mode === 'button',
+        instantKill: hz.instantKill,
+      };
+    });
+}
+
+export function mapDocToSimFinishes(doc: MapDocument): SimFinishBlueprint[] {
+  return doc.entities
+    .filter((e) => e.visible !== false && e.kind === 'finish')
+    .map((e) => {
+      const [tx, ty, tz] = e.position;
+      const width = Math.max(1.4, Math.abs(e.scale[0]) * 2);
+      const depth = Math.max(1.4, Math.abs(e.scale[2]) * 2);
+      const height = Math.max(1.6, Math.abs(e.scale[1]) * 2.5);
+      return {
+        id: e.id,
+        x: tz,
+        y: tx,
+        z: ty,
+        width,
+        depth,
+        height,
+      };
+    });
+}
+
+export function mapDocToSimButtons(doc: MapDocument): SimButtonBlueprint[] {
+  return doc.entities
+    .filter((e) => e.visible !== false && e.kind === 'button')
+    .map((e) => {
+      const anim = e.animation;
+      const [tx, ty, tz] = e.position;
+      const targets = anim?.activatesEntityIds ?? [];
+      const listeners = doc.entities
+        .filter((o) => o.animation?.listenToEntityId === e.id)
+        .map((o) => o.id);
+      const activatesObstacleIds = Array.from(new Set([...targets, ...listeners]));
+      return {
+        id: e.id,
+        x: tz,
+        y: tx,
+        z: ty,
+        radius: Math.max(1.2, anim?.radius ?? 2.5),
+        activatesObstacleIds,
+        holdMs: 2500,
+        cooldownMs: 600,
+      };
+    })
+    .filter((b) => b.activatesObstacleIds.length > 0);
+}
+
+export function mapDocToSimTeleports(doc: MapDocument): SimTeleportBlueprint[] {
+  const byId = new Map(doc.entities.map((e) => [e.id, e]));
+  return doc.entities
+    .filter((e) => e.visible !== false && e.teleport?.enabled && e.teleport.targetEntityId)
+    .map((e) => {
+      const target = byId.get(e.teleport!.targetEntityId!);
+      if (!target) return null;
+      const [tx, ty, tz] = e.position;
+      const [ox, oy, oz] = target.position;
+      const width = Math.max(1.2, Math.abs(e.scale[0]) * 2);
+      const depth = Math.max(1.2, Math.abs(e.scale[2]) * 2);
+      const height = Math.max(1.4, Math.abs(e.scale[1]) * 2);
+      return {
+        id: e.id,
+        x: tz,
+        y: tx,
+        z: ty,
+        width,
+        depth,
+        height,
+        targetX: oz,
+        targetY: ox,
+        targetZ: oy + 0.05,
+        cooldownMs: Math.max(200, e.teleport?.cooldownMs ?? 800),
+      };
+    })
+    .filter((t): t is SimTeleportBlueprint => !!t);
+}
+
+export function mapDocToWorldBounds(
+  doc: MapDocument,
+  platforms: SimPlatformBlueprint[],
+  finishes: SimFinishBlueprint[]
+): SimWorldBounds {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  const expand = (x: number, y: number, halfW: number, halfD: number) => {
+    minX = Math.min(minX, x - halfW);
+    maxX = Math.max(maxX, x + halfW);
+    minY = Math.min(minY, y - halfD);
+    maxY = Math.max(maxY, y + halfD);
+  };
+
+  for (const p of platforms) expand(p.x, p.y, p.width / 2 + 2, p.depth / 2 + 2);
+  for (const f of finishes) expand(f.x, f.y, f.width / 2 + 2, f.depth / 2 + 2);
+
+  const spawns = mapDocSpawnPoints(doc);
+  for (const s of [spawns.runner, spawns.trapper]) {
+    if (s) expand(s.x, s.y, 3, 3);
+  }
+
+  if (!Number.isFinite(minX)) {
+    return { minX: 0, maxX: 48, minY: 0, maxY: 10 };
+  }
+
+  const pad = 2.5;
+  return {
+    minX: minX - pad,
+    maxX: maxX + pad,
+    minY: minY - pad,
+    maxY: maxY + pad,
+  };
+}
+
 export function mapDocSpawnPoints(doc: MapDocument) {
-  const runner = doc.entities.find((e) => e.kind === 'spawn_runner' || e.kind === 'player');
+  const runner =
+    doc.entities.find((e) => e.kind === 'start') ??
+    doc.entities.find((e) => e.kind === 'spawn_runner') ??
+    doc.entities.find((e) => e.kind === 'player');
   const trapper = doc.entities.find((e) => e.kind === 'spawn_trapper');
   const toSim = (e?: EditorEntity) =>
-    e
-      ? { x: e.position[2], y: e.position[0], z: e.position[1] }
-      : null;
+    e ? { x: e.position[2], y: e.position[0], z: e.position[1] } : null;
   return { runner: toSim(runner), trapper: toSim(trapper) };
+}
+
+/** Bake a stairs-like prop into thin solid pads for climbable collision. */
+export function bakeStairsToPads(stairs: EditorEntity, steps = 6): EditorEntity[] {
+  const n = Math.max(3, Math.min(16, Math.round(steps)));
+  const [sx, sy, sz] = stairs.position;
+  const yaw = ((stairs.rotation?.[1] ?? 0) * Math.PI) / 180;
+  const run = Math.max(2, Math.abs(stairs.scale[2]) * 2);
+  const rise = Math.max(1, Math.abs(stairs.scale[1]) * 2);
+  const width = Math.max(1.2, Math.abs(stairs.scale[0]) * 2);
+  const stepRun = run / n;
+  const stepRise = rise / n;
+  const pads: EditorEntity[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const along = (t - 0.5) * run;
+    const px = sx + Math.sin(yaw) * along;
+    const pz = sz + Math.cos(yaw) * along;
+    const py = sy + (i + 1) * stepRise * 0.5;
+    pads.push({
+      id: generateId(),
+      name: `${stairs.name} Step ${i + 1}`,
+      kind: 'prop',
+      model: 'floor-square',
+      layerId: stairs.layerId,
+      position: [px, py, pz],
+      rotation: [0, stairs.rotation?.[1] ?? 0, 0],
+      scale: [width / 2, 0.15, Math.max(0.35, stepRun * 0.55)],
+      solid: true,
+      color: '#5b7c99',
+    });
+  }
+  return pads;
 }

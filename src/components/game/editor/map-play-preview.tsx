@@ -11,15 +11,31 @@ import { AnimationDirector } from './animation-director';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
+import {
+  createSimScratch,
+  simToThree,
+  stepPlatformer,
+  type SimBody,
+} from '@/lib/platformer-sim';
+import {
+  mapDocSpawnPoints,
+  mapDocToSimFinishes,
+  mapDocToSimPlatforms,
+  mapDocToWorldBounds,
+} from './prefab-storage';
+import { loadPlayerAvatar } from './player-avatar';
+import { normalizeCharacter } from '../renderer/asset-loader';
+import { suggestPlayerBindings } from './map-document';
 
 /**
- * Compiles the editor map into a freelook preview with animation triggers.
- * Walk near doors (proximity), press E (interact), step on buttons (collide).
+ * Play Test uses the same pad export + platformer step as Deathrun match
+ * (coyote, jump cut, jump pads, solid wall boxes, finishes).
  */
 export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const [hp, setHp] = useState(100);
+  const [finished, setFinished] = useState(false);
   const isTouch = typeof window !== 'undefined' && detectTouchDevice();
 
   useEffect(() => {
@@ -33,7 +49,9 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     scene.fog = new THREE.FogExp2(env.fogColor || '#0c1830', env.fogDensity ?? 0.022);
 
     const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 300);
-    const runner = doc.entities.find((e) => e.kind === 'spawn_runner' || e.kind === 'player');
+    const runner = doc.entities.find(
+      (e) => e.kind === 'start' || e.kind === 'spawn_runner' || e.kind === 'player'
+    );
     if (runner) {
       camera.position.set(runner.position[0], runner.position[1] + 1.6, runner.position[2]);
     } else {
@@ -70,8 +88,27 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     let pitch = 0;
     let interactPulse = false;
     let raf = 0;
-    let grounded = true;
-    let vy = 0;
+    const pads = mapDocToSimPlatforms(doc);
+    const finishes = mapDocToSimFinishes(doc);
+    const bounds = mapDocToWorldBounds(doc, pads, finishes);
+    const spawn = mapDocSpawnPoints(doc).runner;
+    const scratch = createSimScratch();
+    const body: SimBody = {
+      x: spawn?.x ?? 0,
+      y: spawn?.y ?? 0,
+      z: spawn?.z ?? 0,
+      vz: 0,
+      isGrounded: true,
+      energy: 100,
+    };
+    if (spawn) {
+      const [tx, ty, tz] = simToThree(body.x, body.y, body.z);
+      camera.position.set(tx, ty + 1.6, tz);
+    }
+    let finishedLocal = false;
+    let checkpoint: { x: number; y: number; z: number } | null = null;
+    let wasGrounded = true;
+    let landUntil = 0;
 
     const resize = () => {
       const w = Math.max(1, host.clientWidth);
@@ -87,8 +124,45 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     const loadAll = async () => {
       for (const ent of doc.entities) {
         if (disposed) return;
-        const src = resolveModelSrc(ent.model, ent.customModelUrl);
         try {
+          if (ent.kind === 'player') {
+            const loaded = await loadPlayerAvatar(ent);
+            if (disposed) return;
+            const root = loaded.scene;
+            normalizeCharacter(root, 1.75);
+            root.position.set(...ent.position);
+            root.rotation.set(
+              THREE.MathUtils.degToRad(ent.rotation[0]),
+              THREE.MathUtils.degToRad(ent.rotation[1]),
+              THREE.MathUtils.degToRad(ent.rotation[2])
+            );
+            root.scale.multiplyScalar(ent.scale[1] || 1);
+            root.userData.entityId = ent.id;
+            scene.add(root);
+            roots.set(ent.id, root);
+            director.register(ent.id, root, loaded.animations);
+            // Fill bindings in-memory if empty so locomotion works this session
+            if (!ent.playerAnims || Object.keys(ent.playerAnims).length === 0) {
+              ent.playerAnims = suggestPlayerBindings(loaded.clipNames);
+            }
+            if (!ent.animation?.availableClips?.length) {
+              ent.animation = {
+                ...(ent.animation ?? {
+                  availableClips: [],
+                  trigger: 'none',
+                  radius: 2.5,
+                  loopActive: false,
+                  loopDefault: true,
+                }),
+                availableClips: loaded.clipNames,
+              };
+            }
+            playerRoot = root;
+            playerId = ent.id;
+            continue;
+          }
+
+          const src = resolveModelSrc(ent.model, ent.customModelUrl);
           if (src) {
             const { root, clips } = await loadAnimatedPrefab(src);
             root.position.set(...ent.position);
@@ -102,17 +176,25 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
             scene.add(root);
             roots.set(ent.id, root);
             director.register(ent.id, root, clips);
-            if (ent.kind === 'player') {
-              playerRoot = root;
-              playerId = ent.id;
-              camera.position.set(ent.position[0], ent.position[1] + 1.6, ent.position[2] + 4);
-            } else if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
+            if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
               director.playDefault(ent);
             }
-          } else if (ent.kind === 'spawn_runner' || ent.kind === 'spawn_trapper') {
-            const color = ent.kind === 'spawn_runner' ? 0x22c55e : 0xef4444;
+          } else if (
+            ent.kind === 'spawn_runner' ||
+            ent.kind === 'spawn_trapper' ||
+            ent.kind === 'start' ||
+            ent.kind === 'finish'
+          ) {
+            const color =
+              ent.kind === 'finish'
+                ? 0xfbbf24
+                : ent.kind === 'spawn_trapper'
+                  ? 0xef4444
+                  : 0x22c55e;
             const marker = new THREE.Mesh(
-              new THREE.ConeGeometry(0.4, 1.2, 10),
+              ent.kind === 'finish'
+                ? new THREE.BoxGeometry(1.6, 0.12, 1.6)
+                : new THREE.ConeGeometry(0.4, 1.2, 10),
               new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.3 })
             );
             marker.position.set(ent.position[0], ent.position[1] + 0.6, ent.position[2]);
@@ -191,73 +273,110 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
 
       const sprint =
         keys.has('ShiftLeft') || keys.has('ShiftRight') || !!joy?.isSprintHeld();
-      const speed = (sprint ? 14 : 8) * dt;
-      // Fly/walk toward look direction (pitch included) so aiming down moves downward on mobile free camera
-      const forward = new THREE.Vector3(
-        Math.sin(yaw) * Math.cos(pitch),
-        Math.sin(pitch),
-        Math.cos(yaw) * Math.cos(pitch)
-      );
-      const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+      const crouch = keys.has('ControlLeft') || keys.has('KeyC');
 
-      let moveX = 0;
-      let moveZ = 0;
-      if (keys.has('KeyW')) {
-        camera.position.addScaledVector(forward, speed);
-        moveZ += 1;
-      }
-      if (keys.has('KeyS')) {
-        camera.position.addScaledVector(forward, -speed);
-        moveZ -= 1;
-      }
-      if (keys.has('KeyA')) {
-        camera.position.addScaledVector(right, speed);
-        moveX -= 1;
-      }
-      if (keys.has('KeyD')) {
-        camera.position.addScaledVector(right, -speed);
-        moveX += 1;
-      }
+      // Camera-relative wishdir → sim axes (x forward, y lateral)
+      let wishFwd = 0;
+      let wishStrafe = 0;
+      if (keys.has('KeyW')) wishFwd += 1;
+      if (keys.has('KeyS')) wishFwd -= 1;
+      if (keys.has('KeyA')) wishStrafe -= 1;
+      if (keys.has('KeyD')) wishStrafe += 1;
       if (moveStick.y || moveStick.x) {
-        camera.position.addScaledVector(forward, -moveStick.y * speed * 1.35);
-        camera.position.addScaledVector(right, -moveStick.x * speed * 1.35);
-        moveZ += -moveStick.y;
-        moveX += moveStick.x;
+        wishFwd += -moveStick.y;
+        wishStrafe += moveStick.x;
+      }
+      const c = Math.cos(yaw);
+      const s = Math.sin(yaw);
+      // Three forward is +Z; sim forward is +X after remap
+      const moveX = wishFwd * c + wishStrafe * s;
+      const moveY = wishFwd * s - wishStrafe * c;
+
+      if (hpLocal > 0 && !finishedLocal) {
+        stepPlatformer(
+          body,
+          {
+            moveX,
+            moveY,
+            jumpPressed: keys.has('Space') || !!joy?.isJumpHeld(),
+            sprint,
+            crouch,
+          },
+          dt,
+          pads,
+          scratch,
+          bounds
+        );
       }
 
-      // Simple jump for player anim testing
-      if ((keys.has('Space') || joy?.isJumpHeld()) && grounded) {
-        vy = 6;
-        grounded = false;
+      // Checkpoint / finish (sim space)
+      for (const pad of pads) {
+        if (pad.kind !== 'checkpoint') continue;
+        if (
+          Math.abs(body.x - pad.x) <= pad.width / 2 + 0.4 &&
+          Math.abs(body.y - pad.y) <= pad.depth / 2 + 0.4 &&
+          body.z >= pad.z - 0.4 &&
+          body.z <= pad.z + 0.6
+        ) {
+          checkpoint = { x: pad.x, y: pad.y, z: pad.z };
+        }
       }
-      vy -= 18 * dt;
-      camera.position.y += vy * dt;
-      if (camera.position.y <= 1.6) {
-        camera.position.y = 1.6;
-        vy = 0;
-        grounded = true;
+      for (const f of finishes) {
+        const halfW = f.width / 2;
+        const halfD = f.depth / 2;
+        if (
+          Math.abs(body.x - f.x) <= halfW + 0.4 &&
+          Math.abs(body.y - f.y) <= halfD + 0.4 &&
+          body.z >= f.z - 0.35 &&
+          body.z <= f.z + Math.max(f.height, 1.2)
+        ) {
+          if (!finishedLocal) {
+            finishedLocal = true;
+            setFinished(true);
+          }
+        }
+      }
+      if (body.z < -4) {
+        if (checkpoint) {
+          body.x = checkpoint.x;
+          body.y = checkpoint.y;
+          body.z = checkpoint.z + 0.05;
+          body.vz = 0;
+          body.isGrounded = true;
+          hpLocal = Math.max(hpLocal, 60);
+          setHp(hpLocal);
+        } else {
+          hpLocal = 0;
+          setHp(0);
+        }
       }
 
+      const [tx, ty, tz] = simToThree(body.x, body.y, body.z);
+      camera.position.set(tx, ty + 1.55, tz);
       camera.lookAt(
         camera.position.x + Math.sin(yaw) * Math.cos(pitch),
         camera.position.y + Math.sin(pitch),
         camera.position.z + Math.cos(yaw) * Math.cos(pitch)
       );
 
-      playerPos.copy(camera.position);
-      playerPos.y = 0;
+      playerPos.set(tx, ty, tz);
 
       if (playerRoot && playerId) {
-        playerRoot.position.set(camera.position.x, 0, camera.position.z);
+        playerRoot.position.set(tx, ty, tz);
         playerRoot.rotation.y = yaw;
         const pe = doc.entities.find((e) => e.id === playerId);
+        const justLanded = !wasGrounded && body.isGrounded;
+        wasGrounded = body.isGrounded;
+        if (justLanded) landUntil = performance.now() + 280;
         director.updatePlayer(playerId, pe?.playerAnims, {
-          moving: moveX !== 0 || moveZ !== 0,
+          moving: Math.abs(moveX) + Math.abs(moveY) > 0.05,
           sprint,
-          grounded,
-          crouch: keys.has('ControlLeft') || keys.has('KeyC'),
-          moveX,
-          moveZ,
+          grounded: body.isGrounded,
+          crouch,
+          moveX: wishStrafe,
+          moveZ: wishFwd,
+          alive: hpLocal > 0,
+          justLanded: performance.now() < landUntil,
         });
       }
 
@@ -317,11 +436,13 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
   return (
     <div className="fixed inset-0 z-[9999] bg-black flex flex-col">
       <div className="h-11 flex items-center gap-3 px-4 bg-black/80 border-b border-white/10 relative z-[60]">
-        <span className="text-sm font-bold text-emerald-300 tracking-wide uppercase">Play Test</span>
-        <span className="text-xs text-white/50">
+        <span className="text-sm font-bold text-emerald-300 tracking-wide uppercase shrink-0">
+          Play Test
+        </span>
+        <span className="text-[10px] sm:text-xs text-white/50 truncate min-w-0">
           {isTouch
-            ? 'Left look · Right move · Jump/Sprint · Esc exit'
-            : 'WASD · Mouse · Space jump · E interact · Esc exit'}
+            ? 'Sticks · Jump/Sprint · match physics'
+            : 'WASD · Space jump · E · match physics'}
         </span>
         <div className="ml-4 flex items-center gap-2 text-xs">
           <span className="text-white/50">HP</span>
@@ -379,8 +500,17 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
         )}
       </div>
       {hp <= 0 && (
-        <div className="absolute inset-0 top-11 flex items-center justify-center bg-black/50 pointer-events-none">
-          <p className="text-2xl font-black text-red-400 tracking-wide">YOU DIED — exit & retry</p>
+        <div className="absolute inset-0 top-11 flex items-center justify-center bg-black/50 pointer-events-none px-4">
+          <p className="text-xl sm:text-2xl font-black text-red-400 tracking-wide text-center">
+            YOU DIED — exit & retry
+          </p>
+        </div>
+      )}
+      {finished && hp > 0 && (
+        <div className="absolute inset-0 top-11 flex items-center justify-center bg-black/45 pointer-events-none px-4">
+          <p className="text-xl sm:text-2xl font-black text-amber-300 tracking-wide text-center">
+            FINISH — course cleared
+          </p>
         </div>
       )}
     </div>

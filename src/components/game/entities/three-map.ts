@@ -10,6 +10,7 @@ const HAZARD_MODELS: Record<NetObstacleState['kind'], string> = {
   saw: 'shape-cylinder-detailed',
   laser: 'column',
   crusher: 'crate-color',
+  damage: 'floor-square',
 };
 
 const PAD_MODELS = [
