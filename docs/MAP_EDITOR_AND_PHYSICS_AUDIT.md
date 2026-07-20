@@ -285,21 +285,24 @@ Authoritative loop: clients send **intent only** (`input`); server steps at ~30 
 | Unit tests | `prefab-storage.test.ts` | 5 cases |
 | Mobile FABs | Start / Finish / Props / Avatar | Collapsed + visible chrome |
 | **Player Model studio** | Toolbar + side panel | Live preview, clip bind (walk/jump/die…), GLB upload; drives Play Test + match |
+| **Timed / button traps** | Hazard panel Mode | always / timed pulse / button-armed; spike/saw/laser kinds |
+| **Authoritative buttons** | Button → Activates | Press E near button arms linked traps in match |
+| **Ice / conveyor** | Gameplay panel | Slippery pads + push along facing |
+| **Teleporters** | Gameplay panel | Link A→B pads; touch to warp |
+| **Stair baker** | Stairs selection | Bake stairs → solid step pads |
 
 ### Still missing (next)
 
 1. **Server MAIN + map document sync** — other clients may miss overlay meshes/lights / custom avatars.  
-2. **Timed / moving traps** + authoritative buttons.  
+2. **Moving platforms** (kinematic path).  
 3. **Client prediction**.  
-4. **Slopes / stair baker / conveyors**.  
-5. Shared constants package (avoid drift between server + `platformer-sim.ts`).
+4. Shared constants package (avoid drift between server + `platformer-sim.ts`).
 
 ### Suggested inclusion order
 
 1. Phase 5 cloud MAIN sync  
-2. Phase 4 timed traps / buttons  
+2. Moving platforms  
 3. Phase 6 prediction  
-4. Phase 2 stair baker + Phase 3 feel polish  
 
 ---
 
@@ -308,11 +311,13 @@ Authoritative loop: clients send **intent only** (`input`); server steps at ~30 
 1. Admin → Map Editor  
 2. Open **Player Model** — pick mannequin/upload GLB, bind walk/jump/die, preview  
 3. Place **Start** + floors/solids + hazards/jump pads + **Finish**  
-4. On mobile: **Hide UI**, place with FABs, tap **Avatar** / **Props**  
-5. **Play Test** to verify gaps/finish/anims (match-like physics)  
-6. Save → **Set as MAIN** (toast)  
-7. Join Deathrun from **that same browser** while still in lobby/countdown so `loadCustomMap` fires  
-8. Mark walls **Solid** so corridors contain players  
+4. Add **timed traps** / **button-armed** kill floors; wire Button → Activates trap  
+5. Optional: ice, conveyor, teleporters; bake stairs for climbable collision  
+6. On mobile: **Hide UI**, place with FABs, tap **Avatar** / **Props**  
+7. **Play Test** to verify gaps/finish/anims (match-like physics)  
+8. Save → **Set as MAIN** (toast)  
+9. Join Deathrun from **that same browser** while still in lobby/countdown so `loadCustomMap` fires  
+10. Mark walls **Solid** so corridors contain players  
 
 ---
 
@@ -326,5 +331,6 @@ Authoritative loop: clients send **intent only** (`input`); server steps at ~30 
 | 2026-07-20 | Start + Finish entities, trapper spawn, dynamic world bounds; publish validation requires Start/Finish. |
 | 2026-07-20 | Wall boxes, jump cut, checkpoints, play-test parity, role-gate, HUD anchors, unit tests, mobile FABs; audit checklist refreshed. |
 | 2026-07-20 | Player Model studio: side panel, die/land slots, match/Play Test honor map avatar bindings. |
+| 2026-07-20 | Timed traps, button-armed hazards, ice/conveyor, teleporters, stair baker — dream-map deathrun loop. |
 
 *Re-run this audit after cloud MAIN sync lands.*
