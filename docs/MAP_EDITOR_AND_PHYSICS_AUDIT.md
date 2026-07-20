@@ -40,6 +40,8 @@
 | Kind / feature | Editor | Visual in match | Authoritative collide / kill |
 |---|---|---|---|
 | Floor / platform props (`*floor*`) | Yes | Often skipped in overlay (server pad instead) | **Yes** (top-plane pads) |
+| **Start** | Yes | Marker (skipped in match overlay) | Spawn point for runners |
+| **Finish** | Yes | Amber pad overlay | **Yes** — touch/step marks finished |
 | **Any prop with Solid ✓** | Yes | Mesh overlay | **Yes** (top-plane pad from position/scale) |
 | Checkpoint | Yes | Pad kind | Platform presence; respawn rules still limited |
 | **Jump pad** | Yes (Gameplay panel) | Cyan pad / tint when no mesh | **Yes** — launches with `boost` |
@@ -165,14 +167,15 @@ Authoritative loop: clients send **intent only** (`input`); server steps at ~30 
 
 **Goal:** Stop silent footguns so MAIN maps actually play.
 
-- [ ] Raise / dynamic world bounds from map AABB when loading custom platforms.  
+- [x] Raise / dynamic world bounds from map AABB when loading custom platforms.  
 - [ ] Persist **Active MAIN map id + document** on **server/SiteSettings** (not only localStorage).  
 - [x] ~~Warn in editor UI: “Only floor*/checkpoint collide.”~~ → **Replaced** by explicit Solid / Jump pad / Death zone controls + green/cyan pad gizmos.  
 - [ ] After Set MAIN, toast: “Rejoin match to reload platforms.”  
 - [ ] Unit tests: `mapDocToSimPlatforms` / `mapDocToSimHazards` axes + spawn remap.  
-- [ ] Fix finish detection for custom map length (or place `finish` entity kind).  
+- [x] Finish detection via editor **Finish** entity (touch/step); falls back to `FINISH_X` when none.  
 - [ ] Role-gate `loadCustomMap` (admin / lobby host only).  
-- [ ] Apply trapper spawn from map doc in match.
+- [x] Apply trapper spawn from map doc in match.  
+- [x] **Start** entity as player spawn (legacy `spawn_runner` still accepted).
 
 **Exit:** A documented solid/jump-pad map plays for any joining client after staff publishes MAIN once.
 
@@ -352,8 +355,8 @@ Extra high-severity findings. Fold into Phase 0–2 tickets.
 
 1. Admin → Map Editor → New  
 2. Place floors / props; enable **Solid** on anything you want walkable  
-3. Optionally enable **Jump pad** / **Death zone** on selection; place **Light bulbs**  
-4. Place **Runner Spawn**  
+3. Place **Start** (spawn) and **Finish** (touch to win)  
+4. Optionally enable **Jump pad** / **Death zone**; place **Light bulbs** / Trapper Spawn  
 5. Save → **Set as MAIN**  
 6. Join Deathrun from **that same browser** while still in lobby/countdown so `loadCustomMap` fires  
 7. Treat unmarked walls/stairs as **decor only** until wall boxes land  
@@ -372,6 +375,10 @@ Do **not** use Play Test alone to judge gap difficulty.
 | **Jump pad** + boost slider | Properties → Gameplay | Platform `kind: 'jumpPad'`, server launches on land/stand |
 | **Death zone** authoritative | Existing panel + `mapDocToSimHazards` | Always-active obstacles with per-entity damage / interval / instant kill |
 | **Light bulb** entity | Toolbar + kind + light panel | PointLight in editor + match overlay |
+| **Start** entity | Toolbar + kind | Runner spawn (`spawn_runner` legacy OK) |
+| **Finish** entity | Toolbar + kind | Touch/step → `hasFinished`; required to publish |
+| Trapper spawn applied | `DeathrunRoom` | Role-aware spawn from map |
+| Dynamic world bounds | `mapDocToWorldBounds` → movement clamp | Big maps no longer stuck in 48×10 |
 | Solid / jump gizmos | Editor viewport | Green = solid, cyan = jump, red = hazard |
 | Mobile Hide UI (prior PR) | Map editor chrome | Collapse all menus for placing |
 
@@ -379,20 +386,18 @@ Do **not** use Play Test alone to judge gap difficulty.
 
 1. **Vertical wall / box colliders** — Solid does not block walking through walls.  
 2. **Server MAIN + map document sync** — other players may not see overlay meshes/lights.  
-3. **Dynamic world bounds** from map AABB.  
-4. **Play Test = `applyMovement`** + same pads/hazards.  
-5. **Finish entity / custom FINISH_X**.  
-6. **Trapper spawn** applied in room.  
-7. **Role-gated `loadCustomMap`**.  
-8. **Timed / moving traps** from editor (buttons authoritative).  
-9. **Checkpoint respawn**.  
-10. **Variable jump cut** + prediction.  
-11. **Conveyors / ice / teleporters** (nice-to-have).  
-12. **Unit tests** for export remaps.
+3. **Play Test = `applyMovement`** + same pads/hazards/finishes.  
+4. **Role-gated `loadCustomMap`**.  
+5. **Timed / moving traps** from editor (buttons authoritative).  
+6. **Checkpoint respawn**.  
+7. **Variable jump cut** + prediction.  
+8. **Conveyors / ice / teleporters** (nice-to-have).  
+9. **Unit tests** for export remaps.  
+10. Progress HUD should use Start→Finish distance instead of hardcoded `FINISH_X`.
 
 ### Suggested inclusion order
 
-1. Phase 0 security + MAIN cloud + bounds + finish + trapper spawn  
+1. Phase 0 security + MAIN cloud sync  
 2. Phase 1 play-test parity  
 3. Phase 2 wall boxes  
 4. Phase 4 timed traps / checkpoints  
@@ -407,5 +412,6 @@ Do **not** use Play Test alone to judge gap difficulty.
 | 2026-07-20 | Initial audit from codebase review; no runtime play session logged in this doc. |
 | 2026-07-20 | Added Part H deep-dive from follow-up editor + physics audits (security, finish/spawn gaps, jump/net edge cases). |
 | 2026-07-20 | Part I: Solid / Jump pad / authoritative hazards / Light bulb shipped; checklist boxes updated; remaining gaps restated. |
+| 2026-07-20 | Start + Finish entities, trapper spawn, dynamic world bounds; publish validation requires Start/Finish. |
 
 *Re-run this audit after Phase 0–1 land; update verdicts in the table at the top.*

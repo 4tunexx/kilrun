@@ -115,7 +115,7 @@ export class GameConnection {
       z: number;
       width: number;
       depth: number;
-      kind?: 'solid' | 'checkpoint' | 'jumpPad';
+      kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish';
       boost?: number;
     }[];
     obstacles?: {
@@ -132,7 +132,23 @@ export class GameConnection {
       alwaysActive?: boolean;
       instantKill?: boolean;
     }[];
+    finishes?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      width: number;
+      depth: number;
+      height: number;
+    }[];
     spawn?: { x: number; y: number; z: number };
+    trapperSpawn?: { x: number; y: number; z: number };
+    worldBounds?: {
+      minX: number;
+      maxX: number;
+      minY: number;
+      maxY: number;
+    };
   }): void {
     this.room?.send('loadCustomMap', payload);
   }

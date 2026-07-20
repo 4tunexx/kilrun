@@ -46,6 +46,7 @@ export class CustomMapOverlay {
     const skip = new Set([
       'spawn_runner',
       'spawn_trapper',
+      'start',
       'player',
     ]);
 
@@ -54,11 +55,12 @@ export class CustomMapOverlay {
       if (ent.visible === false) continue;
       if (skip.has(ent.kind)) continue;
       // Floors are represented by server platforms — skip their mesh to avoid doubles
-      // unless they carry gameplay overlays (hazard / jump pad tint).
+      // unless they carry gameplay overlays (hazard / jump / finish).
       if (
         ent.model?.includes('floor') &&
         ent.kind !== 'hazard' &&
         ent.kind !== 'trap' &&
+        ent.kind !== 'finish' &&
         !ent.hazard?.enabled &&
         !ent.jumpPad?.enabled
       ) {
@@ -71,6 +73,15 @@ export class CustomMapOverlay {
         let clips: THREE.AnimationClip[] = [];
         if (ent.kind === 'light') {
           obj = this.makeLight(ent);
+        } else if (ent.kind === 'finish') {
+          obj = new THREE.Mesh(
+            new THREE.BoxGeometry(1.8, 0.14, 1.8),
+            new THREE.MeshStandardMaterial({
+              color: 0xfbbf24,
+              emissive: 0xb45309,
+              emissiveIntensity: 0.65,
+            })
+          );
         } else if (src) {
           const loaded = await loadAnimatedPrefab(src);
           obj = loaded.root;

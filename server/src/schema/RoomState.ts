@@ -34,7 +34,7 @@ export class PlayerState extends Schema {
 /** Solid walkable surface for the shared platformer physics. */
 export class PlatformState extends Schema {
   @type('string') id = '';
-  @type('string') kind: 'solid' | 'checkpoint' | 'jumpPad' = 'solid';
+  @type('string') kind: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' = 'solid';
   @type('number') x = 0;
   @type('number') y = 0;
   /** Top surface height. */

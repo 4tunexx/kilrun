@@ -41,6 +41,7 @@ import {
   PanelLeftClose,
   Lightbulb,
   Rocket,
+  FlagTriangleRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -1332,8 +1333,11 @@ export function MapEditor({
             <ToolBtn onClick={() => apiRef.current?.focusSelected()} title="Focus selection (F)">
               <Crosshair className="w-4 h-4" />
             </ToolBtn>
-            <ToolBtn onClick={() => apiRef.current?.placeSpawn('spawn_runner')} title="Runner spawn">
+            <ToolBtn onClick={() => apiRef.current?.placeSpawn('start')} title="Start (player spawn)">
               <Flag className="w-4 h-4 text-emerald-400" />
+            </ToolBtn>
+            <ToolBtn onClick={() => apiRef.current?.placeSpawn('finish')} title="Finish (touch to win)">
+              <FlagTriangleRight className="w-4 h-4 text-amber-300" />
             </ToolBtn>
             <ToolBtn onClick={() => apiRef.current?.placeSpawn('spawn_trapper')} title="Trapper spawn">
               <Flag className="w-4 h-4 text-red-400" />
@@ -1426,12 +1430,14 @@ export function MapEditor({
                   }
                 >
                   <option value="prop">Prop</option>
+                  <option value="start">Start (spawn)</option>
+                  <option value="finish">Finish</option>
                   <option value="trap">Trap (activatable)</option>
                   <option value="hazard">Death zone</option>
                   <option value="light">Light bulb</option>
                   <option value="player">Player</option>
                   <option value="button">Button</option>
-                  <option value="spawn_runner">Spawn Runner</option>
+                  <option value="spawn_runner">Spawn Runner (legacy)</option>
                   <option value="spawn_trapper">Spawn Trapper</option>
                   <option value="checkpoint">Checkpoint</option>
                 </select>
@@ -1496,11 +1502,17 @@ export function MapEditor({
               {/* Gameplay: solid / jump pad / damage */}
               {selected.kind !== 'light' &&
                 selected.kind !== 'spawn_runner' &&
-                selected.kind !== 'spawn_trapper' && (
+                selected.kind !== 'spawn_trapper' &&
+                selected.kind !== 'start' && (
                 <div className="space-y-2 border-t border-white/10 pt-2">
                   <p className="text-[10px] tracking-widest text-white/50 uppercase">
                     Gameplay
                   </p>
+                  {selected.kind === 'finish' && (
+                    <p className="text-[10px] text-amber-200/80">
+                      Runners finish when they step on or touch this volume.
+                    </p>
+                  )}
                   <label className="flex items-center gap-2 text-xs text-white/70">
                     <input
                       type="checkbox"
@@ -1624,7 +1636,11 @@ export function MapEditor({
                 </div>
               )}
 
-              {selected.kind !== 'light' && (
+              {selected.kind !== 'light' &&
+                selected.kind !== 'start' &&
+                selected.kind !== 'finish' &&
+                selected.kind !== 'spawn_runner' &&
+                selected.kind !== 'spawn_trapper' && (
               <div className="space-y-2 border-t border-white/10 pt-2">
                 <p className="text-[10px] tracking-widest text-white/50 uppercase">Death zone</p>
                 <label className="flex items-center gap-2 text-xs text-white/70">

@@ -53,16 +53,30 @@ export async function renderMapThumbnail(
     if (ent.visible === false) continue;
     const isFloor = !!ent.model?.includes('floor') || ent.kind === 'checkpoint';
     const isSpawn =
-      ent.kind === 'spawn_runner' || ent.kind === 'spawn_trapper' || ent.kind === 'player';
+      ent.kind === 'spawn_runner' ||
+      ent.kind === 'spawn_trapper' ||
+      ent.kind === 'start' ||
+      ent.kind === 'finish' ||
+      ent.kind === 'player';
     const isHazard = ent.kind === 'hazard' || ent.kind === 'trap' || !!ent.hazard?.enabled;
 
     let mesh: THREE.Mesh;
     if (isSpawn) {
       mesh = new THREE.Mesh(
-        sphere,
+        ent.kind === 'finish' ? box : sphere,
         new THREE.MeshStandardMaterial({
-          color: ent.kind === 'spawn_trapper' ? '#ef4444' : '#22c55e',
-          emissive: ent.kind === 'spawn_trapper' ? '#7f1d1d' : '#14532d',
+          color:
+            ent.kind === 'finish'
+              ? '#fbbf24'
+              : ent.kind === 'spawn_trapper'
+                ? '#ef4444'
+                : '#22c55e',
+          emissive:
+            ent.kind === 'finish'
+              ? '#b45309'
+              : ent.kind === 'spawn_trapper'
+                ? '#7f1d1d'
+                : '#14532d',
           emissiveIntensity: 0.35,
         })
       );

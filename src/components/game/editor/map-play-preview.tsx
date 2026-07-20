@@ -33,7 +33,9 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     scene.fog = new THREE.FogExp2(env.fogColor || '#0c1830', env.fogDensity ?? 0.022);
 
     const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 300);
-    const runner = doc.entities.find((e) => e.kind === 'spawn_runner' || e.kind === 'player');
+    const runner = doc.entities.find(
+      (e) => e.kind === 'start' || e.kind === 'spawn_runner' || e.kind === 'player'
+    );
     if (runner) {
       camera.position.set(runner.position[0], runner.position[1] + 1.6, runner.position[2]);
     } else {
@@ -109,10 +111,22 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
             } else if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
               director.playDefault(ent);
             }
-          } else if (ent.kind === 'spawn_runner' || ent.kind === 'spawn_trapper') {
-            const color = ent.kind === 'spawn_runner' ? 0x22c55e : 0xef4444;
+          } else if (
+            ent.kind === 'spawn_runner' ||
+            ent.kind === 'spawn_trapper' ||
+            ent.kind === 'start' ||
+            ent.kind === 'finish'
+          ) {
+            const color =
+              ent.kind === 'finish'
+                ? 0xfbbf24
+                : ent.kind === 'spawn_trapper'
+                  ? 0xef4444
+                  : 0x22c55e;
             const marker = new THREE.Mesh(
-              new THREE.ConeGeometry(0.4, 1.2, 10),
+              ent.kind === 'finish'
+                ? new THREE.BoxGeometry(1.6, 0.12, 1.6)
+                : new THREE.ConeGeometry(0.4, 1.2, 10),
               new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.3 })
             );
             marker.position.set(ent.position[0], ent.position[1] + 0.6, ent.position[2]);

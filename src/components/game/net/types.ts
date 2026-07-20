@@ -30,7 +30,7 @@ export interface NetPlayerState {
 
 export interface NetPlatformState {
   id: string;
-  kind: 'solid' | 'checkpoint' | 'jumpPad';
+  kind: 'solid' | 'checkpoint' | 'jumpPad' | 'finish';
   x: number;
   y: number;
   z: number;

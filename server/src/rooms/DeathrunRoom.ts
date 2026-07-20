@@ -18,6 +18,8 @@ import {
   OBSTACLE_HIT_COOLDOWN_MS,
   HITSCAN_DAMAGE,
   HITSCAN_RANGE,
+  PLAYER_HEIGHT,
+  PLAYER_RADIUS,
   SHOOT_COOLDOWN_MS,
   SPAWN_X,
   SPAWN_Z,
@@ -27,9 +29,11 @@ import {
 import {
   applyMovement,
   createSimScratch,
+  DEFAULT_WORLD_BOUNDS,
   defaultInput,
   type PlayerInput,
   type PlayerSimScratch,
+  type WorldBounds,
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 
@@ -37,6 +41,22 @@ interface JoinOptions {
   userId?: string;
   username?: string;
   avatarUrl?: string;
+}
+
+interface FinishZone {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  depth: number;
+  height: number;
+}
+
+interface SpawnPoint {
+  x: number;
+  y: number;
+  z: number;
 }
 
 const RESULTS_DISPLAY_MS = 8000;
@@ -54,8 +74,14 @@ export class DeathrunRoom extends Room<RoomState> {
   private lastObstacleHitAt = new Map<string, number>();
   private lastShotAt = new Map<string, number>();
   private resultsElapsedMs = 0;
-  /** Editor MAIN map runner spawn (sim space). Kept across round resets. */
-  private customSpawn: { x: number; y: number; z: number } | null = null;
+  /** Editor MAIN map runner / start spawn (sim space). */
+  private customRunnerSpawn: SpawnPoint | null = null;
+  /** Editor trapper spawn (sim space). */
+  private customTrapperSpawn: SpawnPoint | null = null;
+  /** Editor finish trigger volumes. When set, replaces FINISH_X line. */
+  private customFinishes: FinishZone[] = [];
+  /** Clamp box — expanded from custom map AABB when loaded. */
+  private worldBounds: WorldBounds = { ...DEFAULT_WORLD_BOUNDS };
 
   onCreate() {
     this.setState(new RoomState());
@@ -80,7 +106,10 @@ export class DeathrunRoom extends Room<RoomState> {
         data: {
           platforms?: PlatformBlueprint[];
           obstacles?: ObstacleBlueprint[];
-          spawn?: { x: number; y: number; z: number };
+          finishes?: FinishZone[];
+          spawn?: SpawnPoint;
+          trapperSpawn?: SpawnPoint;
+          worldBounds?: WorldBounds;
         }
       ) => {
         if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
@@ -100,16 +129,22 @@ export class DeathrunRoom extends Room<RoomState> {
         }
         this.obstacleTimers = this.state.obstacles.map(() => 0);
 
-        if (data.spawn) {
-          this.customSpawn = { x: data.spawn.x, y: data.spawn.y, z: data.spawn.z };
-          this.state.players.forEach((player) => {
-            this.applySpawnPosition(player, 0);
-            player.vz = 0;
-          });
+        this.customFinishes = Array.isArray(data?.finishes) ? data.finishes : [];
+        if (data.spawn) this.customRunnerSpawn = { ...data.spawn };
+        if (data.trapperSpawn) this.customTrapperSpawn = { ...data.trapperSpawn };
+        if (data.worldBounds) {
+          this.worldBounds = { ...data.worldBounds };
+        } else {
+          this.worldBounds = { ...DEFAULT_WORLD_BOUNDS };
         }
 
+        this.state.players.forEach((player, index) => {
+          this.applySpawnPosition(player, index);
+          player.vz = 0;
+        });
+
         console.log(
-          `[DeathrunRoom] MAIN map loaded by ${client.sessionId}: ${platforms.length} platforms, ${hazards.length} hazards`
+          `[DeathrunRoom] MAIN map loaded by ${client.sessionId}: ${platforms.length} platforms, ${hazards.length} hazards, ${this.customFinishes.length} finishes`
         );
       }
     );
@@ -145,16 +180,42 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private applySpawnPosition(player: PlayerState, laneIndex: number) {
-    if (this.customSpawn) {
-      const laneSpread = ((laneIndex % 5) - 2) * 0.55;
-      player.x = this.customSpawn.x;
-      player.y = this.customSpawn.y + laneSpread;
-      player.z = this.customSpawn.z;
+    const laneSpread = ((laneIndex % 5) - 2) * 0.55;
+    const custom =
+      player.role === 'trapper' && this.customTrapperSpawn
+        ? this.customTrapperSpawn
+        : this.customRunnerSpawn;
+
+    if (custom) {
+      player.x = custom.x;
+      player.y = custom.y + laneSpread;
+      player.z = custom.z;
       return;
     }
     player.x = SPAWN_X;
     player.y = (((laneIndex % 5) + 1) / 6) * WORLD_HEIGHT;
     player.z = SPAWN_Z;
+  }
+
+  private isTouchingFinish(player: PlayerState): boolean {
+    if (this.customFinishes.length === 0) {
+      return player.x >= FINISH_X && player.isGrounded;
+    }
+    for (const zone of this.customFinishes) {
+      const halfW = zone.width / 2;
+      const halfD = zone.depth / 2;
+      const closestX = Math.min(Math.max(player.x, zone.x - halfW), zone.x + halfW);
+      const closestY = Math.min(Math.max(player.y, zone.y - halfD), zone.y + halfD);
+      const dx = player.x - closestX;
+      const dy = player.y - closestY;
+      if (dx * dx + dy * dy >= PLAYER_RADIUS * PLAYER_RADIUS) continue;
+      const playerBottom = player.z;
+      const playerTop = player.z + PLAYER_HEIGHT;
+      const zoneBottom = zone.z - 0.35;
+      const zoneTop = zone.z + Math.max(zone.height, 1.2);
+      if (playerTop >= zoneBottom && playerBottom <= zoneTop) return true;
+    }
+    return false;
   }
 
   private update(dtMs: number) {
@@ -224,7 +285,9 @@ export class DeathrunRoom extends Room<RoomState> {
     }
 
     this.obstacleTimers = this.state.obstacles.map(() => 0);
-    this.state.obstacles.forEach((o) => (o.active = false));
+    this.state.obstacles.forEach((o) => {
+      o.active = !!o.alwaysActive;
+    });
 
     this.state.phase = 'playing';
     this.state.matchTimeRemainingMs = MATCH_DURATION_MS;
@@ -283,7 +346,14 @@ export class DeathrunRoom extends Room<RoomState> {
         this.simScratch.set(sessionId, scratch);
       }
 
-      applyMovement(player, input, dtSeconds, this.state.platforms, scratch);
+      applyMovement(
+        player,
+        input,
+        dtSeconds,
+        this.state.platforms,
+        scratch,
+        this.worldBounds
+      );
 
       if (player.role === 'runner' && player.isAlive && !player.hasFinished) {
         for (const obstacle of this.state.obstacles) {
@@ -301,7 +371,7 @@ export class DeathrunRoom extends Room<RoomState> {
           this.damagePlayer(player, amount);
         }
 
-        if (player.x >= FINISH_X && player.isGrounded) {
+        if (this.isTouchingFinish(player)) {
           player.hasFinished = true;
         }
       }

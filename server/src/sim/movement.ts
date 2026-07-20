@@ -77,6 +77,20 @@ export function createSimScratch(): PlayerSimScratch {
   };
 }
 
+export interface WorldBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+export const DEFAULT_WORLD_BOUNDS: WorldBounds = {
+  minX: 0,
+  maxX: WORLD_WIDTH,
+  minY: 0,
+  maxY: WORLD_HEIGHT,
+};
+
 /**
  * Authoritative Deathrun platformer step — Quake-inspired accel/friction on
  * XY, gravity + coyote/buffer jump on Z, energy sprint. Shared by all modes.
@@ -86,7 +100,8 @@ export function applyMovement(
   input: PlayerInput,
   dtSeconds: number,
   platforms: Iterable<PlatformState>,
-  scratch: PlayerSimScratch
+  scratch: PlayerSimScratch,
+  bounds: WorldBounds = DEFAULT_WORLD_BOUNDS
 ): void {
   if (!player.isAlive || player.hasFinished) return;
 
@@ -204,8 +219,16 @@ export function applyMovement(
     }
   }
 
-  player.x = clamp(player.x + scratch.velX * dtSeconds, PLAYER_RADIUS, WORLD_WIDTH - PLAYER_RADIUS);
-  player.y = clamp(player.y + scratch.velY * dtSeconds, PLAYER_RADIUS, WORLD_HEIGHT - PLAYER_RADIUS);
+  player.x = clamp(
+    player.x + scratch.velX * dtSeconds,
+    bounds.minX + PLAYER_RADIUS,
+    bounds.maxX - PLAYER_RADIUS
+  );
+  player.y = clamp(
+    player.y + scratch.velY * dtSeconds,
+    bounds.minY + PLAYER_RADIUS,
+    bounds.maxY - PLAYER_RADIUS
+  );
 
   // Vertical
   if (!player.isGrounded) {

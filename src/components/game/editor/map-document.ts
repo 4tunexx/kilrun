@@ -2,6 +2,8 @@ export type EditorEntityKind =
   | 'prop'
   | 'spawn_runner'
   | 'spawn_trapper'
+  | 'start'
+  | 'finish'
   | 'checkpoint'
   | 'hazard'
   | 'trap'
@@ -234,9 +236,16 @@ export function ensureLight(ent: EditorEntity): EntityLight {
 /** Whether this entity should export as a standable / jump-pad platform. */
 export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   if (ent.visible === false) return false;
-  if (ent.kind === 'light' || ent.kind === 'spawn_runner' || ent.kind === 'spawn_trapper') {
+  if (
+    ent.kind === 'light' ||
+    ent.kind === 'spawn_runner' ||
+    ent.kind === 'spawn_trapper' ||
+    ent.kind === 'start'
+  ) {
     return false;
   }
+  // Finish pads are standable trigger volumes.
+  if (ent.kind === 'finish') return true;
   // Jump pads always export (need a pad to launch from).
   if (ent.jumpPad?.enabled) return true;
   // Explicit authoring wins over name heuristics.
@@ -311,8 +320,8 @@ export function createEmptyMap(name = 'Untitled Map'): MapDocument {
       },
       {
         id: generateId(),
-        name: 'Runner Spawn',
-        kind: 'spawn_runner',
+        name: 'Start',
+        kind: 'start',
         model: 'figurine',
         layerId: spawnsId,
         position: [0, 0.5, 2],
@@ -323,11 +332,24 @@ export function createEmptyMap(name = 'Untitled Map'): MapDocument {
       },
       {
         id: generateId(),
+        name: 'Finish',
+        kind: 'finish',
+        model: 'floor-square',
+        layerId: spawnsId,
+        position: [0, 0, 20],
+        rotation: [0, 0, 0],
+        scale: [2.2, 1, 2.2],
+        color: '#fbbf24',
+        solid: true,
+        animation: defaultAnimation(),
+      },
+      {
+        id: generateId(),
         name: 'Trapper Spawn',
         kind: 'spawn_trapper',
         model: 'figurine-large',
         layerId: spawnsId,
-        position: [0, 0.5, 20],
+        position: [4, 0.5, 10],
         rotation: [0, 180, 0],
         scale: [1, 1, 1],
         color: '#ef4444',

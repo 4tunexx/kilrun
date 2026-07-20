@@ -90,7 +90,7 @@ export interface EditorViewportApi {
   setMeasureMode: (on: boolean) => void;
   isMeasureMode: () => boolean;
   applyEnvironment: (env: MapEnvironment) => void;
-  placeSpawn: (kind: 'spawn_runner' | 'spawn_trapper') => void;
+  placeSpawn: (kind: 'spawn_runner' | 'spawn_trapper' | 'start' | 'finish') => void;
   placeEntity: (kind: EditorEntity['kind'], model?: string) => void;
   stampEntities: (entities: EditorEntity[]) => void;
   duplicateSelected: (axis?: 'x' | 'y' | 'z') => void;
@@ -335,21 +335,51 @@ export function createEditorViewport(
     return loadAnimatedPrefab(src);
   }
 
-  function makeSpawnMarker(kind: 'spawn_runner' | 'spawn_trapper', color: string): THREE.Object3D {
+  function makeSpawnMarker(
+    kind: 'spawn_runner' | 'spawn_trapper' | 'start' | 'finish',
+    color: string
+  ): THREE.Object3D {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.ConeGeometry(0.45, 1.4, 12),
-      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.25 })
-    );
-    body.position.y = 0.7;
-    g.add(body);
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.55, 0.05, 8, 24),
-      new THREE.MeshStandardMaterial({ color })
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.05;
-    g.add(ring);
+    if (kind === 'finish') {
+      const pad = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 0.12, 1.6),
+        new THREE.MeshStandardMaterial({
+          color,
+          emissive: color,
+          emissiveIntensity: 0.55,
+          transparent: true,
+          opacity: 0.9,
+        })
+      );
+      pad.position.y = 0.06;
+      g.add(pad);
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 1.4, 8),
+        new THREE.MeshStandardMaterial({ color: 0xf8fafc })
+      );
+      pole.position.set(0.55, 0.75, 0.55);
+      g.add(pole);
+      const flag = new THREE.Mesh(
+        new THREE.BoxGeometry(0.55, 0.35, 0.04),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4 })
+      );
+      flag.position.set(0.85, 1.25, 0.55);
+      g.add(flag);
+    } else {
+      const body = new THREE.Mesh(
+        new THREE.ConeGeometry(0.45, 1.4, 12),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.25 })
+      );
+      body.position.y = 0.7;
+      g.add(body);
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.55, 0.05, 8, 24),
+        new THREE.MeshStandardMaterial({ color })
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.05;
+      g.add(ring);
+    }
     g.userData.kind = kind;
     return g;
   }
@@ -413,8 +443,21 @@ export function createEditorViewport(
             new THREE.MeshStandardMaterial({ color: 0xff00ff })
           );
         }
-      } else if (ent.kind === 'spawn_runner' || ent.kind === 'spawn_trapper') {
-        root = makeSpawnMarker(ent.kind, ent.color ?? (ent.kind === 'spawn_runner' ? '#22c55e' : '#ef4444'));
+      } else if (
+        ent.kind === 'spawn_runner' ||
+        ent.kind === 'spawn_trapper' ||
+        ent.kind === 'start' ||
+        ent.kind === 'finish'
+      ) {
+        root = makeSpawnMarker(
+          ent.kind,
+          ent.color ??
+            (ent.kind === 'finish'
+              ? '#fbbf24'
+              : ent.kind === 'spawn_trapper'
+                ? '#ef4444'
+                : '#22c55e')
+        );
       } else if (ent.kind === 'button') {
         root = new THREE.Mesh(
           new THREE.CylinderGeometry(0.45, 0.5, 0.2, 16),
@@ -611,6 +654,8 @@ export function createEditorViewport(
       kind === 'button' ||
       kind === 'trap' ||
       kind === 'hazard' ||
+      kind === 'finish' ||
+      kind === 'start' ||
       kind.startsWith('spawn')
         ? brush ?? undefined
         : undefined);
@@ -628,31 +673,45 @@ export function createEditorViewport(
                 ? 'Death Zone'
                 : kind === 'light'
                   ? 'Light Bulb'
-                  : kind.startsWith('spawn')
-                    ? kind
-                    : modelName ?? 'Entity',
+                  : kind === 'start'
+                    ? 'Start'
+                    : kind === 'finish'
+                      ? 'Finish'
+                      : kind.startsWith('spawn')
+                        ? kind
+                        : modelName ?? 'Entity',
       kind,
-      model: kind === 'light' ? undefined : modelName,
+      model:
+        kind === 'light'
+          ? undefined
+          : kind === 'start'
+            ? modelName ?? 'figurine'
+            : kind === 'finish'
+              ? modelName ?? 'floor-square'
+              : modelName,
       layerId: activeLayerId,
-      position: [x, y, z],
+      position: [x, kind === 'finish' ? Math.max(0, y) : y, z],
       rotation: [0, 0, 0],
-      scale: [1, 1, 1],
+      scale: kind === 'finish' ? [2, 1, 2] : [1, 1, 1],
       color:
-        kind === 'spawn_runner'
+        kind === 'spawn_runner' || kind === 'start'
           ? '#22c55e'
           : kind === 'spawn_trapper'
             ? '#ef4444'
-            : kind === 'button'
+            : kind === 'finish'
               ? '#fbbf24'
-              : kind === 'trap'
-                ? '#a78bfa'
-                : kind === 'hazard'
-                  ? '#ef4444'
-                  : kind === 'light'
-                    ? '#ffe9a8'
-                    : undefined,
+              : kind === 'button'
+                ? '#fbbf24'
+                : kind === 'trap'
+                  ? '#a78bfa'
+                  : kind === 'hazard'
+                    ? '#ef4444'
+                    : kind === 'light'
+                      ? '#ffe9a8'
+                      : undefined,
       opacity: 1,
       visible: true,
+      solid: kind === 'finish' ? true : undefined,
       animation: defaultAnimation(),
       playerAnims: kind === 'player' ? {} : undefined,
       hazard: kind === 'hazard' ? defaultHazard() : undefined,
@@ -994,14 +1053,20 @@ export function createEditorViewport(
       const t = new THREE.Vector3();
       camera.getWorldDirection(t);
       const p = camera.position.clone().add(t.multiplyScalar(8));
-      p.y = 0.5;
-      placeAt(p, kind, kind === 'spawn_runner' ? 'figurine' : 'figurine-large');
+      p.y = kind === 'finish' ? 0 : 0.5;
+      const model =
+        kind === 'finish'
+          ? 'floor-square'
+          : kind === 'spawn_trapper'
+            ? 'figurine-large'
+            : 'figurine';
+      placeAt(p, kind, model);
     },
     placeEntity: (kind, model) => {
       const t = new THREE.Vector3();
       camera.getWorldDirection(t);
       const p = camera.position.clone().add(t.multiplyScalar(8));
-      p.y = kind === 'player' ? 0 : 0.5;
+      p.y = kind === 'player' || kind === 'finish' ? 0 : 0.5;
       placeAt(p, kind, model);
     },
     stampEntities: (entities) => {

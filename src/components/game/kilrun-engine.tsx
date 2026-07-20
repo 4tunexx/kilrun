@@ -35,8 +35,10 @@ import dynamic from 'next/dynamic';
 import {
   getActivePlayMapId,
   mapDocSpawnPoints,
+  mapDocToSimFinishes,
   mapDocToSimHazards,
   mapDocToSimPlatforms,
+  mapDocToWorldBounds,
 } from './editor/prefab-storage';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
@@ -102,13 +104,18 @@ export default function KilrunEngine({
     if (!platforms.length) return;
 
     const obstacles = mapDocToSimHazards(doc);
+    const finishes = mapDocToSimFinishes(doc);
     const spawns = mapDocSpawnPoints(doc);
+    const worldBounds = mapDocToWorldBounds(doc, platforms, finishes);
     customDocRef.current = doc;
     customLoadedRef.current = true;
     connectionRef.current.sendLoadCustomMap({
       platforms,
       obstacles,
+      finishes,
       spawn: spawns.runner ?? undefined,
+      trapperSpawn: spawns.trapper ?? undefined,
+      worldBounds,
     });
   }, [room.phase, connectionRef, playerCount, connectionError]);
 
