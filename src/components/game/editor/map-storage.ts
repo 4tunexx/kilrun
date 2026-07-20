@@ -93,10 +93,9 @@ function indexEntryFromDoc(id: string, doc: MapDocument, serialized: string): Ma
   };
 }
 
-/** Rebuild missing stats on older index rows. */
+/** Rebuild missing stats on older index rows (in-memory only — safe in React render). */
 export function listMaps(filterMode?: KilrunMode): MapListItem[] {
   const index = readIndex();
-  let dirty = false;
   const enriched = index.map((item) => {
     if (
       item.entityCount != null &&
@@ -111,10 +110,8 @@ export function listMaps(filterMode?: KilrunMode): MapListItem[] {
     }
     const doc = loadMap(item.id);
     if (!doc) return item;
-    dirty = true;
     return indexEntryFromDoc(item.id, doc, JSON.stringify(doc));
   });
-  if (dirty) writeIndex(enriched);
   const sorted = enriched.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   if (!filterMode) return sorted;
   return sorted.filter((m) => normalizeKilrunMode(m.gameMode) === filterMode);
@@ -133,7 +130,19 @@ export function saveMap(
     meta: { ...doc.meta, updatedAt, createdAt: doc.meta?.createdAt ?? updatedAt },
   };
   const serialized = JSON.stringify(next);
-  localStorage.setItem(DOC_PREFIX + id, serialized);
+  try {
+    localStorage.setItem(DOC_PREFIX + id, serialized);
+  } catch (err) {
+    const quota =
+      err instanceof DOMException &&
+      (err.name === 'QuotaExceededError' || err.code === 22);
+    if (quota) {
+      throw new Error(
+        'Map too large for browser storage (often huge GLB data-URLs). Remove embeds or use external URLs.'
+      );
+    }
+    throw err;
+  }
   if (opts?.thumbnailDataUrl) {
     try {
       localStorage.setItem(THUMB_PREFIX + id, opts.thumbnailDataUrl);

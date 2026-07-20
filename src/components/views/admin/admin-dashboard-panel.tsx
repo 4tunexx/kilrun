@@ -111,8 +111,8 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
               ? 'Live chat enabled'
               : 'Live chat disabled'
             : enabled
-              ? 'Deathrun open'
-              : 'Deathrun in maintenance',
+              ? 'Matches open'
+              : 'Matches in maintenance',
       });
       await load();
     } catch (e: unknown) {

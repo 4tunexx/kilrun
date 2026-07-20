@@ -214,7 +214,7 @@ export async function adminGetDashboardOverview(): Promise<AdminDashboardOvervie
     },
     {
       id: 'game',
-      label: 'Deathrun play',
+      label: 'Match play',
       ok: !gameDisabled,
       detail: gameDisabled
         ? settings?.gameDisabledMsg || 'Maintenance mode'

@@ -8,7 +8,7 @@ import {
   Award,
   Check,
   Copy,
-  Crown,
+  Gem,
   Lock,
   Loader2,
   Package,
@@ -48,8 +48,8 @@ import { cn } from '@/lib/utils';
 
 type Editor = NonNullable<Awaited<ReturnType<typeof getMyShowcaseEditor>>>;
 
-const TYPE_ICONS: Record<ShowcaseItemType, typeof Crown> = {
-  rank: Crown,
+const TYPE_ICONS: Record<ShowcaseItemType, typeof Gem> = {
+  rank: Gem,
   badge: Award,
   achievement: Trophy,
   inventory: Package,

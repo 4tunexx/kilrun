@@ -748,14 +748,46 @@ export function MapEditor({
                 <Flag className="w-4 h-4" />
                 Start
               </button>
-              <button
-                type="button"
-                onClick={() => apiRef.current?.placeSpawn('finish')}
-                className="flex items-center gap-1.5 rounded-xl border border-amber-400/60 bg-amber-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
-              >
-                <FlagTriangleRight className="w-4 h-4" />
-                Finish
-              </button>
+              {gameMode === 'deathrun' && (
+                <button
+                  type="button"
+                  onClick={() => apiRef.current?.placeSpawn('finish')}
+                  className="flex items-center gap-1.5 rounded-xl border border-amber-400/60 bg-amber-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
+                >
+                  <FlagTriangleRight className="w-4 h-4" />
+                  Finish
+                </button>
+              )}
+              {gameMode === 'competitive' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => apiRef.current?.placeSpawn('spawn_team_a')}
+                    className="flex items-center gap-1.5 rounded-xl border border-sky-400/60 bg-sky-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
+                  >
+                    <Flag className="w-4 h-4" />
+                    Team A
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => apiRef.current?.placeSpawn('spawn_team_b')}
+                    className="flex items-center gap-1.5 rounded-xl border border-rose-400/60 bg-rose-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
+                  >
+                    <Flag className="w-4 h-4" />
+                    Team B
+                  </button>
+                </>
+              )}
+              {gameMode === 'horde' && (
+                <button
+                  type="button"
+                  onClick={() => apiRef.current?.placeSpawn('spawn_monster')}
+                  className="flex items-center gap-1.5 rounded-xl border border-violet-400/60 bg-violet-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
+                >
+                  <Flag className="w-4 h-4" />
+                  Monster
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -810,17 +842,19 @@ export function MapEditor({
             <Flag className="w-4 h-4" />
             Start
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              apiRef.current?.placeSpawn('finish');
-              collapseAllMenus();
-            }}
-            className="flex items-center gap-1.5 rounded-xl border border-amber-400/50 bg-black/75 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-amber-100 shadow-lg active:scale-95 min-h-11"
-          >
-            <FlagTriangleRight className="w-4 h-4" />
-            Finish
-          </button>
+          {gameMode === 'deathrun' && (
+            <button
+              type="button"
+              onClick={() => {
+                apiRef.current?.placeSpawn('finish');
+                collapseAllMenus();
+              }}
+              className="flex items-center gap-1.5 rounded-xl border border-amber-400/50 bg-black/75 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-amber-100 shadow-lg active:scale-95 min-h-11"
+            >
+              <FlagTriangleRight className="w-4 h-4" />
+              Finish
+            </button>
+          )}
         </div>
       )}
 

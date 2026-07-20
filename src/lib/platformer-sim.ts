@@ -69,8 +69,10 @@ const PLAYER_HEIGHT = 1.0;
 const MAX_ENERGY = 100;
 const ENERGY_DRAIN = 28;
 const ENERGY_REGEN = 18;
-const JUMP_ENERGY = 8;
+const JUMP_ENERGY = 6;
 const SKIN = 0.02;
+const ENERGY_EXHAUSTED_THRESHOLD = 50;
+const ENERGY_EXHAUSTED_SPEED_MULT = 0.72;
 
 export function createSimScratch(): SimScratch {
   return {
@@ -157,9 +159,9 @@ export function stepPlatformer(
     if (body.energy <= 0) scratch.exhausted = true;
   } else {
     body.energy = Math.min(MAX_ENERGY, body.energy + ENERGY_REGEN * dt);
-    if (body.energy >= 35) scratch.exhausted = false;
+    if (body.energy >= ENERGY_EXHAUSTED_THRESHOLD) scratch.exhausted = false;
   }
-  if (scratch.exhausted) maxSpeed *= 0.55;
+  if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;
 
   const support = findSupport(body.x, body.y, body.z, pads);
   let grounded = !!support && body.vz <= 0.15;
@@ -189,8 +191,7 @@ export function stepPlatformer(
   else scratch.jumpBufferMs = Math.max(0, scratch.jumpBufferMs - dt * 1000);
 
   if (
-    body.isGrounded &&
-    scratch.coyoteMs > 0 &&
+    (body.isGrounded || scratch.coyoteMs > 0) &&
     scratch.jumpBufferMs > 0 &&
     body.energy >= JUMP_ENERGY * 0.25
   ) {

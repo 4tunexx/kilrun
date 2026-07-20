@@ -178,8 +178,7 @@ export function applyMovement(
   else scratch.jumpBufferMs = Math.max(0, scratch.jumpBufferMs - dtSeconds * 1000);
 
   const canJump =
-    player.isGrounded &&
-    scratch.coyoteMs > 0 &&
+    (player.isGrounded || scratch.coyoteMs > 0) &&
     scratch.jumpBufferMs > 0;
   if (canJump && player.energy >= JUMP_ENERGY_COST * 0.25) {
     player.vz = JUMP_VELOCITY;

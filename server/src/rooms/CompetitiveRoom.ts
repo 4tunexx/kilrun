@@ -117,6 +117,9 @@ export class CompetitiveRoom extends Room<RoomState> {
         { x: 0, y: 0, z: 0, width: 18, depth: 22, kind: 'solid', height: 0.25 },
       ])
     );
+    // Default arena is centered at origin — Deathrun's [0,W]×[0,H] clamp would
+    // shove team spawns into a corner. Custom maps override via loadCustomMap.
+    this.worldBounds = { minX: -12, maxX: 12, minY: -12, maxY: 12 };
     this.teamASpawns = [
       { x: -6, y: -3, z: 0.5 },
       { x: -6, y: -1, z: 0.5 },
@@ -284,7 +287,14 @@ export class CompetitiveRoom extends Room<RoomState> {
             `[CompetitiveRoom] same-rank underfilled (${this.state.players.size}/${this.minSameRank}) — opened lobby`
           );
         }
-        if (this.state.players.size >= COMPETITIVE_MIN_PLAYERS_TO_START) {
+        // Same-rank bracket waits for minSameRank; after open (or casual) use 2+.
+        const minToStart =
+          this.state.modeTag === 'competitive_ranked' &&
+          !this.openedToAll &&
+          this.rankKey !== 'open'
+            ? this.minSameRank
+            : COMPETITIVE_MIN_PLAYERS_TO_START;
+        if (this.state.players.size >= minToStart) {
           this.state.phase = 'countdown';
           this.state.countdownMs = LOBBY_COUNTDOWN_MS;
         }

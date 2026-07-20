@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, type ReactNode } from 'react';
-import { Crown, ExternalLink, Loader2, ThumbsUp } from 'lucide-react';
+import { ExternalLink, Gem, Loader2, ThumbsUp } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -260,8 +260,8 @@ export function MiniProfileCard({
             {summary.isVip && (
               <Badge className="h-5 shrink-0 bg-yellow-500 text-[10px] text-black">VIP</Badge>
             )}
-            <span className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-yellow-400">
-              <Crown className="h-3 w-3" /> {summary.currentRank}
+            <span className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-amber-300">
+              <Gem className="h-3 w-3 fill-amber-400/40" /> {summary.currentRank}
             </span>
           </div>
         </div>

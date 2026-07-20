@@ -382,7 +382,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
           body.isGrounded = true;
           hpLocal = Math.max(hpLocal, 60);
           setHp(hpLocal);
-        } else {
+        } else if (hpLocal > 0) {
           hpLocal = 0;
           setHp(0);
         }

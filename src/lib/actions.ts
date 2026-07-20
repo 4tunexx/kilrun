@@ -26,6 +26,15 @@ export async function getSessionUser() {
   return prisma.user.findUnique({ where: { steamId } });
 }
 
+/** Match reward actions must only credit the signed-in player. */
+async function requireSelfUserId(claimedUserId: string) {
+  const user = await getSessionUser();
+  if (!user) throw new Error('Not authenticated');
+  if (user.isBanned) throw new Error('Account banned');
+  if (user.id !== claimedUserId) throw new Error('Forbidden');
+  return user;
+}
+
 /** Backfill StoreItem docs created before createdAt / sale fields existed. */
 async function healStoreItemDefaults() {
   await prisma.$runCommandRaw({
@@ -311,6 +320,7 @@ export async function recordMatchStat(input: {
   distance: number;
   livesRemaining: number;
 }) {
+  await requireSelfUserId(input.userId);
   return prisma.matchStat.create({
     data: {
       userId: input.userId,
@@ -340,6 +350,7 @@ export async function recordDeathrunResult(input: {
   score?: number;
   distance?: number;
 }): Promise<{ xpEarned: number; vpEarned: number }> {
+  await requireSelfUserId(input.userId);
   const reward = DEATHRUN_REWARDS[input.outcome];
 
   await prisma.matchResult.create({
@@ -388,6 +399,7 @@ export async function recordHordeResult(input: {
   kills?: number;
   score?: number;
 }): Promise<{ xpEarned: number; vpEarned: number }> {
+  await requireSelfUserId(input.userId);
   const reward = HORDE_REWARDS[input.outcome];
   const bonusXp = Math.min(80, (input.wavesCleared ?? 0) * 4);
 
@@ -446,6 +458,7 @@ export async function recordCompetitiveResult(input: {
   /** Default ranked for backward compat; casual skips KP. */
   queue?: 'casual' | 'ranked';
 }): Promise<{ xpEarned: number; vpEarned: number; kpDelta: number; kp: number; rank: string }> {
+  await requireSelfUserId(input.userId);
   const { applyKpDelta } = await import('@/lib/progression-actions');
   const { computeCompetitiveKpDelta, KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
   const { isPremiumActive } = await import('@/lib/premium');

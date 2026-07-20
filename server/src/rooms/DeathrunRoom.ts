@@ -589,13 +589,13 @@ export class DeathrunRoom extends Room<RoomState> {
       this.state.countdownMs = 0;
       this.state.trapperSessionId = '';
       this.state.winnerRole = '';
-      this.state.players.forEach((player) => {
+      Array.from(this.state.players.values()).forEach((player, index) => {
         player.role = 'runner';
         player.health = 100;
         player.energy = MAX_ENERGY;
         player.isAlive = true;
         player.hasFinished = false;
-        this.applySpawnPosition(player, 0);
+        this.applySpawnPosition(player, index);
         player.vz = 0;
       });
     }
