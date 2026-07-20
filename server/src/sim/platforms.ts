@@ -2,7 +2,7 @@
  * Deathrun floating course — pads with clear gaps (platformer read),
  * not a continuous tunnel floor.
  */
-import { PlatformState } from '../schema/RoomState.js';
+import { ObstacleState, PlatformState } from '../schema/RoomState.js';
 import { WORLD_HEIGHT, WORLD_WIDTH } from './constants.js';
 
 export interface PlatformBlueprint {
@@ -12,6 +12,22 @@ export interface PlatformBlueprint {
   width: number;
   depth: number;
   kind?: PlatformState['kind'];
+  boost?: number;
+}
+
+export interface ObstacleBlueprint {
+  id?: string;
+  kind?: 'saw' | 'laser' | 'crusher' | 'spike' | 'damage';
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  height: number;
+  intervalMs?: number;
+  activeMs?: number;
+  damage?: number;
+  alwaysActive?: boolean;
+  instantKill?: boolean;
 }
 
 export const DEATHRUN_PLATFORMS: PlatformBlueprint[] = [
@@ -52,7 +68,27 @@ export function createFromBlueprints(blueprints: PlatformBlueprint[]): PlatformS
     platform.z = bp.z;
     platform.width = bp.width;
     platform.depth = bp.depth;
+    platform.boost = bp.boost ?? 0;
     return platform;
+  });
+}
+
+export function createObstaclesFromBlueprints(blueprints: ObstacleBlueprint[]): ObstacleState[] {
+  return blueprints.map((bp, index) => {
+    const obstacle = new ObstacleState();
+    obstacle.id = bp.id ?? `hazard_${index}`;
+    obstacle.kind = bp.kind ?? 'damage';
+    obstacle.x = bp.x;
+    obstacle.y = bp.y;
+    obstacle.z = bp.z;
+    obstacle.width = bp.width;
+    obstacle.height = bp.height;
+    obstacle.intervalMs = bp.intervalMs ?? 500;
+    obstacle.activeMs = bp.activeMs ?? 999999;
+    obstacle.damage = bp.instantKill ? 999 : bp.damage ?? 25;
+    obstacle.alwaysActive = bp.alwaysActive !== false;
+    obstacle.active = obstacle.alwaysActive;
+    return obstacle;
   });
 }
 

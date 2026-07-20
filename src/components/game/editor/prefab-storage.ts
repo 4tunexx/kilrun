@@ -1,5 +1,5 @@
 import type { EditorEntity, MapDocument } from './map-document';
-import { generateId } from './map-document';
+import { entityExportsAsPlatform, ensureHazard, generateId } from './map-document';
 
 const PREFAB_KEY = 'kilrun.prefabs.v1';
 export const ACTIVE_PLAY_MAP_KEY = 'kilrun.activePlayMapId.v1';
@@ -36,6 +36,9 @@ export function savePrefab(name: string, entities: EditorEntity[]): PrefabStamp 
       ? { ...e.animation, availableClips: [...e.animation.availableClips] }
       : undefined,
     playerAnims: e.playerAnims ? { ...e.playerAnims } : undefined,
+    hazard: e.hazard ? { ...e.hazard } : undefined,
+    jumpPad: e.jumpPad ? { ...e.jumpPad } : undefined,
+    light: e.light ? { ...e.light } : undefined,
   }));
   const stamp: PrefabStamp = {
     id: `prefab_${Date.now().toString(36)}`,
@@ -69,6 +72,9 @@ export function instantiatePrefab(
     animation: e.animation
       ? { ...e.animation, availableClips: [...(e.animation.availableClips ?? [])] }
       : undefined,
+    hazard: e.hazard ? { ...e.hazard } : undefined,
+    jumpPad: e.jumpPad ? { ...e.jumpPad } : undefined,
+    light: e.light ? { ...e.light } : undefined,
   }));
 }
 
@@ -84,50 +90,75 @@ export function getActivePlayMapId(): string | null {
 }
 
 /** Editor Three (Y-up) → server sim (x forward, y lateral, z height). */
+export type SimPlatformKind = 'solid' | 'checkpoint' | 'jumpPad';
+
 export interface SimPlatformBlueprint {
   x: number;
   y: number;
   z: number;
   width: number;
   depth: number;
-  kind?: 'solid' | 'checkpoint';
+  kind?: SimPlatformKind;
+  /** Jump-pad launch speed (sim vz). */
+  boost?: number;
 }
 
+/** Always-on (or timed) damage volumes exported from editor hazards. */
+export interface SimHazardBlueprint {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  height: number;
+  damage: number;
+  intervalMs: number;
+  alwaysActive: boolean;
+  instantKill: boolean;
+}
+
+function entityToPad(e: EditorEntity): SimPlatformBlueprint {
+  const [tx, ty, tz] = e.position;
+  const sizeX = Math.max(1.2, Math.abs(e.scale[0]) * 2);
+  const sizeZ = Math.max(1.2, Math.abs(e.scale[2]) * 2);
+  const jump = e.jumpPad?.enabled;
+  return {
+    x: tz,
+    y: tx,
+    z: ty,
+    width: sizeZ,
+    depth: sizeX,
+    kind: jump ? 'jumpPad' : e.kind === 'checkpoint' ? 'checkpoint' : 'solid',
+    boost: jump ? Math.max(4, e.jumpPad?.boost ?? 14) : undefined,
+  };
+}
+
+/**
+ * Convert map entities → standable pads.
+ * Prefer explicit `solid` / jumpPad / checkpoint; fall back to floor* heuristic
+ * so older maps keep working.
+ */
 export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
-  const isFloorLike = (e: EditorEntity) =>
-    e.visible !== false &&
-    (e.kind === 'checkpoint' ||
-      !!e.model?.includes('floor') ||
-      !!e.model?.startsWith('platform') ||
-      (e.kind === 'prop' &&
+  const explicit = doc.entities.filter(entityExportsAsPlatform);
+  // Legacy fallback: if nothing marked solid/floor, keep old floor-like heuristic
+  let source = explicit;
+  if (source.length === 0) {
+    source = doc.entities.filter(
+      (e) =>
+        e.visible !== false &&
+        e.kind !== 'light' &&
         !!e.model &&
         !e.model.startsWith('wall') &&
         !e.model.startsWith('column') &&
         !e.model.startsWith('pipe') &&
         !e.model.startsWith('figurine') &&
         !e.model.startsWith('door') &&
-        !e.model.startsWith('button')));
-
-  const floors = doc.entities.filter(
-    (e) => e.visible !== false && (e.model?.includes('floor') || e.kind === 'checkpoint')
-  );
-  const source = floors.length > 0 ? floors : doc.entities.filter(isFloorLike);
+        !e.model.startsWith('button')
+    );
+  }
 
   const runner = doc.entities.find((e) => e.kind === 'spawn_runner' || e.kind === 'player');
-
-  const pads = source.map((e) => {
-    const [tx, ty, tz] = e.position;
-    const sizeX = Math.max(1.2, Math.abs(e.scale[0]) * 2);
-    const sizeZ = Math.max(1.2, Math.abs(e.scale[2]) * 2);
-    return {
-      x: tz,
-      y: tx,
-      z: ty,
-      width: sizeZ,
-      depth: sizeX,
-      kind: (e.kind === 'checkpoint' ? 'checkpoint' : 'solid') as 'solid' | 'checkpoint',
-    };
-  });
+  const pads = source.map(entityToPad);
 
   if (pads.length === 0 && runner) {
     const [tx, ty, tz] = runner.position;
@@ -135,6 +166,35 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
   }
 
   return pads;
+}
+
+/** Hazard / damage volumes for authoritative match damage. */
+export function mapDocToSimHazards(doc: MapDocument): SimHazardBlueprint[] {
+  return doc.entities
+    .filter((e) => {
+      if (e.visible === false) return false;
+      const hz = ensureHazard(e);
+      return e.kind === 'hazard' || hz.enabled;
+    })
+    .map((e) => {
+      const hz = ensureHazard(e);
+      const [tx, ty, tz] = e.position;
+      const width = Math.max(1.2, Math.abs(e.scale[0]) * 2);
+      const depth = Math.max(1.2, Math.abs(e.scale[2]) * 2);
+      const height = Math.max(1.2, Math.abs(e.scale[1]) * 2);
+      return {
+        id: e.id,
+        x: tz,
+        y: tx,
+        z: ty,
+        width: Math.max(width, depth),
+        height,
+        damage: hz.instantKill ? 999 : Math.max(1, hz.damage),
+        intervalMs: Math.max(100, hz.intervalMs),
+        alwaysActive: true,
+        instantKill: hz.instantKill,
+      };
+    });
 }
 
 export function mapDocSpawnPoints(doc: MapDocument) {

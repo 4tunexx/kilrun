@@ -49,6 +49,8 @@ export const TRAPPER_MOVE_SPEED = MAX_GROUND_SPEED * 0.92;
 
 export const OBSTACLE_DAMAGE = 40;
 export const OBSTACLE_HIT_COOLDOWN_MS = 600;
+/** Default vertical launch when landing on a jumpPad with boost=0. */
+export const JUMP_PAD_BOOST = 14;
 
 export const HITSCAN_RANGE = 14;
 export const HITSCAN_DAMAGE = 25;

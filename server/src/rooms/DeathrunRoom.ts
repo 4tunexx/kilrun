@@ -1,7 +1,13 @@
 import { Client, Room } from 'colyseus';
 import { PlayerState, RoomState } from '../schema/RoomState.js';
 import { createDeathrunObstacles } from '../sim/deathrun-map.js';
-import { createDeathrunPlatforms, createFromBlueprints, type PlatformBlueprint } from '../sim/platforms.js';
+import {
+  createDeathrunPlatforms,
+  createFromBlueprints,
+  createObstaclesFromBlueprints,
+  type ObstacleBlueprint,
+  type PlatformBlueprint,
+} from '../sim/platforms.js';
 import {
   FINISH_X,
   LOBBY_COUNTDOWN_MS,
@@ -73,6 +79,7 @@ export class DeathrunRoom extends Room<RoomState> {
         client,
         data: {
           platforms?: PlatformBlueprint[];
+          obstacles?: ObstacleBlueprint[];
           spawn?: { x: number; y: number; z: number };
         }
       ) => {
@@ -84,9 +91,14 @@ export class DeathrunRoom extends Room<RoomState> {
         while (this.state.platforms.length > 0) this.state.platforms.pop();
         this.state.platforms.push(...createFromBlueprints(platforms));
 
-        // Default deathrun obstacles don't match custom geometry — clear them
+        // Default deathrun obstacles don't match custom geometry — replace with
+        // editor hazard volumes when provided (otherwise clear).
         while (this.state.obstacles.length > 0) this.state.obstacles.pop();
-        this.obstacleTimers = [];
+        const hazards = Array.isArray(data?.obstacles) ? data.obstacles : [];
+        if (hazards.length > 0) {
+          this.state.obstacles.push(...createObstaclesFromBlueprints(hazards));
+        }
+        this.obstacleTimers = this.state.obstacles.map(() => 0);
 
         if (data.spawn) {
           this.customSpawn = { x: data.spawn.x, y: data.spawn.y, z: data.spawn.z };
@@ -97,7 +109,7 @@ export class DeathrunRoom extends Room<RoomState> {
         }
 
         console.log(
-          `[DeathrunRoom] MAIN map loaded by ${client.sessionId}: ${platforms.length} platforms`
+          `[DeathrunRoom] MAIN map loaded by ${client.sessionId}: ${platforms.length} platforms, ${hazards.length} hazards`
         );
       }
     );
@@ -244,6 +256,10 @@ export class DeathrunRoom extends Room<RoomState> {
 
   private tickObstacles(dtMs: number) {
     this.state.obstacles.forEach((obstacle, index) => {
+      if (obstacle.alwaysActive) {
+        obstacle.active = true;
+        return;
+      }
       this.obstacleTimers[index] += dtMs;
       if (!obstacle.active && this.obstacleTimers[index] >= obstacle.intervalMs) {
         obstacle.active = true;
@@ -272,10 +288,17 @@ export class DeathrunRoom extends Room<RoomState> {
       if (player.role === 'runner' && player.isAlive && !player.hasFinished) {
         for (const obstacle of this.state.obstacles) {
           if (!isPlayerHitByObstacle(player, obstacle)) continue;
-          const lastHit = this.lastObstacleHitAt.get(sessionId) ?? 0;
-          if (now - lastHit < OBSTACLE_HIT_COOLDOWN_MS) continue;
-          this.lastObstacleHitAt.set(sessionId, now);
-          this.damagePlayer(player, OBSTACLE_DAMAGE);
+          const hitKey = `${sessionId}:${obstacle.id}`;
+          const lastHit = this.lastObstacleHitAt.get(hitKey) ?? 0;
+          const cooldown =
+            obstacle.alwaysActive && obstacle.intervalMs > 0
+              ? obstacle.intervalMs
+              : OBSTACLE_HIT_COOLDOWN_MS;
+          if (now - lastHit < cooldown) continue;
+          this.lastObstacleHitAt.set(hitKey, now);
+          const amount =
+            obstacle.damage > 0 ? obstacle.damage : OBSTACLE_DAMAGE;
+          this.damagePlayer(player, amount);
         }
 
         if (player.x >= FINISH_X && player.isGrounded) {

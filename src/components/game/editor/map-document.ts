@@ -7,7 +7,8 @@ export type EditorEntityKind =
   | 'trap'
   | 'group'
   | 'player'
-  | 'button';
+  | 'button'
+  | 'light';
 
 export type SkyPreset = 'cavern' | 'dusk' | 'bright' | 'void' | 'custom';
 export type FloorPreset = 'grid' | 'void' | 'solid' | 'water';
@@ -86,6 +87,22 @@ export interface EntityHazard {
   instantKill: boolean;
 }
 
+/** Launch player upward when they land / stand on this pad. */
+export interface EntityJumpPad {
+  enabled: boolean;
+  /** Vertical launch speed (sim vz). Default ~14. */
+  boost: number;
+}
+
+/** Point light for map atmosphere (client visual; not simulated). */
+export interface EntityLight {
+  color: string;
+  intensity: number;
+  /** Attenuation distance in world units */
+  distance: number;
+  castShadow?: boolean;
+}
+
 export interface EditorEntity {
   id: string;
   name: string;
@@ -107,6 +124,15 @@ export interface EditorEntity {
   playerAnims?: PlayerAnimBindings;
   /** Death zone / damage on touch */
   hazard?: EntityHazard;
+  /**
+   * Explicit standable collider for match export.
+   * When true, entity becomes a server platform pad (top-plane AABB).
+   */
+  solid?: boolean;
+  /** Bounce / launch pad gameplay */
+  jumpPad?: EntityJumpPad;
+  /** kind === 'light' settings */
+  light?: EntityLight;
 }
 
 export interface EditorLayer {
@@ -175,6 +201,51 @@ export function ensureHazard(ent: EditorEntity): EntityHazard {
     instantKill: false,
     ...ent.hazard,
   };
+}
+
+export function defaultJumpPad(): EntityJumpPad {
+  return { enabled: true, boost: 14 };
+}
+
+export function ensureJumpPad(ent: EditorEntity): EntityJumpPad {
+  return {
+    enabled: false,
+    boost: 14,
+    ...ent.jumpPad,
+  };
+}
+
+export function defaultLight(color = '#ffe9a8'): EntityLight {
+  return {
+    color,
+    intensity: 1.4,
+    distance: 18,
+    castShadow: false,
+  };
+}
+
+export function ensureLight(ent: EditorEntity): EntityLight {
+  return {
+    ...defaultLight(ent.color ?? '#ffe9a8'),
+    ...ent.light,
+  };
+}
+
+/** Whether this entity should export as a standable / jump-pad platform. */
+export function entityExportsAsPlatform(ent: EditorEntity): boolean {
+  if (ent.visible === false) return false;
+  if (ent.kind === 'light' || ent.kind === 'spawn_runner' || ent.kind === 'spawn_trapper') {
+    return false;
+  }
+  // Jump pads always export (need a pad to launch from).
+  if (ent.jumpPad?.enabled) return true;
+  // Explicit authoring wins over name heuristics.
+  if (ent.solid === false) return false;
+  if (ent.solid === true) return true;
+  if (ent.kind === 'checkpoint') return true;
+  if (ent.model?.includes('floor')) return true;
+  if (ent.model?.startsWith('platform')) return true;
+  return false;
 }
 
 export function generateId(prefix = 'ent'): string {
@@ -282,6 +353,8 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
       : undefined,
     playerAnims: ent.playerAnims ? { ...ent.playerAnims } : undefined,
     hazard: ent.hazard ? { ...ent.hazard } : undefined,
+    jumpPad: ent.jumpPad ? { ...ent.jumpPad } : undefined,
+    light: ent.light ? { ...ent.light } : undefined,
   };
 }
 

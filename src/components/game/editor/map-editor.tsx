@@ -39,11 +39,21 @@ import {
   ChevronDown,
   ChevronUp,
   PanelLeftClose,
+  Lightbulb,
+  Rocket,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { EditorEntity, FloorPreset, MapDocument, SkyPreset } from './map-document';
-import { ensureAnimation, ensureEnvironment, ensureHazard, generateId } from './map-document';
+import {
+  ensureAnimation,
+  ensureEnvironment,
+  ensureHazard,
+  ensureJumpPad,
+  ensureLight,
+  entityExportsAsPlatform,
+  generateId,
+} from './map-document';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
 import {
   ensureStarterMap,
@@ -1354,6 +1364,12 @@ export function MapEditor({
             >
               <Skull className="w-4 h-4 text-red-400" />
             </ToolBtn>
+            <ToolBtn
+              onClick={() => apiRef.current?.placeEntity('light')}
+              title="Light bulb"
+            >
+              <Lightbulb className="w-4 h-4 text-amber-200" />
+            </ToolBtn>
             <ToolBtn onClick={() => apiRef.current?.duplicateSelected()} title="Duplicate">
               <Copy className="w-4 h-4" />
             </ToolBtn>
@@ -1412,6 +1428,7 @@ export function MapEditor({
                   <option value="prop">Prop</option>
                   <option value="trap">Trap (activatable)</option>
                   <option value="hazard">Death zone</option>
+                  <option value="light">Light bulb</option>
                   <option value="player">Player</option>
                   <option value="button">Button</option>
                   <option value="spawn_runner">Spawn Runner</option>
@@ -1419,56 +1436,195 @@ export function MapEditor({
                   <option value="checkpoint">Checkpoint</option>
                 </select>
               </label>
-              <label className="block text-xs text-white/60">
-                Model
-                <select
-                  className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
-                  value={selected.model ?? ''}
-                  onChange={(e) =>
-                    patchSelected({
-                      model: e.target.value || undefined,
-                      customModelUrl: undefined,
-                    })
-                  }
-                >
-                  <option value="">— none —</option>
-                  {PROTOTYPE_MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-white/60">
-                Upload animated GLB
-                <input
-                  type="file"
-                  accept=".glb,.gltf,model/gltf-binary"
-                  className="mt-0.5 w-full text-[10px]"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (!f) return;
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      patchSelected({
-                        customModelUrl: String(reader.result),
-                        model: undefined,
-                        name: selected.name || f.name.replace(/\.(glb|gltf)$/i, ''),
-                      });
-                    };
-                    reader.readAsDataURL(f);
-                  }}
+
+              {selected.kind !== 'light' && (
+                <>
+                  <label className="block text-xs text-white/60">
+                    Model
+                    <select
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={selected.model ?? ''}
+                      onChange={(e) =>
+                        patchSelected({
+                          model: e.target.value || undefined,
+                          customModelUrl: undefined,
+                        })
+                      }
+                    >
+                      <option value="">— none —</option>
+                      {PROTOTYPE_MODELS.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Upload animated GLB
+                    <input
+                      type="file"
+                      accept=".glb,.gltf,model/gltf-binary"
+                      className="mt-0.5 w-full text-[10px]"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          patchSelected({
+                            customModelUrl: String(reader.result),
+                            model: undefined,
+                            name: selected.name || f.name.replace(/\.(glb|gltf)$/i, ''),
+                          });
+                        };
+                        reader.readAsDataURL(f);
+                      }}
+                    />
+                  </label>
+                </>
+              )}
+
+              {selected.kind !== 'light' && (
+                <AnimationPropsPanel
+                  entity={selected}
+                  allEntities={doc.entities}
+                  onChange={patchSelected}
+                  onPreview={(which) => apiRef.current?.previewAnim(which)}
+                  onWireTrap={wireTrapToButton}
                 />
-              </label>
+              )}
 
-              <AnimationPropsPanel
-                entity={selected}
-                allEntities={doc.entities}
-                onChange={patchSelected}
-                onPreview={(which) => apiRef.current?.previewAnim(which)}
-                onWireTrap={wireTrapToButton}
-              />
+              {/* Gameplay: solid / jump pad / damage */}
+              {selected.kind !== 'light' &&
+                selected.kind !== 'spawn_runner' &&
+                selected.kind !== 'spawn_trapper' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-white/50 uppercase">
+                    Gameplay
+                  </p>
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={entityExportsAsPlatform(selected)}
+                      onChange={(e) =>
+                        patchSelected({
+                          solid: e.target.checked,
+                          ...(e.target.checked
+                            ? {}
+                            : { jumpPad: { ...ensureJumpPad(selected), enabled: false } }),
+                        })
+                      }
+                    />
+                    Solid (players can stand on it)
+                  </label>
+                  <p className="text-[10px] text-white/40">
+                    Exports a top-plane collision pad into Deathrun. Floors/checkpoints default on;
+                    turn on for crates/props you want walkable.
+                  </p>
 
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={ensureJumpPad(selected).enabled}
+                      onChange={(e) => {
+                        const jp = ensureJumpPad(selected);
+                        patchSelected({
+                          jumpPad: { ...jp, enabled: e.target.checked },
+                          solid: e.target.checked ? true : selected.solid,
+                        });
+                      }}
+                    />
+                    <Rocket className="w-3.5 h-3.5 text-sky-300" />
+                    Jump pad
+                  </label>
+                  {ensureJumpPad(selected).enabled && (
+                    <label className="block text-xs text-white/60">
+                      Boost ({ensureJumpPad(selected).boost})
+                      <input
+                        type="range"
+                        min={6}
+                        max={28}
+                        step={1}
+                        className="w-full"
+                        value={ensureJumpPad(selected).boost}
+                        onChange={(e) =>
+                          patchSelected({
+                            jumpPad: {
+                              enabled: true,
+                              boost: Number(e.target.value),
+                            },
+                            solid: true,
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+              )}
+
+              {selected.kind === 'light' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-white/50 uppercase flex items-center gap-1">
+                    <Lightbulb className="w-3.5 h-3.5 text-amber-200" /> Light bulb
+                  </p>
+                  <label className="block text-xs text-white/60">
+                    Color
+                    <input
+                      type="color"
+                      className="mt-0.5 w-full h-8 bg-transparent"
+                      value={ensureLight(selected).color}
+                      onChange={(e) =>
+                        patchSelected({
+                          color: e.target.value,
+                          light: { ...ensureLight(selected), color: e.target.value },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Intensity ({ensureLight(selected).intensity.toFixed(1)})
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={5}
+                      step={0.1}
+                      className="w-full"
+                      value={ensureLight(selected).intensity}
+                      onChange={(e) =>
+                        patchSelected({
+                          light: {
+                            ...ensureLight(selected),
+                            intensity: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Distance ({ensureLight(selected).distance})
+                    <input
+                      type="range"
+                      min={2}
+                      max={60}
+                      step={1}
+                      className="w-full"
+                      value={ensureLight(selected).distance}
+                      onChange={(e) =>
+                        patchSelected({
+                          light: {
+                            ...ensureLight(selected),
+                            distance: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <p className="text-[10px] text-white/40">
+                    Lights are visual in editor + match overlay (client-side).
+                  </p>
+                </div>
+              )}
+
+              {selected.kind !== 'light' && (
               <div className="space-y-2 border-t border-white/10 pt-2">
                 <p className="text-[10px] tracking-widest text-white/50 uppercase">Death zone</p>
                 <label className="flex items-center gap-2 text-xs text-white/70">
@@ -1543,11 +1699,12 @@ export function MapEditor({
                       </>
                     )}
                     <p className="text-[10px] text-white/40">
-                      Test in Play Test (HP bar). In Deathrun match, instant-kill zones remove the runner.
+                      Damage volumes export into Deathrun matches (authoritative).
                     </p>
                   </>
                 )}
               </div>
+              )}
 
               <div className="grid grid-cols-3 gap-1 border-t border-white/10 pt-2">
                 {(['position', 'rotation', 'scale'] as const).map((key) => (

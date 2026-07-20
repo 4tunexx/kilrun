@@ -13,6 +13,7 @@ import {
   GROUND_FRICTION,
   JUMP_BUFFER_MS,
   JUMP_ENERGY_COST,
+  JUMP_PAD_BOOST,
   JUMP_VELOCITY,
   MAX_AIR_SPEED_MULT,
   MAX_ENERGY,
@@ -140,13 +141,26 @@ export function applyMovement(
     scratch.coyoteMs = Math.max(0, scratch.coyoteMs - dtSeconds * 1000);
   }
 
+  // Jump pads: launch as soon as we would be standing on them.
+  if (grounded && support!.platform.kind === 'jumpPad') {
+    const boost =
+      support!.platform.boost > 0 ? support!.platform.boost : JUMP_PAD_BOOST;
+    player.vz = boost;
+    player.isGrounded = false;
+    scratch.coyoteMs = 0;
+    scratch.jumpBufferMs = 0;
+  }
+
   // Jump buffer: edge-trigger on press.
   const jumpEdge = input.jumpPressed && !scratch.wasJumpHeld;
   scratch.wasJumpHeld = input.jumpPressed;
   if (jumpEdge) scratch.jumpBufferMs = JUMP_BUFFER_MS;
   else scratch.jumpBufferMs = Math.max(0, scratch.jumpBufferMs - dtSeconds * 1000);
 
-  const canJump = scratch.coyoteMs > 0 && scratch.jumpBufferMs > 0;
+  const canJump =
+    player.isGrounded &&
+    scratch.coyoteMs > 0 &&
+    scratch.jumpBufferMs > 0;
   if (canJump && player.energy >= JUMP_ENERGY_COST * 0.25) {
     player.vz = JUMP_VELOCITY;
     player.isGrounded = false;
@@ -209,9 +223,15 @@ export function applyMovement(
     );
     if (land && player.vz <= 0 && player.z <= land.topZ + 0.05) {
       player.z = land.topZ;
-      player.vz = 0;
-      player.isGrounded = true;
-      scratch.coyoteMs = COYOTE_TIME_MS;
+      if (land.platform.kind === 'jumpPad') {
+        player.vz = land.platform.boost > 0 ? land.platform.boost : JUMP_PAD_BOOST;
+        player.isGrounded = false;
+        scratch.coyoteMs = 0;
+      } else {
+        player.vz = 0;
+        player.isGrounded = true;
+        scratch.coyoteMs = COYOTE_TIME_MS;
+      }
     }
   }
 

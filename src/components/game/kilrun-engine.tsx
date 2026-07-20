@@ -32,7 +32,12 @@ import { MobilePlayGate } from './ui/mobile-play-gate';
 import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
 import dynamic from 'next/dynamic';
-import { getActivePlayMapId, mapDocSpawnPoints, mapDocToSimPlatforms } from './editor/prefab-storage';
+import {
+  getActivePlayMapId,
+  mapDocSpawnPoints,
+  mapDocToSimHazards,
+  mapDocToSimPlatforms,
+} from './editor/prefab-storage';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
 
@@ -96,11 +101,13 @@ export default function KilrunEngine({
     const platforms = mapDocToSimPlatforms(doc);
     if (!platforms.length) return;
 
+    const obstacles = mapDocToSimHazards(doc);
     const spawns = mapDocSpawnPoints(doc);
     customDocRef.current = doc;
     customLoadedRef.current = true;
     connectionRef.current.sendLoadCustomMap({
       platforms,
+      obstacles,
       spawn: spawns.runner ?? undefined,
     });
   }, [room.phase, connectionRef, playerCount, connectionError]);

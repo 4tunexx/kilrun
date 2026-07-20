@@ -8,10 +8,65 @@ import {
   DEFAULT_ENVIRONMENT,
   defaultAnimation,
   defaultHazard,
+  defaultLight,
+  ensureLight,
+  entityExportsAsPlatform,
   generateId,
   snapToGrid,
   ensureEnvironment,
 } from './map-document';
+
+function makeLightBulb(ent: EditorEntity): THREE.Group {
+  const lightCfg = ensureLight(ent);
+  const group = new THREE.Group();
+  group.name = 'light-bulb';
+  const bulb = new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 16, 12),
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color(lightCfg.color),
+      emissive: new THREE.Color(lightCfg.color),
+      emissiveIntensity: 1.2,
+      roughness: 0.35,
+      metalness: 0.1,
+    })
+  );
+  const stem = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.08, 0.22, 10),
+    new THREE.MeshStandardMaterial({ color: 0x334155 })
+  );
+  stem.position.y = -0.2;
+  const point = new THREE.PointLight(
+    new THREE.Color(lightCfg.color),
+    lightCfg.intensity,
+    lightCfg.distance,
+    2
+  );
+  point.castShadow = !!lightCfg.castShadow;
+  point.userData.isEntityLight = true;
+  group.add(bulb);
+  group.add(stem);
+  group.add(point);
+  return group;
+}
+
+function syncLightParams(root: THREE.Object3D, ent: EditorEntity) {
+  const cfg = ensureLight(ent);
+  root.traverse((o) => {
+    if (o instanceof THREE.PointLight && o.userData.isEntityLight) {
+      o.color.set(cfg.color);
+      o.intensity = cfg.intensity;
+      o.distance = cfg.distance;
+      o.castShadow = !!cfg.castShadow;
+    }
+    if (o instanceof THREE.Mesh && o.geometry instanceof THREE.SphereGeometry) {
+      const mat = o.material as THREE.MeshStandardMaterial;
+      if (mat?.emissive) {
+        mat.color.set(cfg.color);
+        mat.emissive.set(cfg.color);
+      }
+    }
+  });
+}
 import { AnimationDirector } from './animation-director';
 import { loadAnimatedPrefab, resolveModelSrc, scanModelClips } from './model-scan';
 
@@ -366,6 +421,8 @@ export function createEditorViewport(
           new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0xf59e0b, emissiveIntensity: 0.35 })
         );
         root.position.y = 0.1;
+      } else if (ent.kind === 'light') {
+        root = makeLightBulb(ent);
       } else if (ent.kind === 'player') {
         root = new THREE.Mesh(
           new THREE.CapsuleGeometry(0.35, 0.9, 4, 8),
@@ -406,6 +463,7 @@ export function createEditorViewport(
       });
     }
     applyEntityTexture(root, ent);
+    if (ent.kind === 'light') syncLightParams(root, ent);
     refreshGizmos();
   }
 
@@ -441,6 +499,26 @@ export function createEditorViewport(
           THREE.MathUtils.degToRad(ent.rotation[2])
         );
         gizmoGroup.add(box);
+      }
+
+      const showSolid = entityExportsAsPlatform(ent);
+      if (showSolid && !isHz) {
+        const pad = new THREE.Mesh(
+          new THREE.BoxGeometry(
+            Math.max(0.5, Math.abs(ent.scale[0]) * 2),
+            0.08,
+            Math.max(0.5, Math.abs(ent.scale[2]) * 2)
+          ),
+          new THREE.MeshBasicMaterial({
+            color: ent.jumpPad?.enabled ? 0x38bdf8 : 0x22c55e,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.75,
+            depthTest: false,
+          })
+        );
+        pad.position.set(ent.position[0], ent.position[1] + 0.04, ent.position[2]);
+        gizmoGroup.add(pad);
       }
 
       // Trap / door ← button links
@@ -548,11 +626,13 @@ export function createEditorViewport(
               ? 'Trap'
               : kind === 'hazard'
                 ? 'Death Zone'
-                : kind.startsWith('spawn')
-                  ? kind
-                  : modelName ?? 'Entity',
+                : kind === 'light'
+                  ? 'Light Bulb'
+                  : kind.startsWith('spawn')
+                    ? kind
+                    : modelName ?? 'Entity',
       kind,
-      model: modelName,
+      model: kind === 'light' ? undefined : modelName,
       layerId: activeLayerId,
       position: [x, y, z],
       rotation: [0, 0, 0],
@@ -568,12 +648,15 @@ export function createEditorViewport(
                 ? '#a78bfa'
                 : kind === 'hazard'
                   ? '#ef4444'
-                  : undefined,
+                  : kind === 'light'
+                    ? '#ffe9a8'
+                    : undefined,
       opacity: 1,
       visible: true,
       animation: defaultAnimation(),
       playerAnims: kind === 'player' ? {} : undefined,
       hazard: kind === 'hazard' ? defaultHazard() : undefined,
+      light: kind === 'light' ? defaultLight() : undefined,
     };
     doc = { ...doc, entities: [...doc.entities, ent] };
     void syncEntity(ent).then(() => {
@@ -991,8 +1074,10 @@ export function createEditorViewport(
     updateSelected: (patch) => {
       if (!selectedId) return;
       const id = selectedId;
+      const prev = doc.entities.find((e) => e.id === id);
       const modelChanged = patch.model !== undefined || patch.customModelUrl !== undefined;
-      if (modelChanged) {
+      const kindChanged = patch.kind !== undefined && patch.kind !== prev?.kind;
+      if (modelChanged || kindChanged) {
         director.unregister(id);
         entityClips.delete(id);
         roots.get(id)?.removeFromParent();
@@ -1000,7 +1085,13 @@ export function createEditorViewport(
       }
       doc = {
         ...doc,
-        entities: doc.entities.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+        entities: doc.entities.map((e) => {
+          if (e.id !== id) return e;
+          const next = { ...e, ...patch };
+          if (patch.kind === 'light' && !next.light) next.light = defaultLight(next.color);
+          if (patch.kind === 'hazard' && !next.hazard) next.hazard = defaultHazard();
+          return next;
+        }),
       };
       const ent = doc.entities.find((e) => e.id === id);
       if (ent) {

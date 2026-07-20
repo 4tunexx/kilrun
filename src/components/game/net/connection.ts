@@ -115,7 +115,22 @@ export class GameConnection {
       z: number;
       width: number;
       depth: number;
-      kind?: 'solid' | 'checkpoint';
+      kind?: 'solid' | 'checkpoint' | 'jumpPad';
+      boost?: number;
+    }[];
+    obstacles?: {
+      id?: string;
+      kind?: 'saw' | 'laser' | 'crusher' | 'spike' | 'damage';
+      x: number;
+      y: number;
+      z: number;
+      width: number;
+      height: number;
+      intervalMs?: number;
+      activeMs?: number;
+      damage?: number;
+      alwaysActive?: boolean;
+      instantKill?: boolean;
     }[];
     spawn?: { x: number; y: number; z: number };
   }): void {

@@ -30,17 +30,18 @@ export interface NetPlayerState {
 
 export interface NetPlatformState {
   id: string;
-  kind: 'solid' | 'checkpoint';
+  kind: 'solid' | 'checkpoint' | 'jumpPad';
   x: number;
   y: number;
   z: number;
   width: number;
   depth: number;
+  boost?: number;
 }
 
 export interface NetObstacleState {
   id: string;
-  kind: 'saw' | 'laser' | 'crusher' | 'spike';
+  kind: 'saw' | 'laser' | 'crusher' | 'spike' | 'damage';
   x: number;
   y: number;
   z: number;
@@ -49,6 +50,8 @@ export interface NetObstacleState {
   intervalMs: number;
   activeMs: number;
   active: boolean;
+  damage?: number;
+  alwaysActive?: boolean;
 }
 
 export interface NetRoomState {

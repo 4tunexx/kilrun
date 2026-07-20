@@ -7,6 +7,7 @@ const KIND_COLORS: Record<NetObstacleState['kind'], { active: number; idle: numb
   saw: { active: 0xe5e7eb, idle: 0x6b7280 },
   laser: { active: 0xf472b6, idle: 0x831843 },
   crusher: { active: 0x7c3aed, idle: 0x3b0764 },
+  damage: { active: 0xf87171, idle: 0x7f1d1d },
 };
 
 /** Client-side visual for one automatic hazard. Shape/animation vary by `kind`; toggling color+glow by `active` is what tells the player "danger now" vs "safe for a moment". */

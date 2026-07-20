@@ -34,19 +34,21 @@ export class PlayerState extends Schema {
 /** Solid walkable surface for the shared platformer physics. */
 export class PlatformState extends Schema {
   @type('string') id = '';
-  @type('string') kind: 'solid' | 'checkpoint' = 'solid';
+  @type('string') kind: 'solid' | 'checkpoint' | 'jumpPad' = 'solid';
   @type('number') x = 0;
   @type('number') y = 0;
   /** Top surface height. */
   @type('number') z = 0;
   @type('number') width = 1;
   @type('number') depth = 1;
+  /** Jump-pad vertical boost (sim vz). 0 = use default. */
+  @type('number') boost = 0;
 }
 
-/** A hazard that toggles on/off on a fixed interval. */
+/** A hazard that toggles on/off on a fixed interval (or stays on when alwaysActive). */
 export class ObstacleState extends Schema {
   @type('string') id = '';
-  @type('string') kind: 'saw' | 'laser' | 'crusher' | 'spike' = 'spike';
+  @type('string') kind: 'saw' | 'laser' | 'crusher' | 'spike' | 'damage' = 'spike';
   @type('number') x = 0;
   @type('number') y = 0;
   @type('number') z = 0;
@@ -55,6 +57,10 @@ export class ObstacleState extends Schema {
   @type('number') intervalMs = 2000;
   @type('number') activeMs = 1000;
   @type('boolean') active = false;
+  /** HP removed per hit. 0 = use room default OBSTACLE_DAMAGE. */
+  @type('number') damage = 0;
+  /** When true, stays active (editor death zones). */
+  @type('boolean') alwaysActive = false;
 }
 
 export class RoomState extends Schema {
