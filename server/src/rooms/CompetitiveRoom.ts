@@ -494,7 +494,12 @@ export class CompetitiveRoom extends Room<RoomState> {
           target.x,
           target.y,
           range,
-          cone
+          cone,
+          {
+            shooterZ: shooter.z,
+            aimPitch: shooter.aimPitch,
+            targetZ: target.z,
+          }
         )
       ) {
         this.damagePlayer(target, damage);

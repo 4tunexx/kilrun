@@ -16,6 +16,8 @@ export interface NetPlayerState {
   z: number;
   vz: number;
   aimAngle: number;
+  /** Look pitch (radians, up positive). */
+  aimPitch?: number;
   cameraYaw: number;
   health: number;
   energy: number;
@@ -82,6 +84,7 @@ export interface PlayerInputMessage {
   moveX: number;
   moveY: number;
   aimAngle: number;
+  aimPitch: number;
   cameraYaw: number;
   crouch: boolean;
   sprint: boolean;

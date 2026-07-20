@@ -18,6 +18,8 @@ export class PlayerState extends Schema {
   @type('number') z = 0;
   @type('number') vz = 0;
   @type('number') aimAngle = 0;
+  /** Client look pitch (radians, up positive) — used for 3D hitscan. */
+  @type('number') aimPitch = 0;
   /** Client camera yaw (radians) — movement is camera-relative. */
   @type('number') cameraYaw = 0;
   @type('number') health = 100;

@@ -276,7 +276,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
     const onMove = (e: MouseEvent) => {
       yaw -= (e.movementX || 0) * 0.002;
       pitch -= (e.movementY || 0) * 0.002;
-      pitch = THREE.MathUtils.clamp(pitch, -0.35, 0.55);
+      pitch = THREE.MathUtils.clamp(pitch, -1.0, 0.78);
     };
     const onMouseDown = (e: MouseEvent) => {
       if (e.button === 0) attackPulse = true;
@@ -305,7 +305,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       if (lookStick.x || lookStick.y) {
         yaw -= lookStick.x * 1.1 * dt;
         pitch -= lookStick.y * 0.9 * dt;
-        pitch = THREE.MathUtils.clamp(pitch, -0.35, 0.55);
+        pitch = THREE.MathUtils.clamp(pitch, -1.0, 0.78);
       }
 
       const sprint =
@@ -392,7 +392,7 @@ export function MapPlayPreview({ doc, onClose }: { doc: MapDocument; onClose: ()
       playerPos.set(tx, ty, tz);
 
       // 3rd-person follow — same feel as Deathrun match
-      updateFollowCamera(camera, playerPos, yaw, pitch, dt, 8.4);
+      updateFollowCamera(camera, playerPos, yaw, pitch, dt, 5.8);
 
       const colliding = new Set<string>();
       roots.forEach((root, id) => {

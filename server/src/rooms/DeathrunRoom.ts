@@ -524,7 +524,13 @@ export class DeathrunRoom extends Room<RoomState> {
     const cone = trapper.weaponConeRadians > 0 ? trapper.weaponConeRadians : 0.18;
     for (const target of this.state.players.values()) {
       if (target.role !== 'runner' || !target.isAlive || target.hasFinished) continue;
-      if (isHitByShot(trapper.x, trapper.y, trapper.aimAngle, target.x, target.y, range, cone)) {
+      if (
+        isHitByShot(trapper.x, trapper.y, trapper.aimAngle, target.x, target.y, range, cone, {
+          shooterZ: trapper.z,
+          aimPitch: trapper.aimPitch,
+          targetZ: target.z,
+        })
+      ) {
         this.damagePlayer(target, damage);
         break;
       }

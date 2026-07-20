@@ -18,26 +18,27 @@ export const SPAWN_X = 2;
 export const SPAWN_Z = 0;
 
 export const PLAYER_RADIUS = 0.4;
-export const PLAYER_HEIGHT = 1.0;
+/** Match visual avatar height (~1.8) with a slightly shorter collision capsule. */
+export const PLAYER_HEIGHT = 1.7;
 
 /** Quake / Deathrun-inspired horizontal movement (world units / second). */
-export const MAX_GROUND_SPEED = 6.2;
-export const SPRINT_MULTIPLIER = 1.35;
-export const GROUND_ACCEL = 28;
-export const GROUND_FRICTION = 14;
-export const AIR_ACCEL = 10;
-export const AIR_CONTROL = 0.65;
-export const MAX_AIR_SPEED_MULT = 1.05;
+export const MAX_GROUND_SPEED = 6.4;
+export const SPRINT_MULTIPLIER = 1.38;
+export const GROUND_ACCEL = 32;
+export const GROUND_FRICTION = 16;
+export const AIR_ACCEL = 12;
+export const AIR_CONTROL = 0.78;
+export const MAX_AIR_SPEED_MULT = 1.08;
 export const CROUCH_SPEED_MULTIPLIER = 0.55;
 
 /** Vertical platformer feel. */
-export const GRAVITY = 28;
-export const JUMP_VELOCITY = 9.4;
+export const GRAVITY = 30;
+export const JUMP_VELOCITY = 9.8;
 /** Multiply ascending vz when jump is released (variable jump height). */
-export const JUMP_CUT_MULTIPLIER = 0.45;
-export const COYOTE_TIME_MS = 90;
-export const JUMP_BUFFER_MS = 110;
-export const MAX_FALL_SPEED = 22;
+export const JUMP_CUT_MULTIPLIER = 0.42;
+export const COYOTE_TIME_MS = 110;
+export const JUMP_BUFFER_MS = 130;
+export const MAX_FALL_SPEED = 24;
 /** Skin width for solid AABB push-out. */
 export const COLLISION_SKIN = 0.02;
 /** Below this height the runner falls into the void and is eliminated. */

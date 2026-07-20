@@ -68,8 +68,8 @@ import type { GameRoomName } from './net/connection';
 
 const MapEditor = dynamic(() => import('./editor/map-editor'), { ssr: false });
 
-const PITCH_SENS = 0.0028;
-const ZOOM = 9.5;
+const PITCH_SENS = 0.0026;
+const ZOOM = 5.8;
 
 interface KilrunEngineProps {
   joinOptions: JoinOptions;
@@ -238,7 +238,7 @@ export default function KilrunEngine({
     joystickRef.current = inputManager.joystick;
 
     let cameraYaw = 0;
-    let cameraPitch = 0.22;
+    let cameraPitch = 0.08;
     let sendAccumulatorMs = 0;
     let shootHeld = false;
     let wasShootEdge = false;
@@ -350,7 +350,7 @@ export default function KilrunEngine({
         inputManager.consumeMouseLookDeltaX();
         inputManager.consumeMouseLookDeltaY();
       }
-      cameraPitch = THREE.MathUtils.clamp(cameraPitch, -0.45, 0.5);
+      cameraPitch = THREE.MathUtils.clamp(cameraPitch, -1.0, 0.78);
 
       const localSessionId = connectionRef.current?.sessionId;
       const localState = localSessionId ? playersRef.current.get(localSessionId) : undefined;
@@ -410,6 +410,7 @@ export default function KilrunEngine({
             moveX,
             moveY,
             aimAngle: cameraYaw,
+            aimPitch: cameraPitch,
             cameraYaw,
             crouch: inputManager.isCrouchPressed(),
             sprint: inputManager.isSprintPressed(),

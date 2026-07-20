@@ -594,7 +594,13 @@ export class HordeRoom extends Room<RoomState> {
     let bestDist = range;
     for (const mon of this.monsters) {
       if (
-        !isHitByShot(shooter.x, shooter.y, shooter.aimAngle, mon.x, mon.y, range, cone)
+        !isHitByShot(shooter.x, shooter.y, shooter.aimAngle, mon.x, mon.y, range, cone, {
+          shooterZ: shooter.z,
+          aimPitch: shooter.aimPitch,
+          targetZ: mon.z,
+          targetHeight: 1.4,
+          targetRadius: mon.radius,
+        })
       ) {
         continue;
       }
