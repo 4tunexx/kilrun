@@ -241,7 +241,7 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const absS = Math.abs(Math.sin(yaw));
   const worldSizeX = sizeX * absC + sizeZ * absS;
   const worldSizeZ = sizeX * absS + sizeZ * absC;
-  const jump = e.jumpPad?.enabled;
+  const jump = e.jumpPad?.enabled || e.kind === 'jump_pad';
   const ice = !!e.surface?.ice;
   const conveyor = !!e.surface?.conveyor;
   let kind: SimPlatformKind = 'solid';
@@ -255,17 +255,20 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const topOnly =
     e.kind === 'finish' ||
     e.kind === 'checkpoint' ||
+    e.kind === 'jump_pad' ||
     jump ||
     ice ||
     conveyor ||
     !!e.teleport?.enabled ||
     model.includes('floor') ||
+    model.includes('stair') ||
     model.startsWith('platform');
   const wallLike =
     !topOnly &&
     (model.startsWith('wall') ||
       model.startsWith('column') ||
       model.includes('door') ||
+      e.kind === 'door' ||
       Math.abs(e.scale[1]) >= 1.15 ||
       e.solid === true);
   const height = topOnly
