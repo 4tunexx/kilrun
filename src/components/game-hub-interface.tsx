@@ -1131,11 +1131,6 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
                             VIP
                           </Badge>
                         )}
-                        {isPremium && (
-                          <Badge className="bg-amber-500 text-black h-5 px-1.5 text-[10px]">
-                            Premium
-                          </Badge>
-                        )}
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span className="inline-flex w-5 h-5 rounded-full bg-[#1b2838] border border-slate-600 items-center justify-center shrink-0 align-middle">
