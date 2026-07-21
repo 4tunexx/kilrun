@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Crosshair as CrosshairHud } from '../ui/crosshair';
+import { MapPlayPreview } from './map-play-preview';
 import { updateFollowCamera } from '../renderer/three-world';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import {
@@ -27,7 +28,7 @@ import {
   sanitizeTpsView,
   type TpsViewSettings,
 } from '../tps/tps-view-settings';
-import type { EditorEntity, PlayerAnimSlot } from './map-document';
+import type { EditorEntity, MapDocument, PlayerAnimSlot } from './map-document';
 import {
   PLAYER_ANIM_SLOTS,
   suggestPlayerBindings,
@@ -88,6 +89,7 @@ export function TpsViewStudio({
   isMobile,
   onClose,
   onPlayTest,
+  mapDoc,
   mapOverride,
   onSaveToMap,
   playerEntity,
@@ -97,6 +99,7 @@ export function TpsViewStudio({
   isMobile?: boolean;
   onClose: () => void;
   onPlayTest?: () => void;
+  mapDoc?: MapDocument;
   mapOverride?: TpsViewSettings | null;
   onSaveToMap?: (settings: TpsViewSettings) => void;
   /** Map player avatar — model + anim bindings. */
@@ -115,6 +118,7 @@ export function TpsViewStudio({
   const [pitch, setPitch] = useState(settings.camera.defaultPitch);
   const [clips, setClips] = useState<string[]>([]);
   const [modelBusy, setModelBusy] = useState(false);
+  const [previewSkins, setPreviewSkins] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const avatarReloadToken = useRef(0);
 
@@ -151,6 +155,7 @@ export function TpsViewStudio({
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    if (mapDoc) return;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a1220);
@@ -173,12 +178,7 @@ export function TpsViewStudio({
     );
     floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
-    const grid = new THREE.GridHelper(24, 24, 0x3a5080, 0x243050);
-    (grid.material as THREE.Material).opacity = 0.45;
-    (grid.material as THREE.Material).transparent = true;
-    scene.add(grid);
-
-    // Simple mannequin (swapped for real avatar when available)
+    // Simple fallback body (swapped for real avatar when available)
     const player = new THREE.Group();
     player.name = '__tps_preview_player__';
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x5ec8ff, roughness: 0.45 });
@@ -195,6 +195,7 @@ export function TpsViewStudio({
     scene.add(player);
 
     let avatarRoot: THREE.Object3D | null = null;
+    let avatarBaseScale = 1;
     const reloadAvatar = async () => {
       const token = ++avatarReloadToken.current;
       const ent = playerRef.current;
@@ -207,6 +208,7 @@ export function TpsViewStudio({
         }
         const root = loaded.scene;
         normalizeCharacter(root, 1.75);
+        avatarBaseScale = root.scale.x || 1;
         scene.add(root);
         avatarRoot = root;
         player.visible = false;
@@ -216,6 +218,7 @@ export function TpsViewStudio({
           scene.remove(avatarRoot);
           avatarRoot = null;
         }
+        avatarBaseScale = 1;
         player.visible = true;
       }
     };
@@ -234,13 +237,6 @@ export function TpsViewStudio({
       new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.7 })
     );
     scene.add(boomLine);
-
-    const platform = new THREE.Mesh(
-      new THREE.BoxGeometry(3.2, 0.2, 3.2),
-      new THREE.MeshStandardMaterial({ color: 0x2a3a55 })
-    );
-    platform.position.y = 0.1;
-    scene.add(platform);
 
     let disposed = false;
     let dragging = false;
@@ -302,8 +298,9 @@ export function TpsViewStudio({
       const s = settingsRef.current;
       const pl = s.player;
       const body = avatarRoot ?? player;
+      const entityScale = playerRef.current?.scale?.[1] ?? 1;
 
-      body.scale.setScalar(pl.scale);
+      body.scale.setScalar((avatarRoot ? avatarBaseScale : 1) * entityScale * pl.scale);
       body.position.y = pl.offsetY;
       body.rotation.y = localYaw + (pl.yawOffsetDeg * Math.PI) / 180;
 
@@ -336,7 +333,7 @@ export function TpsViewStudio({
       renderer.dispose();
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
     };
-  }, []);
+  }, [mapDoc]);
 
   // Sync pitch when default pitch slider changes
   useEffect(() => {
@@ -398,7 +395,9 @@ export function TpsViewStudio({
       className={`flex flex-col bg-[#0b1220] border-l border-white/10 ${
         isMobile
           ? 'fixed inset-0 z-[80]'
-          : 'w-[min(420px,42vw)] shrink-0 h-full max-h-full'
+          : mapDoc
+            ? 'w-[min(820px,72vw)] shrink-0 h-full max-h-full'
+            : 'w-[min(420px,42vw)] shrink-0 h-full max-h-full'
       }`}
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 bg-black/30">
@@ -406,7 +405,7 @@ export function TpsViewStudio({
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold text-white tracking-wide">3rd View</p>
           <p className="text-[10px] text-white/45 truncate">
-            Save overrides Play Test + live match 3rd-person engine
+            Preview the real map + camera framing used in Play Test / match
           </p>
         </div>
         <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-white/70" onClick={onClose}>
@@ -414,17 +413,36 @@ export function TpsViewStudio({
         </Button>
       </div>
 
-      <div className="relative h-[220px] shrink-0 border-b border-white/10 bg-black/40">
-        <div ref={hostRef} className="absolute inset-0 cursor-grab active:cursor-grabbing" />
+      <div className={mapDoc && !isMobile ? 'flex flex-1 min-h-0' : 'contents'}>
+      <div
+        className={`relative shrink-0 border-b border-white/10 bg-black/40 ${
+          mapDoc
+            ? isMobile
+              ? 'h-[42vh]'
+              : 'h-auto flex-1 min-w-0 border-b-0 border-r'
+            : 'h-[220px]'
+        }`}
+      >
+        {mapDoc ? (
+          <MapPlayPreview
+            doc={mapDoc}
+            embedded
+            tpsViewOverride={settings}
+            previewSkins={previewSkins}
+          />
+        ) : (
+          <div ref={hostRef} className="absolute inset-0 cursor-grab active:cursor-grabbing" />
+        )}
         <CrosshairHud visible style={settings.crosshair} />
         <p className="absolute bottom-2 left-2 text-[9px] text-white/40 pointer-events-none">
-          Drag to look · boom cyan
+          {mapDoc ? 'WASD / arrows in real map preview' : 'Drag to look · boom cyan'}
         </p>
         <p className="absolute bottom-2 right-2 text-[9px] text-cyan-200/50 tabular-nums pointer-events-none">
           yaw {(yaw * 180) / Math.PI | 0}° · pitch {((pitch * 180) / Math.PI).toFixed(0)}°
         </p>
       </div>
 
+      <div className={mapDoc && !isMobile ? 'w-[320px] shrink-0 flex flex-col min-h-0' : 'contents'}>
       <div className="flex border-b border-white/10">
         {tabs.map((t) => (
           <button
@@ -627,6 +645,19 @@ export function TpsViewStudio({
               unit="°"
               onChange={(v) => patch((s) => { s.player.yawOffsetDeg = v; })}
             />
+            <label className="flex items-center justify-between text-[11px] text-white/60">
+              Preview map player skins
+              <input
+                type="checkbox"
+                checked={previewSkins}
+                onChange={(e) => setPreviewSkins(e.target.checked)}
+                className="accent-violet-400"
+              />
+            </label>
+            <p className="text-[10px] text-white/35 leading-relaxed">
+              Off by default so editor-only skins do not appear unless you explicitly preview the
+              map player&apos;s saved attachments.
+            </p>
             <label className="flex items-center justify-between text-[11px] text-white/60">
               Hide body when zoomed in
               <input
@@ -845,6 +876,8 @@ export function TpsViewStudio({
             </Button>
           )}
         </div>
+      </div>
+      </div>
       </div>
     </div>
   );

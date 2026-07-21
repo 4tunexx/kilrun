@@ -154,14 +154,15 @@ export function mouseSensRadians(settings: TpsViewSettings): number {
 }
 
 /** Merge map override on top of global (map wins when present). */
-export function resolveTpsView(mapOverride?: TpsViewSettings | null): TpsViewSettings {
+export function resolveTpsView(mapOverride?: unknown | null): TpsViewSettings {
   const global = loadTpsViewSettings();
-  if (!mapOverride) return global;
+  if (!mapOverride || typeof mapOverride !== 'object') return global;
+  const override = mapOverride as Partial<TpsViewSettings>;
   return sanitizeTpsView({
     ...global,
-    ...mapOverride,
-    camera: { ...global.camera, ...mapOverride.camera },
-    crosshair: { ...global.crosshair, ...mapOverride.crosshair },
-    player: { ...global.player, ...mapOverride.player },
+    ...override,
+    camera: { ...global.camera, ...override.camera },
+    crosshair: { ...global.crosshair, ...override.crosshair },
+    player: { ...global.player, ...override.player },
   });
 }

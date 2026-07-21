@@ -811,15 +811,18 @@ export function MapEditor({
     if (!player) return;
     scheduleHistory();
     setDoc((d) => {
+      const playerSkins = attachments.length > 0 ? attachments : undefined;
       const entities = d.entities.map((e) =>
-        e.id === player.id ? { ...e, playerSkins: attachments } : e
+        e.id === player.id ? { ...e, playerSkins } : e
       );
       const next = { ...d, entities };
       docRef.current = next;
       apiRef.current?.setDoc(next);
       return next;
     });
-    toast({ title: 'Skins applied to player avatar' });
+    toast({
+      title: attachments.length > 0 ? 'Skins applied to player avatar' : 'Skins removed from player avatar',
+    });
   };
 
   const playerAvatar = findPlayerEntity(doc);
@@ -3423,6 +3426,7 @@ export function MapEditor({
                 setTpsViewOpen(false);
                 startPlay();
               }}
+              mapDoc={doc}
               mapOverride={doc.tpsView ? sanitizeTpsView(doc.tpsView) : null}
               onSaveToMap={saveTpsToMap}
               playerEntity={playerAvatar}
