@@ -1,6 +1,11 @@
 import type { SkinAttachment } from '@/lib/player-skins';
 import type { KilrunMode } from '@/lib/game-modes';
 import { normalizeKilrunMode } from '@/lib/game-modes';
+import type {
+  TpsCameraSettings,
+  TpsCrosshairSettings,
+  TpsPlayerViewSettings,
+} from '../tps/tps-view-settings';
 
 export type { KilrunMode };
 
@@ -17,6 +22,9 @@ export type EditorEntityKind =
   | 'player'
   | 'button'
   | 'light'
+  | 'door'
+  | 'jump_pad'
+  | 'action'
   // Horde
   | 'spawn_monster'
   | 'red_zone'
@@ -26,6 +34,26 @@ export type EditorEntityKind =
   // Competitive
   | 'spawn_team_a'
   | 'spawn_team_b';
+
+/**
+ * Invisible gameplay markers — shown as flags/cones in the editor only.
+ * Never rendered in Play Test or live match.
+ */
+export const INVISIBLE_MARKER_KINDS: EditorEntityKind[] = [
+  'start',
+  'spawn_runner',
+  'spawn_trapper',
+  'spawn_monster',
+  'spawn_team_a',
+  'spawn_team_b',
+  'wave_anchor',
+  'action',
+  'checkpoint',
+];
+
+export function isInvisibleMarkerKind(kind: EditorEntityKind): boolean {
+  return INVISIBLE_MARKER_KINDS.includes(kind);
+}
 
 /** Monster spawn authoring for Horde maps. */
 export interface EntityMonsterSpawn {
@@ -299,6 +327,21 @@ export interface EntityTeleport {
   cooldownMs?: number;
 }
 
+/**
+ * Prop interaction — play animation + optional damage / push when the player touches.
+ * Shown on props / traps / doors so rotating hazards can hurt or shove.
+ */
+export interface EntityInteract {
+  /** Play active animation while colliding / on trigger. */
+  playAnimationOnTouch?: boolean;
+  /** Damage the player on touch (mirrors hazard.enabled for quick authoring). */
+  damageOnTouch?: boolean;
+  /** Horizontal shove when the player touches this object. */
+  pushPlayer?: boolean;
+  /** Push strength in world units / second. */
+  pushStrength?: number;
+}
+
 /** Point light for map atmosphere (client visual; not simulated). */
 export interface EntityLight {
   color: string;
@@ -363,6 +406,8 @@ export interface EditorEntity {
   healthFloor?: EntityHealthFloor;
   /** kind === 'wave_anchor' */
   waveAnchor?: EntityWaveAnchor;
+  /** Prop / trap / door touch interaction (damage, push, anim). */
+  interact?: EntityInteract;
 }
 
 export interface EditorLayer {
@@ -397,10 +442,92 @@ export interface MapEnvironment {
 /** Embedded 3rd-person view override (from 3rd View tool). Shape matches tps-view-settings. */
 export type MapTpsView = {
   version?: 1;
-  camera?: Record<string, number>;
-  crosshair?: Record<string, number | string | boolean>;
-  player?: Record<string, number | boolean>;
+  camera?: Partial<TpsCameraSettings>;
+  crosshair?: Partial<TpsCrosshairSettings>;
+  player?: Partial<TpsPlayerViewSettings>;
 };
+
+/** Deathrun match timing / flow (Settings tab). */
+export interface DeathrunModeSettings {
+  warmupSec: number;
+  roundTimeSec: number;
+  /** Max runners that can spawn (place that many Runner Spawn entities). */
+  maxRunners: number;
+  trapperEnabled: boolean;
+}
+
+/** Horde match timing / wave flow (Settings tab). */
+export interface HordeModeSettings {
+  warmupSec: number;
+  waveTimeSec: number;
+  /** Seconds between waves. */
+  intermissionSec: number;
+  maxPlayers: number;
+  startingWave: number;
+}
+
+/** Competitive match timing / rounds (Settings tab). */
+export interface CompetitiveModeSettings {
+  warmupSec: number;
+  buyTimeSec: number;
+  roundTimeSec: number;
+  roundCount: number;
+  overtimeSec: number;
+}
+
+export interface MapModeSettings {
+  deathrun?: Partial<DeathrunModeSettings>;
+  horde?: Partial<HordeModeSettings>;
+  competitive?: Partial<CompetitiveModeSettings>;
+}
+
+export const DEFAULT_DEATHRUN_SETTINGS: DeathrunModeSettings = {
+  warmupSec: 10,
+  roundTimeSec: 180,
+  maxRunners: 8,
+  trapperEnabled: true,
+};
+
+export const DEFAULT_HORDE_SETTINGS: HordeModeSettings = {
+  warmupSec: 8,
+  waveTimeSec: 90,
+  intermissionSec: 12,
+  maxPlayers: 4,
+  startingWave: 1,
+};
+
+export const DEFAULT_COMPETITIVE_SETTINGS: CompetitiveModeSettings = {
+  warmupSec: 15,
+  buyTimeSec: 20,
+  roundTimeSec: 120,
+  roundCount: 6,
+  overtimeSec: 60,
+};
+
+export function ensureDeathrunSettings(doc: MapDocument): DeathrunModeSettings {
+  return { ...DEFAULT_DEATHRUN_SETTINGS, ...doc.modeSettings?.deathrun };
+}
+
+export function ensureHordeSettings(doc: MapDocument): HordeModeSettings {
+  return { ...DEFAULT_HORDE_SETTINGS, ...doc.modeSettings?.horde };
+}
+
+export function ensureCompetitiveSettings(doc: MapDocument): CompetitiveModeSettings {
+  return { ...DEFAULT_COMPETITIVE_SETTINGS, ...doc.modeSettings?.competitive };
+}
+
+export function defaultInteract(): EntityInteract {
+  return {
+    playAnimationOnTouch: false,
+    damageOnTouch: false,
+    pushPlayer: false,
+    pushStrength: 8,
+  };
+}
+
+export function ensureInteract(ent: EditorEntity): EntityInteract {
+  return { ...defaultInteract(), ...ent.interact };
+}
 
 export interface MapDocument {
   version: 1;
@@ -416,6 +543,8 @@ export interface MapDocument {
   environment?: MapEnvironment;
   /** Optional per-map 3rd-person camera / crosshair / player framing. */
   tpsView?: MapTpsView;
+  /** Per-mode match settings (warmup, round/wave times, spawn caps). */
+  modeSettings?: MapModeSettings;
   meta?: { createdAt?: string; updatedAt?: string };
 }
 
@@ -539,24 +668,25 @@ export function ensureLight(ent: EditorEntity): EntityLight {
 /** Whether this entity should export as a standable / jump-pad platform. */
 export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   if (ent.visible === false) return false;
+  if (isInvisibleMarkerKind(ent.kind)) return false;
   if (
     ent.kind === 'light' ||
-    ent.kind === 'spawn_runner' ||
-    ent.kind === 'spawn_trapper' ||
-    ent.kind === 'start' ||
     ent.kind === 'button' ||
     ent.kind === 'hazard' ||
     ent.kind === 'trap' ||
-    ent.kind === 'spawn_monster' ||
-    ent.kind === 'wave_anchor' ||
-    ent.kind === 'spawn_team_a' ||
-    ent.kind === 'spawn_team_b' ||
+    ent.kind === 'door' ||
+    ent.kind === 'action' ||
     ent.kind === 'red_zone'
   ) {
     return false;
   }
-  // Finish / revive / health floors are standable trigger volumes.
-  if (ent.kind === 'finish' || ent.kind === 'revive_pad' || ent.kind === 'health_floor') {
+  // Finish / revive / health floors / jump pads are standable trigger volumes.
+  if (
+    ent.kind === 'finish' ||
+    ent.kind === 'revive_pad' ||
+    ent.kind === 'health_floor' ||
+    ent.kind === 'jump_pad'
+  ) {
     return true;
   }
   // Jump pads / ice / conveyor always export (need a pad).
@@ -569,6 +699,8 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   if (ent.kind === 'checkpoint') return true;
   if (ent.model?.includes('floor')) return true;
   if (ent.model?.startsWith('platform')) return true;
+  // Stairs / walls marked solid by name heuristic when model suggests walkable geometry.
+  if (ent.model?.includes('stair') || ent.model?.includes('ramp')) return true;
   return false;
 }
 
@@ -578,31 +710,37 @@ export function entityKindLabel(kind: EditorEntityKind): string {
     case 'prop':
       return 'Prop';
     case 'start':
-      return 'Start (spawn point)';
+      return 'Runner Spawn';
     case 'finish':
       return 'Finish';
     case 'trap':
       return 'Trap';
     case 'hazard':
-      return 'Death zone';
+      return 'Death';
     case 'light':
       return 'Light';
     case 'player':
-      return 'Player (avatar only)';
+      return 'Player avatar';
     case 'button':
       return 'Button';
+    case 'door':
+      return 'Door';
+    case 'jump_pad':
+      return 'Jump pad';
+    case 'action':
+      return 'Action';
     case 'spawn_runner':
-      return 'Spawn Runner (= Start)';
+      return 'Runner Spawn';
     case 'spawn_trapper':
-      return 'Spawn Trapper';
+      return 'Trapper Spawn';
     case 'checkpoint':
       return 'Checkpoint';
     case 'group':
       return 'Group';
     case 'spawn_monster':
-      return 'Monster spawn';
+      return 'Enemy Spawn';
     case 'red_zone':
-      return 'Red zone';
+      return 'Death';
     case 'revive_pad':
       return 'Revive pad';
     case 'health_floor':
@@ -610,9 +748,9 @@ export function entityKindLabel(kind: EditorEntityKind): string {
     case 'wave_anchor':
       return 'Wave anchor';
     case 'spawn_team_a':
-      return 'Team A spawn';
+      return 'Player A Spawn';
     case 'spawn_team_b':
-      return 'Team B spawn';
+      return 'Player B Spawn';
     default:
       return kind;
   }
@@ -622,57 +760,95 @@ export function entityKindLabel(kind: EditorEntityKind): string {
 export function entityKindHint(kind: EditorEntityKind): string | null {
   switch (kind) {
     case 'player':
-      return 'Sets how you LOOK (model + animations). Does NOT place your spawn — use Start for that.';
+      return 'Sets how you LOOK (model + animations). Does NOT place your spawn — use Runner Spawn / Player Spawn.';
     case 'start':
-      return 'Where you appear in Play Test and as Runner in Deathrun. Place this on a solid floor.';
     case 'spawn_runner':
-      return 'Same job as Start (older name). Prefer Start.';
+      return 'Invisible spawn marker. Place one per runner slot (Deathrun up to 8). Sits on the floor.';
     case 'spawn_trapper':
-      return 'Where the Trapper role starts in Deathrun matches.';
+      return 'Invisible Trapper spawn marker for Deathrun.';
+    case 'spawn_team_a':
+      return 'Invisible Team A / Player A spawn marker.';
+    case 'spawn_team_b':
+      return 'Invisible Team B / Player B spawn marker.';
+    case 'spawn_monster':
+      return 'Invisible enemy spawn marker for Horde waves.';
     case 'prop':
-      return 'Floors / walls / decoration. Tick Solid so you can stand on it in Play Test.';
+      return 'Floors / walls / stairs / decoration. Tick Solid so you can stand on it.';
     case 'finish':
-      return 'Touch to clear the course in Play Test / Deathrun.';
+      return 'Touch to clear the course. Invisible marker unless you assign a model.';
     case 'checkpoint':
-      return 'Saves a soft-respawn if you fall into the void.';
+      return 'Invisible soft-respawn marker if you fall into the void.';
     case 'hazard':
+    case 'red_zone':
     case 'trap':
-      return 'Damages or kills on touch (see Properties).';
+      return 'Damages or kills on touch (see Interaction / Death).';
     case 'button':
       return 'Press Use / E nearby to trigger linked doors or traps.';
+    case 'door':
+      return 'Animated door / gate. Wire a Button or set Animation trigger.';
+    case 'jump_pad':
+      return 'Launches the player upward. Place on a floor surface.';
+    case 'action':
+      return 'Invisible trigger volume for scripted actions / signals.';
+    case 'light':
+      return 'Point light (visible bulb in editor; light in game).';
     default:
       return null;
   }
 }
 
-/** Entity kinds available in the Kind dropdown / palette for a mode. */
+/**
+ * Simplified entity palette for the Entities toolbar — mode-specific markers & gameplay.
+ * Props / floors still come from the Assets brush, not this list.
+ */
 export function entityKindsForMode(mode: KilrunMode): EditorEntityKind[] {
-  const shared: EditorEntityKind[] = ['prop', 'player', 'light', 'checkpoint'];
   if (mode === 'horde') {
     return [
-      ...shared,
       'start',
       'spawn_monster',
+      'hazard',
+      'light',
+      'door',
       'red_zone',
       'revive_pad',
       'health_floor',
-      'wave_anchor',
-      'hazard',
+      'player',
     ];
   }
   if (mode === 'competitive') {
-    return [...shared, 'spawn_team_a', 'spawn_team_b', 'hazard'];
+    return ['spawn_team_a', 'spawn_team_b', 'hazard', 'light', 'door', 'player'];
   }
   return [
-    ...shared,
     'start',
+    'spawn_trapper',
     'finish',
+    'button',
     'trap',
     'hazard',
-    'button',
-    'spawn_runner',
-    'spawn_trapper',
+    'door',
+    'jump_pad',
+    'action',
+    'light',
+    'checkpoint',
+    'player',
   ];
+}
+
+/** Kinds that place as invisible markers (no GLB) — editor shows a flag/cone only. */
+export function isMarkerEntityKind(kind: EditorEntityKind): boolean {
+  return (
+    isInvisibleMarkerKind(kind) ||
+    kind === 'finish' ||
+    kind === 'light' ||
+    kind === 'jump_pad' ||
+    kind === 'button' ||
+    kind === 'door' ||
+    kind === 'hazard' ||
+    kind === 'trap' ||
+    kind === 'red_zone' ||
+    kind === 'revive_pad' ||
+    kind === 'health_floor'
+  );
 }
 
 export function generateId(prefix = 'ent'): string {
@@ -759,11 +935,10 @@ function createEmptyDeathrunMap(name: string): MapDocument {
       },
       {
         id: generateId(),
-        name: 'Start',
+        name: 'Runner Spawn 1',
         kind: 'start',
-        model: 'figurine',
         layerId: spawnsId,
-        position: [0, 0.5, 2],
+        position: [0, 0, 2],
         rotation: [0, 0, 0],
         scale: [1, 1, 1],
         color: '#22c55e',
@@ -773,7 +948,6 @@ function createEmptyDeathrunMap(name: string): MapDocument {
         id: generateId(),
         name: 'Finish',
         kind: 'finish',
-        model: 'floor-square',
         layerId: spawnsId,
         position: [0, 0, 20],
         rotation: [0, 0, 0],
@@ -786,15 +960,17 @@ function createEmptyDeathrunMap(name: string): MapDocument {
         id: generateId(),
         name: 'Trapper Spawn',
         kind: 'spawn_trapper',
-        model: 'figurine-large',
         layerId: spawnsId,
-        position: [4, 0.5, 10],
+        position: [4, 0, 10],
         rotation: [0, 180, 0],
         scale: [1, 1, 1],
         color: '#ef4444',
         animation: defaultAnimation(),
       },
     ],
+    modeSettings: {
+      deathrun: { ...DEFAULT_DEATHRUN_SETTINGS },
+    },
     meta: { createdAt: now, updatedAt: now },
   };
 }
@@ -816,15 +992,14 @@ function createEmptyHordeMap(name: string): MapDocument {
     animation: defaultAnimation(),
   };
   const playerSpawns: EditorEntity[] = [
-    [-2, 0.5, -2],
-    [2, 0.5, -2],
-    [-2, 0.5, 2],
-    [2, 0.5, 2],
+    [-2, 0, -2],
+    [2, 0, -2],
+    [-2, 0, 2],
+    [2, 0, 2],
   ].map((pos, i) => ({
     id: generateId(),
     name: `Player Spawn ${i + 1}`,
     kind: 'start' as const,
-    model: 'figurine',
     layerId: spawnsId,
     position: pos as [number, number, number],
     rotation: [0, 0, 0] as [number, number, number],
@@ -850,11 +1025,10 @@ function createEmptyHordeMap(name: string): MapDocument {
       ...playerSpawns,
       {
         id: generateId(),
-        name: 'Monster Spawn N',
+        name: 'Enemy Spawn N',
         kind: 'spawn_monster',
-        model: 'figurine-large',
         layerId: spawnsId,
-        position: [0, 0.5, 10],
+        position: [0, 0, 10],
         rotation: [0, 180, 0],
         scale: [1, 1, 1],
         color: '#f43f5e',
@@ -863,11 +1037,10 @@ function createEmptyHordeMap(name: string): MapDocument {
       },
       {
         id: generateId(),
-        name: 'Monster Spawn S',
+        name: 'Enemy Spawn S',
         kind: 'spawn_monster',
-        model: 'figurine-large',
         layerId: spawnsId,
-        position: [0, 0.5, -10],
+        position: [0, 0, -10],
         rotation: [0, 0, 0],
         scale: [1, 1, 1],
         color: '#f43f5e',
@@ -890,45 +1063,20 @@ function createEmptyHordeMap(name: string): MapDocument {
       },
       {
         id: generateId(),
-        name: 'Revive Pad',
-        kind: 'revive_pad',
-        model: 'floor-square',
-        layerId: floorId,
-        position: [-6, 0, 0],
-        rotation: [0, 0, 0],
-        scale: [1.5, 1, 1.5],
-        color: '#60a5fa',
-        solid: true,
-        revive: defaultRevive(),
-        animation: defaultAnimation(),
-      },
-      {
-        id: generateId(),
-        name: 'Red Zone',
+        name: 'Death Zone',
         kind: 'red_zone',
-        model: 'floor-square',
-        layerId: floorId,
-        position: [0, 0, 6],
+        layerId: spawnsId,
+        position: [-6, 0, 0],
         rotation: [0, 0, 0],
         scale: [2, 1, 2],
         color: '#ef4444',
         redZone: defaultRedZone(),
         animation: defaultAnimation(),
       },
-      {
-        id: generateId(),
-        name: 'Wave 1 Anchor',
-        kind: 'wave_anchor',
-        model: 'target-a-square',
-        layerId: spawnsId,
-        position: [0, 0.2, 0],
-        rotation: [0, 0, 0],
-        scale: [0.6, 0.6, 0.6],
-        color: '#fbbf24',
-        waveAnchor: defaultWaveAnchor(),
-        animation: defaultAnimation(),
-      },
     ],
+    modeSettings: {
+      horde: { ...DEFAULT_HORDE_SETTINGS },
+    },
     meta: { createdAt: now, updatedAt: now },
   };
 }
@@ -942,9 +1090,8 @@ function createEmptyCompetitiveMap(name: string): MapDocument {
     pos: [number, number, number]
   ): EditorEntity => ({
     id: generateId(),
-    name: `Team ${team.toUpperCase()} Spawn ${index}`,
+    name: `Player ${team.toUpperCase()} Spawn ${index}`,
     kind: team === 'a' ? 'spawn_team_a' : 'spawn_team_b',
-    model: 'figurine',
     layerId: spawnsId,
     position: pos,
     rotation: [0, team === 'a' ? 0 : 180, 0],
@@ -992,15 +1139,18 @@ function createEmptyCompetitiveMap(name: string): MapDocument {
         solid: true,
         animation: defaultAnimation(),
       },
-      mkTeamSpawn('a', 1, [-4, 0.5, -6]),
-      mkTeamSpawn('a', 2, [-2, 0.5, -6]),
-      mkTeamSpawn('a', 3, [2, 0.5, -6]),
-      mkTeamSpawn('a', 4, [4, 0.5, -6]),
-      mkTeamSpawn('b', 1, [-4, 0.5, 6]),
-      mkTeamSpawn('b', 2, [-2, 0.5, 6]),
-      mkTeamSpawn('b', 3, [2, 0.5, 6]),
-      mkTeamSpawn('b', 4, [4, 0.5, 6]),
+      mkTeamSpawn('a', 1, [-4, 0, -6]),
+      mkTeamSpawn('a', 2, [-2, 0, -6]),
+      mkTeamSpawn('a', 3, [2, 0, -6]),
+      mkTeamSpawn('a', 4, [4, 0, -6]),
+      mkTeamSpawn('b', 1, [-4, 0, 6]),
+      mkTeamSpawn('b', 2, [-2, 0, 6]),
+      mkTeamSpawn('b', 3, [2, 0, 6]),
+      mkTeamSpawn('b', 4, [4, 0, 6]),
     ],
+    modeSettings: {
+      competitive: { ...DEFAULT_COMPETITIVE_SETTINGS },
+    },
     meta: { createdAt: now, updatedAt: now },
   };
 }
