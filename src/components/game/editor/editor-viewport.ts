@@ -9,6 +9,7 @@ import {
   defaultAnimation,
   defaultHazard,
   defaultHealthFloor,
+  defaultJumpPad,
   defaultLight,
   defaultMonsterSpawn,
   defaultRedZone,
@@ -18,9 +19,16 @@ import {
   entityExportsAsPlatform,
   entityKindLabel,
   generateId,
+  isInvisibleMarkerKind,
   snapToGrid,
   ensureEnvironment,
 } from './map-document';
+import {
+  applyTextureToObject,
+  makeBoundsWireBox,
+  makeSelectionOutline,
+  plantLocalFeet,
+} from './editor-mesh';
 
 function makeLightBulb(ent: EditorEntity): THREE.Group {
   const lightCfg = ensureLight(ent);
@@ -75,6 +83,7 @@ function syncLightParams(root: THREE.Object3D, ent: EditorEntity) {
 }
 import { AnimationDirector } from './animation-director';
 import { loadAnimatedPrefab, resolveModelSrc, scanModelClips } from './model-scan';
+import { DEFAULT_DOOR_MODEL, modelFootprint } from './prototype-catalog';
 
 export type TransformMode = 'translate' | 'rotate' | 'scale';
 
@@ -86,8 +95,8 @@ export interface EditorCameraState {
   pitch: number;
 }
 
-/** Primary pointer tool: Select picks; Brush places one click; Bucket hold-drags paint. */
-export type EditTool = 'select' | 'brush' | 'bucket';
+/** Primary pointer tool: Select picks; Brush places one click; Bucket hold-drags paint models; Paint applies texture on release. */
+export type EditTool = 'select' | 'brush' | 'bucket' | 'paint';
 
 export interface EditorViewportApi {
   setDoc: (doc: MapDocument) => void;
@@ -97,6 +106,7 @@ export interface EditorViewportApi {
   getSelectedIds: () => string[];
   setSelectedIds: (ids: string[]) => void;
   setBrush: (model: string | null) => void;
+  setPaintTexture: (url: string | null) => void;
   setEditTool: (tool: EditTool) => void;
   getEditTool: () => EditTool;
   setActiveLayerId: (id: string) => void;
@@ -120,12 +130,22 @@ export interface EditorViewportApi {
       | 'spawn_monster'
       | 'spawn_team_a'
       | 'spawn_team_b'
+      | 'action'
+      | 'jump_pad'
+      | 'door'
+      | 'checkpoint'
   ) => void;
   placeEntity: (kind: EditorEntity['kind'], model?: string) => void;
+  /** Arm click-to-place for an entity kind (next ground click places it on the floor). */
+  armPlaceKind: (kind: EditorEntity['kind'], model?: string) => void;
+  getPendingPlaceKind: () => EditorEntity['kind'] | null;
+  clearPendingPlace: () => void;
   stampEntities: (entities: EditorEntity[]) => void;
   duplicateSelected: (axis?: 'x' | 'y' | 'z') => void;
   /** Align multi-selection: shared bottom Y, edge-to-edge along X. Returns false if nothing snapped. */
   snapSelectedTogether: (idsOverride?: string[]) => boolean;
+  /** Drop selection onto the floor / supporting surface under each pivot. */
+  snapSelectedToFloor: (idsOverride?: string[]) => boolean;
   focusSelected: () => void;
   /** Restore default edit camera (or Start / edit focus). */
   resetCamera: () => void;
@@ -168,9 +188,14 @@ export function createEditorViewport(
   let selectedId: string | null = null;
   let selectedIds: string[] = [];
   let brush: string | null = 'floor-square';
-  /** Select = pick; Brush = single click place; Bucket = hold-drag continuous paint. */
+  /** Active texture URL for the Paint tool (applies on pointer release). */
+  let paintTextureUrl: string | null = null;
+  /** Select = pick; Brush = single click place; Bucket = hold-drag continuous paint; Paint = texture on release. */
   let editTool: EditTool = 'select';
   let stampEntitiesQueue: EditorEntity[] | null = null;
+  /** Click-to-place: next ground click places this entity kind on the floor surface. */
+  let pendingPlaceKind: EditorEntity['kind'] | null = null;
+  let pendingPlaceModel: string | undefined;
   let activeLayerId = doc.layers[0]?.id ?? '';
   let gridSnap = true;
   let snapY = false;
@@ -186,6 +211,11 @@ export function createEditorViewport(
   /** Paint Bucket only: hold LMB and drag to paint continuously. */
   let bucketPainting = false;
   let lastPaintCellKey: string | null = null;
+  /** Long-press multi-select (mobile): hold ~400ms to toggle additive pick. */
+  let longPressTimer: number | null = null;
+  let longPressId: string | null = null;
+  let longPressFired = false;
+  const selectionOutlines: THREE.BoxHelper[] = [];
   const keys = new Set<string>();
   let touchAxes = { moveX: 0, moveY: 0, lookX: 0, lookY: 0, sprint: false };
   const DEFAULT_CAM_POS = new THREE.Vector3(12, 14, 18);
@@ -440,24 +470,18 @@ export function createEditorViewport(
     return loadAnimatedPrefab(src);
   }
 
-  /** Shift mesh so local AABB feet sit on y=0 (no gap / float under props & avatars). */
-  function plantLocalFeet(obj: THREE.Object3D) {
-    obj.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(obj);
-    if (box.isEmpty()) return;
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-    obj.position.x -= center.x;
-    obj.position.z -= center.z;
-    obj.position.y -= box.min.y;
-  }
-
-  /** World Y of the top surface under a point (mesh AABB or ground). */
+  /** World Y of the top surface under a point (mesh AABB or ground). Ignores invisible markers. */
   function surfaceYAt(x: number, z: number, ignoreId?: string): number {
     let best = 0;
     roots.forEach((root, id) => {
       if (ignoreId && id === ignoreId) return;
       if (!root.visible) return;
+      const ent = doc.entities.find((e) => e.id === id);
+      // Markers / lights / buttons shouldn't lift props off the floor.
+      if (ent && (isInvisibleMarkerKind(ent.kind) || ent.kind === 'light' || ent.kind === 'button' || ent.kind === 'action')) {
+        return;
+      }
+      if (root.userData.isEditorMarker) return;
       const box = new THREE.Box3().setFromObject(root);
       if (box.isEmpty()) return;
       if (x < box.min.x - 0.05 || x > box.max.x + 0.05) return;
@@ -537,6 +561,7 @@ export function createEditorViewport(
       g.add(ring);
     }
     g.userData.kind = kind;
+    g.userData.isEditorMarker = true;
     return g;
   }
 
@@ -546,30 +571,87 @@ export function createEditorViewport(
 
   function applyEntityTexture(root: THREE.Object3D, ent: EditorEntity) {
     const url = ent.textureUrl || doc.environment?.defaultTextureUrl;
-    if (!url) return;
-    new THREE.TextureLoader().load(url, (tex) => {
-      tex.colorSpace = THREE.SRGBColorSpace;
-      root.traverse((o) => {
-        if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardMaterial) {
-          o.material = o.material.clone();
-          o.material.map = tex;
-          o.material.needsUpdate = true;
-        }
-      });
-    });
+    applyTextureToObject(root, url);
+  }
+
+  function clearSelectionOutlines() {
+    while (selectionOutlines.length) {
+      const h = selectionOutlines.pop()!;
+      h.removeFromParent();
+      h.geometry?.dispose?.();
+      (h.material as THREE.Material)?.dispose?.();
+    }
+  }
+
+  function refreshSelectionOutlines() {
+    clearSelectionOutlines();
+    const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+    for (const id of ids) {
+      const root = roots.get(id);
+      if (!root || !root.visible) continue;
+      try {
+        const outline = makeSelectionOutline(root, 0x38bdf8);
+        outline.userData.isSelectionOutline = true;
+        scene.add(outline);
+        selectionOutlines.push(outline);
+      } catch {
+        /* ignore empty meshes */
+      }
+    }
   }
 
   async function syncEntity(ent: EditorEntity) {
     let root = roots.get(ent.id);
 
     if (!root) {
-      if (ent.model || ent.customModelUrl) {
+      const wantsMarker =
+        isInvisibleMarkerKind(ent.kind) ||
+        ((ent.kind === 'finish' ||
+          ent.kind === 'jump_pad' ||
+          ent.kind === 'hazard' ||
+          ent.kind === 'red_zone' ||
+          ent.kind === 'revive_pad' ||
+          ent.kind === 'health_floor' ||
+          ent.kind === 'action' ||
+          ent.kind === 'door') &&
+          !ent.model &&
+          !ent.customModelUrl);
+
+      if (!wantsMarker && (ent.model || ent.customModelUrl)) {
         try {
           const loaded = await loadModel(ent.model, ent.customModelUrl);
           // Wrap + plant feet so entity.position.y is the stand surface (no gap/clip)
           root = new THREE.Group();
           plantLocalFeet(loaded.root);
           root.add(loaded.root);
+          // Measure real mesh size (local, unscaled) for collision export.
+          loaded.root.updateMatrixWorld(true);
+          const meshBox = new THREE.Box3().setFromObject(loaded.root);
+          if (!meshBox.isEmpty()) {
+            const size = new THREE.Vector3();
+            meshBox.getSize(size);
+            const measured: [number, number, number] = [
+              Math.max(0.05, size.x),
+              Math.max(0.05, size.y),
+              Math.max(0.05, size.z),
+            ];
+            const idx = doc.entities.findIndex((e) => e.id === ent.id);
+            if (idx >= 0) {
+              const prevSize = doc.entities[idx].collisionSize;
+              const changed =
+                !prevSize ||
+                Math.abs(prevSize[0] - measured[0]) > 0.01 ||
+                Math.abs(prevSize[1] - measured[1]) > 0.01 ||
+                Math.abs(prevSize[2] - measured[2]) > 0.01;
+              if (changed) {
+                const entities = doc.entities.slice();
+                entities[idx] = { ...entities[idx], collisionSize: measured };
+                doc = { ...doc, entities };
+                ent = entities[idx];
+                handlers.onDocChange(doc);
+              }
+            }
+          }
           entityClips.set(ent.id, loaded.clips);
           // Persist discovered clips back into document
           if (loaded.clipNames.length) {
@@ -603,6 +685,7 @@ export function createEditorViewport(
           );
         }
       } else if (
+        wantsMarker ||
         ent.kind === 'spawn_runner' ||
         ent.kind === 'spawn_trapper' ||
         ent.kind === 'start' ||
@@ -613,12 +696,19 @@ export function createEditorViewport(
         ent.kind === 'red_zone' ||
         ent.kind === 'revive_pad' ||
         ent.kind === 'health_floor' ||
-        ent.kind === 'wave_anchor'
+        ent.kind === 'wave_anchor' ||
+        ent.kind === 'action' ||
+        ent.kind === 'jump_pad' ||
+        ent.kind === 'door' ||
+        ent.kind === 'checkpoint'
       ) {
         const fallbackColor =
-          ent.kind === 'finish'
+          ent.kind === 'finish' || ent.kind === 'jump_pad'
             ? '#fbbf24'
-            : ent.kind === 'spawn_trapper' || ent.kind === 'spawn_monster' || ent.kind === 'red_zone'
+            : ent.kind === 'spawn_trapper' ||
+                ent.kind === 'spawn_monster' ||
+                ent.kind === 'red_zone' ||
+                ent.kind === 'hazard'
               ? '#ef4444'
               : ent.kind === 'spawn_team_a'
                 ? '#38bdf8'
@@ -628,18 +718,28 @@ export function createEditorViewport(
                     ? '#34d399'
                     : ent.kind === 'revive_pad'
                       ? '#60a5fa'
-                      : ent.kind === 'wave_anchor'
+                      : ent.kind === 'wave_anchor' || ent.kind === 'action'
                         ? '#fbbf24'
-                        : '#22c55e';
-        root = makeSpawnMarker(ent.kind, ent.color ?? fallbackColor);
+                        : ent.kind === 'door'
+                          ? '#a78bfa'
+                          : '#22c55e';
+        const markerKind =
+          ent.kind === 'jump_pad'
+            ? 'finish'
+            : ent.kind === 'door' || ent.kind === 'action' || ent.kind === 'checkpoint'
+              ? 'start'
+              : ent.kind;
+        root = makeSpawnMarker(markerKind, ent.color ?? fallbackColor);
       } else if (ent.kind === 'button') {
         root = new THREE.Mesh(
           new THREE.CylinderGeometry(0.45, 0.5, 0.2, 16),
           new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0xf59e0b, emissiveIntensity: 0.35 })
         );
         root.position.y = 0.1;
+        root.userData.isEditorMarker = true;
       } else if (ent.kind === 'light') {
         root = makeLightBulb(ent);
+        root.userData.isEditorMarker = true;
       } else if (ent.kind === 'player') {
         root = new THREE.Mesh(
           new THREE.CapsuleGeometry(0.35, 0.9, 4, 8),
@@ -697,56 +797,60 @@ export function createEditorViewport(
     );
     for (const ent of doc.entities) {
       const isSelected = selectedSet.has(ent.id);
-      // Green/red wire pads are collision helpers — not multi-select.
-      // Default: only the selection, so the scene isn't covered in green boxes.
       const drawCollision = showAllCollisionGizmos || isSelected;
-
+      const root = roots.get(ent.id);
       const isHz = ent.kind === 'hazard' || ent.hazard?.enabled;
+
       if (drawCollision && isHz) {
-        const box = new THREE.Mesh(
-          new THREE.BoxGeometry(
-            Math.max(0.5, Math.abs(ent.scale[0]) * 1.6),
-            Math.max(0.2, Math.abs(ent.scale[1]) * 0.4),
-            Math.max(0.5, Math.abs(ent.scale[2]) * 1.6)
-          ),
-          new THREE.MeshBasicMaterial({
-            color: 0xff2244,
-            wireframe: true,
-            transparent: true,
-            opacity: 0.85,
-            depthTest: false,
-          })
-        );
-        box.position.set(ent.position[0], ent.position[1] + 0.05, ent.position[2]);
-        box.rotation.set(
-          THREE.MathUtils.degToRad(ent.rotation[0]),
-          THREE.MathUtils.degToRad(ent.rotation[1]),
-          THREE.MathUtils.degToRad(ent.rotation[2])
-        );
+        const box =
+          (root && makeBoundsWireBox(root, 0xff2244)) ||
+          (() => {
+            const m = new THREE.Mesh(
+              new THREE.BoxGeometry(
+                Math.max(0.5, Math.abs(ent.scale[0]) * 1.6),
+                Math.max(0.2, Math.abs(ent.scale[1]) * 0.4),
+                Math.max(0.5, Math.abs(ent.scale[2]) * 1.6)
+              ),
+              new THREE.MeshBasicMaterial({
+                color: 0xff2244,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.85,
+                depthTest: false,
+              })
+            );
+            m.position.set(ent.position[0], ent.position[1] + 0.05, ent.position[2]);
+            return m;
+          })();
         gizmoGroup.add(box);
       }
 
       const showSolid = entityExportsAsPlatform(ent);
       if (drawCollision && showSolid && !isHz) {
-        const pad = new THREE.Mesh(
-          new THREE.BoxGeometry(
-            Math.max(0.5, Math.abs(ent.scale[0]) * 2),
-            0.08,
-            Math.max(0.5, Math.abs(ent.scale[2]) * 2)
-          ),
-          new THREE.MeshBasicMaterial({
-            color: ent.jumpPad?.enabled ? 0x38bdf8 : 0x22c55e,
-            wireframe: true,
-            transparent: true,
-            opacity: 0.75,
-            depthTest: false,
-          })
-        );
-        pad.position.set(ent.position[0], ent.position[1] + 0.04, ent.position[2]);
+        const color = ent.jumpPad?.enabled || ent.kind === 'jump_pad' ? 0x38bdf8 : 0x22c55e;
+        const pad =
+          (root && makeBoundsWireBox(root, color, { flattenY: true })) ||
+          (() => {
+            const m = new THREE.Mesh(
+              new THREE.BoxGeometry(
+                Math.max(0.5, Math.abs(ent.scale[0]) * 2),
+                0.08,
+                Math.max(0.5, Math.abs(ent.scale[2]) * 2)
+              ),
+              new THREE.MeshBasicMaterial({
+                color,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.75,
+                depthTest: false,
+              })
+            );
+            m.position.set(ent.position[0], ent.position[1] + 0.04, ent.position[2]);
+            return m;
+          })();
         gizmoGroup.add(pad);
       }
 
-      // Trap / door ← button links (always visible so wiring stays clear)
       const listen = ent.animation?.listenToEntityId;
       const activates = ent.animation?.activatesEntityIds ?? [];
       const pairs: [string, string][] = [];
@@ -770,6 +874,7 @@ export function createEditorViewport(
         gizmoGroup.add(line);
       }
     }
+    refreshSelectionOutlines();
   }
 
   function attachSelectionGizmo() {
@@ -871,14 +976,7 @@ export function createEditorViewport(
 
     const modelName =
       model ??
-      (kind === 'prop' ||
-      kind === 'player' ||
-      kind === 'button' ||
-      kind === 'trap' ||
-      kind === 'hazard' ||
-      kind === 'finish' ||
-      kind === 'start' ||
-      kind.startsWith('spawn')
+      (kind === 'prop' || kind === 'player' || kind === 'trap' || kind === 'door'
         ? brush ?? undefined
         : undefined);
 
@@ -886,18 +984,19 @@ export function createEditorViewport(
       kind === 'finish' ||
       kind === 'health_floor' ||
       kind === 'revive_pad' ||
-      kind === 'red_zone';
+      kind === 'red_zone' ||
+      kind === 'jump_pad';
 
     const defaultColor =
       kind === 'spawn_runner' || kind === 'start'
         ? '#22c55e'
         : kind === 'spawn_trapper' || kind === 'spawn_monster' || kind === 'red_zone'
           ? '#ef4444'
-          : kind === 'finish' || kind === 'wave_anchor'
+          : kind === 'finish' || kind === 'wave_anchor' || kind === 'jump_pad' || kind === 'action'
             ? '#fbbf24'
             : kind === 'button'
               ? '#fbbf24'
-              : kind === 'trap'
+              : kind === 'trap' || kind === 'door'
                 ? '#a78bfa'
                 : kind === 'hazard'
                   ? '#ef4444'
@@ -913,41 +1012,55 @@ export function createEditorViewport(
                             ? '#60a5fa'
                             : undefined;
 
-    const defaultModel =
-      kind === 'light'
-        ? undefined
-        : kind === 'start' ||
-            kind === 'spawn_runner' ||
-            kind === 'spawn_trapper' ||
-            kind === 'spawn_monster' ||
-            kind === 'spawn_team_a' ||
-            kind === 'spawn_team_b'
-          ? modelName ?? (kind === 'spawn_trapper' || kind === 'spawn_monster' ? 'figurine-large' : 'figurine')
-          : kind === 'finish' ||
-              kind === 'health_floor' ||
-              kind === 'revive_pad' ||
-              kind === 'red_zone'
-            ? modelName ?? 'floor-square'
-            : kind === 'wave_anchor'
-              ? modelName ?? 'target-a-square'
-              : modelName;
+    // Invisible markers / gameplay entities: no GLB by default (editor shows flag/cone only).
+    // Doors always get a real door model so they aren't invisible markers.
+    const markerNoModel =
+      isInvisibleMarkerKind(kind) ||
+      kind === 'finish' ||
+      kind === 'jump_pad' ||
+      kind === 'light' ||
+      kind === 'action' ||
+      kind === 'hazard' ||
+      kind === 'button' ||
+      kind === 'red_zone' ||
+      kind === 'revive_pad';
+
+    const defaultModel = markerNoModel
+      ? undefined
+      : kind === 'door'
+        ? modelName ?? DEFAULT_DOOR_MODEL
+        : kind === 'health_floor'
+          ? modelName ?? 'floor-square'
+          : modelName;
+
+    const runnerCount =
+      kind === 'start' || kind === 'spawn_runner'
+        ? doc.entities.filter((e) => e.kind === 'start' || e.kind === 'spawn_runner').length + 1
+        : 0;
+
+    const foot = defaultModel ? modelFootprint(defaultModel) : null;
 
     const ent: EditorEntity = {
       id: generateId(),
-      name: entityKindLabel(kind),
+      name:
+        kind === 'start' || kind === 'spawn_runner'
+          ? `Runner Spawn ${runnerCount}`
+          : entityKindLabel(kind),
       kind,
       model: defaultModel,
       layerId: activeLayerId,
-      position: [x, padKinds ? Math.max(0, y) : y, z],
+      position: [x, Math.max(0, y), z],
       rotation: [0, 0, 0],
       scale: padKinds ? [2, 1, 2] : [1, 1, 1],
       color: defaultColor,
       opacity: 1,
       visible: true,
-      solid: padKinds && kind !== 'red_zone' ? true : undefined,
+      solid: kind === 'door' ? true : padKinds && kind !== 'red_zone' ? true : undefined,
+      collisionSize: foot ?? undefined,
       animation: defaultAnimation(),
       playerAnims: kind === 'player' ? {} : undefined,
       hazard: kind === 'hazard' ? defaultHazard() : undefined,
+      jumpPad: kind === 'jump_pad' ? defaultJumpPad() : undefined,
       light: kind === 'light' ? defaultLight() : undefined,
       monsterSpawn: kind === 'spawn_monster' ? defaultMonsterSpawn() : undefined,
       redZone: kind === 'red_zone' ? defaultRedZone() : undefined,
@@ -968,17 +1081,18 @@ export function createEditorViewport(
   function updateCursor() {
     if (freeFly) renderer.domElement.style.cursor = 'none';
     else if (measureMode) renderer.domElement.style.cursor = 'cell';
+    else if (pendingPlaceKind) renderer.domElement.style.cursor = 'crosshair';
     else if (editTool === 'select') renderer.domElement.style.cursor = 'default';
-    else if (editTool === 'bucket') renderer.domElement.style.cursor = 'cell';
+    else if (editTool === 'bucket' || editTool === 'paint') renderer.domElement.style.cursor = 'cell';
     else renderer.domElement.style.cursor = 'crosshair';
   }
 
   function applyToolCameraLock() {
-    // Paint Bucket disables orbit/transform so drag paints instead of spinning the view.
-    const lockCam = editTool === 'bucket' || freeFly || measureMode;
+    // Paint Bucket / texture paint disable orbit/transform so drag paints instead of spinning the view.
+    const lockCam = editTool === 'bucket' || editTool === 'paint' || freeFly || measureMode;
     orbit.enabled = !lockCam && !bucketPainting;
-    transform.enabled = editTool !== 'bucket' && !freeFly && !measureMode;
-    if (editTool === 'bucket') transform.detach();
+    transform.enabled = editTool !== 'bucket' && editTool !== 'paint' && !freeFly && !measureMode;
+    if (editTool === 'bucket' || editTool === 'paint') transform.detach();
     updateCursor();
   }
 
@@ -1060,7 +1174,13 @@ export function createEditorViewport(
     if (ev.button !== 0) return;
     downX = ev.clientX;
     downY = ev.clientY;
-    if (ev.altKey && !freeFly && !measureMode && editTool !== 'bucket') {
+    longPressFired = false;
+    longPressId = null;
+    if (longPressTimer != null) {
+      window.clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    if (ev.altKey && !freeFly && !measureMode && editTool !== 'bucket' && editTool !== 'paint') {
       altBoxPending = true;
       boxStart = { x: ev.clientX, y: ev.clientY };
       return;
@@ -1081,6 +1201,45 @@ export function createEditorViewport(
         renderer.domElement.setPointerCapture(ev.pointerId);
       } catch {
         /* ignore */
+      }
+      return;
+    }
+    // Texture paint: arm on down; apply on release under finger/cursor.
+    if (!freeFly && !measureMode && editTool === 'paint' && paintTextureUrl) {
+      orbit.enabled = false;
+      try {
+        renderer.domElement.setPointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    // Mobile / touch long-press → additive multi-select.
+    if (!freeFly && !measureMode && editTool === 'select' && !ev.shiftKey && !ev.altKey) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const pickables = Array.from(roots.values()).filter((r) => r.visible);
+      const hits = raycaster.intersectObjects(pickables, true);
+      if (hits.length) {
+        let o: THREE.Object3D | null = hits[0].object;
+        while (o && !o.userData.entityId) o = o.parent;
+        if (o?.userData.entityId) {
+          longPressId = o.userData.entityId as string;
+          longPressTimer = window.setTimeout(() => {
+            if (!longPressId) return;
+            longPressFired = true;
+            select(longPressId, true);
+            try {
+              if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+                (navigator as Navigator & { vibrate?: (n: number) => void }).vibrate?.(12);
+              }
+            } catch {
+              /* ignore */
+            }
+          }, 420);
+        }
       }
     }
   };
@@ -1130,12 +1289,51 @@ export function createEditorViewport(
 
     const picked: string[] = [];
     const tmp = new THREE.Vector3();
+    const corners = [
+      new THREE.Vector3(),
+      new THREE.Vector3(),
+      new THREE.Vector3(),
+      new THREE.Vector3(),
+      new THREE.Vector3(),
+      new THREE.Vector3(),
+      new THREE.Vector3(),
+      new THREE.Vector3(),
+    ];
     roots.forEach((root, id) => {
       if (!root.visible) return;
-      tmp.copy(root.position).project(camera);
-      const sx = (tmp.x * 0.5 + 0.5) * hostRect.width + hostRect.left;
-      const sy = (-tmp.y * 0.5 + 0.5) * hostRect.height + hostRect.top;
-      if (sx >= x1 && sx <= x2 && sy >= y1 && sy <= y2) picked.push(id);
+      root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(root);
+      if (box.isEmpty()) {
+        tmp.copy(root.position).project(camera);
+        const sx = (tmp.x * 0.5 + 0.5) * hostRect.width + hostRect.left;
+        const sy = (-tmp.y * 0.5 + 0.5) * hostRect.height + hostRect.top;
+        if (sx >= x1 && sx <= x2 && sy >= y1 && sy <= y2) picked.push(id);
+        return;
+      }
+      // Project real mesh AABB corners — selection matches the model, not just the pivot.
+      corners[0].set(box.min.x, box.min.y, box.min.z);
+      corners[1].set(box.min.x, box.min.y, box.max.z);
+      corners[2].set(box.min.x, box.max.y, box.min.z);
+      corners[3].set(box.min.x, box.max.y, box.max.z);
+      corners[4].set(box.max.x, box.min.y, box.min.z);
+      corners[5].set(box.max.x, box.min.y, box.max.z);
+      corners[6].set(box.max.x, box.max.y, box.min.z);
+      corners[7].set(box.max.x, box.max.y, box.max.z);
+      let minSX = Infinity;
+      let maxSX = -Infinity;
+      let minSY = Infinity;
+      let maxSY = -Infinity;
+      for (const c of corners) {
+        tmp.copy(c).project(camera);
+        const sx = (tmp.x * 0.5 + 0.5) * hostRect.width + hostRect.left;
+        const sy = (-tmp.y * 0.5 + 0.5) * hostRect.height + hostRect.top;
+        minSX = Math.min(minSX, sx);
+        maxSX = Math.max(maxSX, sx);
+        minSY = Math.min(minSY, sy);
+        maxSY = Math.max(maxSY, sy);
+      }
+      const overlaps = !(maxSX < x1 || minSX > x2 || maxSY < y1 || minSY > y2);
+      if (overlaps) picked.push(id);
     });
     if (!picked.length) {
       select(null);
@@ -1151,6 +1349,14 @@ export function createEditorViewport(
 
   const onPointerUp = (ev: PointerEvent) => {
     if (ev.button !== 0) return;
+    if (longPressTimer != null) {
+      window.clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    const wasLongPress = longPressFired;
+    longPressFired = false;
+    longPressId = null;
+
     const wasBucketPainting = bucketPainting;
     if (bucketPainting) {
       bucketPainting = false;
@@ -1170,8 +1376,46 @@ export function createEditorViewport(
     // Short Alt+click: cancel pending box-select and continue (force-stack / normal click).
     if (altBoxPending) altBoxPending = false;
     if ((transform as unknown as { dragging: boolean }).dragging) return;
+
+    // Texture paint: apply texture to the mesh under the pointer on release (no properties menu).
+    if (editTool === 'paint' && paintTextureUrl) {
+      try {
+        renderer.domElement.releasePointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      applyToolCameraLock();
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const pickables = Array.from(roots.values()).filter((r) => r.visible);
+      const hits = raycaster.intersectObjects(pickables, true);
+      if (hits.length) {
+        let o: THREE.Object3D | null = hits[0].object;
+        while (o && !o.userData.entityId) o = o.parent;
+        const id = o?.userData.entityId as string | undefined;
+        if (id) {
+          const tex = paintTextureUrl;
+          doc = {
+            ...doc,
+            entities: doc.entities.map((e) =>
+              e.id === id ? { ...e, textureUrl: tex } : e
+            ),
+          };
+          const ent = doc.entities.find((e) => e.id === id);
+          const root = roots.get(id);
+          if (ent && root) applyEntityTexture(root, ent);
+          handlers.onDocChange(doc);
+        }
+      }
+      return;
+    }
+
     // Paint Bucket already painted on down/move — skip click place.
     if (wasBucketPainting || editTool === 'bucket') return;
+    // Long-press already toggled multi-select — don't re-select on release.
+    if (wasLongPress) return;
     const dist = Math.hypot(ev.clientX - downX, ev.clientY - downY);
     if (dist > 5) return;
 
@@ -1220,6 +1464,24 @@ export function createEditorViewport(
       let o: THREE.Object3D | null = hits[0].object;
       while (o && !o.userData.entityId) o = o.parent;
       if (o?.userData.entityId) hitEntityId = o.userData.entityId as string;
+    }
+
+    // Armed entity placement: click floor (or stack on mesh) to place on surface top.
+    if (pendingPlaceKind) {
+      const placedPt = pickPlacePoint(true);
+      const p = placedPt?.point ?? groundHits[0]?.point;
+      if (p) {
+        const kind = pendingPlaceKind;
+        const model = pendingPlaceModel;
+        // Keep armed for multi-place unless Shift is held to place-once.
+        if (ev.shiftKey) {
+          pendingPlaceKind = null;
+          pendingPlaceModel = undefined;
+        }
+        placeAt(p, kind, model);
+        updateCursor();
+        return;
+      }
     }
 
     // Prefab stamp wins over brush paint (armed from Prefabs tab).
@@ -1317,6 +1579,11 @@ export function createEditorViewport(
   };
 
   const onMouseMove = (ev: MouseEvent) => {
+    if (longPressTimer != null && Math.hypot(ev.clientX - downX, ev.clientY - downY) > 8) {
+      window.clearTimeout(longPressTimer);
+      longPressTimer = null;
+      longPressId = null;
+    }
     if (bucketPainting && editTool === 'bucket' && !freeFly && !measureMode) {
       paintBucketAtEvent(ev);
       return;
@@ -1429,6 +1696,13 @@ export function createEditorViewport(
       attachSelectionGizmo();
     }
     director.update(dt);
+    for (const outline of selectionOutlines) {
+      try {
+        outline.update();
+      } catch {
+        /* ignore */
+      }
+    }
     renderer.render(scene, camera);
   };
   raf = requestAnimationFrame(tick);
@@ -1457,6 +1731,9 @@ export function createEditorViewport(
       brush = m;
       if (m) stampEntitiesQueue = null;
     },
+    setPaintTexture: (url) => {
+      paintTextureUrl = url;
+    },
     setEditTool: (tool) => {
       editTool = tool;
       bucketPainting = false;
@@ -1470,8 +1747,14 @@ export function createEditorViewport(
         }
         if (!brush) brush = 'floor-square';
       }
+      if (tool === 'paint') {
+        if (freeFly) setFreeFly(false);
+        if (!paintTextureUrl) {
+          paintTextureUrl = doc.environment?.defaultTextureUrl ?? null;
+        }
+      }
       applyToolCameraLock();
-      if (tool !== 'bucket' && selectedId && roots.has(selectedId) && !freeFly) {
+      if (tool !== 'bucket' && tool !== 'paint' && selectedId && roots.has(selectedId) && !freeFly) {
         const selEnt = doc.entities.find((e) => e.id === selectedId);
         if (!layerMeta(selEnt?.layerId ?? '')?.locked) {
           transform.attach(roots.get(selectedId)!);
@@ -1519,24 +1802,37 @@ export function createEditorViewport(
       handlers.onDocChange(doc);
     },
     placeSpawn: (kind) => {
-      const t = new THREE.Vector3();
-      camera.getWorldDirection(t);
-      const p = camera.position.clone().add(t.multiplyScalar(8));
-      p.y = surfaceYAt(p.x, p.z);
-      const model =
-        kind === 'finish'
-          ? 'floor-square'
-          : kind === 'spawn_trapper' || kind === 'spawn_monster'
-            ? 'figurine-large'
-            : 'figurine';
-      placeAt(p, kind, model);
+      // Click-to-place on the floor — not camera-forward dump.
+      pendingPlaceKind = kind;
+      pendingPlaceModel = undefined;
+      if (editTool === 'bucket' || editTool === 'paint') editTool = 'select';
+      if (freeFly) setFreeFly(false);
+      applyToolCameraLock();
+      updateCursor();
+      handlers.onPlaceResult?.('ok', `Click floor to place ${entityKindLabel(kind)}`);
     },
     placeEntity: (kind, model) => {
-      const t = new THREE.Vector3();
-      camera.getWorldDirection(t);
-      const p = camera.position.clone().add(t.multiplyScalar(8));
-      p.y = surfaceYAt(p.x, p.z);
-      placeAt(p, kind, model);
+      pendingPlaceKind = kind;
+      pendingPlaceModel = model;
+      if (editTool === 'bucket' || editTool === 'paint') editTool = 'select';
+      if (freeFly) setFreeFly(false);
+      applyToolCameraLock();
+      updateCursor();
+      handlers.onPlaceResult?.('ok', `Click floor to place ${entityKindLabel(kind)}`);
+    },
+    armPlaceKind: (kind, model) => {
+      pendingPlaceKind = kind;
+      pendingPlaceModel = model;
+      if (editTool === 'bucket' || editTool === 'paint') editTool = 'select';
+      if (freeFly) setFreeFly(false);
+      applyToolCameraLock();
+      updateCursor();
+    },
+    getPendingPlaceKind: () => pendingPlaceKind,
+    clearPendingPlace: () => {
+      pendingPlaceKind = null;
+      pendingPlaceModel = undefined;
+      updateCursor();
     },
     stampEntities: (entities) => {
       stampEntitiesQueue = entities;
@@ -1717,6 +2013,41 @@ export function createEditorViewport(
       attachSelectionGizmo();
       refreshGizmos();
       handlers.onSelectionChange?.(selectedIds);
+      return true;
+    },
+    snapSelectedToFloor: (idsOverride) => {
+      const ids =
+        idsOverride && idsOverride.length
+          ? idsOverride
+          : selectedIds.length
+            ? selectedIds
+            : selectedId
+              ? [selectedId]
+              : [];
+      if (!ids.length) return false;
+      const updates = new Map<string, [number, number, number]>();
+      for (const id of ids) {
+        const e = doc.entities.find((x) => x.id === id);
+        if (!e) continue;
+        if (layerMeta(e.layerId)?.locked) continue;
+        const y = Math.max(0, surfaceYAt(e.position[0], e.position[2], id));
+        updates.set(id, [e.position[0], y, e.position[2]]);
+      }
+      if (!updates.size) return false;
+      doc = {
+        ...doc,
+        entities: doc.entities.map((e) => {
+          const pos = updates.get(e.id);
+          return pos ? { ...e, position: pos } : e;
+        }),
+      };
+      for (const [id, pos] of updates) {
+        const root = roots.get(id);
+        if (root) root.position.set(pos[0], pos[1], pos[2]);
+      }
+      handlers.onDocChange(doc);
+      attachSelectionGizmo();
+      refreshGizmos();
       return true;
     },
     focusSelected: () => {

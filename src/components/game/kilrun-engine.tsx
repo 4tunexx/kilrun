@@ -56,6 +56,7 @@ import {
   mapDocToSimFinishes,
   mapDocToSimHazards,
   mapDocToSimPlatforms,
+  mapDocToSimActions,
   mapDocToSimButtons,
   mapDocToSimTeleports,
   mapDocToWorldBounds,
@@ -141,7 +142,7 @@ export default function KilrunEngine({
         if (cancelled || !cloud?.document) return;
         cloudDocRef.current = cloud.document;
         if (cloud.document.tpsView) {
-          const merged = resolveTpsView(cloud.document.tpsView);
+          const merged = resolveTpsView(cloud.document.tpsView as TpsViewSettings);
           tpsRef.current = merged;
           setTpsHud(merged);
         }
@@ -182,6 +183,7 @@ export default function KilrunEngine({
     const obstacles = mapDocToSimHazards(doc);
     const finishes = mapDocToSimFinishes(doc);
     const buttons = mapDocToSimButtons(doc);
+    const actions = mapDocToSimActions(doc);
     const teleports = mapDocToSimTeleports(doc);
     const spawns = mapDocSpawnPoints(doc);
     const playerSpawns = mapDocPlayerSpawns(doc);
@@ -198,6 +200,7 @@ export default function KilrunEngine({
       obstacles,
       finishes,
       buttons,
+      actions,
       teleports,
       spawn: spawns.runner ?? playerSpawns[0] ?? undefined,
       trapperSpawn: spawns.trapper ?? undefined,
@@ -209,6 +212,7 @@ export default function KilrunEngine({
       redZones,
       revivePads,
       worldBounds,
+      modeSettings: doc.modeSettings,
     });
   }, [room.phase, connectionRef, playerCount, connectionError, mode]);
 
@@ -253,7 +257,10 @@ export default function KilrunEngine({
     const localDoc = activeId ? loadMapPlayable(activeId) : null;
     const playDoc = cloudDocRef.current ?? localDoc;
     const hasCustomMap = Boolean(playDoc);
-    const map = new ThreeMap(world.scene, { hardcodedDecor: !hasCustomMap });
+    const map = new ThreeMap(world.scene, {
+      hardcodedDecor: !hasCustomMap,
+      hidePlatformMeshes: hasCustomMap,
+    });
     const overlay = new CustomMapOverlay(world.scene);
     const characters = new Map<string, ThreeCharacter>();
     const inputManager = new InputManager(hostElement, isMobile);
@@ -264,7 +271,7 @@ export default function KilrunEngine({
       map.clearHardcodedDecor();
       void overlay.load(playDoc);
       if (playDoc.tpsView) {
-        const merged = resolveTpsView(playDoc.tpsView);
+        const merged = resolveTpsView(playDoc.tpsView as TpsViewSettings);
         tpsRef.current = merged;
         setTpsHud(merged);
       }

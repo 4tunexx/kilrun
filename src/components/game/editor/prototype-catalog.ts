@@ -123,3 +123,61 @@ export function previewUrl(name: string): string {
 export function textureUrl(variation: 'a' | 'b' | 'c' = 'a'): string {
   return `/game/prototype/textures/variation-${variation}.png`;
 }
+
+/**
+ * Approximate local-space AABB size [x, y, z] for prototype GLBs.
+ * Used when a live mesh hasn't been measured yet — keeps collision close to visuals.
+ * Units match Kenney prototype pack (≈1 unit tiles).
+ */
+export const MODEL_FOOTPRINTS: Record<string, [number, number, number]> = {
+  'floor-square': [2, 0.2, 2],
+  'floor-small-square': [1, 0.2, 1],
+  'floor-diagonal': [2, 0.2, 2],
+  'floor-small-diagonal': [1, 0.2, 1],
+  'floor-thick': [2, 0.5, 2],
+  'floor-thick-corner-diagonal': [2, 0.5, 2],
+  'floor-thick-corner-round': [2, 0.5, 2],
+  'floor-thick-corner-rounded': [2, 0.5, 2],
+  wall: [2, 2, 0.25],
+  'wall-low': [2, 1, 0.25],
+  'wall-round': [2, 2, 0.25],
+  'wall-round-low': [2, 1, 0.25],
+  'wall-corner': [2, 2, 2],
+  'wall-corner-low': [2, 1, 2],
+  'wall-diagonal': [2.2, 2, 0.3],
+  'wall-diagonal-low': [2.2, 1, 0.3],
+  'wall-doorway': [2, 2, 0.25],
+  'wall-doorway-garage': [2.5, 2.2, 0.3],
+  'wall-doorway-sliding': [2, 2, 0.25],
+  'wall-doorway-wide': [3, 2, 0.25],
+  stairs: [2, 1.2, 2],
+  'stairs-narrow': [1, 1.2, 2],
+  'stairs-small': [1.2, 0.7, 1.2],
+  'stairs-small-narrow': [0.8, 0.7, 1.2],
+  'stairs-diagonal': [2.2, 1.2, 2.2],
+  'stairs-diagonal-narrow': [1.2, 1.2, 2.2],
+  column: [0.6, 2, 0.6],
+  'column-low': [0.6, 1, 0.6],
+  'column-rounded': [0.6, 2, 0.6],
+  crate: [1, 1, 1],
+  'crate-color': [1, 1, 1],
+  'door-garage': [2.2, 2.2, 0.35],
+  'door-rotate': [1.2, 2.1, 0.15],
+  'door-sliding': [1.2, 2.1, 0.15],
+  'door-sliding-double': [2.2, 2.1, 0.15],
+  'door-sliding-double-round': [2.2, 2.1, 0.15],
+  'door-sliding-double-wide': [3.2, 2.1, 0.15],
+  'shape-cylinder': [1.2, 0.35, 1.2],
+  'shape-hexagon': [1.4, 0.25, 1.4],
+  'target-a-square': [1, 1, 0.2],
+  'target-a-round': [1, 1, 0.2],
+};
+
+export function modelFootprint(model?: string | null): [number, number, number] | null {
+  if (!model) return null;
+  return MODEL_FOOTPRINTS[model] ?? null;
+}
+
+/** Default door GLB when placing a Door entity without picking a brush model. */
+export const DEFAULT_DOOR_MODEL = 'door-sliding';
+

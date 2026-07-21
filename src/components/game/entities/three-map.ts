@@ -35,14 +35,19 @@ export class ThreeMap {
   private glowMats: THREE.MeshStandardMaterial[] = [];
   private decorEnabled = true;
   private decorToken = 0;
+  private platformsVisible = true;
 
-  constructor(private scene: THREE.Scene, opts?: { hardcodedDecor?: boolean }) {
+  constructor(
+    private scene: THREE.Scene,
+    opts?: { hardcodedDecor?: boolean; hidePlatformMeshes?: boolean }
+  ) {
     this.decorRoot.name = 'hardcoded-decor';
     scene.add(this.root);
     this.root.add(this.decorRoot);
     this.buildAtmosphere();
     void this.loadAtlas();
     this.decorEnabled = opts?.hardcodedDecor !== false;
+    this.platformsVisible = opts?.hidePlatformMeshes !== true;
     if (this.decorEnabled) {
       void this.bootstrapDecor();
     }
@@ -179,6 +184,13 @@ export class ThreeMap {
     this.platformRoots.clear();
   }
 
+  public setPlatformsVisible(visible: boolean) {
+    this.platformsVisible = visible;
+    this.platformRoots.forEach((node) => {
+      node.visible = visible;
+    });
+  }
+
   public removeObstacle(index: number) {
     const node = this.obstacleRoots.get(index);
     if (node) {
@@ -230,6 +242,7 @@ export class ThreeMap {
     const s = Math.max(0.85, span * 0.55);
     node.scale.set(s, 1, s);
     node.position.set(tx, ty, tz);
+    node.visible = this.platformsVisible;
   }
 
   public async upsertObstacle(index: number, obstacle: NetObstacleState) {

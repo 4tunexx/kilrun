@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import type { EditorEntity, MapDocument } from '../editor/map-document';
-import { ensureLight } from '../editor/map-document';
+import { ensureLight, isInvisibleMarkerKind } from '../editor/map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from '../editor/model-scan';
 import { AnimationDirector } from '../editor/animation-director';
+import { applyTextureToObject, plantLocalFeet } from '../editor/editor-mesh';
 
 /**
- * Renders non-floor editor props (decor, traps, buttons, hazards, lights) into
- * the live Deathrun Three scene. Floor collision still comes from the server platforms.
+ * Renders authored editor visuals into the live Deathrun Three scene.
+ * Collision still comes from server platforms/pads.
  */
 export class CustomMapOverlay {
   public readonly root = new THREE.Group();
@@ -41,31 +42,67 @@ export class CustomMapOverlay {
     return group;
   }
 
+  private makeFinishFallback(): THREE.Mesh {
+    return new THREE.Mesh(
+      new THREE.BoxGeometry(1.8, 0.14, 1.8),
+      new THREE.MeshStandardMaterial({
+        color: 0xfbbf24,
+        emissive: 0xb45309,
+        emissiveIntensity: 0.65,
+      })
+    );
+  }
+
+  private makeButtonFallback(): THREE.Mesh {
+    return new THREE.Mesh(
+      new THREE.CylinderGeometry(0.45, 0.5, 0.2, 16),
+      new THREE.MeshStandardMaterial({ color: 0xfbbf24 })
+    );
+  }
+
+  private makeHazardFallback(): THREE.Mesh {
+    return new THREE.Mesh(
+      new THREE.BoxGeometry(1.5, 0.15, 1.5),
+      new THREE.MeshStandardMaterial({
+        color: 0xef4444,
+        transparent: true,
+        opacity: 0.55,
+        emissive: 0x991111,
+        emissiveIntensity: 0.4,
+      })
+    );
+  }
+
+  private makeJumpPadFallback(): THREE.Mesh {
+    return new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 0.12, 1.4),
+      new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        emissive: 0x0369a1,
+        emissiveIntensity: 0.55,
+      })
+    );
+  }
+
   async load(doc: MapDocument) {
     this.clear();
-    const skip = new Set([
+    const skipKinds = new Set<EditorEntity['kind']>([
+      'player',
       'spawn_runner',
       'spawn_trapper',
+      'spawn_team_a',
+      'spawn_team_b',
+      'spawn_monster',
+      'wave_anchor',
+      'action',
+      'checkpoint',
       'start',
-      'player',
     ]);
 
     for (const ent of doc.entities) {
       if (this.disposed) return;
       if (ent.visible === false) continue;
-      if (skip.has(ent.kind)) continue;
-      // Floors are represented by server platforms — skip their mesh to avoid doubles
-      // unless they carry gameplay overlays (hazard / jump / finish).
-      if (
-        ent.model?.includes('floor') &&
-        ent.kind !== 'hazard' &&
-        ent.kind !== 'trap' &&
-        ent.kind !== 'finish' &&
-        !ent.hazard?.enabled &&
-        !ent.jumpPad?.enabled
-      ) {
-        continue;
-      }
+      if (isInvisibleMarkerKind(ent.kind) || skipKinds.has(ent.kind)) continue;
 
       const src = resolveModelSrc(ent.model, ent.customModelUrl);
       try {
@@ -73,48 +110,29 @@ export class CustomMapOverlay {
         let clips: THREE.AnimationClip[] = [];
         if (ent.kind === 'light') {
           obj = this.makeLight(ent);
-        } else if (ent.kind === 'finish') {
-          obj = new THREE.Mesh(
-            new THREE.BoxGeometry(1.8, 0.14, 1.8),
-            new THREE.MeshStandardMaterial({
-              color: 0xfbbf24,
-              emissive: 0xb45309,
-              emissiveIntensity: 0.65,
-            })
-          );
         } else if (src) {
           const loaded = await loadAnimatedPrefab(src);
-          obj = loaded.root;
+          plantLocalFeet(loaded.root);
+          const wrap = new THREE.Group();
+          wrap.add(loaded.root);
+          obj = wrap;
           clips = loaded.clips;
+          applyTextureToObject(obj, ent.textureUrl || doc.environment?.defaultTextureUrl);
+        } else if (ent.kind === 'finish') {
+          obj = this.makeFinishFallback();
         } else if (ent.kind === 'button') {
-          obj = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.45, 0.5, 0.2, 16),
-            new THREE.MeshStandardMaterial({ color: 0xfbbf24 })
-          );
-        } else if (ent.kind === 'hazard' || ent.hazard?.enabled) {
-          obj = new THREE.Mesh(
-            new THREE.BoxGeometry(1.5, 0.15, 1.5),
-            new THREE.MeshStandardMaterial({
-              color: 0xef4444,
-              transparent: true,
-              opacity: 0.55,
-              emissive: 0x991111,
-              emissiveIntensity: 0.4,
-            })
-          );
-        } else if (ent.jumpPad?.enabled) {
-          obj = new THREE.Mesh(
-            new THREE.BoxGeometry(1.4, 0.12, 1.4),
-            new THREE.MeshStandardMaterial({
-              color: 0x38bdf8,
-              emissive: 0x0369a1,
-              emissiveIntensity: 0.55,
-            })
-          );
+          obj = this.makeButtonFallback();
+        } else if (ent.kind === 'hazard') {
+          obj = this.makeHazardFallback();
+        } else if (ent.kind === 'jump_pad' || ent.jumpPad?.enabled) {
+          obj = this.makeJumpPadFallback();
         } else {
           continue;
         }
 
+        if (ent.kind !== 'light' && !src) {
+          applyTextureToObject(obj, ent.textureUrl || doc.environment?.defaultTextureUrl);
+        }
         obj.position.set(...ent.position);
         obj.rotation.set(
           THREE.MathUtils.degToRad(ent.rotation[0]),
@@ -133,6 +151,21 @@ export class CustomMapOverlay {
       } catch (err) {
         console.warn('[CustomMapOverlay] skip', ent.name, err);
       }
+    }
+
+    // Invisible Action markers: register empty roots so AnimationDirector can fire signals.
+    for (const ent of doc.entities) {
+      if (this.disposed) return;
+      if (ent.visible === false) continue;
+      if (ent.kind !== 'action') continue;
+      const ghost = new THREE.Group();
+      ghost.visible = false;
+      ghost.position.set(...ent.position);
+      ghost.userData.entityId = ent.id;
+      ghost.userData.editorEntity = ent;
+      this.root.add(ghost);
+      this.entityRoots.set(ent.id, ghost);
+      this.director.register(ent.id, ghost, []);
     }
   }
 

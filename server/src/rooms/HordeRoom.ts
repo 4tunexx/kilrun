@@ -80,6 +80,14 @@ interface PadZone {
   reviveTimeMs?: number;
 }
 
+interface HordeModeSettings {
+  warmupSec?: number;
+  waveTimeSec?: number;
+  intermissionSec?: number;
+  maxPlayers?: number;
+  startingWave?: number;
+}
+
 interface MonsterSim {
   id: string;
   x: number;
@@ -132,6 +140,13 @@ export class HordeRoom extends Room<RoomState> {
     [];
   private betweenWavesMs = 0;
   private matchKills = 0;
+  private lobbyCountdownMs = LOBBY_COUNTDOWN_MS;
+  private matchDurationMs = HORDE_MATCH_MS;
+  private waveClearPauseMs = WAVE_CLEAR_PAUSE_MS;
+  private maxWaves = MAX_WAVES;
+  private startingWave = 1;
+  private waveTimeMs = 0;
+  private waveElapsedMs = 0;
 
   onCreate() {
     this.setState(new RoomState());
@@ -173,6 +188,33 @@ export class HordeRoom extends Room<RoomState> {
 
       const platforms = data?.platforms as PlatformBlueprint[] | undefined;
       if (!Array.isArray(platforms) || platforms.length === 0) return;
+
+      const settings = (data?.modeSettings as { horde?: HordeModeSettings } | undefined)
+        ?.horde;
+      if (settings) {
+        if (typeof settings.warmupSec === 'number' && Number.isFinite(settings.warmupSec)) {
+          this.lobbyCountdownMs = Math.max(0, settings.warmupSec) * 1000;
+        }
+        if (
+          typeof settings.intermissionSec === 'number' &&
+          Number.isFinite(settings.intermissionSec)
+        ) {
+          this.waveClearPauseMs = Math.max(0, settings.intermissionSec) * 1000;
+        }
+        if (typeof settings.maxPlayers === 'number' && Number.isFinite(settings.maxPlayers)) {
+          this.maxClients = Math.max(1, Math.min(4, Math.floor(settings.maxPlayers)));
+        }
+        if (
+          typeof settings.startingWave === 'number' &&
+          Number.isFinite(settings.startingWave)
+        ) {
+          this.startingWave = Math.max(1, Math.floor(settings.startingWave));
+          this.maxWaves = Math.max(this.maxWaves, this.startingWave);
+        }
+        if (typeof settings.waveTimeSec === 'number' && Number.isFinite(settings.waveTimeSec)) {
+          this.waveTimeMs = Math.max(1, settings.waveTimeSec) * 1000;
+        }
+      }
 
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(platforms));
@@ -293,7 +335,7 @@ export class HordeRoom extends Room<RoomState> {
       case 'lobby':
         if (this.state.players.size >= MIN_PLAYERS_TO_START) {
           this.state.phase = 'countdown';
-          this.state.countdownMs = LOBBY_COUNTDOWN_MS;
+          this.state.countdownMs = this.lobbyCountdownMs;
         }
         break;
       case 'countdown':
@@ -335,13 +377,14 @@ export class HordeRoom extends Room<RoomState> {
     });
 
     this.state.phase = 'playing';
-    this.state.matchTimeRemainingMs = HORDE_MATCH_MS;
-    this.beginWave(1);
+    this.state.matchTimeRemainingMs = this.matchDurationMs;
+    this.beginWave(this.startingWave);
   }
 
   private beginWave(wave: number) {
     this.state.wave = wave;
     this.betweenWavesMs = 0;
+    this.waveElapsedMs = 0;
     this.clearMonsters();
     this.waveSpawnQueue = [];
 
@@ -447,17 +490,29 @@ export class HordeRoom extends Room<RoomState> {
       return;
     }
 
+    if (this.waveTimeMs > 0) {
+      this.waveElapsedMs += dtMs;
+      if (this.waveElapsedMs >= this.waveTimeMs) {
+        if (this.state.wave >= this.maxWaves) {
+          this.endMatch('survivor');
+        } else {
+          this.beginWave(this.state.wave + 1);
+        }
+        return;
+      }
+    }
+
     // Wave clear: queue empty and no monsters left
     if (
       this.waveSpawnQueue.every((q) => q.remaining <= 0) &&
       this.monsters.length === 0
     ) {
-      if (this.state.wave >= MAX_WAVES) {
+      if (this.state.wave >= this.maxWaves) {
         this.endMatch('survivor');
         return;
       }
       this.betweenWavesMs += dtMs;
-      if (this.betweenWavesMs >= WAVE_CLEAR_PAUSE_MS) {
+      if (this.betweenWavesMs >= this.waveClearPauseMs) {
         this.beginWave(this.state.wave + 1);
       }
     }

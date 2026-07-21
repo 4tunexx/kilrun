@@ -177,6 +177,7 @@ export function AnimationPropsPanel({
                         (e.kind === 'trap' ||
                           e.kind === 'hazard' ||
                           e.kind === 'prop' ||
+                          e.kind === 'door' ||
                           e.kind === 'checkpoint')
                     )
                     .map((e) => (

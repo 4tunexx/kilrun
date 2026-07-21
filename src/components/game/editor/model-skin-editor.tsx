@@ -348,9 +348,8 @@ export function ModelSkinEditor({
 
   const removeActive = () => {
     setAttachments((prev) => {
-      if (prev.length <= 1) return prev;
       const next = prev.filter((a) => attachmentKey(a) !== activeKey);
-      setActiveKey(attachmentKey(next[0]));
+      setActiveKey(next[0] ? attachmentKey(next[0]) : 'hat');
       return next;
     });
   };
@@ -1490,7 +1489,7 @@ export function ModelSkinEditor({
             size="sm"
             variant="destructive"
             onClick={removeActive}
-            disabled={attachments.length <= 1}
+            disabled={attachments.length === 0}
           >
             <Trash2 className="w-3.5 h-3.5" />
           </Button>
@@ -1521,7 +1520,15 @@ export function ModelSkinEditor({
             onClick={() => onApplyToPlayer(attachments)}
             className="border-white/15"
           >
-            Apply to map player (editor only)
+            Apply to map player (shows in Play Test)
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onApplyToPlayer([])}
+            className="border-rose-400/30 text-rose-100 hover:bg-rose-500/10"
+          >
+            Remove from map player
           </Button>
           {onPublishToShop && (
             <Button
