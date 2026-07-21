@@ -245,6 +245,10 @@ export function applyMovement(
 
   // Foundry: velocity.xz = move_direction * speed (ground + air). Ice keeps slip.
   const onIce = grounded && support?.platform.kind === 'ice';
+  const onSand = grounded && support?.platform.kind === 'sand';
+  const onWater = grounded && support?.platform.kind === 'water';
+  if (onSand) maxSpeed *= 0.62;
+  if (onWater) maxSpeed *= 0.55;
   if (onIce) {
     scratch.velX += wishX * maxSpeed * 2.5 * dtSeconds;
     scratch.velY += wishY * maxSpeed * 2.5 * dtSeconds;
@@ -264,6 +268,10 @@ export function applyMovement(
   } else {
     scratch.velX = wishX * maxSpeed;
     scratch.velY = wishY * maxSpeed;
+  }
+
+  if (onWater && support && support.platform.height > 0.8 && player.vz < 0) {
+    player.vz *= 0.85;
   }
 
   if (grounded && support?.platform.kind === 'conveyor' && support.platform.conveyorSpeed > 0) {

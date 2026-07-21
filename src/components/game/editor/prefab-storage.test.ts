@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MapDocument } from './map-document';
 import {
-  bakeStairsToPads,
   mapDocSpawnPoints,
   mapDocToSimButtons,
   mapDocToSimFinishes,
@@ -10,6 +9,8 @@ import {
   mapDocToSimTeleports,
   mapDocToWorldBounds,
   prepareDocForPlayTest,
+  stairEntityToSimPads,
+  stripLegacyBakedStairPads,
 } from './prefab-storage';
 
 function baseDoc(entities: MapDocument['entities']): MapDocument {
@@ -301,7 +302,7 @@ describe('mapDoc spawn / finish / hazards / bounds', () => {
     expect(teles).toHaveLength(1);
     expect(teles[0].targetX).toBe(20);
 
-    const stairs = bakeStairsToPads(
+    const stairs = stairEntityToSimPads(
       {
         id: 's',
         name: 'Stairs',
@@ -310,11 +311,60 @@ describe('mapDoc spawn / finish / hazards / bounds', () => {
         layerId: 'l1',
         position: [0, 0, 0],
         rotation: [0, 0, 0],
-        scale: [1, 1, 2],
+        scale: [1, 1, 1],
+        solid: true,
+        collideMaterial: 'solid',
       },
       4
     );
     expect(stairs).toHaveLength(4);
-    expect(stairs.every((s) => s.solid)).toBe(true);
+    expect(stairs.every((s) => s.kind === 'solid')).toBe(true);
+
+    const fromDoc = mapDocToSimPlatforms(
+      baseDoc([
+        {
+          id: 's2',
+          name: 'Stairs2',
+          kind: 'prop',
+          model: 'stairs',
+          layerId: 'l1',
+          position: [0, 0, 0],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+          solid: true,
+        },
+      ])
+    );
+    expect(fromDoc.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('strips legacy baked stair pad entities', () => {
+    const doc = baseDoc([
+      {
+        id: 'real',
+        name: 'Stairs',
+        kind: 'prop',
+        model: 'stairs',
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        solid: true,
+      },
+      {
+        id: 'pad',
+        name: 'Stairs Step 3',
+        kind: 'prop',
+        model: 'floor-square',
+        layerId: 'l1',
+        position: [0, 0.5, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 0.15, 0.4],
+        solid: true,
+      },
+    ]);
+    const cleaned = stripLegacyBakedStairPads(doc);
+    expect(cleaned.entities).toHaveLength(1);
+    expect(cleaned.entities[0].id).toBe('real');
   });
 });

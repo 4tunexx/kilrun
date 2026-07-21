@@ -309,6 +309,14 @@ export interface EntityJumpPad {
   boost: number;
 }
 
+/** How the player collides / moves on this mesh (properties Material dropdown). */
+export type EntityCollideMaterial =
+  | 'solid'
+  | 'water'
+  | 'sand'
+  | 'ice'
+  | 'walkthrough';
+
 /** Walkable surface modifiers (ice / conveyor). */
 export interface EntitySurface {
   /** Low friction — slippery. */
@@ -394,6 +402,11 @@ export interface EditorEntity {
    * When true, entity becomes a server platform pad (top-plane AABB).
    */
   solid?: boolean;
+  /**
+   * Material dropdown — solid / water / sand / ice / walkthrough.
+   * When set, drives collision export (wins over bare `solid` heuristics).
+   */
+  collideMaterial?: EntityCollideMaterial;
   /** Bounce / launch pad gameplay */
   jumpPad?: EntityJumpPad;
   /** Ice / conveyor surface */
@@ -643,6 +656,49 @@ export function ensureSurface(ent: EditorEntity): EntitySurface {
   return { ...defaultSurface(), ...ent.surface };
 }
 
+/** Resolve material for UI + collision export. */
+export function resolveCollideMaterial(ent: EditorEntity): EntityCollideMaterial {
+  if (ent.collideMaterial) return ent.collideMaterial;
+  if (ent.solid === false) return 'walkthrough';
+  if (ent.surface?.ice) return 'ice';
+  if (ent.surface?.conveyor) return 'solid';
+  if (ent.solid === true) return 'solid';
+  if (ent.kind === 'finish' || ent.kind === 'checkpoint' || ent.kind === 'jump_pad') return 'solid';
+  if (ent.model?.includes('floor') || ent.model?.startsWith('platform')) return 'solid';
+  if (ent.model?.includes('stair') || ent.model?.includes('ramp')) return 'solid';
+  return 'walkthrough';
+}
+
+/** Patch entity fields when the Material dropdown changes. */
+export function patchCollideMaterial(
+  ent: EditorEntity,
+  material: EntityCollideMaterial
+): Partial<EditorEntity> {
+  const surface = ensureSurface(ent);
+  switch (material) {
+    case 'walkthrough':
+      return {
+        collideMaterial: material,
+        solid: false,
+        surface: { ...surface, ice: false },
+      };
+    case 'ice':
+      return {
+        collideMaterial: material,
+        solid: true,
+        surface: { ...surface, ice: true },
+      };
+    case 'water':
+    case 'sand':
+    case 'solid':
+      return {
+        collideMaterial: material,
+        solid: true,
+        surface: { ...surface, ice: false },
+      };
+  }
+}
+
 export function defaultTeleport(): EntityTeleport {
   return { enabled: true, cooldownMs: 800 };
 }
@@ -686,6 +742,8 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   ) {
     return false;
   }
+  // Explicit walkthrough never collides.
+  if (ent.collideMaterial === 'walkthrough' || ent.solid === false) return false;
   // Finish / revive / health floors / jump pads are standable trigger volumes.
   if (
     ent.kind === 'finish' ||
@@ -695,13 +753,14 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   ) {
     return true;
   }
-  // Jump pads / ice / conveyor always export (need a pad).
+  // Jump pads / ice / conveyor / water / sand always export (need a pad).
   if (ent.jumpPad?.enabled) return true;
+  if (ent.collideMaterial === 'ice' || ent.collideMaterial === 'water' || ent.collideMaterial === 'sand')
+    return true;
   if (ent.surface?.ice || ent.surface?.conveyor) return true;
   if (ent.teleport?.enabled) return true;
   // Explicit authoring wins over name heuristics.
-  if (ent.solid === false) return false;
-  if (ent.solid === true) return true;
+  if (ent.collideMaterial === 'solid' || ent.solid === true) return true;
   if (ent.kind === 'checkpoint') return true;
   if (ent.model?.includes('floor')) return true;
   if (ent.model?.startsWith('platform')) return true;
@@ -766,10 +825,10 @@ export function entityKindLabel(kind: EditorEntityKind): string {
 export function entityKindHint(kind: EditorEntityKind): string | null {
   switch (kind) {
     case 'player':
-      return 'Sets how you LOOK (model + animations). Does NOT place your spawn — use Runner Spawn / Player Spawn.';
+      return 'Sets how you LOOK (model + animations). Spawn is automatic in Play Test — optional Runner Spawn only if you want an exact spot.';
     case 'start':
     case 'spawn_runner':
-      return 'Invisible spawn marker. Place one per runner slot (Deathrun up to 8). Sits on the floor.';
+      return 'Optional spawn marker. If missing, Play Test auto-spawns on the first solid floor.';
     case 'spawn_trapper':
       return 'Invisible Trapper spawn marker for Deathrun.';
     case 'spawn_team_a':
@@ -779,7 +838,7 @@ export function entityKindHint(kind: EditorEntityKind): string | null {
     case 'spawn_monster':
       return 'Invisible enemy spawn marker for Horde waves.';
     case 'prop':
-      return 'Floors / walls / stairs / decoration. Tick Solid so you can stand on it.';
+      return 'Floors / walls / stairs / decoration. Set Material (Solid / Water / Sand / Ice / Walkthrough) for collision.';
     case 'finish':
       return 'Touch to clear the course. Invisible marker unless you assign a model.';
     case 'checkpoint':

@@ -393,6 +393,18 @@ export function createEditorViewport(
       obj.position.z = snapToGrid(obj.position.z, gridSize);
       if (snapY || shiftHeld) obj.position.y = snapToGrid(obj.position.y, gridSize);
     }
+    // Hold Shift while rotating → hard 90° (4-way) grid turns
+    if (transform.mode === 'rotate' && shiftHeld) {
+      const snapDeg = 90;
+      const sx = Math.round(THREE.MathUtils.radToDeg(obj.rotation.x) / snapDeg) * snapDeg;
+      const sy = Math.round(THREE.MathUtils.radToDeg(obj.rotation.y) / snapDeg) * snapDeg;
+      const sz = Math.round(THREE.MathUtils.radToDeg(obj.rotation.z) / snapDeg) * snapDeg;
+      obj.rotation.set(
+        THREE.MathUtils.degToRad(sx),
+        THREE.MathUtils.degToRad(sy),
+        THREE.MathUtils.degToRad(sz)
+      );
+    }
 
     const dx = obj.position.x - lastPrimaryPos.x;
     const dy = obj.position.y - lastPrimaryPos.y;
@@ -1056,6 +1068,19 @@ export function createEditorViewport(
       opacity: 1,
       visible: true,
       solid: kind === 'door' ? true : padKinds && kind !== 'red_zone' ? true : undefined,
+      collideMaterial:
+        kind === 'door' || (padKinds && kind !== 'red_zone')
+          ? 'solid'
+          : defaultModel &&
+              (defaultModel.includes('floor') ||
+                defaultModel.includes('stair') ||
+                defaultModel.includes('ramp') ||
+                defaultModel.startsWith('platform') ||
+                defaultModel.startsWith('wall') ||
+                defaultModel.startsWith('column') ||
+                defaultModel.startsWith('crate'))
+            ? 'solid'
+            : undefined,
       collisionSize: foot ?? undefined,
       animation: defaultAnimation(),
       playerAnims: kind === 'player' ? {} : undefined,
@@ -1604,7 +1629,10 @@ export function createEditorViewport(
 
   let ctrlAloneCandidate = false;
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Shift') shiftHeld = true;
+    if (e.key === 'Shift') {
+      shiftHeld = true;
+      if (transform.mode === 'rotate') transform.setRotationSnap(Math.PI / 2);
+    }
     keys.add(e.code);
     if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
       if (!e.repeat) ctrlAloneCandidate = true;
@@ -1614,7 +1642,10 @@ export function createEditorViewport(
     }
   };
   const onKeyUp = (e: KeyboardEvent) => {
-    if (e.key === 'Shift') shiftHeld = false;
+    if (e.key === 'Shift') {
+      shiftHeld = false;
+      transform.setRotationSnap(0);
+    }
     keys.delete(e.code);
     if (
       (e.code === 'ControlLeft' || e.code === 'ControlRight') &&
@@ -1765,7 +1796,10 @@ export function createEditorViewport(
     setActiveLayerId: (id) => {
       activeLayerId = id;
     },
-    setTransformMode: (mode) => transform.setMode(mode),
+    setTransformMode: (mode) => {
+      transform.setMode(mode);
+      transform.setRotationSnap(mode === 'rotate' && shiftHeld ? Math.PI / 2 : 0);
+    },
     setGridSnap: (on) => {
       gridSnap = on;
     },
@@ -1902,7 +1936,7 @@ export function createEditorViewport(
         return false;
       }
 
-      /** Real world AABB half-extents + bottom (mesh, not just scale). */
+      /** Real world AABB half-extents + center + pivot offset. */
       const measure = (e: EditorEntity) => {
         const root = roots.get(e.id);
         if (root) {
@@ -1913,11 +1947,9 @@ export function createEditorViewport(
               hx: Math.max(0.05, (box.max.x - box.min.x) / 2),
               hy: Math.max(0.05, (box.max.y - box.min.y) / 2),
               hz: Math.max(0.05, (box.max.z - box.min.z) / 2),
-              bottom: box.min.y,
               cx: (box.min.x + box.max.x) / 2,
               cy: (box.min.y + box.max.y) / 2,
               cz: (box.min.z + box.max.z) / 2,
-              // Offset from entity pivot (root.position) to AABB center
               ox: (box.min.x + box.max.x) / 2 - root.position.x,
               oy: (box.min.y + box.max.y) / 2 - root.position.y,
               oz: (box.min.z + box.max.z) / 2 - root.position.z,
@@ -1931,7 +1963,6 @@ export function createEditorViewport(
           hx,
           hy,
           hz,
-          bottom: e.position[1] - hy,
           cx: e.position[0],
           cy: e.position[1],
           cz: e.position[2],
@@ -1941,57 +1972,98 @@ export function createEditorViewport(
         };
       };
 
+      type Meas = ReturnType<typeof measure>;
+
+      /** Snap moving AABB onto the closest face of the anchor AABB. */
+      const snapToClosestFace = (anchor: Meas, moving: Meas) => {
+        type Cand = { cx: number; cy: number; cz: number; dist: number };
+        const cands: Cand[] = [
+          // +X of anchor (moving sits to the right)
+          {
+            cx: anchor.cx + anchor.hx + moving.hx,
+            cy: moving.cy,
+            cz: moving.cz,
+            dist: Math.abs(moving.cx - moving.hx - (anchor.cx + anchor.hx)),
+          },
+          // -X of anchor
+          {
+            cx: anchor.cx - anchor.hx - moving.hx,
+            cy: moving.cy,
+            cz: moving.cz,
+            dist: Math.abs(anchor.cx - anchor.hx - (moving.cx + moving.hx)),
+          },
+          // +Y (stack on top) — keep XZ so arches stay aligned above
+          {
+            cx: moving.cx,
+            cy: anchor.cy + anchor.hy + moving.hy,
+            cz: moving.cz,
+            dist: Math.abs(moving.cy - moving.hy - (anchor.cy + anchor.hy)),
+          },
+          // -Y (below)
+          {
+            cx: moving.cx,
+            cy: anchor.cy - anchor.hy - moving.hy,
+            cz: moving.cz,
+            dist: Math.abs(anchor.cy - anchor.hy - (moving.cy + moving.hy)),
+          },
+          // +Z
+          {
+            cx: moving.cx,
+            cy: moving.cy,
+            cz: anchor.cz + anchor.hz + moving.hz,
+            dist: Math.abs(moving.cz - moving.hz - (anchor.cz + anchor.hz)),
+          },
+          // -Z
+          {
+            cx: moving.cx,
+            cy: moving.cy,
+            cz: anchor.cz - anchor.hz - moving.hz,
+            dist: Math.abs(anchor.cz - anchor.hz - (moving.cz + moving.hz)),
+          },
+        ];
+        cands.sort((a, b) => a.dist - b.dist);
+        return cands[0];
+      };
+
       const anchor = ents[0];
       const aM = measure(anchor);
-      const floorY = aM.bottom;
-
       const updates = new Map<string, [number, number, number]>();
 
-      // Anchor stays in XZ; only re-seat onto measured bottom if needed.
+      // Anchor stays put
       {
         const root = roots.get(anchor.id);
-        const y = floorY + aM.hy - aM.oy;
-        const pos: [number, number, number] = [
+        updates.set(anchor.id, [
           root?.position.x ?? anchor.position[0],
-          y,
+          root?.position.y ?? anchor.position[1],
           root?.position.z ?? anchor.position[2],
-        ];
-        updates.set(anchor.id, pos);
+        ]);
       }
 
-      let prev = {
-        cx: aM.cx,
-        cz: aM.cz,
-        hx: aM.hx,
-        hz: aM.hz,
-      };
+      // Each other selection snaps to the closest face of the nearest already-placed piece
+      // (anchor first, then previously snapped), so stacking / side joins follow proximity.
+      const placed: Meas[] = [aM];
 
       for (let i = 1; i < ents.length; i++) {
         const e = ents[i];
         const m = measure(e);
-        const dx = m.cx - prev.cx;
-        const dz = m.cz - prev.cz;
-        const alongX = Math.abs(dx) >= Math.abs(dz);
-        let newCx: number;
-        let newCz: number;
-        if (alongX) {
-          const sign = Math.sign(dx) || 1;
-          newCx = prev.cx + sign * (prev.hx + m.hx);
-          newCz = prev.cz; // flush in a straight line
-        } else {
-          const sign = Math.sign(dz) || 1;
-          newCz = prev.cz + sign * (prev.hz + m.hz);
-          newCx = prev.cx;
+        let best: { cx: number; cy: number; cz: number; dist: number } | null = null;
+        for (const p of placed) {
+          const cand = snapToClosestFace(p, m);
+          if (!best || cand.dist < best.dist) best = cand;
         }
-        const newCy = floorY + m.hy;
-        // Convert desired AABB center → entity pivot
+        if (!best) continue;
         const pos: [number, number, number] = [
-          newCx - m.ox,
-          newCy - m.oy,
-          newCz - m.oz,
+          best.cx - m.ox,
+          best.cy - m.oy,
+          best.cz - m.oz,
         ];
         updates.set(e.id, pos);
-        prev = { cx: newCx, cz: newCz, hx: m.hx, hz: m.hz };
+        placed.push({
+          ...m,
+          cx: best.cx,
+          cy: best.cy,
+          cz: best.cz,
+        });
       }
 
       // Keep selection order in viewport for further snaps

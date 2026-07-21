@@ -901,8 +901,8 @@ export function MapPlayPreview({
         {autoStartNote && !loading && (
           <div className="absolute top-3 left-3 right-3 z-[70] pointer-events-none">
             <p className="mx-auto max-w-md rounded-lg border border-amber-400/40 bg-amber-500/20 px-3 py-2 text-center text-[11px] text-amber-100">
-              No Start spawn found — spawned from your Player avatar. Place a green{' '}
-              <span className="font-bold">Start</span> flag on a solid floor next time.
+              Auto-spawned on a solid floor (no Start marker needed). Optional: place a green Start
+              if you want a specific spawn spot.
             </p>
           </div>
         )}

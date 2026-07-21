@@ -4,6 +4,7 @@ import {
   entityExportsAsPlatform,
   ensureHazard,
   generateId,
+  resolveCollideMaterial,
 } from './map-document';
 import type { KilrunMode } from '@/lib/game-modes';
 import { normalizeKilrunMode } from '@/lib/game-modes';
@@ -163,7 +164,9 @@ export type SimPlatformKind =
   | 'jumpPad'
   | 'finish'
   | 'ice'
-  | 'conveyor';
+  | 'conveyor'
+  | 'water'
+  | 'sand';
 
 export interface SimPlatformBlueprint {
   x: number;
@@ -258,7 +261,8 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const worldSizeX = sizeX * absC + sizeZ * absS;
   const worldSizeZ = sizeX * absS + sizeZ * absC;
   const jump = e.jumpPad?.enabled || e.kind === 'jump_pad';
-  const ice = !!e.surface?.ice;
+  const mat = resolveCollideMaterial(e);
+  const ice = mat === 'ice' || !!e.surface?.ice;
   const conveyor = !!e.surface?.conveyor;
   let kind: SimPlatformKind = 'solid';
   if (e.kind === 'finish') kind = 'finish';
@@ -266,6 +270,8 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   else if (jump) kind = 'jumpPad';
   else if (conveyor) kind = 'conveyor';
   else if (ice) kind = 'ice';
+  else if (mat === 'water') kind = 'water';
+  else if (mat === 'sand') kind = 'sand';
 
   const model = e.model ?? '';
   const topOnly =
@@ -275,10 +281,11 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
     jump ||
     ice ||
     conveyor ||
+    mat === 'sand' ||
     !!e.teleport?.enabled ||
     model.includes('floor') ||
-    model.includes('stair') ||
     model.startsWith('platform');
+  // Water keeps full volume so deep pools can swim; floors stay thin tops.
   const wallLike =
     !topOnly &&
     (model.startsWith('wall') ||
@@ -286,15 +293,19 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
       model.includes('door') ||
       e.kind === 'door' ||
       sizeY >= 1.0 ||
+      mat === 'solid' ||
       e.solid === true);
-  const height = topOnly
-    ? Math.min(0.35, Math.max(0.2, sizeY))
-    : wallLike
-      ? Math.max(1.0, sizeY)
-      : e.solid === true
-        ? Math.max(0.8, sizeY)
-        : Math.max(0.35, sizeY * 0.5);
-  const topZ = topOnly ? ty + sizeY * 0.5 : ty + height * 0.5;
+  const height =
+    mat === 'water'
+      ? Math.max(0.5, sizeY)
+      : topOnly
+        ? Math.min(0.35, Math.max(0.2, sizeY))
+        : wallLike
+          ? Math.max(1.0, sizeY)
+          : mat === 'solid' || e.solid === true
+            ? Math.max(0.8, sizeY)
+            : Math.max(0.35, sizeY * 0.5);
+  const topZ = topOnly && mat !== 'water' ? ty + sizeY * 0.5 : ty + height * 0.5;
 
   const dirSimX = Math.cos(yaw);
   const dirSimY = Math.sin(yaw);
@@ -314,6 +325,67 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   };
 }
 
+/**
+ * Expand stairs/ramps into stepped solid pads so players can climb the mesh
+ * instead of walking through a single thin top slab.
+ */
+export function stairEntityToSimPads(stairs: EditorEntity, steps = 8): SimPlatformBlueprint[] {
+  const n = Math.max(3, Math.min(16, Math.round(steps)));
+  const [sx, sy, sz] = stairs.position;
+  const yaw = ((stairs.rotation?.[1] ?? 0) * Math.PI) / 180;
+  const foot =
+    stairs.collisionSize ??
+    modelFootprint(stairs.model) ??
+    ([
+      Math.max(1, Math.abs(stairs.scale[0]) * 2),
+      Math.max(0.8, Math.abs(stairs.scale[1]) * 2),
+      Math.max(1, Math.abs(stairs.scale[2]) * 2),
+    ] as [number, number, number]);
+  const run = Math.max(1.2, foot[2] * Math.abs(stairs.scale[2]));
+  const rise = Math.max(0.6, foot[1] * Math.abs(stairs.scale[1]));
+  const width = Math.max(0.8, foot[0] * Math.abs(stairs.scale[0]));
+  const stepRun = run / n;
+  const stepRise = rise / n;
+  const mat = resolveCollideMaterial(stairs);
+  let kind: SimPlatformKind = 'solid';
+  if (mat === 'ice') kind = 'ice';
+  else if (mat === 'water') kind = 'water';
+  else if (mat === 'sand') kind = 'sand';
+
+  const pads: SimPlatformBlueprint[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const along = (t - 0.5) * run;
+    const px = sx + Math.sin(yaw) * along;
+    const pz = sz + Math.cos(yaw) * along;
+    const topY = sy - rise * 0.5 + (i + 1) * stepRise;
+    const stepW = Math.max(0.45, stepRun * 0.95);
+    const absC = Math.abs(Math.cos(yaw));
+    const absS = Math.abs(Math.sin(yaw));
+    const worldSizeX = width * absC + stepW * absS;
+    const worldSizeZ = width * absS + stepW * absC;
+    pads.push({
+      x: pz,
+      y: px,
+      z: topY,
+      width: worldSizeZ,
+      depth: worldSizeX,
+      kind,
+      height: Math.max(0.18, stepRise * 0.85),
+    });
+  }
+  return pads;
+}
+
+function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
+  if (resolveCollideMaterial(e) === 'walkthrough') return [];
+  const model = e.model ?? '';
+  if (model.includes('stair') || model.includes('ramp')) {
+    return stairEntityToSimPads(e, 8);
+  }
+  return [entityToPad(e)];
+}
+
 export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
   const explicit = doc.entities.filter(entityExportsAsPlatform);
   let source = explicit;
@@ -323,6 +395,7 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
         e.visible !== false &&
         e.kind !== 'light' &&
         !!e.model &&
+        resolveCollideMaterial(e) !== 'walkthrough' &&
         !e.model.startsWith('wall') &&
         !e.model.startsWith('column') &&
         !e.model.startsWith('pipe') &&
@@ -336,7 +409,7 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
     doc.entities.find((e) => e.kind === 'start') ??
     doc.entities.find((e) => e.kind === 'spawn_runner') ??
     doc.entities.find((e) => e.kind === 'player');
-  const pads = source.map(entityToPad);
+  const pads = source.flatMap(entityToCollisionPads);
 
   if (pads.length === 0 && runner) {
     const [tx, ty, tz] = runner.position;
@@ -344,6 +417,22 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
   }
 
   return pads;
+}
+
+/** Legacy "Bake stairs → solid steps" props — remove from maps; collision is automatic now. */
+export function isLegacyBakedStairPad(e: EditorEntity): boolean {
+  return (
+    e.kind === 'prop' &&
+    (e.model === 'floor-square' || !e.model) &&
+    / Step \d+$/i.test(e.name) &&
+    Math.abs(e.scale[1]) <= 0.3
+  );
+}
+
+export function stripLegacyBakedStairPads(doc: MapDocument): MapDocument {
+  const entities = doc.entities.filter((e) => !isLegacyBakedStairPad(e));
+  if (entities.length === doc.entities.length) return doc;
+  return { ...doc, entities };
 }
 
 export function mapDocToSimHazards(doc: MapDocument): SimHazardBlueprint[] {
@@ -547,9 +636,9 @@ export function mapDocSpawnPoints(doc: MapDocument) {
 }
 
 /**
- * Play Test needs a real Start marker. If the creator only placed a Player
- * (avatar config), clone its position into a Start so spawn ≠ “mysterious void”.
- * Also returns whether we had to invent one (for a toast / banner).
+ * Play Test needs a spawn point. If the creator never placed Start, invent an
+ * ephemeral one on the first solid floor (or origin) — never requires the author
+ * to place a spawn prop by hand.
  */
 export function prepareDocForPlayTest(doc: MapDocument): {
   doc: MapDocument;
@@ -564,15 +653,31 @@ export function prepareDocForPlayTest(doc: MapDocument): {
     doc.entities.find((e) => e.kind === 'player' && e.visible !== false) ??
     doc.entities.find((e) => e.kind === 'player');
 
+  const floor =
+    doc.entities.find(
+      (e) =>
+        e.visible !== false &&
+        entityExportsAsPlatform(e) &&
+        (e.model?.includes('floor') || e.model?.startsWith('platform') || e.solid === true)
+    ) ?? doc.entities.find((e) => e.visible !== false && entityExportsAsPlatform(e));
+
   const layerId =
     doc.layers.find((l) => /spawn/i.test(l.name))?.id ??
     doc.layers[doc.layers.length - 1]?.id ??
     doc.layers[0]?.id ??
     'layer_0';
 
-  const position: [number, number, number] = player
-    ? [player.position[0], player.position[1], player.position[2]]
-    : [0, 0.5, 0];
+  let position: [number, number, number] = [0, 0.5, 0];
+  if (player) {
+    position = [player.position[0], player.position[1], player.position[2]];
+  } else if (floor) {
+    const foot =
+      floor.collisionSize ??
+      modelFootprint(floor.model) ??
+      ([1, 0.2, 1] as [number, number, number]);
+    const top = floor.position[1] + (foot[1] * Math.abs(floor.scale[1])) * 0.5 + 0.05;
+    position = [floor.position[0], top, floor.position[2]];
+  }
 
   const start: EditorEntity = {
     id: generateId(),
@@ -699,7 +804,7 @@ export function mapDocRevivePads(doc: MapDocument) {
     );
 }
 
-/** Bake a stairs-like prop into thin solid pads for climbable collision. */
+/** @deprecated Prefer stairEntityToSimPads — visual bake creates undeletable clutter. */
 export function bakeStairsToPads(stairs: EditorEntity, steps = 6): EditorEntity[] {
   const n = Math.max(3, Math.min(16, Math.round(steps)));
   const [sx, sy, sz] = stairs.position;

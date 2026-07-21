@@ -60,7 +60,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
-import type { EditorEntity, FloorPreset, MapDocument, SkyPreset } from './map-document';
+import type { EditorEntity, EntityCollideMaterial, FloorPreset, MapDocument, SkyPreset } from './map-document';
 import {
   ensureAnimation,
   ensureCompetitiveSettings,
@@ -86,6 +86,8 @@ import {
   generateId,
   getMapGameMode,
   isInvisibleMarkerKind,
+  patchCollideMaterial,
+  resolveCollideMaterial,
 } from './map-document';
 import { KILRUN_MODE_INFO } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
@@ -132,13 +134,13 @@ import {
   type TutorialStep,
 } from './editor-help';
 import {
-  bakeStairsToPads,
   deletePrefab,
   getActivePlayMapIdForMode,
   instantiatePrefab,
   listPrefabs,
   savePrefab,
   setActivePlayMapIdForMode,
+  stripLegacyBakedStairPads,
   type PrefabStamp,
 } from './prefab-storage';
 import { formatValidationSummary, validateMapForPublish } from './map-validate';
@@ -164,14 +166,16 @@ export function MapEditor({
   const apiRef = useRef<EditorViewportApi | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const texFileRef = useRef<HTMLInputElement>(null);
+  const propTexFileRef = useRef<HTMLInputElement>(null);
   const skyFileRef = useRef<HTMLInputElement>(null);
 
   const starter = useMemo(() => {
     if (initialMapId) {
       const loaded = loadMap(initialMapId);
-      if (loaded) return { id: initialMapId, doc: loaded };
+      if (loaded) return { id: initialMapId, doc: stripLegacyBakedStairPads(loaded) };
     }
-    return ensureStarterMap();
+    const fresh = ensureStarterMap();
+    return { id: fresh.id, doc: stripLegacyBakedStairPads(fresh.doc) };
   }, [initialMapId]);
   const [mapId, setMapId] = useState(starter.id);
   const [doc, setDoc] = useState<MapDocument>(() => ({
@@ -872,15 +876,12 @@ export function MapEditor({
   };
 
   const openTpsViewStudio = () => {
-    const ensured = ensureMapPlayerEntity(docRef.current);
-    if (ensured.created) {
-      scheduleHistory();
-      setDoc(ensured.doc);
-      docRef.current = ensured.doc;
-      apiRef.current?.setDoc(ensured.doc);
+    // Avatar is optional — Play Test / 3rd View use default mannequin if missing.
+    const player = findPlayerEntity(docRef.current);
+    if (player) {
+      setSelectedId(player.id);
+      apiRef.current?.setSelectedId(player.id);
     }
-    setSelectedId(ensured.entity.id);
-    apiRef.current?.setSelectedId(ensured.entity.id);
     setPlayerStudioOpen(false);
     setModelEditorOpen(false);
     setTpsViewOpen(true);
@@ -911,13 +912,8 @@ export function MapEditor({
     // Snapshot camera so Exit restores the exact map view you left
     cameraBeforePlayRef.current = apiRef.current?.getCameraState() ?? null;
     apiRef.current?.setPaused(true);
-    // Ensure a player avatar exists so Play Test can show 3rd-person character
-    const ensured = ensureMapPlayerEntity(docRef.current);
-    if (ensured.created) {
-      setDoc(ensured.doc);
-      docRef.current = ensured.doc;
-      apiRef.current?.setDoc(ensured.doc);
-    }
+    // Do NOT auto-insert Player Avatar into the map — Play Test uses default
+    // mannequin / existing avatar, and invents Start on a floor if needed.
     persist();
     setPlayTest(true);
   };
@@ -1186,7 +1182,8 @@ export function MapEditor({
               );
               if (!ok) return;
             }
-            const withEnv = { ...loaded, environment: ensureEnvironment(loaded) };
+            const cleaned = stripLegacyBakedStairPads(loaded);
+            const withEnv = { ...cleaned, environment: ensureEnvironment(cleaned) };
             setMapId(id);
             setDoc(withEnv);
             docRef.current = withEnv;
@@ -1194,6 +1191,12 @@ export function MapEditor({
             clearHistory();
             apiRef.current?.setDoc(withEnv);
             setActivePlayId(getActivePlayMapIdForMode(getMapGameMode(withEnv)));
+            if (cleaned.entities.length !== loaded.entities.length) {
+              toast({
+                title: 'Removed old baked stair pads',
+                description: 'Stairs now collide automatically — no Bake button needed.',
+              });
+            }
           }}
         >
           {maps
@@ -1318,7 +1321,8 @@ export function MapEditor({
                 }
               }
               const parsed = importJson(await f.text());
-              const withEnv = { ...parsed, environment: ensureEnvironment(parsed) };
+              const cleaned = stripLegacyBakedStairPads(parsed);
+              const withEnv = { ...cleaned, environment: ensureEnvironment(cleaned) };
               const id = `map_${Date.now().toString(36)}`;
               saveMap(id, withEnv);
               setMapId(id);
@@ -1702,7 +1706,8 @@ export function MapEditor({
               <p className="text-[10px] tracking-widest text-white/50 uppercase">Prefabs / Stamps</p>
               <p className="text-[11px] text-white/55 leading-relaxed">
                 Shift+click to multi-select ({selectedIds.length || (selectedId ? 1 : 0)} selected).
-                With 2+ selected, press the magnet Snap icon — objects stick edge-to-edge in a line
+                With 2+ selected, press the magnet Snap icon — each piece joins the closest face
+                (side or stack on top).
                 at the same bottom height (first click is the anchor).
               </p>
               {selectedIds.length >= 2 && (
@@ -2315,6 +2320,7 @@ export function MapEditor({
                   <p>· Pick a model to arm Brush, click ground to place (drag = orbit)</p>
                   <p>· Same model click selects it · <b className="text-white">Alt+click</b> stacks</p>
                   <p>· <b className="text-white">Ctrl</b> free fly · <b className="text-white">G</b> snap · <b className="text-white">W/E/R</b> gizmo</p>
+                  <p>· Rotate + <b className="text-white">Shift</b> = 90° turns · Magnet snaps closest faces</p>
                   <p>· Set as <b className="text-white">MAIN map</b> for Deathrun Play</p>
                 </>
               )}
@@ -2727,7 +2733,7 @@ export function MapEditor({
               }}
               title={
                 selectedIds.length >= 2
-                  ? 'Snap (magnet) — stick edge-to-edge, same bottom'
+                  ? 'Snap (magnet) — join closest faces (side or stack)'
                   : 'Snap (magnet) — Shift+click 2+ objects, then press'
               }
             >
@@ -2803,9 +2809,8 @@ export function MapEditor({
               )}
               {selected.kind === 'player' && (
                 <p className="text-[10px] leading-snug text-amber-200/90 rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1.5">
-                  Player = your avatar look only. Tap <span className="font-bold">START</span> (green
-                  flag) to place where you spawn in Play Test — standing a Player on a platform is not
-                  enough.
+                  Player Avatar = look / animations only (not a spawn). Play Test auto-spawns on your
+                  Start marker or the first solid floor — you do not need to place spawn by hand.
                 </p>
               )}
 
@@ -2966,7 +2971,7 @@ export function MapEditor({
                 </div>
               )}
 
-              {/* Gameplay: solid / jump pad / damage */}
+              {/* Gameplay: material / jump pad / damage */}
               {selected.kind !== 'light' &&
                 !isInvisibleMarkerKind(selected.kind) &&
                 selected.kind !== 'spawn_team_a' &&
@@ -2981,24 +2986,31 @@ export function MapEditor({
                       Runners finish when they step on or touch this volume.
                     </p>
                   )}
-                  <label className="flex items-center gap-2 text-xs text-white/70">
-                    <input
-                      type="checkbox"
-                      checked={entityExportsAsPlatform(selected)}
-                      onChange={(e) =>
+                  <label className="block text-xs text-white/60">
+                    Material
+                    <select
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
+                      value={resolveCollideMaterial(selected)}
+                      onChange={(e) => {
+                        const material = e.target.value as EntityCollideMaterial;
                         patchSelected({
-                          solid: e.target.checked,
-                          ...(e.target.checked
-                            ? {}
-                            : { jumpPad: { ...ensureJumpPad(selected), enabled: false } }),
-                        })
-                      }
-                    />
-                    Solid (players can stand on it)
+                          ...patchCollideMaterial(selected, material),
+                          ...(material === 'walkthrough'
+                            ? { jumpPad: { ...ensureJumpPad(selected), enabled: false } }
+                            : {}),
+                        });
+                      }}
+                    >
+                      <option value="solid">Solid — collide / stand on mesh</option>
+                      <option value="water">Water — walk / swim when deep</option>
+                      <option value="sand">Sand — slow walk</option>
+                      <option value="ice">Ice — slippery</option>
+                      <option value="walkthrough">Walkthrough — no collision</option>
+                    </select>
                   </label>
                   <p className="text-[10px] text-white/40">
-                    Floors/checkpoints are thin top pads. Tall solids (walls/columns) also block
-                    sideways. Turn on for crates/props you want walkable or blocking.
+                    Solid scans the model size (stairs become climbable steps). Water / sand /
+                    ice change how you move on top. Walkthrough disables collision.
                   </p>
 
                   <label className="flex items-center gap-2 text-xs text-white/70">
@@ -3009,7 +3021,9 @@ export function MapEditor({
                         const jp = ensureJumpPad(selected);
                         patchSelected({
                           jumpPad: { ...jp, enabled: e.target.checked },
-                          solid: e.target.checked ? true : selected.solid,
+                          ...(e.target.checked
+                            ? patchCollideMaterial(selected, 'solid')
+                            : {}),
                         });
                       }}
                     />
@@ -3032,7 +3046,7 @@ export function MapEditor({
                               enabled: true,
                               boost: Number(e.target.value),
                             },
-                            solid: true,
+                            ...patchCollideMaterial(selected, 'solid'),
                           })
                         }
                       />
@@ -3042,24 +3056,13 @@ export function MapEditor({
                   <label className="flex items-center gap-2 text-xs text-white/70">
                     <input
                       type="checkbox"
-                      checked={!!ensureSurface(selected).ice}
-                      onChange={(e) =>
-                        patchSelected({
-                          surface: { ...ensureSurface(selected), ice: e.target.checked },
-                          solid: true,
-                        })
-                      }
-                    />
-                    Ice (slippery)
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-white/70">
-                    <input
-                      type="checkbox"
                       checked={!!ensureSurface(selected).conveyor}
                       onChange={(e) =>
                         patchSelected({
                           surface: { ...ensureSurface(selected), conveyor: e.target.checked },
-                          solid: true,
+                          ...(e.target.checked
+                            ? patchCollideMaterial(selected, 'solid')
+                            : {}),
                         })
                       }
                     />
@@ -3082,7 +3085,7 @@ export function MapEditor({
                               conveyor: true,
                               conveyorSpeed: Number(e.target.value),
                             },
-                            solid: true,
+                            ...patchCollideMaterial(selected, 'solid'),
                           })
                         }
                       />
@@ -3127,28 +3130,6 @@ export function MapEditor({
                           ))}
                       </select>
                     </label>
-                  )}
-
-                  {(selected.model?.includes('stair') || selected.model?.includes('ramp')) && (
-                    <button
-                      type="button"
-                      className="w-full text-xs py-2 rounded-lg bg-violet-600/35 hover:bg-violet-500/45 font-semibold"
-                      onClick={() => {
-                        const pads = bakeStairsToPads(selected, 8);
-                        scheduleHistory();
-                        setDoc((d) => {
-                          const next = { ...d, entities: [...d.entities, ...pads] };
-                          apiRef.current?.setDoc(next);
-                          return next;
-                        });
-                        toast({
-                          title: `Baked ${pads.length} stair pads`,
-                          description: 'Thin solid steps added for climbable collision.',
-                        });
-                      }}
-                    >
-                      Bake stairs → solid steps
-                    </button>
                   )}
                 </div>
               )}
@@ -3749,6 +3730,59 @@ export function MapEditor({
                   onChange={(e) => patchSelected({ color: e.target.value })}
                 />
               </label>
+              <div className="space-y-1.5">
+                <p className="text-[10px] tracking-widest text-white/50 uppercase">Texture</p>
+                <input
+                  ref={propTexFileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      const dataUrl = String(reader.result);
+                      saveCustomTexture(f.name, dataUrl);
+                      setCustomTextures(listCustomTextures());
+                      patchSelected({ textureUrl: dataUrl });
+                      toast({ title: 'Texture applied to object' });
+                    };
+                    reader.readAsDataURL(f);
+                    e.target.value = '';
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => propTexFileRef.current?.click()}
+                >
+                  <Upload className="w-3.5 h-3.5 mr-1" />
+                  Upload / replace texture
+                </Button>
+                {selected.textureUrl && (
+                  <div className="flex items-center gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={selected.textureUrl}
+                      alt="Object texture"
+                      className="w-10 h-10 rounded object-cover border border-white/15"
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="flex-1 text-xs text-white/70"
+                      onClick={() => patchSelected({ textureUrl: undefined })}
+                    >
+                      Clear texture
+                    </Button>
+                  </div>
+                )}
+                <p className="text-[10px] text-white/40">
+                  Or pick from the Textures tab / paint brush. Right-click a swatch to apply.
+                </p>
+              </div>
               <label className="block text-xs text-white/60">
                 Layer
                 <select
@@ -3763,16 +3797,6 @@ export function MapEditor({
                   ))}
                 </select>
               </label>
-              {selected.textureUrl && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => patchSelected({ textureUrl: undefined })}
-                >
-                  Clear texture override
-                </Button>
-              )}
               <div className="border-t border-white/10 pt-2 mt-1 sticky bottom-0 bg-black/90 -mx-1 px-1 pb-1">
                 <Button
                   size="sm"

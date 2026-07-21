@@ -13,7 +13,7 @@ export interface SimPad {
   width: number;
   depth: number;
   height?: number;
-  kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor';
+  kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor' | 'water' | 'sand';
   boost?: number;
   conveyorSpeed?: number;
   conveyorDirX?: number;
@@ -268,6 +268,10 @@ export function stepPlatformer(
   }
 
   const onIce = grounded && support?.pad.kind === 'ice';
+  const onSand = grounded && support?.pad.kind === 'sand';
+  const onWater = grounded && support?.pad.kind === 'water';
+  if (onSand) maxSpeed *= 0.62;
+  if (onWater) maxSpeed *= 0.55;
   if (onIce) {
     scratch.velX += wishX * maxSpeed * 2.5 * dt;
     scratch.velY += wishY * maxSpeed * 2.5 * dt;
@@ -286,6 +290,11 @@ export function stepPlatformer(
   } else {
     scratch.velX = wishX * maxSpeed;
     scratch.velY = wishY * maxSpeed;
+  }
+
+  // Deep water: soften gravity while submerged in a tall water volume
+  if (onWater && (support?.pad.height ?? 0) > 0.8 && body.vz < 0) {
+    body.vz *= 0.85;
   }
 
   if (grounded && support?.pad.kind === 'conveyor' && (support.pad.conveyorSpeed ?? 0) > 0) {
