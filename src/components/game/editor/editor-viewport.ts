@@ -83,6 +83,7 @@ function syncLightParams(root: THREE.Object3D, ent: EditorEntity) {
 }
 import { AnimationDirector } from './animation-director';
 import { loadAnimatedPrefab, resolveModelSrc, scanModelClips } from './model-scan';
+import { DEFAULT_DOOR_MODEL, modelFootprint } from './prototype-catalog';
 
 export type TransformMode = 'translate' | 'rotate' | 'scale';
 
@@ -135,6 +136,10 @@ export interface EditorViewportApi {
       | 'checkpoint'
   ) => void;
   placeEntity: (kind: EditorEntity['kind'], model?: string) => void;
+  /** Arm click-to-place for an entity kind (next ground click places it on the floor). */
+  armPlaceKind: (kind: EditorEntity['kind'], model?: string) => void;
+  getPendingPlaceKind: () => EditorEntity['kind'] | null;
+  clearPendingPlace: () => void;
   stampEntities: (entities: EditorEntity[]) => void;
   duplicateSelected: (axis?: 'x' | 'y' | 'z') => void;
   /** Align multi-selection: shared bottom Y, edge-to-edge along X. Returns false if nothing snapped. */
@@ -188,6 +193,9 @@ export function createEditorViewport(
   /** Select = pick; Brush = single click place; Bucket = hold-drag continuous paint; Paint = texture on release. */
   let editTool: EditTool = 'select';
   let stampEntitiesQueue: EditorEntity[] | null = null;
+  /** Click-to-place: next ground click places this entity kind on the floor surface. */
+  let pendingPlaceKind: EditorEntity['kind'] | null = null;
+  let pendingPlaceModel: string | undefined;
   let activeLayerId = doc.layers[0]?.id ?? '';
   let gridSnap = true;
   let snapY = false;
@@ -616,6 +624,34 @@ export function createEditorViewport(
           root = new THREE.Group();
           plantLocalFeet(loaded.root);
           root.add(loaded.root);
+          // Measure real mesh size (local, unscaled) for collision export.
+          loaded.root.updateMatrixWorld(true);
+          const meshBox = new THREE.Box3().setFromObject(loaded.root);
+          if (!meshBox.isEmpty()) {
+            const size = new THREE.Vector3();
+            meshBox.getSize(size);
+            const measured: [number, number, number] = [
+              Math.max(0.05, size.x),
+              Math.max(0.05, size.y),
+              Math.max(0.05, size.z),
+            ];
+            const idx = doc.entities.findIndex((e) => e.id === ent.id);
+            if (idx >= 0) {
+              const prevSize = doc.entities[idx].collisionSize;
+              const changed =
+                !prevSize ||
+                Math.abs(prevSize[0] - measured[0]) > 0.01 ||
+                Math.abs(prevSize[1] - measured[1]) > 0.01 ||
+                Math.abs(prevSize[2] - measured[2]) > 0.01;
+              if (changed) {
+                const entities = doc.entities.slice();
+                entities[idx] = { ...entities[idx], collisionSize: measured };
+                doc = { ...doc, entities };
+                ent = entities[idx];
+                handlers.onDocChange(doc);
+              }
+            }
+          }
           entityClips.set(ent.id, loaded.clips);
           // Persist discovered clips back into document
           if (loaded.clipNames.length) {
@@ -977,6 +1013,7 @@ export function createEditorViewport(
                             : undefined;
 
     // Invisible markers / gameplay entities: no GLB by default (editor shows flag/cone only).
+    // Doors always get a real door model so they aren't invisible markers.
     const markerNoModel =
       isInvisibleMarkerKind(kind) ||
       kind === 'finish' ||
@@ -985,20 +1022,23 @@ export function createEditorViewport(
       kind === 'action' ||
       kind === 'hazard' ||
       kind === 'button' ||
-      (kind === 'door' && !modelName) ||
       kind === 'red_zone' ||
       kind === 'revive_pad';
 
     const defaultModel = markerNoModel
       ? undefined
-      : kind === 'health_floor'
-        ? modelName ?? 'floor-square'
-        : modelName;
+      : kind === 'door'
+        ? modelName ?? DEFAULT_DOOR_MODEL
+        : kind === 'health_floor'
+          ? modelName ?? 'floor-square'
+          : modelName;
 
     const runnerCount =
       kind === 'start' || kind === 'spawn_runner'
         ? doc.entities.filter((e) => e.kind === 'start' || e.kind === 'spawn_runner').length + 1
         : 0;
+
+    const foot = defaultModel ? modelFootprint(defaultModel) : null;
 
     const ent: EditorEntity = {
       id: generateId(),
@@ -1015,7 +1055,8 @@ export function createEditorViewport(
       color: defaultColor,
       opacity: 1,
       visible: true,
-      solid: padKinds && kind !== 'red_zone' ? true : undefined,
+      solid: kind === 'door' ? true : padKinds && kind !== 'red_zone' ? true : undefined,
+      collisionSize: foot ?? undefined,
       animation: defaultAnimation(),
       playerAnims: kind === 'player' ? {} : undefined,
       hazard: kind === 'hazard' ? defaultHazard() : undefined,
@@ -1040,6 +1081,7 @@ export function createEditorViewport(
   function updateCursor() {
     if (freeFly) renderer.domElement.style.cursor = 'none';
     else if (measureMode) renderer.domElement.style.cursor = 'cell';
+    else if (pendingPlaceKind) renderer.domElement.style.cursor = 'crosshair';
     else if (editTool === 'select') renderer.domElement.style.cursor = 'default';
     else if (editTool === 'bucket' || editTool === 'paint') renderer.domElement.style.cursor = 'cell';
     else renderer.domElement.style.cursor = 'crosshair';
@@ -1424,6 +1466,24 @@ export function createEditorViewport(
       if (o?.userData.entityId) hitEntityId = o.userData.entityId as string;
     }
 
+    // Armed entity placement: click floor (or stack on mesh) to place on surface top.
+    if (pendingPlaceKind) {
+      const placedPt = pickPlacePoint(true);
+      const p = placedPt?.point ?? groundHits[0]?.point;
+      if (p) {
+        const kind = pendingPlaceKind;
+        const model = pendingPlaceModel;
+        // Keep armed for multi-place unless Shift is held to place-once.
+        if (ev.shiftKey) {
+          pendingPlaceKind = null;
+          pendingPlaceModel = undefined;
+        }
+        placeAt(p, kind, model);
+        updateCursor();
+        return;
+      }
+    }
+
     // Prefab stamp wins over brush paint (armed from Prefabs tab).
     if (groundHits[0] && stampEntitiesQueue?.length) {
       const stampLayer = layerMeta(activeLayerId);
@@ -1742,19 +1802,37 @@ export function createEditorViewport(
       handlers.onDocChange(doc);
     },
     placeSpawn: (kind) => {
-      const t = new THREE.Vector3();
-      camera.getWorldDirection(t);
-      const p = camera.position.clone().add(t.multiplyScalar(8));
-      p.y = surfaceYAt(p.x, p.z);
-      // Markers place without models — editor shows flag/cone only.
-      placeAt(p, kind);
+      // Click-to-place on the floor — not camera-forward dump.
+      pendingPlaceKind = kind;
+      pendingPlaceModel = undefined;
+      if (editTool === 'bucket' || editTool === 'paint') editTool = 'select';
+      if (freeFly) setFreeFly(false);
+      applyToolCameraLock();
+      updateCursor();
+      handlers.onPlaceResult?.('ok', `Click floor to place ${entityKindLabel(kind)}`);
     },
     placeEntity: (kind, model) => {
-      const t = new THREE.Vector3();
-      camera.getWorldDirection(t);
-      const p = camera.position.clone().add(t.multiplyScalar(8));
-      p.y = surfaceYAt(p.x, p.z);
-      placeAt(p, kind, model);
+      pendingPlaceKind = kind;
+      pendingPlaceModel = model;
+      if (editTool === 'bucket' || editTool === 'paint') editTool = 'select';
+      if (freeFly) setFreeFly(false);
+      applyToolCameraLock();
+      updateCursor();
+      handlers.onPlaceResult?.('ok', `Click floor to place ${entityKindLabel(kind)}`);
+    },
+    armPlaceKind: (kind, model) => {
+      pendingPlaceKind = kind;
+      pendingPlaceModel = model;
+      if (editTool === 'bucket' || editTool === 'paint') editTool = 'select';
+      if (freeFly) setFreeFly(false);
+      applyToolCameraLock();
+      updateCursor();
+    },
+    getPendingPlaceKind: () => pendingPlaceKind,
+    clearPendingPlace: () => {
+      pendingPlaceKind = null;
+      pendingPlaceModel = undefined;
+      updateCursor();
     },
     stampEntities: (entities) => {
       stampEntitiesQueue = entities;

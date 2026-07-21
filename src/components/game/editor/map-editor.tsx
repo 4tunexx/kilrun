@@ -358,15 +358,21 @@ export function MapEditor({
       onFreeFlyChange: setFreeFly,
       onMeasureChange: setMeasureDist,
       onPlaceResult: (result, layerName) => {
-        if (result !== 'locked') return;
-        const now = Date.now();
-        if (now - lastLockedToastAt.current < 1600) return;
-        lastLockedToastAt.current = now;
-        toast({
-          title: 'Build level locked',
-          description: `“${layerName ?? 'This level'}” is locked — unlock it in Layers, or Build here on another level.`,
-          variant: 'destructive',
-        });
+        if (result === 'locked') {
+          const now = Date.now();
+          if (now - lastLockedToastAt.current < 1600) return;
+          lastLockedToastAt.current = now;
+          toast({
+            title: 'Build level locked',
+            description: `“${layerName ?? 'This level'}” is locked — unlock it in Layers, or Build here on another level.`,
+            variant: 'destructive',
+          });
+          return;
+        }
+        // Click-to-place arming hint (layerName reused as message).
+        if (layerName?.startsWith('Click floor')) {
+          toast({ title: 'Place entity', description: `${layerName}. Shift+click places once.` });
+        }
       },
     });
     apiRef.current = api;

@@ -367,6 +367,12 @@ export interface EditorEntity {
   opacity?: number;
   visible?: boolean;
   textureUrl?: string;
+  /**
+   * Cached local-space mesh half-extents / size from the loaded GLB (editor).
+   * Used for collision pad export so stairs/walls match visual size.
+   * `[sizeX, sizeY, sizeZ]` in local units before entity.scale.
+   */
+  collisionSize?: [number, number, number];
   animation?: EntityAnimation;
   /** Only for kind === 'player' */
   playerAnims?: PlayerAnimBindings;

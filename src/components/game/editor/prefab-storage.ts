@@ -1,7 +1,13 @@
 import type { EditorEntity, MapDocument } from './map-document';
-import { entityExportsAsPlatform, ensureHazard, generateId } from './map-document';
+import {
+  ensureDeathrunSettings,
+  entityExportsAsPlatform,
+  ensureHazard,
+  generateId,
+} from './map-document';
 import type { KilrunMode } from '@/lib/game-modes';
 import { normalizeKilrunMode } from '@/lib/game-modes';
+import { modelFootprint } from './prototype-catalog';
 
 const PREFAB_KEY = 'kilrun.prefabs.v1';
 export const ACTIVE_PLAY_MAP_KEY = 'kilrun.activePlayMapId.v1';
@@ -233,8 +239,18 @@ export interface SimWorldBounds {
 
 function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const [tx, ty, tz] = e.position;
-  const sizeX = Math.max(1.2, Math.abs(e.scale[0]) * 2);
-  const sizeZ = Math.max(1.2, Math.abs(e.scale[2]) * 2);
+  // Prefer measured GLB size, then catalog footprint, then legacy scale*2 heuristic.
+  const foot =
+    e.collisionSize ??
+    modelFootprint(e.model) ??
+    ([
+      Math.max(1, Math.abs(e.scale[0]) * 2),
+      Math.max(0.2, Math.abs(e.scale[1]) * 2),
+      Math.max(1, Math.abs(e.scale[2]) * 2),
+    ] as [number, number, number]);
+  const sizeX = Math.max(0.35, foot[0] * Math.abs(e.scale[0]));
+  const sizeY = Math.max(0.12, foot[1] * Math.abs(e.scale[1]));
+  const sizeZ = Math.max(0.35, foot[2] * Math.abs(e.scale[2]));
   // Yaw expands the axis-aligned pad so rotated floors/walls still block.
   const yaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
   const absC = Math.abs(Math.cos(yaw));
@@ -269,16 +285,16 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
       model.startsWith('column') ||
       model.includes('door') ||
       e.kind === 'door' ||
-      Math.abs(e.scale[1]) >= 1.15 ||
+      sizeY >= 1.0 ||
       e.solid === true);
   const height = topOnly
-    ? 0.28
+    ? Math.min(0.35, Math.max(0.2, sizeY))
     : wallLike
-      ? Math.max(1.2, Math.abs(e.scale[1]) * 2)
+      ? Math.max(1.0, sizeY)
       : e.solid === true
-        ? Math.max(0.9, Math.abs(e.scale[1]) * 2)
-        : 0.45;
-  const topZ = topOnly ? ty : ty + height * 0.5;
+        ? Math.max(0.8, sizeY)
+        : Math.max(0.35, sizeY * 0.5);
+  const topZ = topOnly ? ty + sizeY * 0.5 : ty + height * 0.5;
 
   const dirSimX = Math.cos(yaw);
   const dirSimY = Math.sin(yaw);
@@ -407,6 +423,51 @@ export function mapDocToSimButtons(doc: MapDocument): SimButtonBlueprint[] {
     .filter((b) => b.activatesObstacleIds.length > 0);
 }
 
+export interface SimActionBlueprint {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  /** proximity = auto on enter; interact = Use/E; collide = touch */
+  trigger: 'proximity' | 'interact' | 'collide' | 'always';
+  activatesObstacleIds: string[];
+  holdMs: number;
+  cooldownMs: number;
+}
+
+/** Invisible Action markers — fire signals / arm traps like buttons. */
+export function mapDocToSimActions(doc: MapDocument): SimActionBlueprint[] {
+  return doc.entities
+    .filter((e) => e.visible !== false && e.kind === 'action')
+    .map((e) => {
+      const anim = e.animation;
+      const [tx, ty, tz] = e.position;
+      const targets = anim?.activatesEntityIds ?? [];
+      const listeners = doc.entities
+        .filter((o) => o.animation?.listenToEntityId === e.id)
+        .map((o) => o.id);
+      const activatesObstacleIds = Array.from(new Set([...targets, ...listeners]));
+      const raw = anim?.trigger;
+      const trigger: SimActionBlueprint['trigger'] =
+        raw === 'interact' || raw === 'collide' || raw === 'always' || raw === 'proximity'
+          ? raw
+          : 'proximity';
+      return {
+        id: e.id,
+        x: tz,
+        y: tx,
+        z: ty,
+        radius: Math.max(1.0, anim?.radius ?? 2.0),
+        trigger,
+        activatesObstacleIds,
+        holdMs: 2000,
+        cooldownMs: 500,
+      };
+    })
+    .filter((a) => a.activatesObstacleIds.length > 0 || a.trigger === 'always');
+}
+
 export function mapDocToSimTeleports(doc: MapDocument): SimTeleportBlueprint[] {
   const byId = new Map(doc.entities.map((e) => [e.id, e]));
   return doc.entities
@@ -530,8 +591,15 @@ export function prepareDocForPlayTest(doc: MapDocument): {
   };
 }
 
-/** All player start positions (Horde supports up to 4). */
+/** All player / runner start positions (Deathrun capped by modeSettings.maxRunners). */
 export function mapDocPlayerSpawns(doc: MapDocument): { x: number; y: number; z: number }[] {
+  const mode = normalizeKilrunMode(doc.gameMode);
+  const max =
+    mode === 'deathrun'
+      ? ensureDeathrunSettings(doc).maxRunners
+      : mode === 'horde'
+        ? 4
+        : 16;
   const starts = doc.entities.filter(
     (e) =>
       e.visible !== false &&
@@ -541,7 +609,7 @@ export function mapDocPlayerSpawns(doc: MapDocument): { x: number; y: number; z:
     const fallback = mapDocSpawnPoints(doc).runner;
     return fallback ? [fallback] : [];
   }
-  return starts.map((e) => ({
+  return starts.slice(0, Math.max(1, max)).map((e) => ({
     x: e.position[2],
     y: e.position[0],
     z: e.position[1],

@@ -18,7 +18,7 @@ export class AnimationDirector {
     this.unregister(entityId);
     this.roots.set(entityId, root);
     this.clips.set(entityId, clips);
-    if (!clips.length) return;
+    if (!clips.length) return; // root still tracked for proximity/signal (action markers)
     const mixer = new THREE.AnimationMixer(root);
     this.mixers.set(entityId, mixer);
     const map = new Map<string, THREE.AnimationAction>();
@@ -167,11 +167,14 @@ export class AnimationDirector {
   ) {
     for (const ent of entities) {
       const anim = ent.animation;
-      if (!anim || !this.mixers.has(ent.id)) continue;
+      if (!anim) continue;
       if (ent.kind === 'player') continue;
 
       const root = this.roots.get(ent.id);
+      // Action markers may have no clips/mixer — still evaluate for signal firing.
       if (!root) continue;
+      if (!this.mixers.has(ent.id) && ent.kind !== 'action' && ent.kind !== 'button') continue;
+
       const dist = playerPos.distanceTo(root.position);
       const inRange = dist <= (anim.radius ?? 2.5);
 
@@ -185,11 +188,19 @@ export class AnimationDirector {
           continue;
         case 'proximity':
           shouldActive = inRange;
+          if (inRange && ent.kind === 'action') {
+            this.fireSignal(ent.id);
+            if (anim.signalChannel) this.fireSignal(anim.signalChannel);
+            for (const tid of anim.activatesEntityIds ?? []) {
+              this.activated.add(tid);
+              this.fireSignal(tid);
+            }
+          }
           break;
         case 'interact':
           if (inRange && interactPressed) {
             this.activated.add(ent.id);
-            if (ent.kind === 'button') {
+            if (ent.kind === 'button' || ent.kind === 'action') {
               this.fireSignal(ent.id);
               if (anim.signalChannel) this.fireSignal(anim.signalChannel);
               for (const tid of anim.activatesEntityIds ?? []) {
@@ -202,7 +213,7 @@ export class AnimationDirector {
           break;
         case 'collide':
           shouldActive = collidingIds.has(ent.id) || (inRange && dist < 1.1);
-          if (shouldActive && ent.kind === 'button') {
+          if (shouldActive && (ent.kind === 'button' || ent.kind === 'action')) {
             this.fireSignal(ent.id);
             if (anim.signalChannel) this.fireSignal(anim.signalChannel);
             for (const tid of anim.activatesEntityIds ?? []) {

@@ -152,6 +152,21 @@ export class CustomMapOverlay {
         console.warn('[CustomMapOverlay] skip', ent.name, err);
       }
     }
+
+    // Invisible Action markers: register empty roots so AnimationDirector can fire signals.
+    for (const ent of doc.entities) {
+      if (this.disposed) return;
+      if (ent.visible === false) continue;
+      if (ent.kind !== 'action') continue;
+      const ghost = new THREE.Group();
+      ghost.visible = false;
+      ghost.position.set(...ent.position);
+      ghost.userData.entityId = ent.id;
+      ghost.userData.editorEntity = ent;
+      this.root.add(ghost);
+      this.entityRoots.set(ent.id, ghost);
+      this.director.register(ent.id, ghost, []);
+    }
   }
 
   update(
