@@ -81,6 +81,10 @@ interface ButtonZone {
   cooldownMs: number;
 }
 
+interface ActionZone extends ButtonZone {
+  trigger: 'proximity' | 'interact' | 'collide' | 'always';
+}
+
 interface TeleportZone {
   id: string;
   x: number;
@@ -110,14 +114,16 @@ export class DeathrunRoom extends Room<RoomState> {
   private lastObstacleHitAt = new Map<string, number>();
   private lastShotAt = new Map<string, number>();
   private resultsElapsedMs = 0;
-  /** Editor MAIN map runner / start spawn (sim space). */
-  private customRunnerSpawn: SpawnPoint | null = null;
+  /** Editor MAIN map runner / start spawns (sim space). */
+  private customRunnerSpawns: SpawnPoint[] = [];
   /** Editor trapper spawn (sim space). */
   private customTrapperSpawn: SpawnPoint | null = null;
   /** Editor finish trigger volumes. When set, replaces FINISH_X line. */
   private customFinishes: FinishZone[] = [];
   /** Interact buttons that arm linked obstacles. */
   private customButtons: ButtonZone[] = [];
+  /** Invisible action zones that can arm linked obstacles. */
+  private customActions: ActionZone[] = [];
   /** Teleporter volumes. */
   private customTeleports: TeleportZone[] = [];
   /** Button-armed obstacle remaining active ms (obstacle id → ms left). */
@@ -129,6 +135,10 @@ export class DeathrunRoom extends Room<RoomState> {
   /** First joiner — may load MAIN map; admins always may. */
   private hostSessionId: string | null = null;
   private adminSessions = new Set<string>();
+  private matchDurationMs = MATCH_DURATION_MS;
+  private lobbyCountdownMs = LOBBY_COUNTDOWN_MS;
+  private trapperEnabled = true;
+  private maxRunners = 8;
 
   onCreate() {
     this.setState(new RoomState());
@@ -158,10 +168,20 @@ export class DeathrunRoom extends Room<RoomState> {
           obstacles?: ObstacleBlueprint[];
           finishes?: FinishZone[];
           buttons?: ButtonZone[];
+          actions?: ActionZone[];
           teleports?: TeleportZone[];
           spawn?: SpawnPoint;
+          playerSpawns?: SpawnPoint[];
           trapperSpawn?: SpawnPoint;
           worldBounds?: WorldBounds;
+          modeSettings?: {
+            deathrun?: {
+              warmupSec?: number;
+              roundTimeSec?: number;
+              maxRunners?: number;
+              trapperEnabled?: boolean;
+            };
+          };
         }
       ) => {
         if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
@@ -188,10 +208,34 @@ export class DeathrunRoom extends Room<RoomState> {
         this.obstacleTimers = this.state.obstacles.map(() => 0);
         this.buttonArmRemaining.clear();
 
+        const settings = data.modeSettings?.deathrun;
+        if (settings) {
+          if (typeof settings.warmupSec === 'number') {
+            this.lobbyCountdownMs = Math.max(0, settings.warmupSec) * 1000;
+          }
+          if (typeof settings.roundTimeSec === 'number') {
+            this.matchDurationMs = Math.max(30, settings.roundTimeSec) * 1000;
+          }
+          if (typeof settings.maxRunners === 'number') {
+            this.maxRunners = Math.max(1, Math.min(8, Math.floor(settings.maxRunners)));
+            this.maxClients = this.maxRunners;
+          }
+          if (typeof settings.trapperEnabled === 'boolean') {
+            this.trapperEnabled = settings.trapperEnabled;
+          }
+        }
+
         this.customFinishes = Array.isArray(data?.finishes) ? data.finishes : [];
         this.customButtons = Array.isArray(data?.buttons) ? data.buttons : [];
+        this.customActions = Array.isArray(data.actions) ? data.actions : [];
         this.customTeleports = Array.isArray(data?.teleports) ? data.teleports : [];
-        if (data.spawn) this.customRunnerSpawn = { ...data.spawn };
+        if (Array.isArray(data.playerSpawns) && data.playerSpawns.length) {
+          this.customRunnerSpawns = data.playerSpawns
+            .map((s) => ({ ...s }))
+            .slice(0, this.maxRunners);
+        } else if (data.spawn) {
+          this.customRunnerSpawns = [{ ...data.spawn }];
+        }
         if (data.trapperSpawn) this.customTrapperSpawn = { ...data.trapperSpawn };
         if (data.worldBounds) {
           this.worldBounds = { ...data.worldBounds };
@@ -199,7 +243,7 @@ export class DeathrunRoom extends Room<RoomState> {
           this.worldBounds = { ...DEFAULT_WORLD_BOUNDS };
         }
 
-        this.state.courseStartX = data.spawn?.x ?? SPAWN_X;
+        this.state.courseStartX = this.customRunnerSpawns[0]?.x ?? SPAWN_X;
         if (this.customFinishes.length > 0) {
           this.state.courseFinishX = this.customFinishes[this.customFinishes.length - 1].x;
         } else {
@@ -215,7 +259,7 @@ export class DeathrunRoom extends Room<RoomState> {
         });
 
         console.log(
-          `[DeathrunRoom] MAIN map loaded by ${client.sessionId}: ${platforms.length} platforms, ${hazards.length} hazards, ${this.customButtons.length} buttons, ${this.customTeleports.length} teles`
+          `[DeathrunRoom] MAIN map loaded by ${client.sessionId}: ${platforms.length} platforms, ${hazards.length} hazards, ${this.customButtons.length} buttons, ${this.customActions.length} actions, ${this.customTeleports.length} teles`
         );
       }
     );
@@ -260,15 +304,19 @@ export class DeathrunRoom extends Room<RoomState> {
 
   private applySpawnPosition(player: PlayerState, laneIndex: number) {
     const laneSpread = ((laneIndex % 5) - 2) * 0.55;
-    const custom =
-      player.role === 'trapper' && this.customTrapperSpawn
-        ? this.customTrapperSpawn
-        : this.customRunnerSpawn;
+    if (player.role === 'trapper' && this.customTrapperSpawn) {
+      player.x = this.customTrapperSpawn.x;
+      player.y = this.customTrapperSpawn.y;
+      player.z = this.customTrapperSpawn.z;
+      return;
+    }
 
-    if (custom) {
-      player.x = custom.x;
-      player.y = custom.y + laneSpread;
-      player.z = custom.z;
+    if (player.role !== 'trapper' && this.customRunnerSpawns.length > 0) {
+      const spawn = this.customRunnerSpawns[laneIndex % this.customRunnerSpawns.length];
+      const repeatedLaneOffset = Math.floor(laneIndex / this.customRunnerSpawns.length) * 0.15;
+      player.x = spawn.x;
+      player.y = spawn.y + repeatedLaneOffset;
+      player.z = spawn.z;
       return;
     }
     player.x = SPAWN_X;
@@ -317,7 +365,7 @@ export class DeathrunRoom extends Room<RoomState> {
   private tickLobby() {
     if (this.state.players.size >= MIN_PLAYERS_TO_START) {
       this.state.phase = 'countdown';
-      this.state.countdownMs = LOBBY_COUNTDOWN_MS;
+      this.state.countdownMs = this.lobbyCountdownMs;
     }
   }
 
@@ -343,22 +391,27 @@ export class DeathrunRoom extends Room<RoomState> {
   private startRound() {
     const sessionIds = Array.from(this.state.players.keys());
 
-    if (sessionIds.length === 1) {
-      const only = sessionIds[0];
-      const player = this.state.players.get(only)!;
-      player.role = 'runner';
-      this.resetPlayerOnSpawn(player, 0);
-      this.simScratch.set(only, createSimScratch());
+    if (!this.trapperEnabled || sessionIds.length === 1) {
+      sessionIds.forEach((sessionId, i) => {
+        const player = this.state.players.get(sessionId)!;
+        player.role = 'runner';
+        this.resetPlayerOnSpawn(player, i);
+        this.simScratch.set(sessionId, createSimScratch());
+      });
       this.state.trapperSessionId = '';
     } else {
       const trapperIndex = Math.floor(Math.random() * sessionIds.length);
       const trapperSessionId = sessionIds[trapperIndex];
       this.state.trapperSessionId = trapperSessionId;
 
+      let runnerLaneIndex = 0;
       sessionIds.forEach((sessionId, i) => {
         const player = this.state.players.get(sessionId)!;
         player.role = sessionId === trapperSessionId ? 'trapper' : 'runner';
-        this.resetPlayerOnSpawn(player, i);
+        this.resetPlayerOnSpawn(
+          player,
+          player.role === 'runner' ? runnerLaneIndex++ : i
+        );
         this.simScratch.set(sessionId, createSimScratch());
       });
     }
@@ -369,7 +422,7 @@ export class DeathrunRoom extends Room<RoomState> {
     });
 
     this.state.phase = 'playing';
-    this.state.matchTimeRemainingMs = MATCH_DURATION_MS;
+    this.state.matchTimeRemainingMs = this.matchDurationMs;
     this.state.winnerRole = '';
   }
 
@@ -489,9 +542,8 @@ export class DeathrunRoom extends Room<RoomState> {
           player.hasFinished = true;
         }
 
-        if (input.interactPressed) {
-          this.tryPressButtons(player, sessionId, now);
-        }
+        if (input.interactPressed) this.tryPressButtons(player, sessionId, now);
+        this.tryTriggerActions(player, sessionId, now, input.interactPressed);
         this.tryTeleport(player, sessionId, now);
       }
 
@@ -550,22 +602,41 @@ export class DeathrunRoom extends Room<RoomState> {
 
   private tryPressButtons(player: PlayerState, sessionId: string, now: number) {
     for (const btn of this.customButtons) {
-      const dx = player.x - btn.x;
-      const dy = player.y - btn.y;
-      const dz = player.z - btn.z;
-      if (Math.hypot(dx, dy) > btn.radius + PLAYER_RADIUS) continue;
-      if (Math.abs(dz) > 2.2) continue;
-      const key = `${sessionId}:${btn.id}`;
-      const last = this.lastButtonPressAt.get(key) ?? 0;
-      if (now - last < btn.cooldownMs) continue;
-      this.lastButtonPressAt.set(key, now);
-      for (const oid of btn.activatesObstacleIds) {
-        const obs = this.state.obstacles.find((o) => o.id === oid);
-        if (!obs) continue;
-        obs.active = true;
-        const hold = btn.holdMs > 0 ? btn.holdMs : obs.activeMs || 1500;
-        this.buttonArmRemaining.set(oid, hold);
-      }
+      if (!this.isPlayerInActivationRadius(player, btn)) continue;
+      this.activateObstacleZone(btn, `button:${sessionId}:${btn.id}`, now);
+    }
+  }
+
+  private tryTriggerActions(
+    player: PlayerState,
+    sessionId: string,
+    now: number,
+    interactPressed: boolean
+  ) {
+    for (const action of this.customActions) {
+      if (action.trigger === 'interact' && !interactPressed) continue;
+      if (!this.isPlayerInActivationRadius(player, action)) continue;
+      this.activateObstacleZone(action, `action:${sessionId}:${action.id}`, now);
+    }
+  }
+
+  private isPlayerInActivationRadius(player: PlayerState, zone: ButtonZone): boolean {
+    const dx = player.x - zone.x;
+    const dy = player.y - zone.y;
+    const dz = player.z - zone.z;
+    return Math.hypot(dx, dy) <= zone.radius + PLAYER_RADIUS && Math.abs(dz) <= 2.2;
+  }
+
+  private activateObstacleZone(zone: ButtonZone, cooldownKey: string, now: number) {
+    const last = this.lastButtonPressAt.get(cooldownKey) ?? 0;
+    if (now - last < zone.cooldownMs) return;
+    this.lastButtonPressAt.set(cooldownKey, now);
+    for (const oid of zone.activatesObstacleIds) {
+      const obs = this.state.obstacles.find((o) => o.id === oid);
+      if (!obs) continue;
+      obs.active = true;
+      const hold = zone.holdMs > 0 ? zone.holdMs : obs.activeMs || 1500;
+      this.buttonArmRemaining.set(oid, hold);
     }
   }
 

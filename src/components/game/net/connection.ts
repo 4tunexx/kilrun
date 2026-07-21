@@ -284,6 +284,17 @@ export class GameConnection {
       holdMs: number;
       cooldownMs: number;
     }[];
+    actions?: {
+      id: string;
+      x: number;
+      y: number;
+      z: number;
+      radius: number;
+      trigger: 'proximity' | 'interact' | 'collide' | 'always';
+      activatesObstacleIds: string[];
+      holdMs: number;
+      cooldownMs: number;
+    }[];
     teleports?: {
       id: string;
       x: number;
@@ -350,6 +361,28 @@ export class GameConnection {
       maxX: number;
       minY: number;
       maxY: number;
+    };
+    modeSettings?: {
+      deathrun?: {
+        warmupSec?: number;
+        roundTimeSec?: number;
+        maxRunners?: number;
+        trapperEnabled?: boolean;
+      };
+      horde?: {
+        warmupSec?: number;
+        waveTimeSec?: number;
+        intermissionSec?: number;
+        maxPlayers?: number;
+        startingWave?: number;
+      };
+      competitive?: {
+        warmupSec?: number;
+        buyTimeSec?: number;
+        roundTimeSec?: number;
+        roundCount?: number;
+        overtimeSec?: number;
+      };
     };
   }): void {
     this.room?.send('loadCustomMap', payload);

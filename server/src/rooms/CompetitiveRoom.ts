@@ -61,10 +61,17 @@ interface SpawnPoint {
   z: number;
 }
 
+interface CompetitiveModeSettings {
+  warmupSec?: number;
+  buyTimeSec?: number;
+  roundTimeSec?: number;
+  roundCount?: number;
+  overtimeSec?: number;
+}
+
 const RESULTS_DISPLAY_MS = 10000;
 const ROUND_COUNTDOWN_MS = 4000;
 const MAX_ROUNDS = 6;
-const ROUNDS_TO_WIN = 4;
 const ROUND_TIME_MS = 120_000;
 const DEFAULT_MM_WAIT_MS = 12_000;
 const DEFAULT_MIN_SAME_RANK = 4;
@@ -90,12 +97,19 @@ export class CompetitiveRoom extends Room<RoomState> {
   private betweenRounds = false;
   private betweenRoundMs = 0;
   private matchStarted = false;
+  private overtimeApplied = false;
 
   private rankKey = 'open';
   private mmWaitMs = DEFAULT_MM_WAIT_MS;
   private minSameRank = DEFAULT_MIN_SAME_RANK;
   private lobbyElapsedMs = 0;
   private openedToAll = false;
+  private lobbyCountdownMs = LOBBY_COUNTDOWN_MS;
+  private roundCountdownMs = ROUND_COUNTDOWN_MS;
+  private roundTimeMs = ROUND_TIME_MS;
+  private maxRounds = MAX_ROUNDS;
+  private buyTimeMs = 0;
+  private overtimeMs = 60_000;
 
   onCreate(options: JoinOptions = {}) {
     this.setState(new RoomState());
@@ -153,7 +167,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       if (!this.adminSessions.has(client.sessionId)) return;
       // Admin can launch even alone — skip matchmaking wait.
       this.state.phase = 'countdown';
-      this.state.countdownMs = LOBBY_COUNTDOWN_MS;
+      this.state.countdownMs = this.lobbyCountdownMs;
       console.log(
         `[CompetitiveRoom] admin forceStart (${this.state.players.size} player(s))`
       );
@@ -167,6 +181,33 @@ export class CompetitiveRoom extends Room<RoomState> {
 
       const platforms = data?.platforms as PlatformBlueprint[] | undefined;
       if (!Array.isArray(platforms) || platforms.length === 0) return;
+
+      const settings = (
+        data?.modeSettings as { competitive?: CompetitiveModeSettings } | undefined
+      )?.competitive;
+      if (settings) {
+        if (typeof settings.warmupSec === 'number' && Number.isFinite(settings.warmupSec)) {
+          this.lobbyCountdownMs = Math.max(0, settings.warmupSec) * 1000;
+        }
+        if (typeof settings.buyTimeSec === 'number' && Number.isFinite(settings.buyTimeSec)) {
+          this.buyTimeMs = Math.max(0, settings.buyTimeSec) * 1000;
+        }
+        if (
+          typeof settings.roundTimeSec === 'number' &&
+          Number.isFinite(settings.roundTimeSec)
+        ) {
+          this.roundTimeMs = Math.max(15, settings.roundTimeSec) * 1000;
+        }
+        if (typeof settings.roundCount === 'number' && Number.isFinite(settings.roundCount)) {
+          this.maxRounds = Math.max(1, Math.min(12, Math.floor(settings.roundCount)));
+        }
+        if (
+          typeof settings.overtimeSec === 'number' &&
+          Number.isFinite(settings.overtimeSec)
+        ) {
+          this.overtimeMs = Math.max(0, settings.overtimeSec) * 1000;
+        }
+      }
 
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(platforms));
@@ -303,7 +344,7 @@ export class CompetitiveRoom extends Room<RoomState> {
             : COMPETITIVE_MIN_PLAYERS_TO_START;
         if (this.state.players.size >= minToStart) {
           this.state.phase = 'countdown';
-          this.state.countdownMs = LOBBY_COUNTDOWN_MS;
+          this.state.countdownMs = this.lobbyCountdownMs;
         }
         break;
       case 'countdown':
@@ -319,7 +360,7 @@ export class CompetitiveRoom extends Room<RoomState> {
           if (this.betweenRoundMs <= 0) {
             this.betweenRounds = false;
             this.state.phase = 'countdown';
-            this.state.countdownMs = ROUND_COUNTDOWN_MS;
+            this.state.countdownMs = this.roundCountdownMs;
           }
           break;
         }
@@ -346,14 +387,16 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.state.roundIndex = 0;
     this.state.winnerRole = '';
     this.assignTeamsAndSpawn();
-    this.startRound();
+    this.state.phase = 'countdown';
+    this.state.countdownMs = this.roundCountdownMs + this.buyTimeMs;
   }
 
   private startRound() {
     this.state.roundIndex += 1;
     this.betweenRounds = false;
+    this.overtimeApplied = false;
     this.state.phase = 'playing';
-    this.state.matchTimeRemainingMs = ROUND_TIME_MS;
+    this.state.matchTimeRemainingMs = this.roundTimeMs;
 
     Array.from(this.state.players.values()).forEach((player) => {
       player.health = 100;
@@ -371,6 +414,11 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.tickPlayers(dtMs);
 
     if (this.state.matchTimeRemainingMs <= 0) {
+      if (!this.overtimeApplied && this.state.scoreA === this.state.scoreB && this.overtimeMs > 0) {
+        this.overtimeApplied = true;
+        this.state.matchTimeRemainingMs = this.overtimeMs;
+        return;
+      }
       // Time expired — team with more alive wins; tie → Team A for determinism
       const aAlive = this.countAlive('team_a');
       const bAlive = this.countAlive('team_b');
@@ -411,9 +459,9 @@ export class CompetitiveRoom extends Room<RoomState> {
     else this.state.scoreB += 1;
 
     if (
-      this.state.scoreA >= ROUNDS_TO_WIN ||
-      this.state.scoreB >= ROUNDS_TO_WIN ||
-      this.state.roundIndex >= MAX_ROUNDS
+      this.state.scoreA >= this.roundsToWin() ||
+      this.state.scoreB >= this.roundsToWin() ||
+      this.state.roundIndex >= this.maxRounds
     ) {
       const matchWinner =
         this.state.scoreA === this.state.scoreB
@@ -431,6 +479,10 @@ export class CompetitiveRoom extends Room<RoomState> {
     // Short pause then countdown for next round
     this.betweenRounds = true;
     this.betweenRoundMs = 2000;
+  }
+
+  private roundsToWin() {
+    return Math.floor(this.maxRounds / 2) + 1;
   }
 
   private tickPlayers(dtMs: number) {

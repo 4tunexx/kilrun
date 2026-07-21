@@ -56,6 +56,7 @@ import {
   mapDocToSimFinishes,
   mapDocToSimHazards,
   mapDocToSimPlatforms,
+  mapDocToSimActions,
   mapDocToSimButtons,
   mapDocToSimTeleports,
   mapDocToWorldBounds,
@@ -182,6 +183,7 @@ export default function KilrunEngine({
     const obstacles = mapDocToSimHazards(doc);
     const finishes = mapDocToSimFinishes(doc);
     const buttons = mapDocToSimButtons(doc);
+    const actions = mapDocToSimActions(doc);
     const teleports = mapDocToSimTeleports(doc);
     const spawns = mapDocSpawnPoints(doc);
     const playerSpawns = mapDocPlayerSpawns(doc);
@@ -198,6 +200,7 @@ export default function KilrunEngine({
       obstacles,
       finishes,
       buttons,
+      actions,
       teleports,
       spawn: spawns.runner ?? playerSpawns[0] ?? undefined,
       trapperSpawn: spawns.trapper ?? undefined,
@@ -209,6 +212,7 @@ export default function KilrunEngine({
       redZones,
       revivePads,
       worldBounds,
+      modeSettings: doc.modeSettings,
     });
   }, [room.phase, connectionRef, playerCount, connectionError, mode]);
 
