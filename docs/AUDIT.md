@@ -4,7 +4,7 @@ _Last updated: 2026-07-22 (branch `cursor/home-daily-missions-count-200f`)_
 
 ## Merge
 
-- **Merge only [PR #21](https://github.com/4tunexx/kilrun/pull/21).** Close **#20** without merging (#21 already includes it).
+- Current work: [PR #36](https://github.com/4tunexx/kilrun/pull/36) (`cursor/home-daily-missions-count-200f`) — daily mission count fix + security/progression audit hardening + server-authored match rewards.
 
 ## After deploy (required once)
 
