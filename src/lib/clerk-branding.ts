@@ -1,5 +1,20 @@
 'use server';
 
+import { auth } from '@/auth';
+import { prisma } from '@/lib/prisma';
+import { canAccessAdmin } from '@/lib/roles';
+
+async function requireStaff() {
+  const session = await auth();
+  const steamId = (session?.user as { steamId?: string } | undefined)?.steamId;
+  if (!steamId) throw new Error('Not authenticated');
+  const user = await prisma.user.findUnique({ where: { steamId } });
+  if (!user || user.isBanned || !canAccessAdmin(user.role)) {
+    throw new Error('Forbidden');
+  }
+  return user;
+}
+
 /**
  * Clerk verification emails use the Dashboard application name ("My Application"
  * by default). We can't fully redesign Clerk's hosted email HTML from code, but
@@ -11,6 +26,8 @@ export async function syncClerkBrandingToKilrun(): Promise<{
   message: string;
   steps: string[];
 }> {
+  await requireStaff();
+
   const steps = [
     'Open Clerk Dashboard → your Kilrun application',
     'Configure → Application → set Name to “Kilrun” (fixes “My Application” in emails)',

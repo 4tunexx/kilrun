@@ -15,19 +15,26 @@ async function requireStaffActor() {
   return user;
 }
 
+/**
+ * Write an audit row. Actor is always the authenticated staff session —
+ * client-supplied actorId / actorUsername are ignored.
+ */
 export async function writeAuditLog(input: {
-  actorId: string;
-  actorUsername: string;
+  /** @deprecated Ignored — actor comes from the staff session. */
+  actorId?: string;
+  /** @deprecated Ignored — actor comes from the staff session. */
+  actorUsername?: string;
   action: string;
   targetUserId?: string | null;
   targetUsername?: string | null;
   detail?: string;
 }) {
+  const staff = await requireStaffActor();
   try {
     await prisma.auditLog.create({
       data: {
-        actorId: input.actorId,
-        actorUsername: input.actorUsername,
+        actorId: staff.id,
+        actorUsername: staff.username,
         action: input.action,
         targetUserId: input.targetUserId ?? null,
         targetUsername: input.targetUsername ?? null,
@@ -46,12 +53,7 @@ export async function auditStaffAction(input: {
   targetUsername?: string | null;
   detail?: string;
 }) {
-  const actor = await requireStaffActor();
-  await writeAuditLog({
-    actorId: actor.id,
-    actorUsername: actor.username,
-    ...input,
-  });
+  await writeAuditLog(input);
 }
 
 export async function adminListAuditLogs(take = 200) {

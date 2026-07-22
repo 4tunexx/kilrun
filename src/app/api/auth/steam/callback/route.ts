@@ -5,10 +5,22 @@ import {
   withPrismaRetry,
 } from '@/lib/prisma';
 import { steamIdsPromotedToAdmin } from '@/lib/roles';
+import { runAsTrustedServer } from '@/lib/trusted-server';
+
 const STEAM_OPENID_URL = 'https://steamcommunity.com/openid/login';
 const STEAM_CLAIMED_ID_REGEX = /^https:\/\/steamcommunity\.com\/openid\/id\/(\d+)$/;
 const FALLBACK_AVATAR =
   'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg';
+
+function normalizeReturnTo(value: string): string | null {
+  try {
+    const url = new URL(value);
+    // Compare origin + pathname only — OpenID may append query params.
+    return `${url.origin}${url.pathname}`.replace(/\/$/, '') || `${url.origin}/`;
+  } catch {
+    return null;
+  }
+}
 
 async function fetchSteamProfile(steamId: string) {
   const apiKey = process.env.STEAM_API_KEY;
@@ -63,6 +75,12 @@ export async function GET(req: NextRequest) {
   const verifyBody = await verifyRes.text();
 
   if (!verifyBody.includes('is_valid:true')) {
+    return NextResponse.redirect(`${origin}/landing?error=steam_auth_invalid`);
+  }
+
+  const expectedReturnTo = normalizeReturnTo(`${origin}/api/auth/steam/callback`);
+  const actualReturnTo = normalizeReturnTo(params.get('openid.return_to') || '');
+  if (!expectedReturnTo || !actualReturnTo || actualReturnTo !== expectedReturnTo) {
     return NextResponse.redirect(`${origin}/landing?error=steam_auth_invalid`);
   }
 
@@ -121,13 +139,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${origin}/landing?error=${errorCode}`);
   }
 
+  if (user.isBanned) {
+    return NextResponse.redirect(`${origin}/landing?error=banned`);
+  }
+
   // Bootstrap mission board from templates (non-blocking for login cookie).
   try {
     const { ensurePlayerMissions, processWebsiteAction } = await import(
       '@/lib/progression-actions'
     );
-    await ensurePlayerMissions(user.id);
-    await processWebsiteAction(user.id, 'logins');
+    await runAsTrustedServer(async () => {
+      await ensurePlayerMissions(user.id);
+      await processWebsiteAction(user.id, 'logins');
+    });
   } catch (err) {
     console.error('[steam/callback] progression bootstrap failed', err);
   }

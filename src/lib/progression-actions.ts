@@ -11,7 +11,8 @@ import {
 } from '@/lib/daily-missions';
 import { getLevelFromXp, getLevelProgress } from '@/lib/progression';
 import { getRankForKp, KP_DEFAULT, clampKp } from '@/lib/kp';
-import { canAccessAdmin } from '@/lib/roles';
+import { canAccessAdmin, isAdminRole } from '@/lib/roles';
+import { isTrustedServerContext } from '@/lib/trusted-server';
 
 export type WebsiteActionMetric =
   | 'friends'
@@ -56,6 +57,20 @@ async function requireStaff() {
   return user;
 }
 
+async function requireAdmin() {
+  const user = await requireUser();
+  if (!isAdminRole(user.role)) throw new Error('Forbidden');
+  return user;
+}
+
+async function assertCanMutateUser(userId: string) {
+  if (isTrustedServerContext()) return;
+  const user = await requireUser();
+  if (user.id === userId) return;
+  if (isAdminRole(user.role)) return;
+  throw new Error('Forbidden');
+}
+
 /** Bell badge / list — DMs & mass mail belong in Messages, not here. */
 const BELL_EXCLUDED_TYPES = ['message', 'announcement'] as const;
 
@@ -92,6 +107,7 @@ async function notify(
 /** Grant XP and notify on level-up. Rank is driven by KP, not XP level. */
 export async function grantXp(userId: string, amount: number, reason?: string) {
   if (amount <= 0) return null;
+  await assertCanMutateUser(userId);
   const before = await prisma.user.findUnique({ where: { id: userId } });
   if (!before) return null;
 
@@ -139,6 +155,7 @@ export async function applyKpDelta(
   reason?: string
 ): Promise<{ kp: number; rank: string; prevRank: string; delta: number } | null> {
   if (!delta) return null;
+  await assertCanMutateUser(userId);
   const before = await prisma.user.findUnique({ where: { id: userId } });
   if (!before) return null;
 
@@ -181,6 +198,7 @@ export async function applyKpDelta(
 
 /** Ensure user.kp exists and currentRank matches KP (migration / backfill). */
 export async function syncRankFromKp(userId: string) {
+  await assertCanMutateUser(userId);
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return null;
   const kp =
@@ -232,6 +250,7 @@ function templateCategory(t: { category: string; key: string }): string {
 
 /** Assign / refresh active missions. Daily board resets each calendar day. */
 export async function ensurePlayerMissions(userId: string) {
+  await assertCanMutateUser(userId);
   await ensureDailyMissionTemplates();
   const today = missionPeriodKey();
   const templates = await prisma.missionTemplate.findMany({
@@ -348,6 +367,7 @@ export async function progressMissions(
   metric: string,
   amount = 1
 ) {
+  await assertCanMutateUser(userId);
   const missions = await prisma.activeMission.findMany({
     where: { userId, metric, isCompleted: false },
   });
@@ -420,10 +440,16 @@ async function metricCount(userId: string, metric: string): Promise<number> {
       }, 0);
     }
     case 'competitive_runs':
-      return prisma.matchResult.count({ where: { userId, mode: 'competitive' } });
+      return prisma.matchResult.count({
+        where: { userId, mode: { in: ['competitive', 'competitive_ranked'] } },
+      });
     case 'competitive_wins':
       return prisma.matchResult.count({
-        where: { userId, mode: 'competitive', outcome: 'win' },
+        where: {
+          userId,
+          mode: { in: ['competitive', 'competitive_ranked'] },
+          outcome: 'win',
+        },
       });
     case 'kp': {
       const u = await prisma.user.findUnique({ where: { id: userId } });
@@ -572,7 +598,7 @@ async function metricCount(userId: string, metric: string): Promise<number> {
       return prisma.matchResult.count({
         where: {
           userId,
-          mode: 'competitive',
+          mode: { in: ['competitive', 'competitive_ranked'] },
           playedAt: { gte: startOfLocalDay() },
         },
       });
@@ -592,6 +618,7 @@ async function metricCount(userId: string, metric: string): Promise<number> {
  * 2+ days resets it back to 1.
  */
 export async function updateLoginStreak(userId: string) {
+  await assertCanMutateUser(userId);
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return;
 
@@ -627,6 +654,7 @@ export async function tryUnlockAchievement(
   metric: string,
   _delta = 1
 ) {
+  await assertCanMutateUser(userId);
   const defs = await prisma.achievementDefinition.findMany({
     where: { isActive: true, metric },
   });
@@ -662,6 +690,7 @@ export async function tryUnlockAchievement(
 }
 
 export async function tryUnlockBadge(userId: string, metric: string, _delta = 1) {
+  await assertCanMutateUser(userId);
   const defs = await prisma.badgeDefinition.findMany({
     where: { isActive: true, metric },
   });
@@ -703,6 +732,7 @@ export async function processMatchProgression(input: {
   wavesCleared?: number;
   kills?: number;
 }) {
+  await assertCanMutateUser(input.userId);
   const mode = input.mode ?? 'deathrun';
   await ensurePlayerMissions(input.userId);
 
@@ -757,18 +787,27 @@ export async function processMatchProgression(input: {
     for (const m of scoreMissions) {
       const next = Math.max(m.currentCount, input.score);
       const completed = next >= m.targetCount;
-      await prisma.activeMission.update({
-        where: { id: m.id },
-        data: { currentCount: next, isCompleted: completed },
-      });
-      if (completed && !m.isCompleted) {
+      if (completed) {
+        const claimed = await prisma.activeMission.updateMany({
+          where: { id: m.id, isCompleted: false },
+          data: { currentCount: next, isCompleted: true },
+        });
+        if (claimed.count !== 1) continue;
         await grantXp(input.userId, m.rewardXp, `Mission: ${m.title}`);
         await notify(
           input.userId,
           'Mission complete',
           `${m.title} — +${m.rewardXp} XP`,
-          'mission'
+          'mission',
+          `mission:${m.templateKey}:${m.periodKey || 'main'}`
         );
+        await tryUnlockAchievement(input.userId, 'missions_completed', 1);
+        await tryUnlockBadge(input.userId, 'missions_completed', 1);
+      } else if (next !== m.currentCount) {
+        await prisma.activeMission.updateMany({
+          where: { id: m.id, isCompleted: false },
+          data: { currentCount: next },
+        });
       }
     }
   }
@@ -796,6 +835,7 @@ export async function processMatchProgression(input: {
   await tryUnlockBadge(input.userId, 'horde_runs');
   await tryUnlockBadge(input.userId, 'horde_wins');
   await tryUnlockBadge(input.userId, 'horde_waves');
+  await tryUnlockBadge(input.userId, 'competitive_runs');
   await tryUnlockBadge(input.userId, 'competitive_wins');
   await tryUnlockBadge(input.userId, 'kp');
 }
@@ -858,6 +898,7 @@ export async function processWebsiteAction(
   userId: string,
   metric: WebsiteActionMetric
 ) {
+  await assertCanMutateUser(userId);
   await ensurePlayerMissions(userId);
   if (SYNC_FROM_TOTAL_METRICS.has(metric)) {
     await syncMissionProgressFromCount(userId, metric);
@@ -906,16 +947,38 @@ export async function bootstrapHubProgression() {
 /** Polling payload for right-rail XP/VP/rank. */
 export async function getLivePlayerState(userId?: string) {
   let sessionUser: Awaited<ReturnType<typeof requireUser>> | null = null;
-  try {
+
+  if (!isTrustedServerContext()) {
     sessionUser = await requireUser();
-  } catch {
-    sessionUser = null;
+    if (userId && userId !== sessionUser.id && !canAccessAdmin(sessionUser.role)) {
+      throw new Error('Forbidden');
+    }
+  } else if (userId) {
+    // Trusted server path may resolve by id; session optional.
+    try {
+      sessionUser = await requireUser();
+    } catch {
+      sessionUser = null;
+    }
+  } else {
+    throw new Error('Not authenticated');
   }
 
-  const user = userId
-    ? await prisma.user.findUnique({ where: { id: userId } })
-    : sessionUser;
+  const user =
+    userId && (!sessionUser || userId !== sessionUser.id)
+      ? await prisma.user.findUnique({ where: { id: userId } })
+      : sessionUser;
   if (!user) throw new Error('User not found');
+
+  // Refresh today's board before counting (self / admin / trusted can mutate).
+  if (
+    isTrustedServerContext() ||
+    !sessionUser ||
+    sessionUser.id === user.id ||
+    isAdminRole(sessionUser.role)
+  ) {
+    await ensurePlayerMissions(user.id);
+  }
 
   // Heartbeat presence when the authenticated player is polling their own state.
   if (sessionUser && sessionUser.id === user.id) {
@@ -970,25 +1033,16 @@ export async function getLivePlayerState(userId?: string) {
   }
 
   const today = missionPeriodKey();
-  const dailyMissions = await prisma.activeMission.findMany({
+  const dailyBoard = await prisma.activeMission.findMany({
     where: {
       userId: user.id,
       OR: [{ category: 'daily' }, { templateKey: { startsWith: 'daily_' } }],
       periodKey: today,
     },
   });
-  // Fallback: if periodKey not yet backfilled, count any daily-category rows.
-  const dailyBoard =
-    dailyMissions.length > 0
-      ? dailyMissions
-      : await prisma.activeMission.findMany({
-          where: {
-            userId: user.id,
-            OR: [{ category: 'daily' }, { templateKey: { startsWith: 'daily_' } }],
-          },
-        });
   const dailyCompleted = dailyBoard.filter((m) => m.isCompleted).length;
-  const dailyTotal = Math.max(dailyBoard.length, DAILY_MISSION_SEEDS.length);
+  const dailyTotal =
+    dailyBoard.length > 0 ? dailyBoard.length : DAILY_MISSION_SEEDS.length;
 
   const { isPremiumActive, canAccessRankedCompetitive } = await import('@/lib/premium');
   const { parsePremiumConfig, isFreeRankedWeekActive } = await import('@/lib/premium-config');
@@ -1359,6 +1413,7 @@ export async function updateSiteSettings(data: {
 
 /** Strip a solid plate behind the stored site logo (safe to call on hub boot). */
 export async function ensureSiteLogoBackgroundStripped() {
+  await requireStaff();
   const settings = await getSiteSettings();
   if (!settings.logoUrl) return settings;
   const { stripLogoBackground } = await import('@/lib/strip-logo-background');
@@ -1482,7 +1537,7 @@ async function staffAwardMessage(
 }
 
 export async function adminAwardXp(userId: string, amount: number) {
-  const staff = await requireStaff();
+  const staff = await requireAdmin();
   await grantXp(userId, amount, 'Admin award');
   // Awards land in the mail inbox only (not the bell).
   await staffAwardMessage(
@@ -1505,7 +1560,7 @@ export async function adminAwardXp(userId: string, amount: number) {
 }
 
 export async function adminAwardVp(userId: string, amount: number) {
-  const staff = await requireStaff();
+  const staff = await requireAdmin();
   await prisma.user.update({
     where: { id: userId },
     data: { vpCurrency: { increment: amount } },

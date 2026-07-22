@@ -8,6 +8,7 @@ import {
   processMatchProgression,
 } from '@/lib/progression-actions';
 import { resolveShopImageUrl } from '@/lib/shop-images';
+import { canAccessAdmin } from '@/lib/roles';
 
 export type StatsSummary = {
   totalRuns: number;
@@ -33,6 +34,35 @@ async function requireSelfUserId(claimedUserId: string) {
   if (user.isBanned) throw new Error('Account banned');
   if (user.id !== claimedUserId) throw new Error('Forbidden');
   return user;
+}
+
+/** Read helpers: self or staff. */
+async function requireSelfOrStaffUserId(claimedUserId: string) {
+  const user = await getSessionUser();
+  if (!user) throw new Error('Not authenticated');
+  if (user.isBanned) throw new Error('Account banned');
+  if (user.id === claimedUserId) return user;
+  if (canAccessAdmin(user.role)) return user;
+  throw new Error('Forbidden');
+}
+
+const MATCH_RATE_LIMIT_MS = 15_000;
+
+async function assertMatchRateLimit(userId: string, mode: string) {
+  const recent = await prisma.matchResult.findFirst({
+    where: {
+      userId,
+      mode,
+      playedAt: { gte: new Date(Date.now() - MATCH_RATE_LIMIT_MS) },
+    },
+    orderBy: { playedAt: 'desc' },
+  });
+  if (recent) throw new Error('Too many requests');
+}
+
+function clampNonNegInt(value: number | undefined, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(max, Math.floor(value)));
 }
 
 /** Backfill StoreItem docs created before createdAt / sale fields existed. */
@@ -277,6 +307,7 @@ export async function getLandingPageData(): Promise<{
 
 /** A player's live mission board, replacing the old hardcoded mission arrays. */
 export async function getActiveMissions(userId: string) {
+  await requireSelfOrStaffUserId(userId);
   return prisma.activeMission.findMany({
     where: { userId },
     orderBy: [{ isCompleted: 'asc' }, { rewardXp: 'desc' }],
@@ -285,6 +316,7 @@ export async function getActiveMissions(userId: string) {
 
 /** Most recent deathrun sessions for a player, newest first. */
 export async function getMatchStats(userId: string, take = 10) {
+  await requireSelfOrStaffUserId(userId);
   return prisma.matchStat.findMany({
     where: { userId },
     orderBy: { datePlayed: 'desc' },
@@ -294,6 +326,7 @@ export async function getMatchStats(userId: string, take = 10) {
 
 /** Aggregate performance summary derived from real MatchStat telemetry. */
 export async function getStatsSummary(userId: string): Promise<StatsSummary> {
+  await requireSelfOrStaffUserId(userId);
   const stats = await prisma.matchStat.findMany({ where: { userId } });
 
   if (stats.length === 0) {
@@ -321,12 +354,15 @@ export async function recordMatchStat(input: {
   livesRemaining: number;
 }) {
   await requireSelfUserId(input.userId);
+  const score = clampNonNegInt(input.score, 1_000_000);
+  const distance = clampNonNegInt(input.distance, 100_000);
+  const livesRemaining = clampNonNegInt(input.livesRemaining, 99);
   return prisma.matchStat.create({
     data: {
       userId: input.userId,
-      score: input.score,
-      distance: input.distance,
-      livesRemaining: input.livesRemaining,
+      score,
+      distance,
+      livesRemaining,
     },
   });
 }
@@ -351,7 +387,10 @@ export async function recordDeathrunResult(input: {
   distance?: number;
 }): Promise<{ xpEarned: number; vpEarned: number }> {
   await requireSelfUserId(input.userId);
+  await assertMatchRateLimit(input.userId, 'deathrun');
   const reward = DEATHRUN_REWARDS[input.outcome];
+  const score = clampNonNegInt(input.score, 1_000_000);
+  const distance = clampNonNegInt(input.distance, 100_000);
 
   await prisma.matchResult.create({
     data: {
@@ -362,6 +401,13 @@ export async function recordDeathrunResult(input: {
       xpEarned: reward.xp,
       vpEarned: reward.vp,
     },
+  });
+
+  await recordMatchStat({
+    userId: input.userId,
+    score,
+    distance,
+    livesRemaining: 0,
   });
 
   await prisma.user.update({
@@ -377,8 +423,8 @@ export async function recordDeathrunResult(input: {
     mode: 'deathrun',
     outcome: input.outcome,
     role: input.role,
-    score: input.score,
-    distance: input.distance,
+    score,
+    distance,
   });
 
   return { xpEarned: reward.xp, vpEarned: reward.vp };
@@ -400,8 +446,11 @@ export async function recordHordeResult(input: {
   score?: number;
 }): Promise<{ xpEarned: number; vpEarned: number }> {
   await requireSelfUserId(input.userId);
+  await assertMatchRateLimit(input.userId, 'horde');
   const reward = HORDE_REWARDS[input.outcome];
-  const bonusXp = Math.min(80, (input.wavesCleared ?? 0) * 4);
+  const wavesCleared = clampNonNegInt(input.wavesCleared, 50);
+  const kills = clampNonNegInt(input.kills, 50);
+  const bonusXp = Math.min(80, wavesCleared * 4);
 
   await prisma.matchResult.create({
     data: {
@@ -412,10 +461,17 @@ export async function recordHordeResult(input: {
       xpEarned: reward.xp + bonusXp,
       vpEarned: reward.vp,
       stats: {
-        wavesCleared: input.wavesCleared ?? 0,
-        kills: input.kills ?? 0,
+        wavesCleared,
+        kills,
       },
     },
+  });
+
+  await recordMatchStat({
+    userId: input.userId,
+    score: wavesCleared,
+    distance: 0,
+    livesRemaining: 0,
   });
 
   await prisma.user.update({
@@ -429,9 +485,9 @@ export async function recordHordeResult(input: {
     mode: 'horde',
     outcome: input.outcome,
     role: 'survivor',
-    score: input.score,
-    wavesCleared: input.wavesCleared,
-    kills: input.kills,
+    score: wavesCleared,
+    wavesCleared,
+    kills,
   });
 
   return { xpEarned: reward.xp + bonusXp, vpEarned: reward.vp };
@@ -499,6 +555,11 @@ export async function recordCompetitiveResult(input: {
 
   const reward = COMPETITIVE_REWARDS[input.outcome];
   const modeTag = queue === 'ranked' ? 'competitive_ranked' : 'competitive';
+  await assertMatchRateLimit(input.userId, modeTag);
+
+  const kills = clampNonNegInt(input.kills, 100);
+  const roundsWon = clampNonNegInt(input.roundsWon, 50);
+  const roundsLost = clampNonNegInt(input.roundsLost, 50);
 
   await prisma.matchResult.create({
     data: {
@@ -511,12 +572,19 @@ export async function recordCompetitiveResult(input: {
       kpDelta,
       stats: {
         queue,
-        roundsWon: input.roundsWon ?? 0,
-        roundsLost: input.roundsLost ?? 0,
-        kills: input.kills ?? 0,
+        roundsWon,
+        roundsLost,
+        kills,
         opponentAvgKp: input.opponentAvgKp,
       },
     },
+  });
+
+  await recordMatchStat({
+    userId: input.userId,
+    score: roundsWon,
+    distance: 0,
+    livesRemaining: 0,
   });
 
   await prisma.user.update({
@@ -584,6 +652,7 @@ export type RankedStatsSummary = {
 
 /** Own-profile Ranked panel — KP / peak / competitive win-loss. */
 export async function getMyRankedStats(userId: string): Promise<RankedStatsSummary> {
+  await requireSelfOrStaffUserId(userId);
   const { isPremiumActive } = await import('@/lib/premium');
   const { KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
   const { parseRankConfig, findRankTierDef } = await import('@/lib/rank-config');
