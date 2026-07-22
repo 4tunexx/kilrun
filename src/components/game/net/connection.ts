@@ -1,6 +1,7 @@
 import { Client, Room, getStateCallbacks } from 'colyseus.js';
 import type {
   NetObstacleState,
+  NetPlatformKind,
   NetPlatformState,
   NetPlayerState,
   NetRoomState,
@@ -243,7 +244,7 @@ export class GameConnection {
       z: number;
       width: number;
       depth: number;
-      kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor';
+      kind?: NetPlatformKind;
       boost?: number;
       height?: number;
       conveyorSpeed?: number;

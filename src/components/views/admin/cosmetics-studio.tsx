@@ -304,7 +304,13 @@ function BannerPanel({ onCreated }: { onCreated?: () => void }) {
   );
 }
 
-function FramePanel({ onCreated }: { onCreated?: () => void }) {
+function FramePanel({
+  onCreated,
+  markLogoUrl,
+}: {
+  onCreated?: () => void;
+  markLogoUrl?: string;
+}) {
   const [frame, setFrame] = useState<FrameConfig>({ ...DEFAULT_FRAME_CONFIG });
   const [itemName, setItemName] = useState('');
   const [itemSku, setItemSku] = useState('');
@@ -414,7 +420,7 @@ function FramePanel({ onCreated }: { onCreated?: () => void }) {
       <div className="space-y-4">
         <div className="flex items-center justify-center rounded-lg border border-slate-700/50 bg-slate-950/50 p-8">
           <AvatarWithFrame
-            src="/K2.png"
+            src={markLogoUrl?.trim() || '/api/site-favicon'}
             alt="Preview"
             fallback="K"
             frameConfig={frame}
@@ -695,7 +701,14 @@ function SkinPanel({ onCreated }: { onCreated?: () => void }) {
 }
 
 /** Admin cosmetics studio: banners, avatar frames, nickname effects, skins. */
-export function CosmeticsStudio({ onCreated }: { onCreated?: () => void }) {
+export function CosmeticsStudio({
+  onCreated,
+  markLogoUrl,
+}: {
+  onCreated?: () => void;
+  /** Admin mark logo for frame preview (falls back to site favicon API). */
+  markLogoUrl?: string;
+}) {
   return (
     <Card className="bg-slate-800/40 border-slate-700/30">
       <CardHeader>
@@ -715,7 +728,7 @@ export function CosmeticsStudio({ onCreated }: { onCreated?: () => void }) {
             <BannerPanel onCreated={onCreated} />
           </TabsContent>
           <TabsContent value="frame">
-            <FramePanel onCreated={onCreated} />
+            <FramePanel onCreated={onCreated} markLogoUrl={markLogoUrl} />
           </TabsContent>
           <TabsContent value="nickname">
             <NicknamePanel onCreated={onCreated} />

@@ -26,14 +26,20 @@ describe('resolveShopImageUrl', () => {
     );
   });
 
-  it('maps known /shop placeholders', () => {
-    expect(resolveShopImageUrl('/shop/cape.png')).toContain('placehold.co');
-    expect(resolveShopImageUrl('/shop/cape.png')).toContain('Cape');
+  it('maps known /shop placeholders to local SVGs', () => {
+    expect(resolveShopImageUrl('/shop/cape.png')).toBe('/shop/cape.svg');
+    expect(resolveShopImageUrl('/shop/trail.png')).toBe('/shop/trail.svg');
+  });
+
+  it('rewrites legacy placehold.co seed URLs to local SVGs', () => {
+    expect(
+      resolveShopImageUrl(
+        'https://placehold.co/400x400/0f172a/f59e0b/png?text=Cape'
+      )
+    ).toBe('/shop/cape.svg');
   });
 
   it('falls back to Kilrun placeholder only for unknown non-path values', () => {
-    const url = resolveShopImageUrl('broken-asset');
-    expect(url).toContain('placehold.co');
-    expect(url).toContain('Kilrun');
+    expect(resolveShopImageUrl('broken-asset')).toBe('/shop/default.svg');
   });
 });

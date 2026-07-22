@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="400" fill="url(#g)"/>
+  <circle cx="200" cy="160" r="64" fill="none" stroke="#a855f7" stroke-width="8" opacity="0.9"/>
+  <circle cx="200" cy="160" r="28" fill="#a855f7" opacity="0.85"/>
+  <text x="200" y="280" text-anchor="middle" font-family="system-ui,sans-serif" font-size="28" font-weight="800" fill="#a855f7">EMOTE</text>
+</svg>
