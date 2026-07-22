@@ -25,7 +25,8 @@ export const FINISH_X = WORLD_WIDTH - 2;
 export const SPAWN_X = 2;
 export const SPAWN_Z = 0;
 
-export const PLAYER_RADIUS = 0.4;
+/** Horizontal capsule radius — match visual CapsuleGeometry(0.35) / Play Test sim. */
+export const PLAYER_RADIUS = 0.35;
 /** Match visual avatar height (~1.8) with a slightly shorter collision capsule. */
 export const PLAYER_HEIGHT = 1.7;
 

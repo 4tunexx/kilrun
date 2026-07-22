@@ -107,6 +107,35 @@ describe('stepPlatformer (Foundry feel)', () => {
     expect(Math.abs(body.x)).toBeLessThan(3.0);
   });
 
+  it('stops at thin solid wall surface + capsule radius (not an inflated gap)', () => {
+    const wall: SimPad = {
+      x: 2,
+      y: 0,
+      z: 3,
+      width: 0.2,
+      depth: 4,
+      height: 3,
+      kind: 'solid',
+    };
+    const body = groundedBody({ x: 2.6, y: 0, z: 0 });
+    const scratch = createSimScratch();
+    // Walk into the wall for several frames
+    for (let i = 0; i < 20; i++) {
+      stepPlatformer(
+        body,
+        { moveX: -1, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+        1 / 30,
+        [floor, wall],
+        scratch,
+        bounds
+      );
+    }
+    // Wall surface at x=2.1; capsule radius 0.35 → center rests at ~2.45
+    expect(body.x).toBeCloseTo(2.45, 2);
+    // Must be able to stand closer than the old inflated 0.35-thick pad + 0.4 radius (~2.575)
+    expect(body.x).toBeLessThan(2.5);
+  });
+
   it('applies constant Foundry gravity (no apex hang)', () => {
     const body = groundedBody({ z: 2, vz: 1, isGrounded: false });
     const scratch = createSimScratch();

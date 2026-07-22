@@ -66,7 +66,8 @@ const JUMP_BUFFER_MS = 200;
 const MAX_GROUND_SPEED = 5;
 const SPRINT_MULT = 1.35;
 const MAX_FALL = 40;
-const PLAYER_RADIUS = 0.4;
+/** Horizontal capsule radius — keep in sync with visual CapsuleGeometry(0.35). */
+const PLAYER_RADIUS = 0.35;
 const PLAYER_HEIGHT = 1.7;
 const MAX_ENERGY = 100;
 const ENERGY_DRAIN = 28;

@@ -578,9 +578,9 @@ export function MapPlayPreview({
       for (const pad of pads) {
         if (pad.kind !== 'checkpoint') continue;
         if (
-          Math.abs(body.x - pad.x) <= pad.width / 2 + 0.4 &&
-          Math.abs(body.y - pad.y) <= pad.depth / 2 + 0.4 &&
-          body.z >= pad.z - 0.4 &&
+          Math.abs(body.x - pad.x) <= pad.width / 2 + 0.35 &&
+          Math.abs(body.y - pad.y) <= pad.depth / 2 + 0.35 &&
+          body.z >= pad.z - 0.35 &&
           body.z <= pad.z + 0.6
         ) {
           checkpoint = { x: pad.x, y: pad.y, z: pad.z };
@@ -590,8 +590,8 @@ export function MapPlayPreview({
         const halfW = f.width / 2;
         const halfD = f.depth / 2;
         if (
-          Math.abs(body.x - f.x) <= halfW + 0.4 &&
-          Math.abs(body.y - f.y) <= halfD + 0.4 &&
+          Math.abs(body.x - f.x) <= halfW + 0.35 &&
+          Math.abs(body.y - f.y) <= halfD + 0.35 &&
           body.z >= f.z - 0.35 &&
           body.z <= f.z + Math.max(f.height, 1.2)
         ) {

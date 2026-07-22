@@ -251,15 +251,9 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
       Math.max(0.2, Math.abs(e.scale[1]) * 2),
       Math.max(1, Math.abs(e.scale[2]) * 2),
     ] as [number, number, number]);
-  const sizeX = Math.max(0.35, foot[0] * Math.abs(e.scale[0]));
-  const sizeY = Math.max(0.12, foot[1] * Math.abs(e.scale[1]));
-  const sizeZ = Math.max(0.35, foot[2] * Math.abs(e.scale[2]));
-  // Yaw expands the axis-aligned pad so rotated floors/walls still block.
-  const yaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
-  const absC = Math.abs(Math.cos(yaw));
-  const absS = Math.abs(Math.sin(yaw));
-  const worldSizeX = sizeX * absC + sizeZ * absS;
-  const worldSizeZ = sizeX * absS + sizeZ * absC;
+  const rawX = Math.abs(foot[0] * Math.abs(e.scale[0]));
+  const rawY = Math.abs(foot[1] * Math.abs(e.scale[1]));
+  const rawZ = Math.abs(foot[2] * Math.abs(e.scale[2]));
   const jump = e.jumpPad?.enabled || e.kind === 'jump_pad';
   const mat = resolveCollideMaterial(e);
   const ice = mat === 'ice' || !!e.surface?.ice;
@@ -299,8 +293,21 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
       model.startsWith('column') ||
       model.includes('door') ||
       e.kind === 'door' ||
-      sizeY >= 1.0 ||
+      rawY >= 1.0 ||
       wantsSolidVolume);
+  // Floors keep a wider min footprint so tiny pads stay standable. Walls/solids
+  // must keep authored thickness — inflating thin walls (e.g. 0.25 → 0.35) is
+  // what made Play Test stop a full tile short of the visible mesh.
+  const minXZ = topOnly ? 0.35 : 0.05;
+  const sizeX = Math.max(minXZ, rawX);
+  const sizeY = Math.max(0.12, rawY);
+  const sizeZ = Math.max(minXZ, rawZ);
+  // Yaw expands the axis-aligned pad so rotated floors/walls still block.
+  const yaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
+  const absC = Math.abs(Math.cos(yaw));
+  const absS = Math.abs(Math.sin(yaw));
+  const worldSizeX = sizeX * absC + sizeZ * absS;
+  const worldSizeZ = sizeX * absS + sizeZ * absC;
   const height =
     mat === 'water'
       ? Math.max(0.5, sizeY)
