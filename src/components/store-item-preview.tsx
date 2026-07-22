@@ -10,6 +10,7 @@ import {
   normalizeFrameConfig,
   normalizeNicknameConfig,
 } from '@/lib/cosmetics';
+import { resolveShopImageUrl } from '@/lib/shop-images';
 import { cn } from '@/lib/utils';
 
 export type StoreItemPreviewData = {
@@ -74,10 +75,11 @@ export function StoreItemPreview({
       </div>
     );
   }
-  if (item.imageUrl) {
+  const imageSrc = resolveShopImageUrl(item.imageUrl);
+  if (imageSrc) {
     return (
       <Image
-        src={item.imageUrl}
+        src={imageSrc}
         alt={item.itemName}
         fill
         className={cn(
@@ -85,8 +87,9 @@ export function StoreItemPreview({
           className
         )}
         unoptimized={
-          item.imageUrl.includes('placehold.co') ||
-          !/^https?:\/\//i.test(item.imageUrl)
+          imageSrc.includes('placehold.co') ||
+          imageSrc.endsWith('.svg') ||
+          !/^https?:\/\//i.test(imageSrc)
         }
       />
     );

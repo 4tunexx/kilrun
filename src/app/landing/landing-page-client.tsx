@@ -35,6 +35,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { getSiteSettings } from '@/lib/progression-actions';
 import {
   getLandingPageData,
   type LandingStats,
@@ -192,7 +193,11 @@ export default function LandingPageClient({
   };
 
   useEffect(() => {
-    // Branding comes from SSR; only fetch live stats/store/leaderboard here.
+    // Soft-refresh branding in case SSR missed settings; live stats load in parallel.
+    getSiteSettings()
+      .then((s) => applyBranding(s))
+      .catch(() => {});
+
     getLandingPageData()
       .then((data) => {
         setStats(data.stats);

@@ -1921,7 +1921,10 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
               </CardContent>
             </Card>
 
-            <CosmeticsStudio onCreated={reload} />
+            <CosmeticsStudio
+              onCreated={reload}
+              markLogoUrl={siteForm.logoUrl || undefined}
+            />
 
             <Card className="bg-slate-800/40 border-slate-700/30">
               <CardHeader>
