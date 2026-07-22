@@ -47,27 +47,69 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
   }, [players, team]);
 
   useEffect(() => {
+    if (!player.userId) return;
+
+    if (room.rewardsReady || (player.xpEarned ?? 0) > 0 || (player.vpEarned ?? 0) > 0) {
+      setRewards({
+        xpEarned: player.xpEarned ?? 0,
+        vpEarned: player.vpEarned ?? 0,
+        kpDelta: player.kpDelta ?? 0,
+        kp: typeof player.kp === 'number' ? player.kp : KP_DEFAULT,
+        rank: '',
+      });
+      if (room.rewardsReady) {
+        hasRecordedRef.current = true;
+        return;
+      }
+    }
+
     if (hasRecordedRef.current) return;
-    if (!player.userId) return; // wait until userId is available
-    hasRecordedRef.current = true;
-    recordCompetitiveResult({
-      userId: player.userId,
-      team,
-      outcome,
-      opponentAvgKp,
-      roundsWon: team === 'team_a' ? room.scoreA ?? 0 : room.scoreB ?? 0,
-      roundsLost: team === 'team_a' ? room.scoreB ?? 0 : room.scoreA ?? 0,
-      queue: ranked ? 'ranked' : 'casual',
-    })
-      .then(setRewards)
-      .catch(() => {});
+
+    const matchId = room.matchId || undefined;
+    const timer = window.setTimeout(() => {
+      if (hasRecordedRef.current) return;
+      if (room.rewardsReady) {
+        hasRecordedRef.current = true;
+        setRewards({
+          xpEarned: player.xpEarned ?? 0,
+          vpEarned: player.vpEarned ?? 0,
+          kpDelta: player.kpDelta ?? 0,
+          kp: typeof player.kp === 'number' ? player.kp : KP_DEFAULT,
+          rank: '',
+        });
+        return;
+      }
+      hasRecordedRef.current = true;
+      recordCompetitiveResult({
+        userId: player.userId,
+        team,
+        outcome,
+        opponentAvgKp,
+        roundsWon: team === 'team_a' ? room.scoreA ?? 0 : room.scoreB ?? 0,
+        roundsLost: team === 'team_a' ? room.scoreB ?? 0 : room.scoreA ?? 0,
+        kills: player.kills ?? 0,
+        queue: ranked ? 'ranked' : 'casual',
+        matchId,
+      })
+        .then(setRewards)
+        .catch(() => {});
+    }, 2500);
+
+    return () => window.clearTimeout(timer);
   }, [
     player.userId,
+    player.xpEarned,
+    player.vpEarned,
+    player.kpDelta,
+    player.kp,
+    player.kills,
     team,
     outcome,
     opponentAvgKp,
     room.scoreA,
     room.scoreB,
+    room.rewardsReady,
+    room.matchId,
     ranked,
   ]);
 
@@ -119,11 +161,11 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
                 ? `${rewards.kpDelta >= 0 ? '+' : ''}${rewards.kpDelta}`
                 : '...'}
             </p>
-            {rewards && (
+            {rewards ? (
               <p className="text-[11px] text-slate-400 mt-1">
-                {rewards.kp} KP · {rewards.rank}
+                {rewards.kp} KP{rewards.rank ? ` · ${rewards.rank}` : ''}
               </p>
-            )}
+            ) : null}
           </div>
         )}
         {!ranked && (

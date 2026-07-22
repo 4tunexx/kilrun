@@ -40,6 +40,12 @@ import {
   claimsFromAuth,
   type GameJoinClaims,
 } from '../join-token.js';
+import {
+  applyAwardsByUserId,
+  displayDeathrunOutcome,
+  DISPLAY_DEATHRUN_REWARDS,
+  reportMatchResults,
+} from '../match-report.js';
 
 interface JoinOptions {
   token?: string;
@@ -400,14 +406,27 @@ export class DeathrunRoom extends Room<RoomState> {
     player.isCrouching = false;
   }
 
+  private resetMatchTelemetry(player: PlayerState) {
+    player.kills = 0;
+    player.score = 0;
+    player.distance = 0;
+    player.xpEarned = 0;
+    player.vpEarned = 0;
+    player.kpDelta = 0;
+  }
+
   private startRound() {
     const sessionIds = Array.from(this.state.players.keys());
+
+    this.state.matchId = `${this.roomId}-${Date.now()}`;
+    this.state.rewardsReady = false;
 
     if (!this.trapperEnabled || sessionIds.length === 1) {
       sessionIds.forEach((sessionId, i) => {
         const player = this.state.players.get(sessionId)!;
         player.role = 'runner';
         this.resetPlayerOnSpawn(player, i);
+        this.resetMatchTelemetry(player);
         this.simScratch.set(sessionId, createSimScratch());
       });
       this.state.trapperSessionId = '';
@@ -424,6 +443,7 @@ export class DeathrunRoom extends Room<RoomState> {
           player,
           player.role === 'runner' ? runnerLaneIndex++ : i
         );
+        this.resetMatchTelemetry(player);
         this.simScratch.set(sessionId, createSimScratch());
       });
     }
@@ -517,6 +537,10 @@ export class DeathrunRoom extends Room<RoomState> {
       );
 
       if (player.role === 'runner' && player.isAlive && !player.hasFinished) {
+        player.distance = Math.max(
+          player.distance,
+          Math.floor(Math.max(0, player.x - this.state.courseStartX))
+        );
         for (const obstacle of this.state.obstacles) {
           if (!isPlayerHitByObstacle(player, obstacle)) continue;
           const hitKey = `${sessionId}:${obstacle.id}`;
@@ -682,9 +706,67 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private endRound(winnerRole: 'trapper' | 'runner') {
+    if (this.state.phase === 'results') return;
     this.state.phase = 'results';
     this.state.winnerRole = winnerRole;
     this.resultsElapsedMs = 0;
+
+    for (const player of this.state.players.values()) {
+      if (player.role === 'runner') {
+        player.distance = Math.max(
+          player.distance,
+          Math.floor(Math.max(0, player.x - this.state.courseStartX))
+        );
+      }
+      const outcome = displayDeathrunOutcome(winnerRole, player.role, player.isAlive);
+      player.score =
+        outcome === 'win'
+          ? 100 + Math.floor(player.distance)
+          : Math.max(0, Math.floor(player.distance * 0.35));
+    }
+
+    void this.reportRewards(winnerRole);
+  }
+
+  private async reportRewards(winnerRole: 'trapper' | 'runner') {
+    const matchId = this.state.matchId || `${this.roomId}-${Date.now()}`;
+    this.state.matchId = matchId;
+
+    const players = Array.from(this.state.players.values()).map((p) => ({
+      userId: p.userId,
+      role: p.role,
+      isAlive: p.isAlive,
+      hasFinished: p.hasFinished,
+      score: p.score,
+      distance: p.distance,
+      kills: p.kills,
+    }));
+
+    const awards = await reportMatchResults({
+      matchId,
+      mode: 'deathrun',
+      winnerRole,
+      players,
+    });
+
+    if (awards) {
+      applyAwardsByUserId(this.state.players.values(), awards.players);
+      this.state.rewardsReady = true;
+    } else {
+      // Local display-only path — client falls back to record* with matchId.
+      for (const player of this.state.players.values()) {
+        const outcome = displayDeathrunOutcome(
+          winnerRole,
+          player.role,
+          player.isAlive
+        );
+        const reward = DISPLAY_DEATHRUN_REWARDS[outcome] ?? DISPLAY_DEATHRUN_REWARDS.loss;
+        player.xpEarned = reward.xp;
+        player.vpEarned = reward.vp;
+        player.kpDelta = 0;
+      }
+      this.state.rewardsReady = false;
+    }
   }
 
   private tickResults(dtMs: number) {
@@ -694,12 +776,14 @@ export class DeathrunRoom extends Room<RoomState> {
       this.state.countdownMs = 0;
       this.state.trapperSessionId = '';
       this.state.winnerRole = '';
+      this.state.rewardsReady = false;
       Array.from(this.state.players.values()).forEach((player, index) => {
         player.role = 'runner';
         player.health = 100;
         player.energy = MAX_ENERGY;
         player.isAlive = true;
         player.hasFinished = false;
+        this.resetMatchTelemetry(player);
         this.applySpawnPosition(player, index);
         player.vz = 0;
       });

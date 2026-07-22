@@ -31,6 +31,13 @@ export interface NetPlayerState {
   kp?: number;
   /** Compact SkinAttachment[] JSON for remote cosmetics. */
   equippedSkinsJson?: string;
+  /** Per-match telemetry / server-authored rewards. */
+  kills?: number;
+  score?: number;
+  distance?: number;
+  xpEarned?: number;
+  vpEarned?: number;
+  kpDelta?: number;
 }
 
 /** Keep in sync with server PlatformState.kind / SimPlatformKind. */
@@ -91,6 +98,10 @@ export interface NetRoomState {
   roundIndex?: number;
   scoreA?: number;
   scoreB?: number;
+  /** Server-authored match id for reward idempotency. */
+  matchId?: string;
+  /** True once Colyseus applied awards (or local display fallback). */
+  rewardsReady?: boolean;
 }
 
 export interface PlayerInputMessage {

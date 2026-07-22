@@ -26,19 +26,57 @@ export const HordeResultsScreen: React.FC<Props> = ({ room, player, onContinue }
       : 'eliminated';
 
   useEffect(() => {
+    if (!player.userId) return;
+
+    if (room.rewardsReady || (player.xpEarned ?? 0) > 0 || (player.vpEarned ?? 0) > 0) {
+      setRewards({
+        xpEarned: player.xpEarned ?? 0,
+        vpEarned: player.vpEarned ?? 0,
+      });
+      if (room.rewardsReady) {
+        hasRecordedRef.current = true;
+        return;
+      }
+    }
+
     if (hasRecordedRef.current) return;
-    if (!player.userId) return; // wait until userId is available
-    hasRecordedRef.current = true;
-    recordHordeResult({
-      userId: player.userId,
-      outcome,
-      wavesCleared: Math.max(0, (room.wave ?? 1) - (survived ? 0 : 1)),
-      // Per-player kills are not tracked yet — do not credit teamKills to everyone.
-      kills: 0,
-    })
-      .then(setRewards)
-      .catch(() => {});
-  }, [player.userId, outcome, room.wave, survived]);
+
+    const matchId = room.matchId || undefined;
+    const wavesCleared = Math.max(0, (room.wave ?? 1) - (survived ? 0 : 1));
+    const timer = window.setTimeout(() => {
+      if (hasRecordedRef.current) return;
+      if (room.rewardsReady) {
+        hasRecordedRef.current = true;
+        setRewards({
+          xpEarned: player.xpEarned ?? 0,
+          vpEarned: player.vpEarned ?? 0,
+        });
+        return;
+      }
+      hasRecordedRef.current = true;
+      recordHordeResult({
+        userId: player.userId,
+        outcome,
+        wavesCleared,
+        kills: player.kills ?? 0,
+        matchId,
+      })
+        .then(setRewards)
+        .catch(() => {});
+    }, 2500);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    player.userId,
+    player.xpEarned,
+    player.vpEarned,
+    player.kills,
+    outcome,
+    room.wave,
+    room.rewardsReady,
+    room.matchId,
+    survived,
+  ]);
 
   return (
     <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 z-[300]">

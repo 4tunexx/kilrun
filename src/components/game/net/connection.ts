@@ -220,6 +220,8 @@ export class GameConnection {
         roundIndex: s.roundIndex,
         scoreA: s.scoreA,
         scoreB: s.scoreB,
+        matchId: s.matchId,
+        rewardsReady: s.rewardsReady,
       });
     };
     [
@@ -237,6 +239,8 @@ export class GameConnection {
       'roundIndex',
       'scoreA',
       'scoreB',
+      'matchId',
+      'rewardsReady',
     ].forEach((field) => {
       proxy.listen(field, emitRoomChange);
     });

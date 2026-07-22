@@ -36,6 +36,12 @@ import {
   claimsFromAuth,
   type GameJoinClaims,
 } from '../join-token.js';
+import {
+  applyAwardsByUserId,
+  displayHordeOutcome,
+  DISPLAY_HORDE_REWARDS,
+  reportMatchResults,
+} from '../match-report.js';
 
 interface JoinOptions {
   token?: string;
@@ -364,7 +370,16 @@ export class HordeRoom extends Room<RoomState> {
           this.state.winnerRole = '';
           this.state.wave = 0;
           this.state.monstersAlive = 0;
+          this.state.rewardsReady = false;
           this.clearMonsters();
+          for (const player of this.state.players.values()) {
+            player.kills = 0;
+            player.score = 0;
+            player.distance = 0;
+            player.xpEarned = 0;
+            player.vpEarned = 0;
+            player.kpDelta = 0;
+          }
         }
         break;
     }
@@ -375,6 +390,8 @@ export class HordeRoom extends Room<RoomState> {
     this.state.teamKills = 0;
     this.state.wave = 0;
     this.state.winnerRole = '';
+    this.state.matchId = `${this.roomId}-${Date.now()}`;
+    this.state.rewardsReady = false;
     this.clearMonsters();
 
     Array.from(this.state.players.values()).forEach((player, i) => {
@@ -383,6 +400,12 @@ export class HordeRoom extends Room<RoomState> {
       player.energy = MAX_ENERGY;
       player.isAlive = true;
       player.hasFinished = false;
+      player.kills = 0;
+      player.score = 0;
+      player.distance = 0;
+      player.xpEarned = 0;
+      player.vpEarned = 0;
+      player.kpDelta = 0;
       this.applySpawnPosition(player, i);
       player.vz = 0;
       this.simScratch.set(player.sessionId, createSimScratch());
@@ -613,7 +636,7 @@ export class HordeRoom extends Room<RoomState> {
         const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
         if (now - lastShot >= cooldown) {
           this.lastShotAt.set(sessionId, now);
-          this.resolveSurvivorShot(player);
+          this.resolveSurvivorShot(player, sessionId);
         }
       }
     });
@@ -652,7 +675,7 @@ export class HordeRoom extends Room<RoomState> {
     return player.z >= pad.z - 0.5 && player.z <= pad.z + Math.max(pad.height, 1.2);
   }
 
-  private resolveSurvivorShot(shooter: PlayerState) {
+  private resolveSurvivorShot(shooter: PlayerState, shooterSessionId: string) {
     if (shooter.weaponKind === 'cosmetic') return;
     const range = shooter.weaponRange > 0 ? shooter.weaponRange : 14;
     const damage = shooter.weaponDamage > 0 ? shooter.weaponDamage : 25;
@@ -680,17 +703,24 @@ export class HordeRoom extends Room<RoomState> {
     if (!best) return;
     best.hp -= damage;
     if (best.hp <= 0) {
-      this.killMonster(best.id);
+      this.killMonster(best.id, shooterSessionId);
     }
   }
 
-  private killMonster(id: string) {
+  private killMonster(id: string, shooterSessionId?: string) {
     this.monsters = this.monsters.filter((m) => m.id !== id);
     const idx = this.state.obstacles.findIndex((o) => o.id === id);
     if (idx >= 0) this.state.obstacles.splice(idx, 1);
     this.matchKills += 1;
     this.state.teamKills = this.matchKills;
     this.state.monstersAlive = this.monsters.length;
+    if (shooterSessionId) {
+      const shooter = this.state.players.get(shooterSessionId);
+      if (shooter) {
+        shooter.kills += 1;
+        shooter.score = shooter.kills;
+      }
+    }
   }
 
   private damagePlayer(player: PlayerState, amount: number) {
@@ -699,9 +729,50 @@ export class HordeRoom extends Room<RoomState> {
   }
 
   private endMatch(winnerRole: 'survivor' | 'horde') {
+    if (this.state.phase === 'results') return;
     this.state.phase = 'results';
     this.state.winnerRole = winnerRole;
     this.resultsElapsedMs = 0;
     this.clearMonsters();
+    void this.reportRewards(winnerRole);
+  }
+
+  private async reportRewards(winnerRole: 'survivor' | 'horde') {
+    const matchId = this.state.matchId || `${this.roomId}-${Date.now()}`;
+    this.state.matchId = matchId;
+    const survived = winnerRole === 'survivor';
+    const wavesCleared = Math.max(0, this.state.wave - (survived ? 0 : 1));
+
+    const players = Array.from(this.state.players.values()).map((p) => ({
+      userId: p.userId,
+      role: p.role,
+      isAlive: p.isAlive,
+      kills: p.kills,
+      score: p.score,
+      wavesCleared,
+    }));
+
+    const awards = await reportMatchResults({
+      matchId,
+      mode: 'horde',
+      winnerRole,
+      room: { wave: this.state.wave, teamKills: this.state.teamKills },
+      players,
+    });
+
+    if (awards) {
+      applyAwardsByUserId(this.state.players.values(), awards.players);
+      this.state.rewardsReady = true;
+    } else {
+      for (const player of this.state.players.values()) {
+        const outcome = displayHordeOutcome(winnerRole, player.isAlive);
+        const reward = DISPLAY_HORDE_REWARDS[outcome] ?? DISPLAY_HORDE_REWARDS.loss;
+        const bonusXp = Math.min(80, wavesCleared * 4);
+        player.xpEarned = reward.xp + bonusXp;
+        player.vpEarned = reward.vp;
+        player.kpDelta = 0;
+      }
+      this.state.rewardsReady = false;
+    }
   }
 }

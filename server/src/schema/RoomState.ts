@@ -46,6 +46,13 @@ export class PlayerState extends Schema {
   @type('number') weaponDamage = 25;
   @type('number') weaponCooldownMs = 350;
   @type('number') weaponConeRadians = 0.18;
+  /** Per-match telemetry / server-authored rewards. */
+  @type('number') kills = 0;
+  @type('number') score = 0;
+  @type('number') distance = 0;
+  @type('number') xpEarned = 0;
+  @type('number') vpEarned = 0;
+  @type('number') kpDelta = 0;
 }
 
 /** Solid walkable surface for the shared platformer physics. */
@@ -127,4 +134,8 @@ export class RoomState extends Schema {
   @type('number') scoreA = 0;
   /** Competitive: Team B rounds won. */
   @type('number') scoreB = 0;
+  /** Unique id for this match — used for reward idempotency. */
+  @type('string') matchId = '';
+  /** True once server (or local display) awards are written onto players. */
+  @type('boolean') rewardsReady = false;
 }

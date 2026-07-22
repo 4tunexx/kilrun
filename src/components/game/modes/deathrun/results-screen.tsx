@@ -20,23 +20,65 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ room, player, onCo
   const outcome: 'win' | 'loss' | 'eliminated' = isVictory ? 'win' : !player.isAlive ? 'eliminated' : 'loss';
 
   useEffect(() => {
-    if (hasRecordedRef.current) return;
-    if (!player.userId) return; // wait until userId is available
-    hasRecordedRef.current = true;
-    // NetPlayerState has no score/distance yet — minimal telemetry fallbacks.
-    const score = outcome === 'win' ? 100 : 25;
-    recordDeathrunResult({
-      userId: player.userId,
-      role: player.role === 'trapper' ? 'trapper' : 'runner',
-      outcome,
-      score,
-      distance: 0,
-    })
-      .then((result) => setRewards(result))
-      .catch(() => {
-        // Non-fatal: the player still sees their result even if the write fails.
+    if (!player.userId) return;
+
+    // Prefer server-authored awards (Colyseus → Next.js).
+    if (room.rewardsReady || (player.xpEarned ?? 0) > 0 || (player.vpEarned ?? 0) > 0) {
+      setRewards({
+        xpEarned: player.xpEarned ?? 0,
+        vpEarned: player.vpEarned ?? 0,
       });
-  }, [player.userId, player.role, outcome]);
+      if (room.rewardsReady) {
+        hasRecordedRef.current = true;
+        return;
+      }
+      // Display-only preview from room — still fall through to timed persist.
+    }
+
+    if (hasRecordedRef.current) return;
+
+    const matchId = room.matchId || undefined;
+    const timer = window.setTimeout(() => {
+      if (hasRecordedRef.current) return;
+      if (room.rewardsReady) {
+        hasRecordedRef.current = true;
+        setRewards({
+          xpEarned: player.xpEarned ?? 0,
+          vpEarned: player.vpEarned ?? 0,
+        });
+        return;
+      }
+      hasRecordedRef.current = true;
+      const score =
+        typeof player.score === 'number'
+          ? player.score
+          : outcome === 'win'
+            ? 100
+            : 25;
+      recordDeathrunResult({
+        userId: player.userId,
+        role: player.role === 'trapper' ? 'trapper' : 'runner',
+        outcome,
+        score,
+        distance: player.distance ?? 0,
+        matchId,
+      })
+        .then((result) => setRewards(result))
+        .catch(() => {});
+    }, 2500);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    player.userId,
+    player.role,
+    player.xpEarned,
+    player.vpEarned,
+    player.score,
+    player.distance,
+    outcome,
+    room.rewardsReady,
+    room.matchId,
+  ]);
 
   return (
     <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 z-[300]">

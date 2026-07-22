@@ -72,8 +72,9 @@ Your public URL will be `wss://<app-name>.fly.dev`. Requires a credit card once 
 | Variable | Required | Description |
 | --- | --- | --- |
 | `PORT` | No | Defaults to `2567`. Most hosts inject this automatically. |
-| `CLIENT_ORIGIN` | Recommended | CORS allow-origin for the HTTP endpoints (`/healthz`, `/monitor`, `/admin/restart`). Set to your deployed Next.js origin, e.g. `https://kilrun.vercel.app`. Defaults to `*` if unset. |
-| `GAME_SERVER_ADMIN_SECRET` | Recommended | Shared secret for `POST /admin/restart` (must match the Next.js env of the same name). Used by Admin → Dashboard → Restart Colyseus. |
+| `CLIENT_ORIGIN` | Recommended | CORS allow-origin for the HTTP endpoints (`/healthz`, `/monitor`, `/admin/restart`). Set to your deployed Next.js origin, e.g. `https://kilrun.vercel.app`. Defaults to `*` if unset. Also used as a fallback base URL for match-result reporting when `WEB_APP_URL` is unset. |
+| `WEB_APP_URL` | Recommended | HTTPS (or http://localhost) origin of the Next.js app. Colyseus POSTs finished-match rewards to `${WEB_APP_URL}/api/game/match-result`. Example local: `http://localhost:3000`. |
+| `GAME_SERVER_ADMIN_SECRET` | Recommended | Shared secret for `POST /admin/restart` and for authorizing match-result POSTs to Next.js (must match the Next.js env of the same name). |
 
 ### Wiring the deployed server into the Next.js app
 
