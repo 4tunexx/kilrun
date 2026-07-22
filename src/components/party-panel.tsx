@@ -14,25 +14,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
 import {
+  acceptPartyInvite,
   clearPartyQueueRoom,
   createParty,
   getMyParty,
+  getPartyInviteCandidates,
   inviteFriendToParty,
-  joinPartyByCode,
   kickPartyMember,
   leaveParty,
   type PartyDto,
+  type SteamPartyInviteRow,
 } from '@/lib/party-actions';
-import { getFriends } from '@/lib/social-actions';
 import { useToast } from '@/hooks/use-toast';
 import type { KilrunMode } from '@/lib/game-modes';
 import type { CompetitiveQueue } from '@/components/views/play-view';
-
-type FriendRow = {
-  id: string;
-  username: string;
-  avatarUrl: string;
-};
 
 interface PartyPanelProps {
   userId: string;
@@ -59,14 +54,28 @@ function modeFromPartyMode(
   return null;
 }
 
+function sourceLabel(source: SteamPartyInviteRow['source']) {
+  if (source === 'steam') return 'Steam';
+  if (source === 'hub') return 'Hub';
+  return 'Steam · Hub';
+}
+
 export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
   const { toast } = useToast();
   const [party, setParty] = useState<PartyDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [joinCode, setJoinCode] = useState('');
-  const [friends, setFriends] = useState<FriendRow[]>([]);
+  const [candidates, setCandidates] = useState<SteamPartyInviteRow[]>([]);
+  const [steamMeta, setSteamMeta] = useState({
+    steamFriendsAvailable: false,
+    steamFriendsPrivate: false,
+    noSteamApiKey: false,
+  });
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteFilter, setInviteFilter] = useState<'all' | 'steam' | 'hub'>(
+    'all'
+  );
   const followedRoomRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -107,17 +116,18 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
 
   useEffect(() => {
     if (!inviteOpen) return;
-    void getFriends()
-      .then((rows) => {
-        setFriends(
-          rows.map((f) => ({
-            id: f.id,
-            username: f.username,
-            avatarUrl: f.avatarUrl,
-          }))
-        );
+    void getPartyInviteCandidates()
+      .then((data) => {
+        setCandidates(data.rows);
+        setSteamMeta({
+          steamFriendsAvailable: data.steamFriendsAvailable,
+          steamFriendsPrivate: data.steamFriendsPrivate,
+          noSteamApiKey: data.noSteamApiKey,
+        });
       })
-      .catch(() => setFriends([]));
+      .catch(() => {
+        setCandidates([]);
+      });
   }, [inviteOpen]);
 
   const run = async (fn: () => Promise<unknown>, okTitle?: string) => {
@@ -152,7 +162,8 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
           Party
         </div>
         <p className="text-xs text-slate-400">
-          Queue together — create a party or join with a 6-character invite code.
+          Queue with Steam / hub friends — create a party or join with a 6-character
+          invite code.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -176,7 +187,7 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
               variant="secondary"
               disabled={busy || joinCode.trim().length < 4}
               onClick={() =>
-                void run(() => joinPartyByCode(joinCode), 'Joined party')
+                void run(() => acceptPartyInvite(joinCode), 'Joined party')
               }
             >
               Join
@@ -188,6 +199,16 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
   }
 
   const leaderQueuing = !!party.activeRoomId && !!party.mode;
+  const filtered = candidates.filter((f) => {
+    if (party.memberIds.includes(f.id)) return false;
+    if (inviteFilter === 'steam') {
+      return f.source === 'steam' || f.source === 'both';
+    }
+    if (inviteFilter === 'hub') {
+      return f.source === 'hub' || f.source === 'both';
+    }
+    return true;
+  });
 
   return (
     <div className="rounded-xl border border-sky-700/30 bg-slate-900/60 p-4 space-y-3">
@@ -272,7 +293,7 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
       )}
       {party.isLeader && (
         <p className="text-xs text-slate-500">
-          You lead the party — pick a mode below to queue everyone together.
+          Invite Steam or hub friends, then pick a mode below to queue together.
         </p>
       )}
 
@@ -284,16 +305,51 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
           onClick={() => setInviteOpen((o) => !o)}
         >
           <UserPlus className="h-3.5 w-3.5 mr-1.5" />
-          Invite friend
+          Invite Steam / hub friends
         </Button>
         {inviteOpen && (
-          <div className="absolute z-20 mt-1 left-0 right-0 sm:right-auto sm:min-w-[14rem] rounded-lg border border-slate-700 bg-slate-950 shadow-xl max-h-48 overflow-y-auto">
-            {friends.length === 0 ? (
-              <p className="text-xs text-slate-500 p-3">No friends yet.</p>
-            ) : (
-              friends
-                .filter((f) => !party.memberIds.includes(f.id))
-                .map((f) => (
+          <div className="absolute z-20 mt-1 left-0 right-0 sm:right-auto sm:min-w-[16rem] rounded-lg border border-slate-700 bg-slate-950 shadow-xl overflow-hidden">
+            <div className="flex gap-1 p-2 border-b border-slate-800">
+              {([
+                ['all', 'All'],
+                ['steam', 'Steam'],
+                ['hub', 'Hub'],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`text-[11px] px-2 py-1 rounded ${
+                    inviteFilter === id
+                      ? 'bg-sky-600/30 text-sky-200'
+                      : 'text-slate-400 hover:bg-slate-800'
+                  }`}
+                  onClick={() => setInviteFilter(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="max-h-52 overflow-y-auto">
+              {steamMeta.noSteamApiKey && inviteFilter !== 'hub' && (
+                <p className="text-[11px] text-amber-200/80 px-3 py-2 border-b border-slate-800">
+                  Set <code className="text-amber-100">STEAM_API_KEY</code> to load
+                  Steam friends.
+                </p>
+              )}
+              {steamMeta.steamFriendsPrivate && inviteFilter !== 'hub' && (
+                <p className="text-[11px] text-amber-200/80 px-3 py-2 border-b border-slate-800">
+                  Your Steam friends list is private — set it Public in Steam
+                  profile privacy, or share the party code.
+                </p>
+              )}
+              {filtered.length === 0 ? (
+                <p className="text-xs text-slate-500 p-3">
+                  {steamMeta.steamFriendsAvailable
+                    ? 'No Steam friends on Kilrun yet — they need to log in once. You can still share the code.'
+                    : 'No friends to invite. Share the party code, or add hub friends.'}
+                </p>
+              ) : (
+                filtered.map((f) => (
                   <button
                     key={f.id}
                     type="button"
@@ -311,10 +367,14 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
                       name={f.username}
                       className="h-7 w-7"
                     />
-                    <span className="truncate">{f.username}</span>
+                    <span className="truncate flex-1">{f.username}</span>
+                    <span className="text-[10px] text-slate-500 shrink-0">
+                      {sourceLabel(f.source)}
+                    </span>
                   </button>
                 ))
-            )}
+              )}
+            </div>
           </div>
         )}
       </div>
