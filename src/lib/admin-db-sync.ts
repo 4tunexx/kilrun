@@ -16,7 +16,7 @@ import { writeAuditLog } from '@/lib/audit';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-20-gamemap-loadout';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-22-match-rewards-audit';
 
 async function requireAdmin() {
   const session = await auth();

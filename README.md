@@ -86,8 +86,8 @@ Player skins (hats, gear, weapons, tails, etc.) are authored in the **Model Edit
 - `npm run dev` — Start the Next.js development server (Turbopack)
 - `npm run build` — Create a production build
 - `npm run start` — Run the production server
-- `npm run lint` — Run ESLint
-- `npm run typecheck` — Run TypeScript checks
+- `npm run lint` — Run ESLint (`eslint` + `eslint-config-next`; Vercel builds still skip via `eslint.ignoreDuringBuilds`)
+- `npm run typecheck` — Run TypeScript checks (primary CI gate)
 - `npm run db:push` — Push the Prisma schema to MongoDB Atlas
 - `npm run db:seed` — Seed the database
 

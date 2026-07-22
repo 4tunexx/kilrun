@@ -8,7 +8,7 @@ _Last updated: 2026-07-22 (branch `cursor/home-daily-missions-count-200f`)_
 
 ## After deploy (required once)
 
-1. Admin → **Dashboard → Sync database schema** (`2026-07-20-gamemap-loadout`)
+1. Admin → **Dashboard → Sync database schema** (`2026-07-22-match-rewards-audit`)
 2. Admin → **Dashboard → Seed progression** (Horde / Competitive missions, achievements, badges)
 3. **Restart Colyseus** — Admin → Dashboard → **Restart Colyseus** (or redeploy the game server). Requires `GAME_SERVER_ADMIN_SECRET` on both web + game server.
 4. Map Editor: set **Active** map for Deathrun / Horde / Competitive
@@ -55,7 +55,7 @@ _Last updated: 2026-07-22 (branch `cursor/home-daily-missions-count-200f`)_
 | **Colyseus restart** | Yes | Admin Dashboard → Restart Colyseus (`POST /admin/restart` + `GAME_SERVER_ADMIN_SECRET`) |
 | **Party / party queue** | Not built | Solo joinOrCreate only |
 | **Dedicated Ranked season resets** | Not built | Peak ranks persist; no soft reset seasons |
-| **Rank images on every surface** | Partial | Public profile + admin; hub/leaderboard can reuse `RankBadge` more widely |
+| **Rank images on every surface** | Done (hub + leaderboard + profile) | `RankLabel` / `RankBadge` use admin rank config images/colors |
 | **Server-authoritative match awards** | Done | Colyseus → `/api/game/match-result`; client result screens are display/fallback |
 | **Horde monster AI polish** | Basic | Playable waves; balance / bosses can iterate |
 | **Mobile Ranked UX** | Works via hub | Same queues; touch controls shared with Deathrun |
