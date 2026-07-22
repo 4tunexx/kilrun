@@ -673,13 +673,18 @@ export function MapEditor({
       if (e.key === 'v' || e.key === 'V') setEditTool('select');
       if (e.key === 'b' || e.key === 'B') {
         setEditTool('brush');
-        if (!brush) setBrush('floor-square');
+        if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
       }
       if (e.key === 'p' || e.key === 'P') {
         const selModel = docRef.current.entities.find((ent) => ent.id === selectedId)?.model;
-        if (selModel) setBrush(selModel);
-        else if (!brush) setBrush('floor-square');
+        if (selModel && selModel !== HAMMER_SOLID_MODEL) setBrush(selModel);
+        else if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
         setEditTool('bucket');
+        if (freeFly) apiRef.current?.setFreeFly(false);
+      }
+      if (e.key === 'h' || e.key === 'H') {
+        setEditTool('hammer');
+        setMode('scale');
         if (freeFly) apiRef.current?.setFreeFly(false);
       }
       if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey) {
@@ -1486,7 +1491,7 @@ export function MapEditor({
                     }`}
                     onClick={() => {
                       setEditTool('brush');
-                      if (!brush) setBrush('floor-square');
+                      if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
                     }}
                     title="Brush (B) — click once to place"
                   >
@@ -1503,8 +1508,8 @@ export function MapEditor({
                     onClick={() => {
                       // If a scene object is selected, paint that model; else keep library brush.
                       const selModel = selected?.model;
-                      if (selModel) setBrush(selModel);
-                      else if (!brush) setBrush('floor-square');
+                      if (selModel && selModel !== HAMMER_SOLID_MODEL) setBrush(selModel);
+                      else if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
                       setEditTool('bucket');
                       if (freeFly) apiRef.current?.setFreeFly(false);
                     }}
@@ -1522,7 +1527,7 @@ export function MapEditor({
                     type="button"
                     onClick={() => {
                       setBrush(name);
-                      // Keep Bucket if already painting; otherwise arm normal Brush.
+                      // Keep Bucket if already painting; Hammer++ / Select return to Brush.
                       setEditTool((t) => (t === 'bucket' ? 'bucket' : 'brush'));
                       // Free the canvas after picking a brush on mobile.
                       if (isMobile) {
@@ -1531,7 +1536,8 @@ export function MapEditor({
                       }
                     }}
                     className={`rounded border p-1 text-left ${
-                      brush === name && (editTool === 'brush' || editTool === 'bucket')
+                      brush === name &&
+                      (editTool === 'brush' || editTool === 'bucket')
                         ? 'border-cyan-400 bg-cyan-500/10'
                         : brush === name
                           ? 'border-white/30 bg-white/5'
@@ -1553,7 +1559,9 @@ export function MapEditor({
                   ? 'Paint Bucket: camera locked — hold and drag to paint the selected model along a path.'
                   : editTool === 'brush'
                     ? 'Brush: click ground to place. Same model cell selects it. Alt+click stacks.'
-                    : 'Select: click objects to pick them. Pick a model, then Brush or Bucket.'}{' '}
+                    : editTool === 'hammer'
+                      ? 'Hammer++: place/drag solid boxes. Use Scale (R) to resize. Catalog Brush/Bucket unchanged.'
+                      : 'Select: click objects to pick them. Pick a model, then Brush or Bucket.'}{' '}
                 Orbit drag = move view. Ctrl = free fly.
               </p>
             </>
@@ -2391,9 +2399,11 @@ export function MapEditor({
               : ''}
             {editTool === 'paint'
               ? ' · texture paint'
-              : editTool === 'bucket' && brush
+              : editTool === 'hammer'
+                ? ' · Hammer++ solid'
+              : editTool === 'bucket' && brush && brush !== HAMMER_SOLID_MODEL
               ? ` · bucket: ${brush}`
-              : editTool === 'brush' && brush
+              : editTool === 'brush' && brush && brush !== HAMMER_SOLID_MODEL
                 ? ` · brush: ${brush}`
                 : editTool === 'brush' || editTool === 'bucket'
                   ? ' · pick a model'
@@ -2497,10 +2507,10 @@ export function MapEditor({
               active={editTool === 'brush'}
               onClick={() => {
                 setEditTool('brush');
-                if (!brush) setBrush('floor-square');
+                if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
               }}
               title={
-                brush
+                brush && brush !== HAMMER_SOLID_MODEL
                   ? `Brush (B) — click to place ${brush}`
                   : 'Brush (B) — pick a model in Assets'
               }
@@ -2512,13 +2522,13 @@ export function MapEditor({
               onClick={() => {
                 // If a scene object is selected, paint that model; else keep library brush.
                 const selModel = selected?.model;
-                if (selModel) setBrush(selModel);
-                else if (!brush) setBrush('floor-square');
+                if (selModel && selModel !== HAMMER_SOLID_MODEL) setBrush(selModel);
+                else if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
                 setEditTool('bucket');
                 if (freeFly) apiRef.current?.setFreeFly(false);
               }}
               title={
-                brush
+                brush && brush !== HAMMER_SOLID_MODEL
                   ? `Paint Bucket (P) — hold+drag paints ${brush}; camera locked`
                   : 'Paint Bucket (P) — pick a model, then hold+drag'
               }
@@ -2528,12 +2538,11 @@ export function MapEditor({
             <ToolBtn
               active={editTool === 'hammer'}
               onClick={() => {
-                setBrush(HAMMER_SOLID_MODEL);
                 setEditTool('hammer');
                 setMode('scale');
                 if (freeFly) apiRef.current?.setFreeFly(false);
               }}
-              title="Hammer++ — place resizable solid boxes; hold-drag to paint; Scale to size"
+              title="Hammer++ (H) — place resizable solid boxes; hold-drag to paint; Scale to size"
             >
               <Hammer className="w-4 h-4 text-amber-300" />
             </ToolBtn>

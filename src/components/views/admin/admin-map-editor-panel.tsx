@@ -266,7 +266,10 @@ export function AdminMapEditorPanel() {
               </Button>
             </div>
           </div>
-          <p className="text-xs text-slate-400 mt-1">{modeInfo.editorBlurb}</p>
+          <p className="text-xs text-slate-400 mt-1">
+            {modeInfo.editorBlurb} Maps sync to cloud on Save / Active so other devices see the same
+            library (tap refresh to pull).
+          </p>
           <Input
             className="mt-2 max-w-sm bg-slate-950/60"
             placeholder="Search maps…"

@@ -947,7 +947,7 @@ export function createEditorViewport(
   }
 
   function attachSelectionGizmo() {
-    if (!selectedId || !roots.has(selectedId) || freeFly || editTool === 'bucket') {
+    if (!selectedId || !roots.has(selectedId) || freeFly || editTool === 'bucket' || editTool === 'paint' || bucketPainting) {
       transform.detach();
       return;
     }
@@ -1171,24 +1171,63 @@ export function createEditorViewport(
     else if (measureMode) renderer.domElement.style.cursor = 'cell';
     else if (pendingPlaceKind) renderer.domElement.style.cursor = 'crosshair';
     else if (editTool === 'select') renderer.domElement.style.cursor = 'default';
-    else if (editTool === 'bucket' || editTool === 'paint') renderer.domElement.style.cursor = 'cell';
-    else renderer.domElement.style.cursor = 'crosshair';
+    else if (
+      editTool === 'bucket' ||
+      editTool === 'paint' ||
+      editTool === 'hammer'
+    ) {
+      renderer.domElement.style.cursor = 'cell';
+    } else renderer.domElement.style.cursor = 'crosshair';
   }
 
   function applyToolCameraLock() {
-    // Paint Bucket / texture paint disable orbit/transform so drag paints instead of spinning the view.
-    const lockCam = editTool === 'bucket' || editTool === 'paint' || freeFly || measureMode;
-    orbit.enabled = !lockCam && !bucketPainting;
-    transform.enabled = editTool !== 'bucket' && editTool !== 'paint' && !freeFly && !measureMode;
-    if (editTool === 'bucket' || editTool === 'paint') transform.detach();
+    // Bucket + texture paint lock orbit; Hammer++ only locks while hold-dragging.
+    const lockCam =
+      editTool === 'bucket' ||
+      editTool === 'paint' ||
+      freeFly ||
+      measureMode ||
+      bucketPainting;
+    orbit.enabled = !lockCam;
+    transform.enabled =
+      editTool !== 'bucket' &&
+      editTool !== 'paint' &&
+      !freeFly &&
+      !measureMode &&
+      !bucketPainting;
+    if (editTool === 'bucket' || editTool === 'paint' || bucketPainting) {
+      transform.detach();
+    }
     updateCursor();
+  }
+
+  /**
+   * Map pointer into the main perspective pane. In split/triple layouts the
+   * right/side ortho panes are view-only — clicks there are ignored so we
+   * don't place with the wrong camera projection.
+   */
+  function setPointerFromClient(clientX: number, clientY: number): boolean {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const paneFrac = viewLayout === 'triple' ? 1 / 3 : viewLayout === 'split' ? 0.5 : 1;
+    const paneW = rect.width * paneFrac;
+    const localX = clientX - rect.left;
+    if (viewLayout !== 'single' && localX > paneW) return false;
+    pointer.x = (localX / Math.max(1, paneW)) * 2 - 1;
+    pointer.y = -((clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1;
+    return true;
+  }
+
+  function catalogBrushOrDefault(preferred?: string | null): string {
+    const candidate = preferred?.trim() || brush;
+    if (!candidate || candidate === HAMMER_SOLID_MODEL) return 'floor-square';
+    return candidate;
   }
 
   function setFreeFly(on: boolean) {
     const wasFlying = freeFly;
     freeFly = on;
-    if (on && editTool === 'bucket') {
-      // Free fly wins — leave bucket so camera works.
+    if (on && (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer')) {
+      // Free fly wins — leave painting tools so camera works.
       editTool = 'select';
       bucketPainting = false;
       lastPaintCellKey = null;
@@ -1224,10 +1263,11 @@ export function createEditorViewport(
 
   function placeBrushModel(): string | null {
     if (editTool === 'hammer') return HAMMER_SOLID_MODEL;
+    if (!brush || brush === HAMMER_SOLID_MODEL) return null;
     return brush;
   }
 
-  /** Continuous place for Paint Bucket only (active library model / brush). */
+  /** Continuous place for Paint Bucket / Hammer++ hold-drag. */
   function paintBucketAtEvent(ev: { clientX: number; clientY: number }): boolean {
     const model = placeBrushModel();
     if (
@@ -1238,9 +1278,7 @@ export function createEditorViewport(
     ) {
       return false;
     }
-    const rect = renderer.domElement.getBoundingClientRect();
-    pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-    pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    if (!setPointerFromClient(ev.clientX, ev.clientY)) return false;
     raycaster.setFromCamera(pointer, camera);
     const placed = pickPlacePoint(true);
     const point = placed?.point ?? raycaster.intersectObject(ground)[0]?.point;
@@ -1292,11 +1330,12 @@ export function createEditorViewport(
       !measureMode &&
       editTool === 'bucket' &&
       brush &&
+      brush !== HAMMER_SOLID_MODEL &&
       !ev.shiftKey
     ) {
       bucketPainting = true;
       lastPaintCellKey = null;
-      orbit.enabled = false;
+      applyToolCameraLock();
       paintBucketAtEvent(ev);
       try {
         renderer.domElement.setPointerCapture(ev.pointerId);
@@ -1305,7 +1344,7 @@ export function createEditorViewport(
       }
       return;
     }
-    // Hammer++ hold-drag paints solids (same continuous path as bucket).
+    // Hammer++ hold-drag paints solids (does not touch catalog brush).
     if (
       !freeFly &&
       !measureMode &&
@@ -1314,7 +1353,7 @@ export function createEditorViewport(
     ) {
       bucketPainting = true;
       lastPaintCellKey = null;
-      orbit.enabled = false;
+      applyToolCameraLock();
       paintBucketAtEvent(ev);
       try {
         renderer.domElement.setPointerCapture(ev.pointerId);
@@ -1335,9 +1374,7 @@ export function createEditorViewport(
     }
     // Mobile / touch long-press → additive multi-select.
     if (!freeFly && !measureMode && editTool === 'select' && !ev.shiftKey && !ev.altKey) {
-      const rect = renderer.domElement.getBoundingClientRect();
-      pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+      if (!setPointerFromClient(ev.clientX, ev.clientY)) return;
       raycaster.setFromCamera(pointer, camera);
       const pickables = Array.from(roots.values()).filter((r) => r.visible);
       const hits = raycaster.intersectObjects(pickables, true);
@@ -1504,9 +1541,7 @@ export function createEditorViewport(
         /* ignore */
       }
       applyToolCameraLock();
-      const rect = renderer.domElement.getBoundingClientRect();
-      pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+      if (!setPointerFromClient(ev.clientX, ev.clientY)) return;
       raycaster.setFromCamera(pointer, camera);
       const pickables = Array.from(roots.values()).filter((r) => r.visible);
       const hits = raycaster.intersectObjects(pickables, true);
@@ -1539,16 +1574,14 @@ export function createEditorViewport(
       return;
     }
 
-    // Paint Bucket already painted on down/move — skip click place.
-    if (wasBucketPainting || editTool === 'bucket') return;
+    // Paint Bucket / Hammer++ already painted on down/move — skip click place.
+    if (wasBucketPainting || editTool === 'bucket' || editTool === 'hammer') return;
     // Long-press already toggled multi-select — don't re-select on release.
     if (wasLongPress) return;
     const dist = Math.hypot(ev.clientX - downX, ev.clientY - downY);
     if (dist > 5) return;
 
-    const rect = renderer.domElement.getBoundingClientRect();
-    pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-    pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    if (!setPointerFromClient(ev.clientX, ev.clientY)) return;
     raycaster.setFromCamera(pointer, camera);
 
     const groundHits = raycaster.intersectObject(ground);
@@ -1651,12 +1684,11 @@ export function createEditorViewport(
       return;
     }
 
-    // Brush / Hammer++ paint: place on ground / stack. Select tool never places.
+    // Brush paint: place on ground / stack. Select tool never places.
+    // (Hammer++ places on pointer-down via continuous paint path.)
     const placeModel = placeBrushModel();
     const canPaint =
-      ((editTool === 'brush' && Boolean(brush)) || editTool === 'hammer') &&
-      !measureMode &&
-      !ev.shiftKey;
+      editTool === 'brush' && Boolean(brush) && !measureMode && !ev.shiftKey;
     if (canPaint && placeModel) {
       if (hitEntityId && !ev.altKey) {
         const ent = doc.entities.find((e) => e.id === hitEntityId);
@@ -1696,7 +1728,8 @@ export function createEditorViewport(
 
     if (
       groundHits[0] &&
-      ((editTool === 'brush' && brush) || editTool === 'hammer') &&
+      editTool === 'brush' &&
+      brush &&
       !measureMode
     ) {
       placeAt(groundHits[0].point, 'prop', placeBrushModel() ?? undefined);
@@ -1936,11 +1969,19 @@ export function createEditorViewport(
       if (tool === 'bucket') {
         if (freeFly) setFreeFly(false);
         // Prefer painting the model of the current scene selection if it has one.
+        // Never steal Hammer++ into the catalog brush slot.
         if (selectedId) {
           const sel = doc.entities.find((e) => e.id === selectedId);
-          if (sel?.model) brush = sel.model;
+          if (sel?.model && sel.model !== HAMMER_SOLID_MODEL) brush = sel.model;
         }
-        if (!brush) brush = 'floor-square';
+        brush = catalogBrushOrDefault(brush);
+      }
+      if (tool === 'brush') {
+        brush = catalogBrushOrDefault(brush);
+      }
+      if (tool === 'hammer') {
+        if (freeFly) setFreeFly(false);
+        // Do not overwrite catalog brush — Hammer++ uses its own solid model.
       }
       if (tool === 'paint') {
         if (freeFly) setFreeFly(false);
@@ -1949,7 +1990,13 @@ export function createEditorViewport(
         }
       }
       applyToolCameraLock();
-      if (tool !== 'bucket' && tool !== 'paint' && selectedId && roots.has(selectedId) && !freeFly) {
+      if (
+        tool !== 'bucket' &&
+        tool !== 'paint' &&
+        selectedId &&
+        roots.has(selectedId) &&
+        !freeFly
+      ) {
         const selEnt = doc.entities.find((e) => e.id === selectedId);
         if (!layerMeta(selEnt?.layerId ?? '')?.locked) {
           transform.attach(roots.get(selectedId)!);
@@ -1989,7 +2036,9 @@ export function createEditorViewport(
       handlers.onMeasureChange?.(null);
       if (on) {
         bucketPainting = false;
-        if (editTool === 'bucket') editTool = 'select';
+        if (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer') {
+          editTool = 'select';
+        }
       }
       applyToolCameraLock();
     },
@@ -2003,7 +2052,9 @@ export function createEditorViewport(
       // Click-to-place on the floor — not camera-forward dump.
       pendingPlaceKind = kind;
       pendingPlaceModel = undefined;
-      if (editTool === 'bucket' || editTool === 'paint') editTool = 'select';
+      if (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer') {
+        editTool = 'select';
+      }
       if (freeFly) setFreeFly(false);
       applyToolCameraLock();
       updateCursor();
@@ -2012,7 +2063,9 @@ export function createEditorViewport(
     placeEntity: (kind, model) => {
       pendingPlaceKind = kind;
       pendingPlaceModel = model;
-      if (editTool === 'bucket' || editTool === 'paint') editTool = 'select';
+      if (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer') {
+        editTool = 'select';
+      }
       if (freeFly) setFreeFly(false);
       applyToolCameraLock();
       updateCursor();
@@ -2021,7 +2074,9 @@ export function createEditorViewport(
     armPlaceKind: (kind, model) => {
       pendingPlaceKind = kind;
       pendingPlaceModel = model;
-      if (editTool === 'bucket' || editTool === 'paint') editTool = 'select';
+      if (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer') {
+        editTool = 'select';
+      }
       if (freeFly) setFreeFly(false);
       applyToolCameraLock();
       updateCursor();
