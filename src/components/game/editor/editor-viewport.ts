@@ -13,13 +13,17 @@ import {
   defaultJumpPad,
   defaultLight,
   defaultMonsterSpawn,
+  defaultPushBlock,
+  defaultPushRail,
   defaultRedZone,
   defaultRevive,
+  defaultSpinHazard,
   defaultWaveAnchor,
   ensureLight,
   entityExportsAsPlatform,
   entityKindLabel,
   generateId,
+  isHammerSolidEntity as isHammerSolidEntityDoc,
   isInvisibleMarkerKind,
   isPlatformPlayerKind,
   snapToGrid,
@@ -31,14 +35,24 @@ import {
   makeSelectionOutline,
   plantLocalFeet,
 } from './editor-mesh';
-import { applyEntityOpacity, MAP_SKY_COLORS } from './map-scene-visuals';
+import { applyEntityOpacity, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
+import {
+  defaultSizeForHammer,
+  isHammerPrimitive,
+  loadStickyHammerShape,
+  makeHammerSolidObject,
+  type HammerPrimitive,
+} from './hammer-shapes';
 
 function makeLightBulb(ent: EditorEntity): THREE.Group {
   const lightCfg = ensureLight(ent);
   const group = new THREE.Group();
   group.name = 'light-bulb';
+  const type = lightCfg.type ?? 'point';
   const bulb = new THREE.Mesh(
-    new THREE.SphereGeometry(0.18, 16, 12),
+    type === 'beam'
+      ? new THREE.CylinderGeometry(0.08, 0.14, 0.35, 10)
+      : new THREE.SphereGeometry(0.18, 16, 12),
     new THREE.MeshStandardMaterial({
       color: new THREE.Color(lightCfg.color),
       emissive: new THREE.Color(lightCfg.color),
@@ -52,23 +66,69 @@ function makeLightBulb(ent: EditorEntity): THREE.Group {
     new THREE.MeshStandardMaterial({ color: 0x334155 })
   );
   stem.position.y = -0.2;
-  const point = new THREE.PointLight(
-    new THREE.Color(lightCfg.color),
-    lightCfg.intensity,
-    lightCfg.distance,
-    2
-  );
-  point.castShadow = !!lightCfg.castShadow;
-  point.userData.isEntityLight = true;
+
+  let light: THREE.Light;
+  if (type === 'spot' || type === 'flashlight' || type === 'beam') {
+    const angle = THREE.MathUtils.degToRad(lightCfg.angleDeg ?? (type === 'beam' ? 12 : 40));
+    const spot = new THREE.SpotLight(
+      new THREE.Color(lightCfg.color),
+      lightCfg.intensity,
+      lightCfg.beamLength ?? lightCfg.distance,
+      angle,
+      lightCfg.penumbra ?? 0.35,
+      1.5
+    );
+    spot.castShadow = !!lightCfg.castShadow;
+    spot.userData.isEntityLight = true;
+    spot.userData.lightType = type;
+    const target = new THREE.Object3D();
+    const pitch = THREE.MathUtils.degToRad(lightCfg.pitchDeg ?? (type === 'flashlight' ? -8 : -25));
+    target.position.set(0, Math.sin(pitch) * 4, Math.cos(pitch) * 4);
+    group.add(target);
+    spot.target = target;
+    light = spot;
+  } else {
+    const point = new THREE.PointLight(
+      new THREE.Color(lightCfg.color),
+      lightCfg.intensity,
+      lightCfg.distance,
+      2
+    );
+    point.castShadow = !!lightCfg.castShadow;
+    point.userData.isEntityLight = true;
+    point.userData.lightType = 'point';
+    light = point;
+  }
+
   group.add(bulb);
   group.add(stem);
-  group.add(point);
+  group.add(light);
   return group;
 }
 
 function syncLightParams(root: THREE.Object3D, ent: EditorEntity) {
   const cfg = ensureLight(ent);
+  const type = cfg.type ?? 'point';
+  // Rebuild if light class no longer matches (point ↔ spot).
+  let hasSpot = false;
+  let hasPoint = false;
   root.traverse((o) => {
+    if (o instanceof THREE.SpotLight && o.userData.isEntityLight) hasSpot = true;
+    if (o instanceof THREE.PointLight && o.userData.isEntityLight) hasPoint = true;
+  });
+  const wantsSpot = type === 'spot' || type === 'flashlight' || type === 'beam';
+  if ((wantsSpot && !hasSpot) || (!wantsSpot && !hasPoint)) {
+    // Caller should remesh; update what we can in place.
+  }
+  root.traverse((o) => {
+    if (o instanceof THREE.SpotLight && o.userData.isEntityLight) {
+      o.color.set(cfg.color);
+      o.intensity = cfg.intensity;
+      o.distance = cfg.beamLength ?? cfg.distance;
+      o.angle = THREE.MathUtils.degToRad(cfg.angleDeg ?? 40);
+      o.penumbra = cfg.penumbra ?? 0.35;
+      o.castShadow = !!cfg.castShadow;
+    }
     if (o instanceof THREE.PointLight && o.userData.isEntityLight) {
       o.color.set(cfg.color);
       o.intensity = cfg.intensity;
@@ -115,6 +175,9 @@ export interface EditorViewportApi {
   setPaintTexture: (url: string | null) => void;
   setEditTool: (tool: EditTool) => void;
   getEditTool: () => EditTool;
+  /** Sticky Hammer++ shape — used for every place until changed. */
+  setHammerShape: (shape: HammerPrimitive) => void;
+  getHammerShape: () => HammerPrimitive;
   setActiveLayerId: (id: string) => void;
   setTransformMode: (mode: TransformMode) => void;
   setGridSnap: (on: boolean) => void;
@@ -203,6 +266,8 @@ export function createEditorViewport(
   let paintTextureUrl: string | null = null;
   /** Select = pick; Brush = single click place; Bucket = hold-drag continuous paint; Paint = texture on release. */
   let editTool: EditTool = 'select';
+  /** Sticky Hammer++ primitive — persists across places until the author changes it. */
+  let hammerShape: HammerPrimitive = loadStickyHammerShape();
   let stampEntitiesQueue: EditorEntity[] | null = null;
   /** Click-to-place: next ground click places this entity kind on the floor surface. */
   let pendingPlaceKind: EditorEntity['kind'] | null = null;
@@ -624,23 +689,15 @@ export function createEditorViewport(
     });
   }
 
-  function makeHammerSolidMesh(ent: EditorEntity): THREE.Mesh {
-    const size = ent.collisionSize ?? [2, 0.25, 2];
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(size[0], size[1], size[2]),
-      new THREE.MeshStandardMaterial({
-        color: ent.color ? new THREE.Color(ent.color) : 0x64748b,
-        roughness: 0.85,
-        metalness: 0.05,
-      })
-    );
-    mesh.position.y = size[1] * 0.5;
-    mesh.userData.isHammerSolid = true;
-    return mesh;
+  function makeHammerSolidMesh(ent: EditorEntity): THREE.Object3D {
+    const size = ent.collisionSize ?? defaultSizeForHammer((ent.primitive as HammerPrimitive) || 'box');
+    const shape = (ent.primitive as HammerPrimitive) || 'box';
+    const obj = makeHammerSolidObject(shape, size, ent.color || '#64748b');
+    return obj;
   }
 
   function isHammerSolidEntity(ent: EditorEntity): boolean {
-    return ent.primitive === 'box' || ent.model === HAMMER_SOLID_MODEL;
+    return isHammerSolidEntityDoc(ent);
   }
 
   function clearSelectionOutlines() {
@@ -699,14 +756,16 @@ export function createEditorViewport(
       if (!wantsMarker && isHammerSolidEntity(ent)) {
         root = new THREE.Group();
         root.add(makeHammerSolidMesh(ent));
-        const size = ent.collisionSize ?? [2, 0.25, 2];
+        const size =
+          ent.collisionSize ??
+          defaultSizeForHammer((ent.primitive as HammerPrimitive) || hammerShape);
         const idx = doc.entities.findIndex((e) => e.id === ent.id);
         if (idx >= 0 && !doc.entities[idx].collisionSize) {
           const entities = doc.entities.slice();
           entities[idx] = {
             ...entities[idx],
             collisionSize: size,
-            primitive: 'box',
+            primitive: (ent.primitive as HammerPrimitive) || hammerShape || 'box',
             model: HAMMER_SOLID_MODEL,
             solid: true,
             collideMaterial: entities[idx].collideMaterial ?? 'solid',
@@ -838,6 +897,13 @@ export function createEditorViewport(
       } else if (ent.kind === 'light') {
         root = makeLightBulb(ent);
         root.userData.isEditorMarker = true;
+      } else if (
+        ent.kind === 'spinner' ||
+        ent.kind === 'push_rail' ||
+        ent.kind === 'push_block'
+      ) {
+        root = makeGameplayFallback(ent) ?? new THREE.Group();
+        root.userData.isEditorMarker = true;
       } else if (ent.kind === 'player') {
         root = new THREE.Mesh(
           new THREE.CapsuleGeometry(0.35, 0.9, 4, 8),
@@ -919,7 +985,9 @@ export function createEditorViewport(
       if (drawCollision && showSolid && !isHz) {
         const color = ent.jumpPad?.enabled || ent.kind === 'jump_pad' ? 0x38bdf8 : 0x22c55e;
         const hammerVol =
-          ent.primitive === 'box' || ent.model === HAMMER_SOLID_MODEL;
+          ent.primitive === 'box' ||
+          isHammerPrimitive(ent.primitive) ||
+          ent.model === HAMMER_SOLID_MODEL;
         // Hammer solids are full volumes — show full-height wire, not flat pad.
         const pad =
           (root &&
@@ -1144,19 +1212,28 @@ export function createEditorViewport(
 
     const foot = defaultModel ? modelFootprint(defaultModel) : null;
     const isHammer = defaultModel === HAMMER_SOLID_MODEL;
+    const shape: HammerPrimitive = isHammer ? hammerShape : 'box';
+    const hammerSize: [number, number, number] = isHammer
+      ? defaultSizeForHammer(shape)
+      : [2, 0.25, 2];
 
-    const hammerSize: [number, number, number] = [2, 0.25, 2];
     const ent: EditorEntity = {
       id: generateId(),
       name:
         kind === 'start' || kind === 'spawn_runner'
           ? `Runner Spawn ${runnerCount}`
           : isHammer
-            ? 'Hammer Solid'
-            : entityKindLabel(kind),
+            ? `Hammer ${shape}`
+            : kind === 'spinner'
+              ? 'Rotating hazard'
+              : kind === 'push_rail'
+                ? 'Push rail'
+                : kind === 'push_block'
+                  ? 'Push block'
+                  : entityKindLabel(kind),
       kind,
       model: isHammer ? HAMMER_SOLID_MODEL : defaultModel,
-      primitive: isHammer ? 'box' : undefined,
+      primitive: isHammer ? shape : undefined,
       layerId: activeLayerId,
       position: [x, Math.max(0, y), z],
       rotation: [0, 0, 0],
@@ -1190,6 +1267,9 @@ export function createEditorViewport(
       revive: kind === 'revive_pad' ? defaultRevive() : undefined,
       healthFloor: kind === 'health_floor' ? defaultHealthFloor() : undefined,
       waveAnchor: kind === 'wave_anchor' ? defaultWaveAnchor() : undefined,
+      spinHazard: kind === 'spinner' ? defaultSpinHazard() : undefined,
+      pushRail: kind === 'push_rail' ? defaultPushRail() : undefined,
+      pushBlock: kind === 'push_block' ? defaultPushBlock() : undefined,
     };
     doc = { ...doc, entities: [...doc.entities, ent] };
     // Sync React state immediately so a concurrent setDoc cannot wipe the new entity.
@@ -2047,6 +2127,10 @@ export function createEditorViewport(
       }
     },
     getEditTool: () => editTool,
+    setHammerShape: (shape) => {
+      hammerShape = shape;
+    },
+    getHammerShape: () => hammerShape,
     setActiveLayerId: (id) => {
       activeLayerId = id;
     },
@@ -2494,12 +2578,16 @@ export function createEditorViewport(
         (patch.collisionSize !== undefined || patch.primitive !== undefined) &&
         Boolean(
           prev &&
-            (prev.primitive === 'box' ||
-              prev.model === HAMMER_SOLID_MODEL ||
-              patch.primitive === 'box' ||
+            (isHammerSolidEntityDoc(prev) ||
+              (patch.primitive !== undefined && isHammerPrimitive(patch.primitive)) ||
               patch.model === HAMMER_SOLID_MODEL)
         );
-      if (modelChanged || kindChanged || hammerGeomChanged) {
+      const lightTypeChanged =
+        patch.light !== undefined &&
+        prev?.kind === 'light' &&
+        (patch.light as { type?: string } | undefined)?.type !== undefined &&
+        (patch.light as { type?: string }).type !== prev.light?.type;
+      if (modelChanged || kindChanged || hammerGeomChanged || lightTypeChanged) {
         transform.detach();
         disposeRoot(id);
       }
@@ -2510,6 +2598,9 @@ export function createEditorViewport(
           const next = { ...e, ...patch };
           if (patch.kind === 'light' && !next.light) next.light = defaultLight(next.color);
           if (patch.kind === 'hazard' && !next.hazard) next.hazard = defaultHazard();
+          if (patch.kind === 'spinner' && !next.spinHazard) next.spinHazard = defaultSpinHazard();
+          if (patch.kind === 'push_rail' && !next.pushRail) next.pushRail = defaultPushRail();
+          if (patch.kind === 'push_block' && !next.pushBlock) next.pushBlock = defaultPushBlock();
           return next;
         }),
       };

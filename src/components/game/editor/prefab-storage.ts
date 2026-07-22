@@ -3,7 +3,11 @@ import {
   ensureDeathrunSettings,
   entityExportsAsPlatform,
   ensureHazard,
+  ensurePushBlock,
+  ensurePushRail,
+  ensureSpinHazard,
   generateId,
+  isHammerSolidEntity,
   resolveCollideMaterial,
 } from './map-document';
 import type { KilrunMode } from '@/lib/game-modes';
@@ -196,6 +200,30 @@ export interface SimHazardBlueprint {
   alwaysActive: boolean;
   buttonControlled?: boolean;
   instantKill: boolean;
+  /** Rotating hazard visual / feel (client). */
+  spinSpeed?: number;
+  spinAxis?: 'x' | 'y' | 'z';
+}
+
+/** Competitive payload rail + block. */
+export interface SimPushPayloadBlueprint {
+  railId: string;
+  blockId: string;
+  /** Rail center in sim coords. */
+  x: number;
+  y: number;
+  z: number;
+  /** Rail yaw in radians (along length). */
+  yaw: number;
+  length: number;
+  width: number;
+  /** 0 = Team A end, 1 = Team B end. */
+  t: number;
+  pushStrength: number;
+  pushRadius: number;
+  winEpsilon: number;
+  blockModelUrl?: string;
+  blockModelId?: string;
 }
 
 export interface SimFinishBlueprint {
@@ -274,7 +302,7 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   else if (mat === 'sand') kind = 'sand';
 
   const model = e.model ?? '';
-  const isHammerSolid = e.primitive === 'box' || model === 'hammer-solid';
+  const isHammerSolid = isHammerSolidEntity(e);
   const wantsSolidVolume =
     mat === 'solid' || e.solid === true || e.kind === 'door';
   // Hammer++ / box solids are authoring volumes — always full collision when marked
@@ -453,10 +481,36 @@ export function mapDocToSimHazards(doc: MapDocument): SimHazardBlueprint[] {
   return doc.entities
     .filter((e) => {
       if (e.visible === false) return false;
+      if (e.kind === 'spinner') return ensureSpinHazard(e).enabled !== false;
       const hz = ensureHazard(e);
       return e.kind === 'hazard' || e.kind === 'trap' || hz.enabled;
     })
     .map((e) => {
+      if (e.kind === 'spinner') {
+        const spin = ensureSpinHazard(e);
+        const [tx, ty, tz] = e.position;
+        const [sw, sh, sd] = spin.size;
+        const width = Math.max(1.2, sw * Math.abs(e.scale[0]));
+        const depth = Math.max(1.2, sd * Math.abs(e.scale[2]));
+        const height = Math.max(1.0, sh * Math.abs(e.scale[1]));
+        return {
+          id: e.id,
+          kind: 'saw' as const,
+          x: tz,
+          y: tx,
+          z: ty,
+          width: Math.max(width, depth),
+          height,
+          damage: spin.instantKill ? 999 : Math.max(1, spin.damage),
+          intervalMs: Math.max(100, spin.intervalMs),
+          activeMs: 999999,
+          alwaysActive: true,
+          buttonControlled: false,
+          instantKill: !!spin.instantKill,
+          spinSpeed: spin.speed,
+          spinAxis: spin.axis,
+        };
+      }
       const hz = ensureHazard(e);
       const [tx, ty, tz] = e.position;
       const width = Math.max(1.2, Math.abs(e.scale[0]) * 2);
@@ -746,12 +800,58 @@ export function mapDocMonsterSpawns(doc: MapDocument) {
         y: e.position[0],
         z: e.position[1],
         monsterType: ms?.monsterType ?? ('basic' as const),
+        displayName: ms?.displayName,
+        modelUrl: ms?.modelUrl || e.customModelUrl,
+        modelId: ms?.modelId || e.model,
+        level: ms?.level ?? 1,
+        hp: ms?.hp ?? 0,
+        damage: ms?.damage ?? 0,
+        speed: ms?.speed ?? 0,
+        radius: ms?.radius ?? 0,
         waveMin: ms?.waveMin ?? 1,
         waveMax: ms?.waveMax ?? 0,
         countPerWave: ms?.countPerWave ?? 2,
         spawnIntervalSec: ms?.spawnIntervalSec ?? 1.5,
       };
     });
+}
+
+/** Competitive push-block payloads (rail + block pairs). */
+export function mapDocPushPayloads(doc: MapDocument): SimPushPayloadBlueprint[] {
+  const rails = doc.entities.filter((e) => e.visible !== false && e.kind === 'push_rail');
+  const blocks = doc.entities.filter((e) => e.visible !== false && e.kind === 'push_block');
+  const out: SimPushPayloadBlueprint[] = [];
+  for (const block of blocks) {
+    const pb = ensurePushBlock(block);
+    let rail =
+      (pb.railEntityId && rails.find((r) => r.id === pb.railEntityId)) ||
+      rails.find((r) => {
+        const dx = r.position[0] - block.position[0];
+        const dz = r.position[2] - block.position[2];
+        return Math.hypot(dx, dz) < ensurePushRail(r).length * 0.6;
+      }) ||
+      rails[0];
+    if (!rail) continue;
+    const pr = ensurePushRail(rail);
+    const yaw = ((rail.rotation?.[1] ?? 0) * Math.PI) / 180;
+    out.push({
+      railId: rail.id,
+      blockId: block.id,
+      x: rail.position[2],
+      y: rail.position[0],
+      z: rail.position[1],
+      yaw,
+      length: pr.length,
+      width: pr.width,
+      t: pr.startT,
+      pushStrength: pb.pushStrength,
+      pushRadius: pb.pushRadius,
+      winEpsilon: pb.winEpsilon,
+      blockModelUrl: pb.modelUrl || block.customModelUrl,
+      blockModelId: pb.modelId || block.model,
+    });
+  }
+  return out;
 }
 
 export function mapDocTeamSpawns(doc: MapDocument) {

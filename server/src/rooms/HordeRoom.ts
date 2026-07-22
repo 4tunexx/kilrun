@@ -71,7 +71,15 @@ interface MonsterSpawnBlueprint {
   x: number;
   y: number;
   z: number;
-  monsterType?: 'basic' | 'fast' | 'brute' | 'boss';
+  monsterType?: 'basic' | 'fast' | 'brute' | 'boss' | 'custom';
+  displayName?: string;
+  modelUrl?: string;
+  modelId?: string;
+  level?: number;
+  hp?: number;
+  damage?: number;
+  speed?: number;
+  radius?: number;
   waveMin?: number;
   waveMax?: number;
   countPerWave?: number;
@@ -487,8 +495,16 @@ export class HordeRoom extends Room<RoomState> {
   }
 
   private spawnMonster(point: MonsterSpawnBlueprint) {
-    const type = point.monsterType ?? 'basic';
-    const stats = MONSTER_STATS[type] ?? MONSTER_STATS.basic;
+    const type = point.monsterType === 'custom' ? 'basic' : point.monsterType ?? 'basic';
+    const base = MONSTER_STATS[type] ?? MONSTER_STATS.basic;
+    const level = Math.max(1, point.level ?? 1);
+    const levelScale = 1 + (level - 1) * 0.18;
+    const stats = {
+      hp: (point.hp && point.hp > 0 ? point.hp : base.hp * levelScale) * (1 + (this.state.wave - 1) * 0.12),
+      speed: point.speed && point.speed > 0 ? point.speed : base.speed,
+      damage: point.damage && point.damage > 0 ? point.damage : Math.round(base.damage * levelScale),
+      radius: point.radius && point.radius > 0 ? point.radius : base.radius,
+    };
     const id = `mon_${Math.random().toString(36).slice(2, 9)}`;
     const obs = new ObstacleState();
     obs.id = id;
@@ -510,7 +526,7 @@ export class HordeRoom extends Room<RoomState> {
       x: obs.x,
       y: obs.y,
       z: obs.z,
-      hp: stats.hp * (1 + (this.state.wave - 1) * 0.12),
+      hp: stats.hp,
       speed: stats.speed,
       damage: stats.damage,
       radius: stats.radius,
