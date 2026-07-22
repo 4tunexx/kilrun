@@ -91,3 +91,21 @@ export const DAILY_MISSION_SEEDS = [
 export function isDailyMissionCategory(category: string | null | undefined): boolean {
   return (category || '').toLowerCase() === 'daily';
 }
+
+/** ActiveMission-shaped row: category daily or daily_* template key. */
+export function isDailyMissionRow(m: {
+  category?: string | null;
+  templateKey: string;
+}): boolean {
+  return isDailyMissionCategory(m.category) || m.templateKey.startsWith('daily_');
+}
+
+export function isWebMissionRow(m: {
+  category?: string | null;
+  templateKey: string;
+}): boolean {
+  if (isDailyMissionRow(m)) return false;
+  return (
+    (m.category || '').toLowerCase() === 'website' || m.templateKey.startsWith('web_')
+  );
+}

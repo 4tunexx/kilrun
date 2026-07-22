@@ -4,12 +4,20 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { NetPlayerState, NetRoomState } from '../net/types';
 import { getLevelFromXp, getLevelProgress } from '@/lib/progression';
 import { RunnerHud } from '../modes/deathrun/runner-hud';
+import type { WeaponCombatKind } from '@/lib/weapons';
 
 function formatClock(ms: number): string {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function weaponLabel(kind?: WeaponCombatKind | null): string {
+  if (kind === 'hitscan') return 'HITSCAN';
+  if (kind === 'cosmetic') return 'UNARMED';
+  if (kind === 'melee') return 'MELEE';
+  return 'MELEE';
 }
 
 function useSmooth(target: number, speed = 8) {
@@ -166,8 +174,9 @@ export const HUD: React.FC<{
   room: NetRoomState;
   xpProgress?: number;
   runnersLeft?: number;
-  coins?: number;
-}> = ({ player, room, xpProgress = 0, runnersLeft = 1, coins = 0 }) => {
+  /** Loadout weapon combat kind (from equipped skins). */
+  weaponKind?: WeaponCombatKind | null;
+}> = ({ player, room, xpProgress = 0, runnersLeft = 1, weaponKind = null }) => {
   const isTrapper = player.role === 'trapper';
   const level = getLevelFromXp(xpProgress);
   const levelProg = useMemo(() => getLevelProgress(xpProgress), [xpProgress]);
@@ -218,10 +227,10 @@ export const HUD: React.FC<{
       </div>
 
       <div className="absolute right-10 top-[42%] -translate-y-1/2 text-right">
-        <p className="text-[11px] font-bold tracking-[0.25em] text-white/70">COINS</p>
-        <p className="text-[28px] font-black text-white tabular-nums leading-none">
-          <span className="text-emerald-300/90 text-[20px] mr-1">$</span>
-          {coins}
+        <p className="text-[11px] font-bold tracking-[0.25em] text-white/70">LEVEL</p>
+        <p className="text-[28px] font-black text-white tabular-nums leading-none">{level}</p>
+        <p className="text-[10px] font-bold text-white/55 tabular-nums mt-0.5">
+          {Math.round(levelProg.percent)}% to next
         </p>
       </div>
 
@@ -253,8 +262,6 @@ export const HUD: React.FC<{
         >
           {String(energy).padStart(3, '0')}
         </span>
-
-        <ChargeBar left={60} top={96} width={144} height={7} value={100} fill="rgba(255,152,55,0.96)" />
       </div>
 
       {!isTrapper && (
@@ -276,8 +283,7 @@ export const HUD: React.FC<{
         <p className="text-[8px] font-bold tracking-[0.2em] uppercase" style={{ color: 'rgba(209,230,250,0.78)' }}>
           WEAPON
         </p>
-        <p className="text-[18px] font-black text-white leading-tight">PISTOL</p>
-        <p className="text-[28px] font-black text-white tabular-nums leading-none">12 / 60</p>
+        <p className="text-[18px] font-black text-white leading-tight">{weaponLabel(weaponKind)}</p>
         <p className="text-[9px] font-black tracking-wide" style={{ color: 'rgba(209,230,250,0.9)' }}>
           READY
         </p>

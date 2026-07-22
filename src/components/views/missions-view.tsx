@@ -7,23 +7,12 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { bootstrapMyMissions, getActiveMissions } from '@/lib/actions';
-import { DAILY_MISSION_SEEDS } from '@/lib/daily-missions';
+import {
+  DAILY_MISSION_SEEDS,
+  isDailyMissionRow,
+  isWebMissionRow,
+} from '@/lib/daily-missions';
 import type { ActiveMission } from '@/generated/prisma';
-
-function isDailyMission(m: ActiveMission) {
-  return (
-    (m as { category?: string }).category === 'daily' ||
-    m.templateKey.startsWith('daily_')
-  );
-}
-
-function isWebMission(m: ActiveMission) {
-  if (isDailyMission(m)) return false;
-  return (
-    (m as { category?: string }).category === 'website' ||
-    m.templateKey.startsWith('web_')
-  );
-}
 
 export default function MissionsView({ userId }: { userId: string }) {
   const [missions, setMissions] = useState<ActiveMission[]>([]);
@@ -43,12 +32,12 @@ export default function MissionsView({ userId }: { userId: string }) {
     };
   }, [userId]);
 
-  const daily = useMemo(() => missions.filter(isDailyMission), [missions]);
+  const daily = useMemo(() => missions.filter(isDailyMissionRow), [missions]);
   const game = useMemo(
-    () => missions.filter((m) => !isDailyMission(m) && !isWebMission(m)),
+    () => missions.filter((m) => !isDailyMissionRow(m) && !isWebMissionRow(m)),
     [missions]
   );
-  const web = useMemo(() => missions.filter(isWebMission), [missions]);
+  const web = useMemo(() => missions.filter(isWebMissionRow), [missions]);
 
   const dailyDone = daily.filter((m) => m.isCompleted).length;
 

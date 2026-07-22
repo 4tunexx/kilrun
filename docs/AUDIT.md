@@ -1,6 +1,6 @@
 # Kilrun audit — modes, Premium, ranks, matchmaking
 
-_Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6`)_
+_Last updated: 2026-07-22 (branch `cursor/home-daily-missions-count-200f`)_
 
 ## Merge
 
@@ -8,7 +8,7 @@ _Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6
 
 ## After deploy (required once)
 
-1. Admin → **Dashboard → Sync database schema** (`2026-07-20-rank-config-mm`)
+1. Admin → **Dashboard → Sync database schema** (`2026-07-20-gamemap-loadout`)
 2. Admin → **Dashboard → Seed progression** (Horde / Competitive missions, achievements, badges)
 3. **Restart Colyseus** — Admin → Dashboard → **Restart Colyseus** (or redeploy the game server). Requires `GAME_SERVER_ADMIN_SECRET` on both web + game server.
 4. Map Editor: set **Active** map for Deathrun / Horde / Competitive
@@ -39,6 +39,7 @@ _Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6
 ### Progression
 - Missions / achievements / badges for Deathrun + Horde + Competitive (seed)
 - Map Editor (3 modes) + Model Editor skins (`equippedSkins` verified in sync)
+- **Match rewards** are server-authored: Colyseus POSTs to `/api/game/match-result` (shared `GAME_SERVER_ADMIN_SECRET`)
 
 ### Leaderboard
 - Tabs: Top XP · VP · Combat · **Ranked** (Premium by KP)
@@ -55,7 +56,7 @@ _Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6
 | **Party / party queue** | Not built | Solo joinOrCreate only |
 | **Dedicated Ranked season resets** | Not built | Peak ranks persist; no soft reset seasons |
 | **Rank images on every surface** | Partial | Public profile + admin; hub/leaderboard can reuse `RankBadge` more widely |
-| **Server-authoritative KP** | Client records result | `recordCompetitiveResult` from results screen; free week / Premium gated server-side |
+| **Server-authoritative match awards** | Done | Colyseus → `/api/game/match-result`; client result screens are display/fallback |
 | **Horde monster AI polish** | Basic | Playable waves; balance / bosses can iterate |
 | **Mobile Ranked UX** | Works via hub | Same queues; touch controls shared with Deathrun |
 
@@ -77,3 +78,4 @@ _Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6
 - Schema fields to sync: `User.kp`, `peakKp`, `peakRank`, `premiumExpiresAt`, `MatchResult.kpDelta`/`stats`, `SiteSettings.premiumConfigJson`, `rankConfigJson`, `equippedSkins`
 - Ranked join options: `rankKey`, `mmWaitSec`, `minSameRankPlayers`, `isPremium` / `rankedAccess`
 - Fullscreen lobby now passes `competitiveQueue` + Premium access (bugfix in this pass)
+- Match rewards: set `WEB_APP_URL` (or `CLIENT_ORIGIN`) on Colyseus + matching `GAME_SERVER_ADMIN_SECRET` on web

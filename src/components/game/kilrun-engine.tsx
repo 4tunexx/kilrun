@@ -603,7 +603,7 @@ export default function KilrunEngine({
               room={room}
               xpProgress={xpProgress}
               runnersLeft={runnersLeft}
-              coins={Math.floor(xpProgress / 10)}
+              weaponKind={resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind}
             />
             <ModeStatusHud mode={mode} room={room} />
           </>

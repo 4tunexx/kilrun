@@ -12,7 +12,7 @@ export const HordeLobbyOverlay: React.FC<{ playerCount: number }> = ({ playerCou
       </h3>
       <div className="flex items-center gap-2 text-slate-300 font-bold">
         <Users className="w-5 h-5" />
-        <span className="tabular-nums">{playerCount} / 4 survivors</span>
+        <span className="tabular-nums">{playerCount} / 4 in lobby</span>
       </div>
       <p className="text-slate-500 text-sm text-center max-w-xs">
         Clear escalating waves. Health floors heal you, revive pads bring teammates back, red zones

@@ -279,6 +279,15 @@ export async function ensurePlayerMissions(userId: string) {
     await prisma.activeMission.delete({ where: { id: drop.id } }).catch(() => {});
   }
 
+  // Drop ActiveMission rows whose template is missing or inactive.
+  const activeKeys = new Set(templates.map((t) => t.key));
+  for (const row of [...byKey.values()]) {
+    if (!activeKeys.has(row.templateKey)) {
+      await prisma.activeMission.delete({ where: { id: row.id } }).catch(() => {});
+      byKey.delete(row.templateKey);
+    }
+  }
+
   for (const t of templates) {
     const category = templateCategory(t);
     const isDaily = category === 'daily';
@@ -492,8 +501,20 @@ async function metricCount(userId: string, metric: string): Promise<number> {
     }
     case 'chat':
       return prisma.globalChatMessage.count({ where: { userId } });
-    case 'logins':
-      return 1;
+    case 'logins': {
+      // No cumulative login counter — proxy via streak / lastLoginAt.
+      // Seeded missions/badges use targetCount 1 (web_login_1, Hub Citizen, etc.).
+      const u = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { loginStreak: true, lastLoginAt: true },
+      });
+      if (!u) return 0;
+      return typeof u.loginStreak === 'number'
+        ? Math.max(u.loginStreak, u.lastLoginAt ? 1 : 0)
+        : u.lastLoginAt
+          ? 1
+          : 0;
+    }
     case 'missions_completed':
       return prisma.activeMission.count({
         where: { userId, isCompleted: true },

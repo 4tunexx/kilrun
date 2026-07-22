@@ -34,7 +34,7 @@ import {
   getSiteSettings,
 } from '@/lib/progression-actions';
 import { bootstrapHubOnce } from '@/lib/hub-bootstrap-client';
-import { DAILY_MISSION_SEEDS } from '@/lib/daily-missions';
+import { DAILY_MISSION_SEEDS, isDailyMissionRow } from '@/lib/daily-missions';
 import { getForumPosts, getNewsPosts } from '@/lib/social-actions';
 import type { ActiveMission } from '@/generated/prisma';
 import { formatDistanceToNow } from 'date-fns';
@@ -137,11 +137,8 @@ export default function HomeView({
         getForumPosts(5),
       ]);
       if (!isMounted) return;
-      const isDaily = (mission: ActiveMission) =>
-        (mission as { category?: string }).category === 'daily' ||
-        mission.templateKey.startsWith('daily_');
-      const daily = m.filter(isDaily);
-      const main = m.filter((mission) => !isDaily(mission));
+      const daily = m.filter(isDailyMissionRow);
+      const main = m.filter((mission) => !isDailyMissionRow(mission));
       // Show the full daily board so completed missions (e.g. Daily Login)
       // stay counted and visible — do not clip incomplete-first to 5.
       setDailyMissions(daily);

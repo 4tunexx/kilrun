@@ -10,6 +10,7 @@ import {
   resolveMarkLogo,
 } from '@/lib/branding';
 import { getLandingPageData } from '@/lib/actions';
+import { getSiteUrl } from '@/lib/site-url';
 
 interface ClerkEmailAddress {
   id: string;
@@ -113,9 +114,7 @@ async function handleEmailCreated(data: ClerkEmailCreatedData) {
   }
 
   try {
-    const site = (
-      process.env.NEXT_PUBLIC_SITE_URL || 'https://kilrun.vercel.app'
-    ).replace(/\/$/, '');
+    const site = getSiteUrl();
 
     const toAbsolute = (pathOrUrl: string, fallbackPath: string) => {
       const v = pathOrUrl?.trim() || fallbackPath;
