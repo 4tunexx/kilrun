@@ -584,15 +584,27 @@ export function MapEditor({
         document: next,
         thumbnailDataUrl: liveThumb ?? getMapThumbnail(mapId),
         setActive: false,
+      }).then(() => {
+        if (!opts?.quiet) {
+          toast({
+            title: 'Map saved',
+            description: `“${next.name}” saved and synced to cloud — visible on all devices.`,
+          });
+        }
       }).catch((err) => {
         console.warn('[map persist cloud]', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        const isSize = msg.includes('too large');
+        if (!opts?.quiet) {
+          toast({
+            title: 'Map saved locally',
+            description: isSize
+              ? `Cloud sync skipped — map is too large (embedded model data URLs). Re-upload the GLB in the model studio to fix cross-device sync.`
+              : `Cloud sync failed: ${msg}. The map is only saved on this device.`,
+            variant: 'destructive',
+          });
+        }
       });
-      if (!opts?.quiet) {
-        toast({
-          title: 'Map saved',
-          description: `“${next.name}” saved locally and synced to cloud.`,
-        });
-      }
       return true;
     } catch (err) {
       toast({
