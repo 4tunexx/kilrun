@@ -7,6 +7,9 @@ export interface ThreeWorld {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   clock: THREE.Clock;
+  ambient: THREE.AmbientLight;
+  sun: THREE.DirectionalLight;
+  hemi: THREE.HemisphereLight;
   destroy: () => void;
   setSize: (w: number, h: number) => void;
   render: () => void;
@@ -51,7 +54,8 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
   sun.shadow.camera.top = 45;
   sun.shadow.camera.bottom = -45;
   scene.add(sun);
-  scene.add(new THREE.AmbientLight(0x446688, 0.22));
+  const ambient = new THREE.AmbientLight(0x446688, 0.22);
+  scene.add(ambient);
 
   const clock = new THREE.Clock();
 
@@ -72,6 +76,9 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
     scene,
     camera,
     clock,
+    ambient,
+    sun,
+    hemi,
     setSize,
     render: () => renderer.render(scene, camera),
     destroy: () => {

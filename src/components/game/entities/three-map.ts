@@ -39,12 +39,14 @@ export class ThreeMap {
 
   constructor(
     private scene: THREE.Scene,
-    opts?: { hardcodedDecor?: boolean; hidePlatformMeshes?: boolean }
+    opts?: { hardcodedDecor?: boolean; hidePlatformMeshes?: boolean; atmosphere?: boolean }
   ) {
     this.decorRoot.name = 'hardcoded-decor';
     scene.add(this.root);
     this.root.add(this.decorRoot);
-    this.buildAtmosphere();
+    if (opts?.atmosphere !== false) {
+      this.buildAtmosphere();
+    }
     void this.loadAtlas();
     this.decorEnabled = opts?.hardcodedDecor !== false;
     this.platformsVisible = opts?.hidePlatformMeshes !== true;

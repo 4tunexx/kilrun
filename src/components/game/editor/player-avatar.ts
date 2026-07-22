@@ -1,6 +1,7 @@
 /**
  * Shared player avatar loading for Player Model studio, Play Test, and match.
  */
+import * as THREE from 'three';
 import type { EditorEntity, MapDocument, PlayerAnimBindings } from './map-document';
 import {
   defaultAnimation,
@@ -9,13 +10,13 @@ import {
   suggestPlayerBindings,
 } from './map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
-import { loadCharacterPrefab } from '../renderer/asset-loader';
+import { loadCharacterPrefab, normalizeCharacter } from '../renderer/asset-loader';
+import { plantLocalFeet } from './editor-mesh';
 import {
   applyExtraBones,
   applyPlayerMeshEdits,
   authoredClipsToThree,
 } from './player-mesh-edits';
-import type * as THREE from 'three';
 
 export interface LoadedPlayerAvatar {
   scene: THREE.Object3D;
@@ -98,6 +99,53 @@ export async function loadPlayerAvatar(
   }
   const { root, clips } = await loadAnimatedPrefab(src);
   return finalizeAvatar(entity, root, clips, false);
+}
+
+/**
+ * Match map-editor sizing: plant feet, then apply the entity's authored XYZ scale.
+ * Do NOT force a target height — that made Play Test / match look bigger/smaller
+ * than the same avatar next to platforms in the editor.
+ *
+ * Default mannequin (no authored model) is height-fit to ~1.6m so it matches the
+ * editor's blue capsule placeholder, then multiplied by entity.scale.
+ */
+export function fitAvatarLikeEditor(
+  mesh: THREE.Object3D,
+  entity: EditorEntity | null | undefined,
+  isDefaultMannequin: boolean
+): THREE.Group {
+  const wrap = new THREE.Group();
+  wrap.name = 'avatar-fit';
+  if (isDefaultMannequin && !entity?.model && !entity?.customModelUrl) {
+    normalizeCharacter(mesh, 1.6);
+    wrap.add(mesh);
+  } else {
+    plantLocalFeet(mesh);
+    wrap.add(mesh);
+  }
+  const sx = entity?.scale?.[0] ?? 1;
+  const sy = entity?.scale?.[1] ?? 1;
+  const sz = entity?.scale?.[2] ?? 1;
+  wrap.scale.set(
+    Number.isFinite(sx) && sx !== 0 ? sx : 1,
+    Number.isFinite(sy) && sy !== 0 ? sy : 1,
+    Number.isFinite(sz) && sz !== 0 ? sz : 1
+  );
+  return wrap;
+}
+
+/** Authored avatar scale (before TPS framing multiplier). */
+export function avatarAuthoredScale(
+  entity: EditorEntity | null | undefined
+): [number, number, number] {
+  const sx = entity?.scale?.[0] ?? 1;
+  const sy = entity?.scale?.[1] ?? 1;
+  const sz = entity?.scale?.[2] ?? 1;
+  return [
+    Number.isFinite(sx) && sx !== 0 ? sx : 1,
+    Number.isFinite(sy) && sy !== 0 ? sy : 1,
+    Number.isFinite(sz) && sz !== 0 ? sz : 1,
+  ];
 }
 
 /** Merge scanned clips into entity.animation.availableClips + optional auto-bind. */
