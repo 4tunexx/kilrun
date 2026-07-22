@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   createEmptyMap,
   entityKindsForMode,
+  entityShowsModelPicker,
   ensureDeathrunSettings,
   ensureHordeSettings,
   ensureCompetitiveSettings,
   getMapGameMode,
+  isHammerSolidEntity,
   isInvisibleMarkerKind,
+  isPlatformPlayerKind,
 } from '@/components/game/editor/map-document';
 import { validateMapForPublish } from '@/components/game/editor/map-validate';
 
@@ -44,6 +47,28 @@ describe('map game modes', () => {
     expect(isInvisibleMarkerKind('spawn_trapper')).toBe(true);
     expect(isInvisibleMarkerKind('spawn_monster')).toBe(true);
     expect(isInvisibleMarkerKind('prop')).toBe(false);
+  });
+
+  it('classifies hammer solids and model picker visibility', () => {
+    expect(
+      isHammerSolidEntity({ model: 'hammer-solid', primitive: undefined })
+    ).toBe(true);
+    expect(isHammerSolidEntity({ model: 'floor-square', primitive: undefined })).toBe(false);
+    expect(
+      entityShowsModelPicker({ kind: 'start', model: undefined, primitive: undefined })
+    ).toBe(false);
+    expect(
+      entityShowsModelPicker({
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+      })
+    ).toBe(false);
+    expect(
+      entityShowsModelPicker({ kind: 'prop', model: 'floor-square', primitive: undefined })
+    ).toBe(true);
+    expect(isPlatformPlayerKind('player')).toBe(true);
+    expect(isPlatformPlayerKind('prop')).toBe(false);
   });
 
   it('provides mode settings defaults', () => {

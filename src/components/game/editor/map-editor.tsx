@@ -86,13 +86,18 @@ import {
   entityKindHint,
   entityKindLabel,
   entityKindsForMode,
+  entityShowsGameplayMaterial,
+  entityShowsModelPicker,
   findPlayerEntity,
   generateId,
   getMapGameMode,
+  isHammerSolidEntity,
   isInvisibleMarkerKind,
+  isPlatformPlayerKind,
   patchCollideMaterial,
   resolveCollideMaterial,
 } from './map-document';
+import { TextureAtlasPicker } from './texture-atlas-picker';
 import { KILRUN_MODE_INFO } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
 import {
@@ -194,6 +199,8 @@ export function MapEditor({
   /** Select = pick objects; Brush = paint/place. Defaults to Select so clicks don't stack. */
   const [editTool, setEditTool] = useState<EditTool>('select');
   const [paintTextureUrl, setPaintTextureUrl] = useState<string | null>(null);
+  /** Armed click-to-place kind (spawn flag, light, etc.) — cleared by Select / Escape / place-once. */
+  const [pendingPlaceKind, setPendingPlaceKind] = useState<EditorEntity['kind'] | null>(null);
   const [viewLayout, setViewLayout] = useState<EditorViewLayout>('single');
   const [paintRepeat, setPaintRepeat] = useState<[number, number]>([2, 2]);
   const [mode, setMode] = useState<TransformMode>('translate');
@@ -368,6 +375,7 @@ export function MapEditor({
       },
       onFreeFlyChange: setFreeFly,
       onMeasureChange: setMeasureDist,
+      onPendingPlaceChange: setPendingPlaceKind,
       onPlaceResult: (result, layerName) => {
         if (result === 'locked') {
           const now = Date.now();
@@ -381,8 +389,19 @@ export function MapEditor({
           return;
         }
         // Click-to-place arming hint (layerName reused as message).
-        if (layerName?.startsWith('Click floor')) {
-          toast({ title: 'Place entity', description: `${layerName}. Shift+click places once.` });
+        if (layerName?.startsWith('Click once to place') || layerName?.startsWith('Click floor')) {
+          toast({
+            title: 'Place entity',
+            description: layerName.includes('Shift')
+              ? layerName
+              : `${layerName}. Click once to place; Shift+click keeps placing.`,
+          });
+        }
+        if (layerName?.startsWith('Player Model is platform')) {
+          toast({
+            title: 'Player Model',
+            description: 'Opens platform-wide avatar settings — not placed on the map.',
+          });
         }
       },
     });
@@ -650,6 +669,12 @@ export function MapEditor({
 
       if (e.key === 'Escape') {
         e.preventDefault();
+        if (apiRef.current?.getPendingPlaceKind()) {
+          apiRef.current.clearPendingPlace();
+          setPendingPlaceKind(null);
+          toast({ title: 'Placement cancelled', description: 'Back to Select.' });
+          return;
+        }
         if (freeFly) {
           apiRef.current?.setFreeFly(false);
           return;
@@ -670,7 +695,11 @@ export function MapEditor({
       if (e.key === 'w' || e.key === 'W') setMode('translate');
       if (e.key === 'e' || e.key === 'E') setMode('rotate');
       if (e.key === 'r' || e.key === 'R') setMode('scale');
-      if (e.key === 'v' || e.key === 'V') setEditTool('select');
+      if (e.key === 'v' || e.key === 'V') {
+        setEditTool('select');
+        apiRef.current?.clearPendingPlace();
+        setPendingPlaceKind(null);
+      }
       if (e.key === 'b' || e.key === 'B') {
         setEditTool('brush');
         if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
@@ -816,6 +845,18 @@ export function MapEditor({
     setActiveLayerId(layer.id);
   };
 
+  const armPlaceSpawn = (
+    kind: Parameters<NonNullable<EditorViewportApi['placeSpawn']>>[0]
+  ) => {
+    setEditTool('select');
+    apiRef.current?.placeSpawn(kind);
+  };
+
+  const armPlaceEntity = (kind: EditorEntity['kind'], model?: string) => {
+    setEditTool('select');
+    apiRef.current?.placeEntity(kind, model);
+  };
+
   const openPlayerStudio = () => {
     const ensured = ensureMapPlayerEntity(docRef.current);
     if (ensured.created) {
@@ -823,13 +864,11 @@ export function MapEditor({
       setDoc(ensured.doc);
       docRef.current = ensured.doc;
       apiRef.current?.setDoc(ensured.doc);
-      toast({
-        title: 'Player avatar added',
-        description: 'Configure model and animations in the studio panel.',
-      });
     }
-    setSelectedId(ensured.entity.id);
-    apiRef.current?.setSelectedId(ensured.entity.id);
+    // Do not select / focus avatar on the map — Player Model is platform settings.
+    setSelectedId(null);
+    apiRef.current?.setSelectedId(null);
+    setSelectedIds([]);
     setModelEditorOpen(false);
     setTpsViewOpen(false);
     setPlayerStudioOpen(true);
@@ -847,8 +886,9 @@ export function MapEditor({
       docRef.current = ensured.doc;
       apiRef.current?.setDoc(ensured.doc);
     }
-    setSelectedId(ensured.entity.id);
-    apiRef.current?.setSelectedId(ensured.entity.id);
+    setSelectedId(null);
+    apiRef.current?.setSelectedId(null);
+    setSelectedIds([]);
     setPlayerStudioOpen(false);
     setTpsViewOpen(false);
     setModelEditorOpen(true);
@@ -1041,7 +1081,7 @@ export function MapEditor({
             <>
               <button
                 type="button"
-                onClick={() => apiRef.current?.placeSpawn('start')}
+                onClick={() => armPlaceSpawn('start')}
                 className="flex items-center gap-1.5 rounded-xl border border-emerald-400/60 bg-emerald-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
               >
                 <Flag className="w-4 h-4" />
@@ -1050,7 +1090,7 @@ export function MapEditor({
               {gameMode === 'deathrun' && (
                 <button
                   type="button"
-                  onClick={() => apiRef.current?.placeSpawn('finish')}
+                  onClick={() => armPlaceSpawn('finish')}
                   className="flex items-center gap-1.5 rounded-xl border border-amber-400/60 bg-amber-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
                 >
                   <FlagTriangleRight className="w-4 h-4" />
@@ -1061,7 +1101,7 @@ export function MapEditor({
                 <>
                   <button
                     type="button"
-                    onClick={() => apiRef.current?.placeSpawn('spawn_team_a')}
+                    onClick={() => armPlaceSpawn('spawn_team_a')}
                     className="flex items-center gap-1.5 rounded-xl border border-sky-400/60 bg-sky-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
                   >
                     <Flag className="w-4 h-4" />
@@ -1069,7 +1109,7 @@ export function MapEditor({
                   </button>
                   <button
                     type="button"
-                    onClick={() => apiRef.current?.placeSpawn('spawn_team_b')}
+                    onClick={() => armPlaceSpawn('spawn_team_b')}
                     className="flex items-center gap-1.5 rounded-xl border border-rose-400/60 bg-rose-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
                   >
                     <Flag className="w-4 h-4" />
@@ -1080,7 +1120,7 @@ export function MapEditor({
               {gameMode === 'horde' && (
                 <button
                   type="button"
-                  onClick={() => apiRef.current?.placeSpawn('spawn_monster')}
+                  onClick={() => armPlaceSpawn('spawn_monster')}
                   className="flex items-center gap-1.5 rounded-xl border border-violet-400/60 bg-violet-500/35 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 min-h-11"
                 >
                   <Flag className="w-4 h-4" />
@@ -1133,7 +1173,7 @@ export function MapEditor({
           <button
             type="button"
             onClick={() => {
-              apiRef.current?.placeSpawn('start');
+              armPlaceSpawn('start');
               collapseAllMenus();
             }}
             className="flex items-center gap-1.5 rounded-xl border border-emerald-400/50 bg-black/75 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-emerald-100 shadow-lg active:scale-95 min-h-11"
@@ -1145,7 +1185,7 @@ export function MapEditor({
             <button
               type="button"
               onClick={() => {
-                apiRef.current?.placeSpawn('finish');
+                armPlaceSpawn('finish');
                 collapseAllMenus();
               }}
               className="flex items-center gap-1.5 rounded-xl border border-amber-400/50 bg-black/75 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-amber-100 shadow-lg active:scale-95 min-h-11"
@@ -1252,7 +1292,7 @@ export function MapEditor({
           variant={tpsViewOpen ? 'default' : 'secondary'}
           className={`shrink-0 ${tpsViewOpen ? 'bg-violet-600 hover:bg-violet-500 text-white' : ''}`}
           onClick={() => (tpsViewOpen ? setTpsViewOpen(false) : openTpsViewStudio())}
-          title="3rd View — camera boom, crosshair, player framing for Play Test & matches"
+          title="3rd View — in-game camera, crosshair & framing (how players see the match)"
         >
           <Eye className="w-4 h-4 mr-1" />
           {isMobile ? '3rd' : '3rd View'}
@@ -1262,7 +1302,7 @@ export function MapEditor({
           variant={playerStudioOpen ? 'default' : 'secondary'}
           className={`shrink-0 ${playerStudioOpen ? 'bg-sky-600 hover:bg-sky-500 text-white' : ''}`}
           onClick={() => (playerStudioOpen ? setPlayerStudioOpen(false) : openPlayerStudio())}
-          title="Player Model studio — inspect avatar & bind animations"
+          title="Player Model — platform-wide avatar look & animations (not placed on the map)"
         >
           <PersonStanding className="w-4 h-4 mr-1" />
           {isMobile ? 'Avatar' : 'Player Model'}
@@ -1472,12 +1512,16 @@ export function MapEditor({
                   <button
                     type="button"
                     className={`text-xs px-2 py-1.5 rounded border flex items-center justify-center gap-1 ${
-                      editTool === 'select'
+                      editTool === 'select' && !pendingPlaceKind
                         ? 'border-amber-400 text-amber-200 bg-amber-500/10'
                         : 'border-white/10 text-white/50'
                     }`}
-                    onClick={() => setEditTool('select')}
-                    title="Select objects (V) — click without placing"
+                    onClick={() => {
+                      setEditTool('select');
+                      apiRef.current?.clearPendingPlace();
+                      setPendingPlaceKind(null);
+                    }}
+                    title="Select objects (V) — cancels spawn placement"
                   >
                     <MousePointer2 className="w-3 h-3" />
                     Select
@@ -1705,7 +1749,9 @@ export function MapEditor({
 
           {tab === 'outliner' && (
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {doc.entities.map((e) => (
+              {doc.entities
+                .filter((e) => !isPlatformPlayerKind(e.kind))
+                .map((e) => (
                 <button
                   key={e.id}
                   type="button"
@@ -1733,6 +1779,14 @@ export function MapEditor({
                   {e.name}
                 </button>
               ))}
+              <button
+                type="button"
+                className="w-full text-left px-2 py-1.5 rounded text-sm border border-sky-500/30 bg-sky-500/10 text-sky-100 mt-2"
+                onClick={() => openPlayerStudio()}
+              >
+                <span className="text-sky-300/70 text-[10px] mr-1">platform</span>
+                Player Model settings…
+              </button>
             </div>
           )}
 
@@ -2057,8 +2111,42 @@ export function MapEditor({
                 <PaintBucket className="w-4 h-4 mr-1" /> Paint brush (release to paint)
               </Button>
               <p className="text-[10px] text-white/45 leading-snug">
-                Pick a texture below, then tap/click a model and release — paints texture + UV tile.
+                Pick a texture, drag a region on the atlas editor (if an object is selected), then
+                paint or apply. Atlas selection sets UV offset + tile for multi-tile sheets.
               </p>
+              {(paintTextureUrl ||
+                selected?.textureUrl ||
+                env.defaultTextureUrl ||
+                BUILTIN_TEXTURES[0]?.url) && (
+                <TextureAtlasPicker
+                  imageUrl={
+                    paintTextureUrl ||
+                    selected?.textureUrl ||
+                    env.defaultTextureUrl ||
+                    BUILTIN_TEXTURES[0].url
+                  }
+                  repeat={selected?.textureRepeat ?? paintRepeat}
+                  offset={selected?.textureOffset}
+                  onChange={(uv) => {
+                    setPaintRepeat(uv.repeat);
+                    apiRef.current?.setPaintUv({
+                      repeat: uv.repeat,
+                      offset: uv.offset,
+                    });
+                    if (selected) {
+                      patchSelected({
+                        textureUrl:
+                          selected.textureUrl ||
+                          paintTextureUrl ||
+                          env.defaultTextureUrl ||
+                          undefined,
+                        textureRepeat: uv.repeat,
+                        textureOffset: uv.offset,
+                      });
+                    }
+                  }}
+                />
+              )}
               <label className="block text-[10px] text-white/55">
                 Paint UV tile ({paintRepeat[0].toFixed(1)} × {paintRepeat[1].toFixed(1)})
                 <input
@@ -2071,6 +2159,7 @@ export function MapEditor({
                   onChange={(e) => {
                     const n = Number(e.target.value);
                     setPaintRepeat([n, n]);
+                    apiRef.current?.setPaintUv({ repeat: [n, n] });
                   }}
                 />
               </label>
@@ -2346,7 +2435,27 @@ export function MapEditor({
             </div>
           )}
 
-          {showHelp && !freeFly && !uiCollapsed && (
+          {pendingPlaceKind && !freeFly && !uiCollapsed && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[45] flex items-center gap-2 rounded-full border border-emerald-400/50 bg-emerald-600/90 px-3 py-1.5 text-xs font-bold text-white shadow-lg">
+              <span>
+                Placing {entityKindLabel(pendingPlaceKind)} — click once
+                <span className="font-normal opacity-80"> · Shift+click for more · Esc / Select to cancel</span>
+              </span>
+              <button
+                type="button"
+                className="rounded-md bg-black/30 px-2 py-0.5 text-[10px] uppercase tracking-wide hover:bg-black/50"
+                onClick={() => {
+                  apiRef.current?.clearPendingPlace();
+                  setPendingPlaceKind(null);
+                  setEditTool('select');
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {showHelp && !freeFly && !uiCollapsed && !pendingPlaceKind && (
             <div
               className={`absolute max-w-xs bg-black/75 border border-white/15 rounded-xl p-3 text-[11px] text-white/70 space-y-1 pointer-events-none z-[40] ${
                 isMobile ? 'top-24 left-3' : 'top-3 left-3'
@@ -2364,12 +2473,12 @@ export function MapEditor({
                 </>
               ) : (
                 <>
-                  <p>· <b className="text-white">Select (V)</b> picks objects · <b className="text-white">Brush (B)</b> paints</p>
-                  <p>· Build by <b className="text-white">Level</b>: Floor 0 → Props 1; eye toggles visibility</p>
-                  <p>· Pick a model to arm Brush, click ground to place (drag = orbit)</p>
-                  <p>· Same model click selects it · <b className="text-white">Alt+click</b> stacks</p>
+                  <p>· <b className="text-white">Select (V)</b> picks · cancels spawn placement</p>
+                  <p>· Flag / spawn tools: click once to place · Shift keeps placing</p>
+                  <p>· <b className="text-white">Player Model</b> = platform avatar (not map spawn)</p>
+                  <p>· <b className="text-white">Hammer (H)</b> solids: Material + size in Properties</p>
+                  <p>· <b className="text-white">Textures</b> tab: drag atlas region · paint brush</p>
                   <p>· <b className="text-white">Ctrl</b> free fly · <b className="text-white">G</b> snap · <b className="text-white">W/E/R</b> gizmo</p>
-                  <p>· Rotate + <b className="text-white">Shift</b> = 90° turns · Magnet snaps closest faces</p>
                   <p>· Set as <b className="text-white">MAIN map</b> for Deathrun Play</p>
                 </>
               )}
@@ -2497,9 +2606,13 @@ export function MapEditor({
           {!uiCollapsed && toolsOpen && (
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 border border-white/15 rounded-xl px-2 py-1.5 backdrop-blur z-[90] max-w-[calc(100vw-7rem)] overflow-x-auto">
             <ToolBtn
-              active={editTool === 'select'}
-              onClick={() => setEditTool('select')}
-              title="Select (V) — click objects without placing"
+              active={editTool === 'select' && !pendingPlaceKind}
+              onClick={() => {
+                setEditTool('select');
+                apiRef.current?.clearPendingPlace();
+                setPendingPlaceKind(null);
+              }}
+              title="Select (V) — click objects; cancels spawn placement"
             >
               <MousePointer2 className="w-4 h-4" />
             </ToolBtn>
@@ -2670,49 +2783,49 @@ export function MapEditor({
             >
               <Home className="w-4 h-4 text-emerald-300" />
             </ToolBtn>
-            <ToolBtn onClick={() => apiRef.current?.placeSpawn('start')} title="Runner / Player spawn (invisible marker)">
+            <ToolBtn onClick={() => armPlaceSpawn('start')} title="Runner / Player spawn (invisible marker)">
               <Flag className="w-4 h-4 text-emerald-400" />
             </ToolBtn>
             {gameMode === 'deathrun' && (
               <>
-                <ToolBtn onClick={() => apiRef.current?.placeSpawn('finish')} title="Finish (invisible unless you assign a model)">
+                <ToolBtn onClick={() => armPlaceSpawn('finish')} title="Finish (invisible unless you assign a model)">
                   <FlagTriangleRight className="w-4 h-4 text-amber-300" />
                 </ToolBtn>
-                <ToolBtn onClick={() => apiRef.current?.placeSpawn('spawn_trapper')} title="Trapper spawn (invisible)">
+                <ToolBtn onClick={() => armPlaceSpawn('spawn_trapper')} title="Trapper spawn (invisible)">
                   <Flag className="w-4 h-4 text-red-400" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('button')}
+                  onClick={() => armPlaceEntity('button')}
                   title="Button"
                 >
                   <CircleDot className="w-4 h-4 text-amber-300" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('trap')}
+                  onClick={() => armPlaceEntity('trap')}
                   title="Trap"
                 >
                   <Zap className="w-4 h-4 text-violet-300" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('hazard')}
+                  onClick={() => armPlaceEntity('hazard')}
                   title="Death"
                 >
                   <Skull className="w-4 h-4 text-red-400" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('door')}
+                  onClick={() => armPlaceEntity('door')}
                   title="Door"
                 >
                   <Box className="w-4 h-4 text-violet-200" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('jump_pad')}
+                  onClick={() => armPlaceEntity('jump_pad')}
                   title="Jump pad"
                 >
                   <Rocket className="w-4 h-4 text-sky-300" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('action')}
+                  onClick={() => armPlaceEntity('action')}
                   title="Action trigger"
                 >
                   <Zap className="w-4 h-4 text-amber-200" />
@@ -2722,31 +2835,31 @@ export function MapEditor({
             {gameMode === 'horde' && (
               <>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeSpawn('spawn_monster')}
+                  onClick={() => armPlaceSpawn('spawn_monster')}
                   title="Enemy spawn (invisible)"
                 >
                   <Bug className="w-4 h-4 text-rose-400" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('red_zone')}
+                  onClick={() => armPlaceEntity('red_zone')}
                   title="Death zone"
                 >
                   <Skull className="w-4 h-4 text-red-400" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('health_floor')}
+                  onClick={() => armPlaceEntity('health_floor')}
                   title="Health floor"
                 >
                   <Heart className="w-4 h-4 text-emerald-400" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('revive_pad')}
+                  onClick={() => armPlaceEntity('revive_pad')}
                   title="Revive pad"
                 >
                   <HeartPulse className="w-4 h-4 text-sky-400" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('door')}
+                  onClick={() => armPlaceEntity('door')}
                   title="Door"
                 >
                   <Box className="w-4 h-4 text-violet-200" />
@@ -2756,25 +2869,25 @@ export function MapEditor({
             {gameMode === 'competitive' && (
               <>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeSpawn('spawn_team_a')}
+                  onClick={() => armPlaceSpawn('spawn_team_a')}
                   title="Player A spawn (invisible)"
                 >
                   <Flag className="w-4 h-4 text-sky-400" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeSpawn('spawn_team_b')}
+                  onClick={() => armPlaceSpawn('spawn_team_b')}
                   title="Player B spawn (invisible)"
                 >
                   <Flag className="w-4 h-4 text-orange-400" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('hazard')}
+                  onClick={() => armPlaceEntity('hazard')}
                   title="Death"
                 >
                   <Skull className="w-4 h-4 text-red-400" />
                 </ToolBtn>
                 <ToolBtn
-                  onClick={() => apiRef.current?.placeEntity('door')}
+                  onClick={() => armPlaceEntity('door')}
                   title="Door"
                 >
                   <Box className="w-4 h-4 text-violet-200" />
@@ -2803,13 +2916,7 @@ export function MapEditor({
               <Shirt className="w-4 h-4 text-amber-300" />
             </ToolBtn>
             <ToolBtn
-              onClick={() => apiRef.current?.placeEntity('player', brush ?? 'figurine')}
-              title="Place player entity in map"
-            >
-              <User className="w-4 h-4 text-sky-300" />
-            </ToolBtn>
-            <ToolBtn
-              onClick={() => apiRef.current?.placeEntity('light')}
+              onClick={() => armPlaceEntity('light')}
               title="Light bulb"
             >
               <Lightbulb className="w-4 h-4 text-amber-200" />
@@ -2895,35 +3002,84 @@ export function MapEditor({
                   onChange={(e) => patchSelected({ name: e.target.value })}
                 />
               </label>
-              <label className="block text-xs text-white/60">
-                Kind
-                <select
-                  className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
-                  value={selected.kind}
-                  onChange={(e) =>
-                    patchSelected({ kind: e.target.value as EditorEntity['kind'] })
-                  }
-                >
-                  {kindOptions.map((k) => (
-                    <option key={k} value={k}>
-                      {entityKindLabel(k)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {entityKindHint(selected.kind) && (
-                <p className="text-[10px] leading-snug text-cyan-200/80 -mt-1">
-                  {entityKindHint(selected.kind)}
-                </p>
-              )}
-              {selected.kind === 'player' && (
-                <p className="text-[10px] leading-snug text-amber-200/90 rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1.5">
-                  Player Avatar = look / animations only (not a spawn). Play Test auto-spawns on your
-                  Start marker or the first solid floor — you do not need to place spawn by hand.
-                </p>
-              )}
 
-              {selected.kind !== 'light' && (
+              {/* Type label — never a confusing Kind dropdown for hammer / markers / player */}
+              {isHammerSolidEntity(selected) ? (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 space-y-0.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-amber-200">
+                    Hammer solid
+                  </p>
+                  <p className="text-[10px] text-white/55 leading-snug">
+                    Solid brush block — set Material + size. No model upload.
+                  </p>
+                </div>
+              ) : selected.kind === 'player' ? (
+                <div className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-2 py-1.5 space-y-1.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-sky-200">
+                    Player model (platform)
+                  </p>
+                  <p className="text-[10px] text-white/60 leading-snug">
+                    How players look in this map — not a spawn point. Configure in Player Model.
+                  </p>
+                  <Button
+                    size="sm"
+                    className="w-full bg-sky-600 hover:bg-sky-500"
+                    onClick={() => openPlayerStudio()}
+                  >
+                    <User className="w-3.5 h-3.5 mr-1" />
+                    Open Player Model
+                  </Button>
+                </div>
+              ) : isInvisibleMarkerKind(selected.kind) ||
+                selected.kind === 'finish' ||
+                selected.kind === 'jump_pad' ? (
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 space-y-0.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-200">
+                    {entityKindLabel(selected.kind)}
+                  </p>
+                  {entityKindHint(selected.kind) && (
+                    <p className="text-[10px] text-white/55 leading-snug">
+                      {entityKindHint(selected.kind)}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <label className="block text-xs text-white/60">
+                  Kind
+                  <select
+                    className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                    value={selected.kind}
+                    onChange={(e) =>
+                      patchSelected({ kind: e.target.value as EditorEntity['kind'] })
+                    }
+                  >
+                    {/* Include current kind + mode palette so props/hammer stay valid */}
+                    {Array.from(
+                      new Set<EditorEntity['kind']>([
+                        selected.kind,
+                        'prop',
+                        ...kindOptions,
+                      ])
+                    ).map((k) => (
+                      <option key={k} value={k}>
+                        {entityKindLabel(k)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {!isHammerSolidEntity(selected) &&
+                selected.kind !== 'player' &&
+                !isInvisibleMarkerKind(selected.kind) &&
+                selected.kind !== 'finish' &&
+                selected.kind !== 'jump_pad' &&
+                entityKindHint(selected.kind) && (
+                  <p className="text-[10px] leading-snug text-cyan-200/80 -mt-1">
+                    {entityKindHint(selected.kind)}
+                  </p>
+                )}
+
+              {entityShowsModelPicker(selected) && (
                 <>
                   <label className="block text-xs text-white/60">
                     Model
@@ -2969,8 +3125,7 @@ export function MapEditor({
                 </>
               )}
 
-              {selected.kind !== 'light' &&
-                !isInvisibleMarkerKind(selected.kind) &&
+              {entityShowsModelPicker(selected) &&
                 selected.kind !== 'finish' &&
                 selected.kind !== 'jump_pad' && (
                 <AnimationPropsPanel
@@ -2983,11 +3138,12 @@ export function MapEditor({
                 />
               )}
 
-              {/* Interaction: anim / damage / push on props, traps, doors */}
-              {(selected.kind === 'prop' ||
-                selected.kind === 'trap' ||
-                selected.kind === 'door' ||
-                selected.kind === 'hazard') && (
+              {/* Interaction: anim / damage / push on props, traps, doors — not hammer / markers */}
+              {!isHammerSolidEntity(selected) &&
+                (selected.kind === 'prop' ||
+                  selected.kind === 'trap' ||
+                  selected.kind === 'door' ||
+                  selected.kind === 'hazard') && (
                 <div className="space-y-2 border-t border-white/10 pt-2">
                   <p className="text-[10px] tracking-widest text-white/50 uppercase">
                     Interaction
@@ -3080,12 +3236,8 @@ export function MapEditor({
                 </div>
               )}
 
-              {/* Gameplay: material / jump pad / damage */}
-              {selected.kind !== 'light' &&
-                !isInvisibleMarkerKind(selected.kind) &&
-                selected.kind !== 'spawn_team_a' &&
-                selected.kind !== 'spawn_team_b' &&
-                selected.kind !== 'spawn_monster' && (
+              {/* Gameplay: material / jump pad / damage — hammer solids + props / pads */}
+              {entityShowsGameplayMaterial(selected) && (
                 <div className="space-y-2 border-t border-white/10 pt-2">
                   <p className="text-[10px] tracking-widest text-white/50 uppercase">
                     Gameplay
@@ -3122,6 +3274,42 @@ export function MapEditor({
                     ice change how you move on top. Walkthrough disables collision.
                   </p>
 
+                  {isHammerSolidEntity(selected) && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 space-y-1">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-amber-200">
+                        Solid size
+                      </p>
+                      <p className="text-[10px] text-white/55">
+                        Or use Scale (R) in the viewport. Collision matches these dimensions.
+                      </p>
+                      <div className="grid grid-cols-3 gap-1">
+                        {(['W', 'H', 'D'] as const).map((axis, i) => (
+                          <label key={axis} className="text-[9px] text-white/50">
+                            {axis}
+                            <input
+                              type="number"
+                              min={0.1}
+                              step={0.1}
+                              className="w-full bg-black/40 border border-white/10 rounded px-1 py-0.5 text-xs"
+                              value={Number(
+                                (selected.collisionSize?.[i] ?? [2, 0.25, 2][i]).toFixed(2)
+                              )}
+                              onChange={(e) => {
+                                const next: [number, number, number] = [
+                                  ...(selected.collisionSize ?? [2, 0.25, 2]),
+                                ] as [number, number, number];
+                                next[i] = Math.max(0.1, Number(e.target.value) || 0.1);
+                                patchSelected({ collisionSize: next, scale: [1, 1, 1] });
+                              }}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!isHammerSolidEntity(selected) && (
+                  <>
                   <label className="flex items-center gap-2 text-xs text-white/70">
                     <input
                       type="checkbox"
@@ -3239,6 +3427,8 @@ export function MapEditor({
                           ))}
                       </select>
                     </label>
+                  )}
+                  </>
                   )}
                 </div>
               )}
@@ -3622,11 +3812,19 @@ export function MapEditor({
                 </div>
               )}
 
-              {selected.kind !== 'light' &&
+              {/* Death / trap damage — not for spawn markers, lights, player, hammer solids */}
+              {!isInvisibleMarkerKind(selected.kind) &&
+                !isPlatformPlayerKind(selected.kind) &&
+                !isHammerSolidEntity(selected) &&
+                selected.kind !== 'light' &&
                 selected.kind !== 'start' &&
                 selected.kind !== 'finish' &&
                 selected.kind !== 'spawn_runner' &&
-                selected.kind !== 'spawn_trapper' && (
+                selected.kind !== 'spawn_trapper' &&
+                selected.kind !== 'jump_pad' &&
+                selected.kind !== 'button' &&
+                selected.kind !== 'revive_pad' &&
+                selected.kind !== 'health_floor' && (
               <div className="space-y-2 border-t border-white/10 pt-2">
                 <p className="text-[10px] tracking-widest text-white/50 uppercase">
                   {selected.kind === 'trap' ? 'Trap / timed hazard' : 'Death zone'}
@@ -3818,6 +4016,8 @@ export function MapEditor({
                   </div>
                 ))}
               </div>
+              {!isInvisibleMarkerKind(selected.kind) &&
+                !isPlatformPlayerKind(selected.kind) && (
               <label className="block text-xs text-white/60">
                 Opacity
                 <input
@@ -3830,6 +4030,7 @@ export function MapEditor({
                   onChange={(e) => patchSelected({ opacity: Number(e.target.value) })}
                 />
               </label>
+              )}
               <label className="block text-xs text-white/60">
                 Color
                 <input
@@ -3839,6 +4040,9 @@ export function MapEditor({
                   onChange={(e) => patchSelected({ color: e.target.value })}
                 />
               </label>
+              {!isInvisibleMarkerKind(selected.kind) &&
+                !isPlatformPlayerKind(selected.kind) &&
+                selected.kind !== 'light' && (
               <div className="space-y-1.5">
                 <p className="text-[10px] tracking-widest text-white/50 uppercase">Texture</p>
                 <input
@@ -3888,6 +4092,31 @@ export function MapEditor({
                     </Button>
                   </div>
                 )}
+                {(selected.textureUrl ||
+                  paintTextureUrl ||
+                  env.defaultTextureUrl) && (
+                  <TextureAtlasPicker
+                    imageUrl={
+                      selected.textureUrl ||
+                      paintTextureUrl ||
+                      env.defaultTextureUrl ||
+                      BUILTIN_TEXTURES[0].url
+                    }
+                    repeat={selected.textureRepeat}
+                    offset={selected.textureOffset}
+                    onChange={(uv) =>
+                      patchSelected({
+                        textureUrl:
+                          selected.textureUrl ||
+                          paintTextureUrl ||
+                          env.defaultTextureUrl ||
+                          undefined,
+                        textureRepeat: uv.repeat,
+                        textureOffset: uv.offset,
+                      })
+                    }
+                  />
+                )}
                 <label className="block text-[10px] text-white/55">
                   Texture tile X ({(selected.textureRepeat?.[0] ?? 1).toFixed(2)})
                   <input
@@ -3936,44 +4165,11 @@ export function MapEditor({
                     }
                   />
                 </label>
-                {(selected.primitive === 'box' ||
-                  selected.model === HAMMER_SOLID_MODEL) && (
-                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 space-y-1">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-amber-200">
-                      Hammer++ solid
-                    </p>
-                    <p className="text-[10px] text-white/55">
-                      Use Scale (R) to resize. Collision follows the box size.
-                    </p>
-                    <div className="grid grid-cols-3 gap-1">
-                      {(['X', 'Y', 'Z'] as const).map((axis, i) => (
-                        <label key={axis} className="text-[9px] text-white/50">
-                          Size {axis}
-                          <input
-                            type="number"
-                            min={0.1}
-                            step={0.1}
-                            className="w-full bg-black/40 border border-white/10 rounded px-1 py-0.5 text-xs"
-                            value={Number(
-                              (selected.collisionSize?.[i] ?? [2, 0.25, 2][i]).toFixed(2)
-                            )}
-                            onChange={(e) => {
-                              const next: [number, number, number] = [
-                                ...(selected.collisionSize ?? [2, 0.25, 2]),
-                              ] as [number, number, number];
-                              next[i] = Math.max(0.1, Number(e.target.value) || 0.1);
-                              patchSelected({ collisionSize: next, scale: [1, 1, 1] });
-                            }}
-                          />
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
                 <p className="text-[10px] text-white/40">
-                  Or pick from the Textures tab / paint brush. Right-click a swatch to apply.
+                  Drag a region on the atlas above, or use the Textures tab paint brush.
                 </p>
               </div>
+              )}
               <label className="block text-xs text-white/60">
                 Layer
                 <select
@@ -4036,11 +4232,6 @@ export function MapEditor({
               entity={playerAvatar}
               isMobile={isMobile}
               onClose={() => setPlayerStudioOpen(false)}
-              onFocusInMap={() => {
-                setSelectedId(playerAvatar.id);
-                apiRef.current?.setSelectedId(playerAvatar.id);
-                apiRef.current?.focusSelected();
-              }}
               onChange={(patch) => patchEntityById(playerAvatar.id, patch)}
             />
           )}
