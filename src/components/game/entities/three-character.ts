@@ -2,8 +2,7 @@ import * as THREE from 'three';
 import type { NetPlayerState } from '../net/types';
 import type { EditorEntity, PlayerAnimBindings, PlayerAnimSlot } from '../editor/map-document';
 import { suggestPlayerBindings } from '../editor/map-document';
-import { loadPlayerAvatar } from '../editor/player-avatar';
-import { normalizeCharacter } from '../renderer/asset-loader';
+import { loadPlayerAvatar, fitAvatarLikeEditor } from '../editor/player-avatar';
 import { toThree } from '../renderer/coords';
 import {
   computeLocomotionFacingYaw,
@@ -90,19 +89,16 @@ export class ThreeCharacter {
   private async load() {
     try {
       const entity = this.avatarOpts.avatarEntity ?? null;
-      const { scene, animations, clipNames } = await loadPlayerAvatar(entity);
+      const { scene, animations, clipNames, isDefaultMannequin } = await loadPlayerAvatar(entity);
       if (this.disposed) return;
 
       while (this.root.children.length) {
         this.root.remove(this.root.children[0]);
       }
-      normalizeCharacter(scene, 1.8);
-      pruneExtraMeshes(scene);
-      const scale = entity?.scale?.[1];
-      if (typeof scale === 'number' && Number.isFinite(scale) && scale > 0) {
-        scene.scale.multiplyScalar(scale);
-      }
-      this.root.add(scene);
+      // Match map editor size — no forced 1.8m height normalize.
+      const fitted = fitAvatarLikeEditor(scene, entity, isDefaultMannequin);
+      pruneExtraMeshes(fitted);
+      this.root.add(fitted);
       this.avatarScene = scene;
       this.loaded = true;
       this.root.visible = true;

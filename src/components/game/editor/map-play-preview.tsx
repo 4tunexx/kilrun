@@ -43,8 +43,7 @@ import {
   mapDocToWorldBounds,
   prepareDocForPlayTest,
 } from './prefab-storage';
-import { loadPlayerAvatar, getMapPlayerAvatar } from './player-avatar';
-import { normalizeCharacter } from '../renderer/asset-loader';
+import { loadPlayerAvatar, getMapPlayerAvatar, fitAvatarLikeEditor, avatarAuthoredScale } from './player-avatar';
 import { updateFollowCamera } from '../renderer/three-world';
 import { applySkinAttachments, tickSkinAttachments } from './skin-attachments';
 import {
@@ -289,7 +288,7 @@ export function MapPlayPreview({
     const roots = new Map<string, THREE.Object3D>();
     let playerRoot: THREE.Object3D | null = null;
     let playerId: string | null = null;
-    let playerBaseScale = 1;
+    let playerBaseScale: [number, number, number] = [1, 1, 1];
     let bodyYaw = 0;
     let aimHeld = false;
     let aimHeldUi = false;
@@ -328,17 +327,15 @@ export function MapPlayPreview({
       try {
         const loaded = await loadPlayerAvatar(avatarEntity);
         if (disposed) return;
-        const root = loaded.scene;
-        normalizeCharacter(root, 1.75);
-        const scaleY = avatarEntity?.scale?.[1] || 1;
-        root.scale.multiplyScalar(scaleY);
+        // Same plant + authored scale as the map editor (no forced 1.75m height).
+        const root = fitAvatarLikeEditor(loaded.scene, avatarEntity, loaded.isDefaultMannequin);
         const [px, py, pz] = simToThree(body.x, body.y, body.z);
         root.position.set(px, py, pz);
         root.userData.entityId = avatarEntity?.id ?? '__play_avatar__';
         root.userData.isPlayAvatar = true;
         scene.add(root);
         playerRoot = root;
-        playerBaseScale = root.scale.x || 1;
+        playerBaseScale = avatarAuthoredScale(avatarEntity);
         playerId = avatarEntity?.id ?? '__play_avatar__';
         director.register(playerId, root, loaded.animations);
         if (!avatarBindings || Object.keys(avatarBindings).length === 0) {
@@ -361,7 +358,7 @@ export function MapPlayPreview({
             };
           }
           if (previewSkins && avatarEntity.playerSkins?.length) {
-            await applySkinAttachments(root, avatarEntity.playerSkins);
+            await applySkinAttachments(loaded.scene, avatarEntity.playerSkins);
           }
         }
       } catch (err) {
@@ -378,7 +375,7 @@ export function MapPlayPreview({
         wrap.position.set(px, py, pz);
         scene.add(wrap);
         playerRoot = wrap;
-        playerBaseScale = 1;
+        playerBaseScale = [1, 1, 1];
         playerId = '__play_avatar_fallback__';
       }
 
@@ -642,7 +639,12 @@ export function MapPlayPreview({
           liveTps.player.hideWhenClose && liveTps.camera.boomDistance < liveTps.player.hideDistance
         );
         playerRoot.position.set(tx, ty + liveTps.player.offsetY, tz);
-        playerRoot.scale.setScalar(playerBaseScale * liveTps.player.scale);
+        const tpsScale = liveTps.player.scale || 1;
+        playerRoot.scale.set(
+          playerBaseScale[0] * tpsScale,
+          playerBaseScale[1] * tpsScale,
+          playerBaseScale[2] * tpsScale
+        );
         // GTA: RMB aim = face camera + strafe; free = face walk direction
         const targetYaw = aimNow
           ? yaw
