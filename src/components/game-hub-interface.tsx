@@ -53,10 +53,10 @@ import { canAccessAdmin, VIP_UNLOCK_VP_COST, isPremiumActive } from '@/lib/roles
 import { unlockVipWithVp } from '@/lib/social-actions';
 import { isPulsarActive, setPulsarActive } from '@/lib/pulsar-anticheat';
 import {
-  bootstrapHubProgression,
   getLivePlayerState,
   getSiteSettings,
 } from '@/lib/progression-actions';
+import { bootstrapHubOnce } from '@/lib/hub-bootstrap-client';
 import { getLevelProgress } from '@/lib/progression';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { ProfileNavigationProvider } from '@/components/providers/profile-navigation-context';
@@ -81,17 +81,7 @@ import {
   type HubPageId,
   type HubPagesConfig,
 } from '@/lib/hub-layout';
-
-/** Deduplicate StrictMode / multi-mount hub boots in the same browser tab. */
-let hubBootstrapClientFlight: ReturnType<typeof bootstrapHubProgression> | null = null;
-function bootstrapHubOnce() {
-  if (!hubBootstrapClientFlight) {
-    hubBootstrapClientFlight = bootstrapHubProgression().finally(() => {
-      hubBootstrapClientFlight = null;
-    });
-  }
-  return hubBootstrapClientFlight;
-}
+import { DAILY_MISSION_SEEDS } from '@/lib/daily-missions';
 
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Progress } from '@/components/ui/progress';
@@ -245,7 +235,7 @@ export default function GameHubInterface({
   const [vpBalance, setVpBalance] = useState(user.vpCurrency);
   const [xpProgress, setXpProgress] = useState(user.xpProgress);
   const [dailyDone, setDailyDone] = useState(0);
-  const [dailyTotal, setDailyTotal] = useState(5);
+  const [dailyTotal, setDailyTotal] = useState(DAILY_MISSION_SEEDS.length);
   const [currentRank, setCurrentRank] = useState(user.currentRank);
   const [kp, setKp] = useState(user.kp ?? 1000);
   const [emailVerified, setEmailVerified] = useState(user.emailVerified);

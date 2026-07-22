@@ -33,6 +33,8 @@ import {
   sendGlobalChat,
   getSiteSettings,
 } from '@/lib/progression-actions';
+import { bootstrapHubOnce } from '@/lib/hub-bootstrap-client';
+import { DAILY_MISSION_SEEDS } from '@/lib/daily-missions';
 import { getForumPosts, getNewsPosts } from '@/lib/social-actions';
 import type { ActiveMission } from '@/generated/prisma';
 import { formatDistanceToNow } from 'date-fns';
@@ -117,21 +119,32 @@ export default function HomeView({
 
   useEffect(() => {
     let isMounted = true;
-    Promise.all([
-      getActiveMissions(userId),
-      getStatsSummary(userId),
-      getNewsPosts(),
-      getGlobalChat(40),
-      getSiteSettings(),
-      getForumPosts(5),
-    ]).then(([m, s, n, c, settings, forum]) => {
+    (async () => {
+      // Wait for hub bootstrap so Daily Login (and other login-day sync) is
+      // reflected before we snapshot the board for the home panel.
+      try {
+        await bootstrapHubOnce();
+      } catch {
+        // Still load the board; panel may briefly lag until next visit.
+      }
+      if (!isMounted) return;
+      const [m, s, n, c, settings, forum] = await Promise.all([
+        getActiveMissions(userId),
+        getStatsSummary(userId),
+        getNewsPosts(),
+        getGlobalChat(40),
+        getSiteSettings(),
+        getForumPosts(5),
+      ]);
       if (!isMounted) return;
       const isDaily = (mission: ActiveMission) =>
         (mission as { category?: string }).category === 'daily' ||
         mission.templateKey.startsWith('daily_');
       const daily = m.filter(isDaily);
       const main = m.filter((mission) => !isDaily(mission));
-      setDailyMissions(daily.slice(0, 5));
+      // Show the full daily board so completed missions (e.g. Daily Login)
+      // stay counted and visible — do not clip incomplete-first to 5.
+      setDailyMissions(daily);
       setMainMissions(main);
       setSummary(s);
       setNews(n.slice(0, 3));
@@ -153,7 +166,7 @@ export default function HomeView({
         resolveHomeHeroImage(settings.homeHeroImage ?? homeHeroImage)
       );
       setIsLoading(false);
-    });
+    })();
     return () => {
       isMounted = false;
     };
@@ -417,7 +430,7 @@ export default function HomeView({
                 <CardTitle>Daily Missions</CardTitle>
                 <span className="text-xs font-semibold text-emerald-400 tabular-nums">
                   {dailyMissions.filter((m) => m.isCompleted).length}/
-                  {dailyMissions.length || 5}
+                  {dailyMissions.length || DAILY_MISSION_SEEDS.length}
                 </span>
               </div>
               <Progress

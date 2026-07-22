@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { bootstrapMyMissions, getActiveMissions } from '@/lib/actions';
+import { DAILY_MISSION_SEEDS } from '@/lib/daily-missions';
 import type { ActiveMission } from '@/generated/prisma';
 
 function isDailyMission(m: ActiveMission) {
@@ -61,7 +62,7 @@ export default function MissionsView({ userId }: { userId: string }) {
         <Tabs defaultValue="daily">
           <TabsList className="bg-slate-800/60 flex flex-wrap h-auto gap-1">
             <TabsTrigger value="daily">
-              Daily ({dailyDone}/{daily.length || 5})
+              Daily ({dailyDone}/{daily.length || DAILY_MISSION_SEEDS.length})
             </TabsTrigger>
             <TabsTrigger value="game">
               In-Game ({game.filter((m) => m.isCompleted).length}/{game.length})
@@ -82,7 +83,7 @@ export default function MissionsView({ userId }: { userId: string }) {
                 className="h-2.5 flex-1"
               />
               <span className="text-sm font-semibold text-emerald-400 tabular-nums">
-                {dailyDone}/{daily.length || 5}
+                {dailyDone}/{daily.length || DAILY_MISSION_SEEDS.length}
               </span>
             </div>
             <MissionList

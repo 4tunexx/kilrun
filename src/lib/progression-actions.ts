@@ -208,7 +208,7 @@ export async function syncRankFromKp(userId: string) {
   return { kp, rank, peakKp, peakRank };
 }
 
-/** Ensure the 5 built-in daily templates exist (won't overwrite admin edits). */
+/** Ensure the built-in daily templates exist (won't overwrite admin edits). */
 export async function ensureDailyMissionTemplates() {
   for (const m of DAILY_MISSION_SEEDS) {
     const existing = await prisma.missionTemplate.findUnique({
@@ -988,7 +988,7 @@ export async function getLivePlayerState(userId?: string) {
           },
         });
   const dailyCompleted = dailyBoard.filter((m) => m.isCompleted).length;
-  const dailyTotal = Math.max(dailyBoard.length, 5);
+  const dailyTotal = Math.max(dailyBoard.length, DAILY_MISSION_SEEDS.length);
 
   const { isPremiumActive, canAccessRankedCompetitive } = await import('@/lib/premium');
   const { parsePremiumConfig, isFreeRankedWeekActive } = await import('@/lib/premium-config');

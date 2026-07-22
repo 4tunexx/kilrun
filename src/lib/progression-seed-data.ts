@@ -38,7 +38,7 @@ export const missionTemplates = [
   { key: "web_chat_5", title: "Global Chatter", description: "Send 5 global chat messages.", category: "website", metric: "chat", targetCount: 5, rewardXp: 60 },
   { key: "web_friend_3", title: "Social Circle", description: "Have 3 accepted friends.", category: "website", metric: "friends", targetCount: 3, rewardXp: 120 },
   { key: "web_vip_1", title: "VIP Lifestyle", description: "Unlock VIP status.", category: "website", metric: "vip", targetCount: 1, rewardXp: 150 },
-  // Daily (5) — reset each calendar day
+  // Daily — reset each calendar day (see DAILY_MISSION_SEEDS)
   { key: "daily_login", title: "Daily Login", description: "Log into the Kilrun hub today.", category: "daily", metric: "daily_login", targetCount: 1, rewardXp: 40 },
   { key: "daily_chat", title: "Daily Chatter", description: "Send 1 message in live global chat today.", category: "daily", metric: "daily_chat", targetCount: 1, rewardXp: 35 },
   { key: "daily_forum", title: "Forum Check-In", description: "Post a community forum thread or reply today.", category: "daily", metric: "daily_forum", targetCount: 1, rewardXp: 40 },
