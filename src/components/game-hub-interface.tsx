@@ -82,6 +82,17 @@ import {
   type HubPagesConfig,
 } from '@/lib/hub-layout';
 
+/** Deduplicate StrictMode / multi-mount hub boots in the same browser tab. */
+let hubBootstrapClientFlight: ReturnType<typeof bootstrapHubProgression> | null = null;
+function bootstrapHubOnce() {
+  if (!hubBootstrapClientFlight) {
+    hubBootstrapClientFlight = bootstrapHubProgression().finally(() => {
+      hubBootstrapClientFlight = null;
+    });
+  }
+  return hubBootstrapClientFlight;
+}
+
 import { CircularProgress } from '@/components/ui/circular-progress';
 import { Progress } from '@/components/ui/progress';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
@@ -372,7 +383,7 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     (async () => {
       try {
         const [live, settings] = await Promise.all([
-          bootstrapHubProgression(),
+          bootstrapHubOnce(),
           getSiteSettings(),
         ]);
         if (cancelled) return;

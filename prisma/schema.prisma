@@ -200,6 +200,7 @@ model ActiveMission {
 
   user User @relation(fields: [userId], references: [id])
 
+  @@unique([userId, templateKey])
   @@index([userId])
   @@index([userId, metric])
   @@index([userId, category, periodKey])
@@ -392,12 +393,15 @@ model Notification {
   title     String
   body      String
   type      String   @default("info")
+  /// Optional idempotency key (e.g. mission:daily_login:2026-07-22).
+  dedupeKey String?
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId, isRead])
+  @@index([userId, dedupeKey])
 }
 
 model NewsPost {

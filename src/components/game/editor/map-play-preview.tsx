@@ -7,7 +7,6 @@ import { X } from 'lucide-react';
 import type { MapDocument } from './map-document';
 import {
   ensureEnvironment,
-  ensureLight,
   isInvisibleMarkerKind,
   suggestPlayerBindings,
 } from './map-document';
@@ -18,6 +17,13 @@ import {
   plantLocalFeet,
   shouldHideEntityInPlay,
 } from './editor-mesh';
+import {
+  applyAuthoredEnvironment,
+  applyEntityOpacity,
+  makeAuthoredLight,
+  makeGameplayFallback,
+  shouldUseGameplayFallback,
+} from './map-scene-visuals';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
@@ -92,58 +98,19 @@ function addCollisionPadMeshes(scene: THREE.Scene, pads: SimPad[]) {
 }
 
 function placeholderForEntity(ent: MapDocument['entities'][number]): THREE.Object3D {
-  if (ent.kind === 'button') {
-    const btn = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.45, 0.5, 0.2, 16),
-      new THREE.MeshStandardMaterial({ color: 0xfbbf24 })
-    );
-    btn.position.y = 0.1;
-    return btn;
-  }
-  if (ent.kind === 'hazard' || ent.kind === 'trap') {
-    const hazard = new THREE.Mesh(
-      new THREE.BoxGeometry(1.5, 0.12, 1.5),
-      new THREE.MeshStandardMaterial({
-        color: 0xef4444,
-        transparent: true,
-        opacity: 0.55,
-        emissive: 0xaa0000,
-        emissiveIntensity: 0.35,
-      })
-    );
-    hazard.position.y = 0.06;
-    return hazard;
-  }
-  if (ent.kind === 'finish') {
-    const finish = new THREE.Mesh(
-      new THREE.BoxGeometry(1.6, 0.12, 1.6),
-      new THREE.MeshStandardMaterial({
-        color: 0xfbbf24,
-        emissive: 0xf59e0b,
-        emissiveIntensity: 0.35,
-      })
-    );
-    finish.position.y = 0.06;
-    return finish;
-  }
-  if (ent.kind === 'jump_pad' || ent.jumpPad?.enabled) {
-    const jump = new THREE.Mesh(
-      new THREE.BoxGeometry(1.4, 0.12, 1.4),
-      new THREE.MeshStandardMaterial({
-        color: 0x38bdf8,
-        emissive: 0x0369a1,
-        emissiveIntensity: 0.45,
-      })
-    );
-    jump.position.y = 0.06;
-    return jump;
-  }
-  const box = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshStandardMaterial({ color: ent.color ? new THREE.Color(ent.color) : 0x888888 })
+  return (
+    makeGameplayFallback(ent) ??
+    (() => {
+      const box = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({
+          color: ent.color ? new THREE.Color(ent.color) : 0x888888,
+        })
+      );
+      box.position.y = 0.5;
+      return box;
+    })()
   );
-  box.position.y = 0.5;
-  return box;
 }
 
 function shouldUsePlaceholder(
@@ -151,20 +118,7 @@ function shouldUsePlaceholder(
   reason: 'missing-model' | 'load-failed'
 ): boolean {
   if (isInvisibleMarkerKind(ent.kind)) return false;
-  if (ent.kind === 'button' || ent.kind === 'hazard' || ent.kind === 'finish') return true;
-  if (ent.kind === 'jump_pad' || ent.jumpPad?.enabled) return true;
-  if (reason === 'load-failed') {
-    return ent.kind === 'prop' || ent.kind === 'door' || ent.kind === 'trap';
-  }
-  return false;
-}
-
-function makePlayPointLight(ent: MapDocument['entities'][number]): THREE.PointLight {
-  const cfg = ensureLight(ent);
-  const light = new THREE.PointLight(new THREE.Color(cfg.color), cfg.intensity, cfg.distance, 2);
-  light.position.set(...ent.position);
-  light.userData.entityId = ent.id;
-  return light;
+  return shouldUseGameplayFallback(ent, reason);
 }
 
 function snapBodyToPads(body: SimBody, pads: SimPad[]) {
@@ -263,10 +217,6 @@ export function MapPlayPreview({
     let disposed = false;
     const scene = new THREE.Scene();
     const env = ensureEnvironment(playDoc);
-    scene.background = new THREE.Color(env.skyColor || '#0a1220');
-    // Lighter fog so platforms/avatar stay readable on mobile
-    const fogDensity = Math.min(env.fogDensity ?? 0.018, 0.014);
-    scene.fog = new THREE.FogExp2(env.fogColor || '#0c1830', fogDensity);
 
     const camera = new THREE.PerspectiveCamera(initialTps.camera.fov, 1, 0.1, 300);
     const pads = mapDocToSimPlatforms(playDoc);
@@ -305,24 +255,32 @@ export function MapPlayPreview({
     host.appendChild(renderer.domElement);
     Object.assign(renderer.domElement.style, { width: '100%', height: '100%', display: 'block' });
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const sun = new THREE.DirectionalLight(0xfff0dd, 1.15);
+    const ambient = new THREE.AmbientLight(0xffffff, env.ambientIntensity ?? 0.55);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xfff2d6, env.sunIntensity ?? 1.15);
     sun.position.set(10, 22, 8);
     scene.add(sun);
-    scene.add(new THREE.HemisphereLight(0x88aacc, 0x1a2740, 0.45));
+    const hemi = new THREE.HemisphereLight(0x88aacc, 0x1a2740, 0.45);
+    scene.add(hemi);
 
-    // Always keep a readable ground reference (even if env.floor is void)
+    // Match editor floor semantics (grid/solid/water/void) — no fake opaque plane over void.
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(160, 160),
+      new THREE.PlaneGeometry(200, 200),
       new THREE.MeshStandardMaterial({
         color: env.floorColor || '#1a2740',
-        transparent: env.floor === 'void',
-        opacity: env.floor === 'void' ? 0.25 : 1,
+        roughness: 1,
       })
     );
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -0.08;
+    floor.position.y = -0.02;
     scene.add(floor);
+
+    const envHandle = applyAuthoredEnvironment(scene, env, {
+      lights: { ambient, sun, hemi },
+      floorMesh: floor,
+      // Slightly lighter fog on mobile playtest for readability.
+      maxFogDensity: 0.014,
+    });
 
     // Collision pads are sim-only; enable this when debugging exported platform volumes.
     if (SHOW_COLLISION_DEBUG) addCollisionPadMeshes(scene, pads);
@@ -428,39 +386,15 @@ export function MapPlayPreview({
         if (disposed) return;
         if (shouldHideEntityInPlay(ent) || isInvisibleMarkerKind(ent.kind)) continue;
         if (ent.kind === 'light') {
-          scene.add(makePlayPointLight(ent));
+          scene.add(makeAuthoredLight(ent));
           continue;
         }
         const src = resolveModelSrc(ent.model, ent.customModelUrl);
-        try {
-          if (src) {
-            const { root, clips } = await loadAnimatedPrefab(src);
-            plantLocalFeet(root);
-            const planted = new THREE.Group();
-            planted.add(root);
-            applyTextureToObject(planted, ent.textureUrl || playDoc.environment?.defaultTextureUrl);
-            planted.position.set(...ent.position);
-            planted.rotation.set(
-              THREE.MathUtils.degToRad(ent.rotation[0]),
-              THREE.MathUtils.degToRad(ent.rotation[1]),
-              THREE.MathUtils.degToRad(ent.rotation[2])
-            );
-            planted.scale.set(...ent.scale);
-            planted.userData.entityId = ent.id;
-            scene.add(planted);
-            roots.set(ent.id, planted);
-            director.register(ent.id, planted, clips);
-            if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
-              director.playDefault(ent);
-            }
-            continue;
-          }
-
-          if (!shouldUsePlaceholder(ent, 'missing-model')) continue;
-          const visual = placeholderForEntity(ent);
+        const placeVisual = (visual: THREE.Object3D, clips: THREE.AnimationClip[] = []) => {
           const planted = new THREE.Group();
           planted.add(visual);
           applyTextureToObject(planted, ent.textureUrl || playDoc.environment?.defaultTextureUrl);
+          applyEntityOpacity(planted, ent.opacity);
           planted.position.set(...ent.position);
           planted.rotation.set(
             THREE.MathUtils.degToRad(ent.rotation[0]),
@@ -471,24 +405,28 @@ export function MapPlayPreview({
           planted.userData.entityId = ent.id;
           scene.add(planted);
           roots.set(ent.id, planted);
+          if (clips.length) {
+            director.register(ent.id, planted, clips);
+            if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
+              director.playDefault(ent);
+            }
+          }
+        };
+        try {
+          if (src) {
+            const { root, clips } = await loadAnimatedPrefab(src);
+            plantLocalFeet(root);
+            placeVisual(root, clips);
+            continue;
+          }
+
+          if (!shouldUsePlaceholder(ent, 'missing-model')) continue;
+          placeVisual(placeholderForEntity(ent));
         } catch (err) {
           console.warn('[PlayPreview] skip', ent.name, err);
           if (!shouldUsePlaceholder(ent, 'load-failed')) continue;
           try {
-            const visual = placeholderForEntity(ent);
-            const planted = new THREE.Group();
-            planted.add(visual);
-            applyTextureToObject(planted, ent.textureUrl || playDoc.environment?.defaultTextureUrl);
-            planted.position.set(...ent.position);
-            planted.rotation.set(
-              THREE.MathUtils.degToRad(ent.rotation[0]),
-              THREE.MathUtils.degToRad(ent.rotation[1]),
-              THREE.MathUtils.degToRad(ent.rotation[2])
-            );
-            planted.scale.set(...ent.scale);
-            planted.userData.entityId = ent.id;
-            scene.add(planted);
-            roots.set(ent.id, planted);
+            placeVisual(placeholderForEntity(ent));
           } catch {
             /* ignore */
           }
@@ -856,6 +794,7 @@ export function MapPlayPreview({
       joy?.destroy();
       joystickRef.current = null;
       if (document.pointerLockElement) document.exitPointerLock?.();
+      envHandle.dispose();
       director.clear();
       renderer.dispose();
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);

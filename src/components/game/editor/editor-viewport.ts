@@ -29,6 +29,7 @@ import {
   makeSelectionOutline,
   plantLocalFeet,
 } from './editor-mesh';
+import { applyEntityOpacity, MAP_SKY_COLORS } from './map-scene-visuals';
 
 function makeLightBulb(ent: EditorEntity): THREE.Group {
   const lightCfg = ensureLight(ent);
@@ -162,13 +163,7 @@ export interface EditorViewportApi {
   destroy: () => void;
 }
 
-const SKY_COLORS: Record<string, string> = {
-  cavern: '#0a1220',
-  dusk: '#1a1530',
-  bright: '#87b5e0',
-  void: '#050508',
-  custom: '#0a1220',
-};
+const SKY_COLORS = MAP_SKY_COLORS;
 
 export function createEditorViewport(
   host: HTMLElement,
@@ -781,15 +776,7 @@ export function createEditorViewport(
     root.visible = ent.visible !== false && layer?.visible !== false;
 
     if (typeof ent.opacity === 'number') {
-      root.traverse((o) => {
-        if (o instanceof THREE.Mesh && o.material) {
-          const mats = Array.isArray(o.material) ? o.material : [o.material];
-          mats.forEach((m) => {
-            m.transparent = ent.opacity! < 1;
-            m.opacity = ent.opacity!;
-          });
-        }
-      });
+      applyEntityOpacity(root, ent.opacity);
     }
     applyEntityTexture(root, ent);
     if (ent.kind === 'light') syncLightParams(root, ent);

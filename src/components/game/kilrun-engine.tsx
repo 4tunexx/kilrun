@@ -63,6 +63,8 @@ import {
 } from './editor/prefab-storage';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
+import { ensureEnvironment } from './editor/map-document';
+import { applyAuthoredEnvironment } from './editor/map-scene-visuals';
 import type { KilrunMode } from '@/lib/game-modes';
 import { getActiveCloudMapDocument } from '@/lib/game-map-actions';
 import { HordeLobbyOverlay } from './modes/horde/lobby-overlay';
@@ -260,15 +262,33 @@ export default function KilrunEngine({
     const map = new ThreeMap(world.scene, {
       hardcodedDecor: !hasCustomMap,
       hidePlatformMeshes: hasCustomMap,
+      // Custom maps own sky/fog/mood — skip default cyan glow void.
+      atmosphere: !hasCustomMap,
     });
     const overlay = new CustomMapOverlay(world.scene);
     const characters = new Map<string, ThreeCharacter>();
     const inputManager = new InputManager(hostElement, isMobile);
     joystickRef.current = inputManager.joystick;
+    let envHandle: { dispose: () => void } | null = null;
+    let envFloor: THREE.Mesh | null = null;
 
     if (playDoc) {
       customDocRef.current = playDoc;
       map.clearHardcodedDecor();
+      const env = ensureEnvironment(playDoc);
+      envFloor = new THREE.Mesh(
+        new THREE.PlaneGeometry(200, 200),
+        new THREE.MeshStandardMaterial({ color: env.floorColor || '#1a2740', roughness: 1 })
+      );
+      envFloor.rotation.x = -Math.PI / 2;
+      envFloor.position.y = -0.02;
+      world.scene.add(envFloor);
+      envHandle = applyAuthoredEnvironment(world.scene, env, {
+        lights: { ambient: world.ambient, sun: world.sun, hemi: world.hemi },
+        floorMesh: envFloor,
+      });
+      // Match editor cavern default lights a bit warmer when map uses authored env.
+      world.ambient.color.set(0xffffff);
       void overlay.load(playDoc);
       if (playDoc.tpsView) {
         const merged = resolveTpsView(playDoc.tpsView as TpsViewSettings);
@@ -519,6 +539,12 @@ export default function KilrunEngine({
       characters.forEach((c) => c.destroy());
       overlay.destroy();
       map.destroy();
+      envHandle?.dispose();
+      if (envFloor) {
+        envFloor.removeFromParent();
+        envFloor.geometry.dispose();
+        (envFloor.material as THREE.Material).dispose();
+      }
       world.destroy();
       joystickRef.current = null;
       inputManager.joystick.destroy();

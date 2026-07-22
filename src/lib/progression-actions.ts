@@ -63,11 +63,30 @@ async function notify(
   userId: string,
   title: string,
   body: string,
-  type: string
+  type: string,
+  dedupeKey?: string
 ) {
-  await prisma.notification.create({
-    data: { userId, title, body, type },
-  });
+  const key = dedupeKey?.trim() || undefined;
+  if (key) {
+    const existing = await prisma.notification.findFirst({
+      where: { userId, dedupeKey: key },
+    });
+    if (existing) return;
+  }
+  try {
+    await prisma.notification.create({
+      data: { userId, title, body, type, dedupeKey: key },
+    });
+  } catch (err) {
+    // Soft race: another request inserted the same key first.
+    if (key) {
+      const raced = await prisma.notification.findFirst({
+        where: { userId, dedupeKey: key },
+      });
+      if (raced) return;
+    }
+    throw err;
+  }
 }
 
 /** Grant XP and notify on level-up. Rank is driven by KP, not XP level. */
@@ -92,7 +111,8 @@ export async function grantXp(userId: string, amount: number, reason?: string) {
       reason
         ? `You reached level ${nextLevel}. (${reason})`
         : `You reached level ${nextLevel}. Keep climbing!`,
-      'level_up'
+      'level_up',
+      `level_up:${nextLevel}`
     );
   }
 
@@ -218,7 +238,27 @@ export async function ensurePlayerMissions(userId: string) {
     where: { isActive: true },
   });
   const existing = await prisma.activeMission.findMany({ where: { userId } });
-  const byKey = new Map(existing.map((e) => [e.templateKey, e]));
+  // Collapse accidental duplicate rows (pre-unique index / concurrent creates).
+  const byKey = new Map<string, (typeof existing)[number]>();
+  for (const row of existing) {
+    const prev = byKey.get(row.templateKey);
+    if (!prev) {
+      byKey.set(row.templateKey, row);
+      continue;
+    }
+    // Keep the most progressed / newest; drop the other.
+    const keep =
+      row.isCompleted && !prev.isCompleted
+        ? row
+        : !row.isCompleted && prev.isCompleted
+          ? prev
+          : row.currentCount >= prev.currentCount
+            ? row
+            : prev;
+    const drop = keep.id === row.id ? prev : row;
+    byKey.set(row.templateKey, keep);
+    await prisma.activeMission.delete({ where: { id: drop.id } }).catch(() => {});
+  }
 
   for (const t of templates) {
     const category = templateCategory(t);
@@ -227,22 +267,26 @@ export async function ensurePlayerMissions(userId: string) {
 
     if (isDaily) {
       if (!current) {
-        await prisma.activeMission.create({
-          data: {
-            userId,
-            templateKey: t.key,
-            title: t.title,
-            description: t.description,
-            rewardXp: t.rewardXp,
-            targetCount: t.targetCount,
-            metric: t.metric,
-            category: 'daily',
-            periodKey: today,
-            currentCount: 0,
-            isCompleted: false,
-            iconImageUrl: t.iconImageUrl,
-          },
-        });
+        try {
+          await prisma.activeMission.create({
+            data: {
+              userId,
+              templateKey: t.key,
+              title: t.title,
+              description: t.description,
+              rewardXp: t.rewardXp,
+              targetCount: t.targetCount,
+              metric: t.metric,
+              category: 'daily',
+              periodKey: today,
+              currentCount: 0,
+              isCompleted: false,
+              iconImageUrl: t.iconImageUrl,
+            },
+          });
+        } catch {
+          // Unique race with another tab — ignore.
+        }
       } else if (current.periodKey !== today) {
         await prisma.activeMission.update({
           where: { id: current.id },
@@ -269,22 +313,26 @@ export async function ensurePlayerMissions(userId: string) {
     }
 
     if (!current) {
-      await prisma.activeMission.create({
-        data: {
-          userId,
-          templateKey: t.key,
-          title: t.title,
-          description: t.description,
-          rewardXp: t.rewardXp,
-          targetCount: t.targetCount,
-          metric: t.metric,
-          category,
-          periodKey: '',
-          currentCount: 0,
-          isCompleted: false,
-          iconImageUrl: t.iconImageUrl,
-        },
-      });
+      try {
+        await prisma.activeMission.create({
+          data: {
+            userId,
+            templateKey: t.key,
+            title: t.title,
+            description: t.description,
+            rewardXp: t.rewardXp,
+            targetCount: t.targetCount,
+            metric: t.metric,
+            category,
+            periodKey: '',
+            currentCount: 0,
+            isCompleted: false,
+            iconImageUrl: t.iconImageUrl,
+          },
+        });
+      } catch {
+        // Unique race with another tab — ignore.
+      }
     } else if (current.category !== category) {
       await prisma.activeMission.update({
         where: { id: current.id },
@@ -307,20 +355,28 @@ export async function progressMissions(
   for (const m of missions) {
     const next = Math.min(m.targetCount, m.currentCount + amount);
     const completed = next >= m.targetCount;
-    await prisma.activeMission.update({
-      where: { id: m.id },
-      data: { currentCount: next, isCompleted: completed },
-    });
-    if (completed && !m.isCompleted) {
+    if (completed) {
+      // Atomic claim — only one concurrent bootstrap wins the reward + notify.
+      const claimed = await prisma.activeMission.updateMany({
+        where: { id: m.id, isCompleted: false },
+        data: { currentCount: next, isCompleted: true },
+      });
+      if (claimed.count !== 1) continue;
       await grantXp(userId, m.rewardXp, `Mission: ${m.title}`);
       await notify(
         userId,
         'Mission complete',
         `${m.title} — +${m.rewardXp} XP`,
-        'mission'
+        'mission',
+        `mission:${m.templateKey}:${m.periodKey || 'main'}`
       );
       await tryUnlockAchievement(userId, 'missions_completed', 1);
       await tryUnlockBadge(userId, 'missions_completed', 1);
+    } else if (next !== m.currentCount) {
+      await prisma.activeMission.updateMany({
+        where: { id: m.id, isCompleted: false },
+        data: { currentCount: next },
+      });
     }
   }
 }
@@ -773,20 +829,27 @@ async function syncMissionProgressFromCount(userId: string, metric: string) {
   for (const m of missions) {
     const next = Math.min(m.targetCount, count);
     const completed = next >= m.targetCount;
-    await prisma.activeMission.update({
-      where: { id: m.id },
-      data: { currentCount: next, isCompleted: completed },
-    });
-    if (completed && !m.isCompleted) {
+    if (completed) {
+      const claimed = await prisma.activeMission.updateMany({
+        where: { id: m.id, isCompleted: false },
+        data: { currentCount: next, isCompleted: true },
+      });
+      if (claimed.count !== 1) continue;
       await grantXp(userId, m.rewardXp, `Mission: ${m.title}`);
       await notify(
         userId,
         'Mission complete',
         `${m.title} — +${m.rewardXp} XP`,
-        'mission'
+        'mission',
+        `mission:${m.templateKey}:${m.periodKey || 'main'}`
       );
       await tryUnlockAchievement(userId, 'missions_completed', 1);
       await tryUnlockBadge(userId, 'missions_completed', 1);
+    } else if (next !== m.currentCount) {
+      await prisma.activeMission.updateMany({
+        where: { id: m.id, isCompleted: false },
+        data: { currentCount: next },
+      });
     }
   }
 }
