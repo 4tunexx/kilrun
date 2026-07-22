@@ -35,8 +35,14 @@ import {
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import {
+  authenticateJoin,
+  claimsFromAuth,
+  type GameJoinClaims,
+} from '../join-token.js';
 
 interface JoinOptions {
+  token?: string;
   userId?: string;
   username?: string;
   avatarUrl?: string;
@@ -267,15 +273,21 @@ export class DeathrunRoom extends Room<RoomState> {
     this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
   }
 
+  onAuth(_client: Client, options: JoinOptions): GameJoinClaims {
+    return authenticateJoin(options);
+  }
+
   onJoin(client: Client, options: JoinOptions) {
+    const claims = claimsFromAuth(client.auth, options);
     if (!this.hostSessionId) this.hostSessionId = client.sessionId;
-    if (options.isAdmin) this.adminSessions.add(client.sessionId);
+    if (claims.isAdmin) this.adminSessions.add(client.sessionId);
 
     const player = new PlayerState();
     player.sessionId = client.sessionId;
-    player.userId = options.userId ?? client.sessionId;
-    player.username = options.username ?? `Player${client.sessionId.slice(0, 4)}`;
-    player.avatarUrl = options.avatarUrl ?? '';
+    player.userId = claims.userId || client.sessionId;
+    player.username =
+      claims.username || `Player${client.sessionId.slice(0, 4)}`;
+    player.avatarUrl = claims.avatarUrl || '';
     applyLoadoutToPlayer(player, options);
     this.applySpawnPosition(player, this.state.players.size);
     player.energy = MAX_ENERGY;

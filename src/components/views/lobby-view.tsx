@@ -9,6 +9,7 @@ import { packMatchLoadout } from '@/lib/match-loadout';
 import { getSiteSettings } from '@/lib/progression-actions';
 import { getRankForKp, KP_DEFAULT } from '@/lib/kp';
 import { parseRankConfig, RANK_MM_OPEN_KEY } from '@/lib/rank-config';
+import { mintMyGameJoinToken } from '@/lib/actions';
 
 interface LobbyViewProps {
   mode: KilrunMode;
@@ -47,6 +48,8 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   const [rankKey, setRankKey] = useState(RANK_MM_OPEN_KEY);
   const [mmWaitSec, setMmWaitSec] = useState(12);
   const [minSameRankPlayers, setMinSameRankPlayers] = useState(4);
+  const [joinToken, setJoinToken] = useState<string | undefined>(undefined);
+  const [tokenReady, setTokenReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +64,26 @@ const LobbyView: React.FC<LobbyViewProps> = ({
         if (!cancelled) {
           setEquippedSkins([]);
           setSkinsReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void mintMyGameJoinToken()
+      .then((token) => {
+        if (!cancelled) {
+          setJoinToken(token ?? undefined);
+          setTokenReady(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setJoinToken(undefined);
+          setTokenReady(true);
         }
       });
     return () => {
@@ -106,6 +129,9 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       userId,
       username,
       avatarUrl,
+      ...(joinToken ? { token: joinToken } : {}),
+      // Privilege fields are unused when a verified token is present; kept for
+      // local/dev servers with no join secret (onAuth falls back to options).
       isAdmin,
       kp,
       isPremium,
@@ -120,6 +146,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       userId,
       username,
       avatarUrl,
+      joinToken,
       isAdmin,
       kp,
       isPremium,
@@ -133,8 +160,8 @@ const LobbyView: React.FC<LobbyViewProps> = ({
     ]
   );
 
-  // Wait for equipped skins so the local avatar spawns with shop gear once.
-  if (!skinsReady || !rankReady) {
+  // Wait for equipped skins + join token so privileges are server-minted.
+  if (!skinsReady || !rankReady || !tokenReady) {
     return (
       <div className="fixed inset-0 z-[200] bg-[#0a1220] flex items-center justify-center text-white/60 text-sm">
         {mode === 'competitive' && competitiveQueue === 'ranked'

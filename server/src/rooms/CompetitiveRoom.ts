@@ -30,8 +30,14 @@ import {
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import {
+  authenticateJoin,
+  claimsFromAuth,
+  type GameJoinClaims,
+} from '../join-token.js';
 
 interface JoinOptions {
+  token?: string;
   userId?: string;
   username?: string;
   avatarUrl?: string;
@@ -242,22 +248,32 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
   }
 
+  onAuth(_client: Client, options: JoinOptions): GameJoinClaims {
+    return authenticateJoin(options);
+  }
+
   onJoin(client: Client, options: JoinOptions) {
+    const claims = claimsFromAuth(client.auth, options);
     const ranked = this.state.modeTag === 'competitive_ranked';
-    const allowed = !!(options.isPremium || options.rankedAccess || options.isAdmin);
+    const allowed = !!(
+      claims.isPremium ||
+      claims.rankedAccess ||
+      claims.isAdmin
+    );
     if (ranked && !allowed) {
       throw new Error('Premium required for Ranked Competitive');
     }
 
     if (!this.hostSessionId) this.hostSessionId = client.sessionId;
-    if (options.isAdmin) this.adminSessions.add(client.sessionId);
+    if (claims.isAdmin) this.adminSessions.add(client.sessionId);
 
     const player = new PlayerState();
     player.sessionId = client.sessionId;
-    player.userId = options.userId ?? client.sessionId;
-    player.username = options.username ?? `Player${client.sessionId.slice(0, 4)}`;
-    player.avatarUrl = options.avatarUrl ?? '';
-    player.kp = typeof options.kp === 'number' ? options.kp : 1000;
+    player.userId = claims.userId || client.sessionId;
+    player.username =
+      claims.username || `Player${client.sessionId.slice(0, 4)}`;
+    player.avatarUrl = claims.avatarUrl || '';
+    player.kp = claims.kp;
     applyLoadoutToPlayer(player, options);
     player.energy = MAX_ENERGY;
 

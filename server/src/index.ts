@@ -1,4 +1,5 @@
 import http from 'http';
+import { timingSafeEqual } from 'crypto';
 import express from 'express';
 import cors from 'cors';
 import { Server } from 'colyseus';
@@ -10,6 +11,13 @@ import { CompetitiveRoom } from './rooms/CompetitiveRoom.js';
 
 const PORT = Number(process.env.PORT ?? 2567);
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*';
+
+function secretsEqual(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 const app = express();
 app.use(cors({ origin: ALLOWED_ORIGIN }));
@@ -38,7 +46,7 @@ app.post('/admin/restart', (req, res) => {
     });
     return;
   }
-  if (!provided || provided !== secret) {
+  if (!provided || !secretsEqual(provided, secret)) {
     res.status(401).json({ ok: false, error: 'Unauthorized' });
     return;
   }
@@ -53,6 +61,23 @@ app.post('/admin/restart', (req, res) => {
 });
 
 // Lightweight room-state dashboard for local debugging; not linked from the game itself.
+const adminSecret = process.env.GAME_SERVER_ADMIN_SECRET || '';
+if (adminSecret) {
+  app.use('/monitor', (req, res, next) => {
+    const header =
+      typeof req.headers['x-admin-secret'] === 'string'
+        ? req.headers['x-admin-secret']
+        : '';
+    const query =
+      typeof req.query.secret === 'string' ? req.query.secret : '';
+    const provided = header || query;
+    if (!provided || !secretsEqual(provided, adminSecret)) {
+      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      return;
+    }
+    next();
+  });
+}
 app.use('/monitor', monitor());
 
 const httpServer = http.createServer(app);

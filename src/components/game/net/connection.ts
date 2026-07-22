@@ -12,6 +12,11 @@ export interface JoinOptions {
   userId: string;
   username: string;
   avatarUrl?: string;
+  /**
+   * HMAC join token minted by the hub (`mintMyGameJoinToken`).
+   * Required when the game server has a join secret configured.
+   */
+  token?: string;
   /** Allows pushing MAIN custom maps into the room. */
   isAdmin?: boolean;
   /** Competitive KP snapshot (optional). */

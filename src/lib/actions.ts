@@ -680,3 +680,55 @@ export async function getMyRankedStats(userId: string): Promise<RankedStatsSumma
     matchesPlayed: results.length,
   };
 }
+
+/**
+ * Mint a short-lived Colyseus join token for the signed-in player.
+ * Privilege claims (admin / premium / ranked / kp) come from the DB — not the client.
+ * Returns null when no join secret is configured (local/dev without secrets).
+ */
+export async function mintMyGameJoinToken(): Promise<string | null> {
+  const user = await getSessionUser();
+  if (!user) throw new Error('Not authenticated');
+  if (user.isBanned) throw new Error('Account banned');
+
+  const { mintGameJoinToken } = await import('@/lib/game-join-token');
+  const { isPremiumActive, canAccessRankedCompetitive } = await import(
+    '@/lib/premium'
+  );
+  const { parsePremiumConfig } = await import('@/lib/premium-config');
+  const { getSiteSettings } = await import('@/lib/progression-actions');
+  const { KP_DEFAULT } = await import('@/lib/kp');
+
+  const settings = await getSiteSettings();
+  const premiumCfg = parsePremiumConfig(
+    (settings as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
+  );
+  const isPremium = isPremiumActive({
+    isVip: user.isVip,
+    premiumExpiresAt: (user as { premiumExpiresAt?: Date | null })
+      .premiumExpiresAt,
+  });
+  const rankedAccess = canAccessRankedCompetitive({
+    isPremium,
+    config: premiumCfg,
+  });
+  const kp =
+    typeof (user as { kp?: number }).kp === 'number'
+      ? (user as { kp: number }).kp
+      : KP_DEFAULT;
+
+  try {
+    return mintGameJoinToken({
+      userId: user.id,
+      username: user.username || 'Player',
+      avatarUrl: user.avatarUrl || '',
+      isAdmin: user.role === 'admin',
+      isPremium,
+      rankedAccess,
+      kp,
+    });
+  } catch {
+    // No GAME_JOIN_TOKEN_SECRET / GAME_SERVER_ADMIN_SECRET / AUTH_SECRET — local/dev.
+    return null;
+  }
+}
