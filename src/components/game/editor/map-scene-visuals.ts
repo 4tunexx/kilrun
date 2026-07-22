@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { EditorEntity, MapEnvironment } from './map-document';
-import { ensureLight } from './map-document';
+import { ensureLight, ensurePushRail, ensureSpinHazard } from './map-document';
 
 /** Sky preset hex colors — shared by editor, Play Test, and live match. */
 export const MAP_SKY_COLORS: Record<string, string> = {
@@ -167,22 +167,46 @@ export function applyAuthoredEnvironment(
   };
 }
 
-/** Point light + visible bulb — matches editor / overlay atmosphere. */
+/** Authored map light — point / spot / flashlight / beam. */
 export function makeAuthoredLight(ent: EditorEntity): THREE.Group {
   const cfg = ensureLight(ent);
   const group = new THREE.Group();
   group.name = 'map-light';
+  const type = cfg.type ?? 'point';
   const bulb = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 14, 10),
+    type === 'beam'
+      ? new THREE.CylinderGeometry(0.07, 0.12, 0.3, 10)
+      : new THREE.SphereGeometry(0.16, 14, 10),
     new THREE.MeshStandardMaterial({
       color: new THREE.Color(cfg.color),
       emissive: new THREE.Color(cfg.color),
       emissiveIntensity: 1.1,
     })
   );
-  const point = new THREE.PointLight(new THREE.Color(cfg.color), cfg.intensity, cfg.distance, 2);
-  group.add(bulb);
-  group.add(point);
+  if (type === 'spot' || type === 'flashlight' || type === 'beam') {
+    const angle = THREE.MathUtils.degToRad(cfg.angleDeg ?? (type === 'beam' ? 12 : 40));
+    const spot = new THREE.SpotLight(
+      new THREE.Color(cfg.color),
+      cfg.intensity,
+      cfg.beamLength ?? cfg.distance,
+      angle,
+      cfg.penumbra ?? 0.35,
+      1.5
+    );
+    spot.castShadow = !!cfg.castShadow;
+    const target = new THREE.Object3D();
+    const pitch = THREE.MathUtils.degToRad(cfg.pitchDeg ?? (type === 'flashlight' ? -8 : -25));
+    target.position.set(0, Math.sin(pitch) * 4, Math.cos(pitch) * 4);
+    group.add(target);
+    spot.target = target;
+    group.add(bulb);
+    group.add(spot);
+  } else {
+    const point = new THREE.PointLight(new THREE.Color(cfg.color), cfg.intensity, cfg.distance, 2);
+    point.castShadow = !!cfg.castShadow;
+    group.add(bulb);
+    group.add(point);
+  }
   group.position.set(...ent.position);
   group.userData.entityId = ent.id;
   return group;
@@ -266,6 +290,73 @@ export function makeGameplayFallback(ent: EditorEntity): THREE.Object3D | null {
       new THREE.MeshStandardMaterial({ color: 0xa78bfa })
     );
   }
+  if (ent.kind === 'spinner') {
+    const spin = ensureSpinHazard(ent);
+    const [w, h, d] = spin.size;
+    let geo: THREE.BufferGeometry;
+    switch (spin.shape) {
+      case 'disc':
+        geo = new THREE.CylinderGeometry(Math.max(w, d) * 0.5, Math.max(w, d) * 0.5, Math.max(0.08, h), 24);
+        break;
+      case 'cross': {
+        const g = new THREE.BoxGeometry(w, h, d * 0.35);
+        return (() => {
+          const group = new THREE.Group();
+          const a = new THREE.Mesh(
+            g,
+            new THREE.MeshStandardMaterial({ color: 0xf97316, metalness: 0.4, roughness: 0.35 })
+          );
+          const b = new THREE.Mesh(
+            new THREE.BoxGeometry(d * 0.35, h, w),
+            new THREE.MeshStandardMaterial({ color: 0xf97316, metalness: 0.4, roughness: 0.35 })
+          );
+          a.position.y = h * 0.5;
+          b.position.y = h * 0.5;
+          group.add(a, b);
+          group.userData.spinHazard = true;
+          return group;
+        })();
+      }
+      case 'bar':
+        geo = new THREE.BoxGeometry(w, h, d);
+        break;
+      case 'box':
+        geo = new THREE.BoxGeometry(w, h, d);
+        break;
+      case 'blade':
+      default:
+        geo = new THREE.BoxGeometry(w, h, d);
+        break;
+    }
+    const mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({ color: 0xf97316, metalness: 0.45, roughness: 0.3 })
+    );
+    mesh.position.y = h * 0.5;
+    mesh.userData.spinHazard = true;
+    return mesh;
+  }
+  if (ent.kind === 'push_rail') {
+    const rail = ensurePushRail(ent);
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(rail.width, 0.08, rail.length),
+      new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.45,
+        emissive: 0x0284c7,
+        emissiveIntensity: 0.3,
+      })
+    );
+    mesh.position.y = 0.04;
+    return mesh;
+  }
+  if (ent.kind === 'push_block') {
+    return new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 1.4, 1.4),
+      new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.2, roughness: 0.55 })
+    );
+  }
   return null;
 }
 
@@ -278,7 +369,9 @@ export function shouldUseGameplayFallback(
   if (ent.kind === 'red_zone' || ent.kind === 'revive_pad' || ent.kind === 'health_floor') {
     return true;
   }
-  if (ent.kind === 'door') return true;
+  if (ent.kind === 'door' || ent.kind === 'spinner' || ent.kind === 'push_rail' || ent.kind === 'push_block') {
+    return true;
+  }
   if (reason === 'load-failed') {
     return ent.kind === 'prop' || ent.kind === 'trap';
   }

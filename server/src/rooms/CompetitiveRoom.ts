@@ -83,6 +83,21 @@ interface CompetitiveModeSettings {
   overtimeSec?: number;
 }
 
+interface PushPayloadSim {
+  railId: string;
+  blockId: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  length: number;
+  width: number;
+  t: number;
+  pushStrength: number;
+  pushRadius: number;
+  winEpsilon: number;
+}
+
 const RESULTS_DISPLAY_MS = 10000;
 const ROUND_COUNTDOWN_MS = 4000;
 const MAX_ROUNDS = 6;
@@ -112,6 +127,8 @@ export class CompetitiveRoom extends Room<RoomState> {
   private betweenRoundMs = 0;
   private matchStarted = false;
   private overtimeApplied = false;
+  private pushPayloads: PushPayloadSim[] = [];
+  private pushWinPending: 'team_a' | 'team_b' | null = null;
 
   private rankKey = 'open';
   private mmWaitMs = DEFAULT_MM_WAIT_MS;
@@ -243,13 +260,25 @@ export class CompetitiveRoom extends Room<RoomState> {
         this.teamBSpawns = teamB.map((s) => ({ ...s }));
       }
 
+      const payloads = data?.pushPayloads as PushPayloadSim[] | undefined;
+      this.pushPayloads = Array.isArray(payloads)
+        ? payloads.map((p) => ({
+            ...p,
+            t: typeof p.t === 'number' ? Math.min(1, Math.max(0, p.t)) : 0.5,
+            pushStrength: Math.max(0.5, p.pushStrength ?? 3),
+            pushRadius: Math.max(0.8, p.pushRadius ?? 1.8),
+            winEpsilon: Math.max(0.02, p.winEpsilon ?? 0.08),
+          }))
+        : [];
+      this.pushWinPending = null;
+
       if (data.worldBounds) {
         this.worldBounds = { ...(data.worldBounds as WorldBounds) };
       }
 
       this.assignTeamsAndSpawn();
       console.log(
-        `[CompetitiveRoom] map loaded: ${platforms.length} pads, A=${this.teamASpawns.length} B=${this.teamBSpawns.length}`
+        `[CompetitiveRoom] map loaded: ${platforms.length} pads, A=${this.teamASpawns.length} B=${this.teamBSpawns.length}, push=${this.pushPayloads.length}`
       );
     });
 
@@ -438,8 +467,13 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.state.roundIndex += 1;
     this.betweenRounds = false;
     this.overtimeApplied = false;
+    this.pushWinPending = null;
     this.state.phase = 'playing';
     this.state.matchTimeRemainingMs = this.roundTimeMs;
+    // Reset payload to mid-rail each round.
+    for (const p of this.pushPayloads) {
+      p.t = 0.5;
+    }
 
     Array.from(this.state.players.values()).forEach((player) => {
       player.health = 100;
@@ -455,6 +489,14 @@ export class CompetitiveRoom extends Room<RoomState> {
   private tickPlaying(dtMs: number) {
     this.state.matchTimeRemainingMs -= dtMs;
     this.tickPlayers(dtMs);
+    this.tickPushPayloads(dtMs / 1000);
+
+    if (this.pushWinPending) {
+      const winner = this.pushWinPending;
+      this.pushWinPending = null;
+      this.endRound(winner);
+      return;
+    }
 
     if (this.state.matchTimeRemainingMs <= 0) {
       if (!this.overtimeApplied && this.state.scoreA === this.state.scoreB && this.overtimeMs > 0) {
@@ -462,7 +504,14 @@ export class CompetitiveRoom extends Room<RoomState> {
         this.state.matchTimeRemainingMs = this.overtimeMs;
         return;
       }
-      // Time expired — team with more alive wins; tie → Team A for determinism
+      // Prefer payload position when rails exist; otherwise alive-count.
+      if (this.pushPayloads.length) {
+        const avgT =
+          this.pushPayloads.reduce((s, p) => s + p.t, 0) / this.pushPayloads.length;
+        if (avgT <= 0.5) this.endRound('team_a');
+        else this.endRound('team_b');
+        return;
+      }
       const aAlive = this.countAlive('team_a');
       const bAlive = this.countAlive('team_b');
       if (aAlive >= bAlive) this.endRound('team_a');
@@ -471,6 +520,45 @@ export class CompetitiveRoom extends Room<RoomState> {
     }
 
     this.checkRoundEnd();
+  }
+
+  /**
+   * Payload objective: Team A pushes toward t→0 (their end), Team B toward t→1.
+   * First team to reach their end wins the round — stops endless hide/draw.
+   */
+  private tickPushPayloads(dt: number) {
+    if (!this.pushPayloads.length) return;
+    const players = Array.from(this.state.players.values()).filter((p) => p.isAlive);
+    for (const payload of this.pushPayloads) {
+      const alongX = Math.sin(payload.yaw);
+      const alongY = Math.cos(payload.yaw);
+      const half = payload.length * 0.5;
+      const blockX = payload.x + alongX * (payload.t - 0.5) * payload.length;
+      const blockY = payload.y + alongY * (payload.t - 0.5) * payload.length;
+      let force = 0;
+      for (const p of players) {
+        const dx = p.x - blockX;
+        const dy = p.y - blockY;
+        const dist = Math.hypot(dx, dy);
+        if (dist > payload.pushRadius) continue;
+        // Push direction: Team A decreases t, Team B increases t.
+        const dir = p.role === 'team_a' ? -1 : p.role === 'team_b' ? 1 : 0;
+        if (!dir) continue;
+        const falloff = 1 - dist / payload.pushRadius;
+        force += dir * payload.pushStrength * falloff;
+      }
+      if (force !== 0) {
+        payload.t = Math.min(1, Math.max(0, payload.t + (force * dt) / Math.max(1, half)));
+      }
+      if (payload.t <= payload.winEpsilon) {
+        this.pushWinPending = 'team_a';
+        return;
+      }
+      if (payload.t >= 1 - payload.winEpsilon) {
+        this.pushWinPending = 'team_b';
+        return;
+      }
+    }
   }
 
   private countAlive(team: 'team_a' | 'team_b') {

@@ -1,14 +1,11 @@
 import * as THREE from 'three';
 import type { EditorEntity, MapDocument } from '../editor/map-document';
-import { HAMMER_SOLID_MODEL, isInvisibleMarkerKind } from '../editor/map-document';
+import { HAMMER_SOLID_MODEL, isHammerSolidEntity, isInvisibleMarkerKind } from '../editor/map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from '../editor/model-scan';
 import { AnimationDirector } from '../editor/animation-director';
 import { applyTextureToObject, plantLocalFeet } from '../editor/editor-mesh';
-import {
-  applyEntityOpacity,
-  makeAuthoredLight,
-  makeGameplayFallback,
-} from '../editor/map-scene-visuals';
+import { applyEntityOpacity, makeAuthoredLight, makeGameplayFallback } from '../editor/map-scene-visuals';
+import { makeHammerSolidObject, type HammerPrimitive } from '../editor/hammer-shapes';
 
 function applyEntTexture(obj: THREE.Object3D, ent: EditorEntity, doc: MapDocument) {
   applyTextureToObject(obj, ent.textureUrl || doc.environment?.defaultTextureUrl, {
@@ -18,20 +15,10 @@ function applyEntTexture(obj: THREE.Object3D, ent: EditorEntity, doc: MapDocumen
   });
 }
 
-function makeHammerSolid(ent: EditorEntity): THREE.Group {
+function makeHammerSolid(ent: EditorEntity): THREE.Object3D {
   const size = ent.collisionSize ?? [2, 0.25, 2];
-  const group = new THREE.Group();
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(size[0], size[1], size[2]),
-    new THREE.MeshStandardMaterial({
-      color: ent.color ? new THREE.Color(ent.color) : 0x64748b,
-      roughness: 0.85,
-      metalness: 0.05,
-    })
-  );
-  mesh.position.y = size[1] * 0.5;
-  group.add(mesh);
-  return group;
+  const shape = (ent.primitive as HammerPrimitive) || 'box';
+  return makeHammerSolidObject(shape, size, ent.color || '#64748b');
 }
 
 /**
@@ -76,7 +63,7 @@ export class CustomMapOverlay {
         if (ent.kind === 'light') {
           obj = makeAuthoredLight(ent);
           // makeAuthoredLight already sets position; still apply rotation/scale below.
-        } else if (ent.primitive === 'box' || ent.model === HAMMER_SOLID_MODEL) {
+        } else if (isHammerSolidEntity(ent) || ent.model === HAMMER_SOLID_MODEL) {
           obj = makeHammerSolid(ent);
           applyEntTexture(obj, ent, doc);
         } else if (src) {

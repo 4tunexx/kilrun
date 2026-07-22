@@ -63,7 +63,15 @@ import {
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
-import type { EditorEntity, EntityCollideMaterial, FloorPreset, MapDocument, SkyPreset } from './map-document';
+import type {
+  EditorEntity,
+  EntityCollideMaterial,
+  EntityLightType,
+  FloorPreset,
+  HammerPrimitive,
+  MapDocument,
+  SkyPreset,
+} from './map-document';
 import {
   HAMMER_SOLID_MODEL,
   ensureAnimation,
@@ -77,8 +85,11 @@ import {
   ensureJumpPad,
   ensureLight,
   ensureMonsterSpawn,
+  ensurePushBlock,
+  ensurePushRail,
   ensureRedZone,
   ensureRevive,
+  ensureSpinHazard,
   ensureSurface,
   ensureTeleport,
   ensureWaveAnchor,
@@ -97,6 +108,12 @@ import {
   patchCollideMaterial,
   resolveCollideMaterial,
 } from './map-document';
+import {
+  defaultSizeForHammer,
+  HAMMER_PRIMITIVES,
+  loadStickyHammerShape,
+  saveStickyHammerShape,
+} from './hammer-shapes';
 import { TextureAtlasPicker } from './texture-atlas-picker';
 import { KILRUN_MODE_INFO } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
@@ -198,6 +215,7 @@ export function MapEditor({
   const [brush, setBrush] = useState<string | null>('floor-square');
   /** Select = pick objects; Brush = paint/place. Defaults to Select so clicks don't stack. */
   const [editTool, setEditTool] = useState<EditTool>('select');
+  const [hammerShape, setHammerShape] = useState<HammerPrimitive>(() => loadStickyHammerShape());
   const [paintTextureUrl, setPaintTextureUrl] = useState<string | null>(null);
   /** Armed click-to-place kind (spawn flag, light, etc.) — cleared by Select / Escape / place-once. */
   const [pendingPlaceKind, setPendingPlaceKind] = useState<EditorEntity['kind'] | null>(null);
@@ -619,6 +637,10 @@ export function MapEditor({
   useEffect(() => {
     apiRef.current?.setEditTool(editTool);
   }, [editTool]);
+  useEffect(() => {
+    apiRef.current?.setHammerShape(hammerShape);
+    saveStickyHammerShape(hammerShape);
+  }, [hammerShape]);
   useEffect(() => {
     apiRef.current?.setPaintTexture(paintTextureUrl);
   }, [paintTextureUrl]);
@@ -2655,10 +2677,27 @@ export function MapEditor({
                 setMode('scale');
                 if (freeFly) apiRef.current?.setFreeFly(false);
               }}
-              title="Hammer++ (H) — place resizable solid boxes; hold-drag to paint; Scale to size"
+              title="Hammer++ (H) — place solid shapes; hold-drag to paint; shape sticks until you change it"
             >
               <Hammer className="w-4 h-4 text-amber-300" />
             </ToolBtn>
+            {editTool === 'hammer' && (
+              <label className="flex items-center gap-1 text-[10px] text-amber-100/90 ml-1">
+                <span className="uppercase tracking-wide text-white/40">Shape</span>
+                <select
+                  className="bg-black/50 border border-amber-500/40 rounded px-1.5 py-1 text-xs text-white max-w-[7.5rem]"
+                  value={hammerShape}
+                  onChange={(e) => setHammerShape(e.target.value as HammerPrimitive)}
+                  title="Sticky Hammer shape for the next solids you place"
+                >
+                  {HAMMER_PRIMITIVES.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <ToolBtn
               active={editTool === 'paint'}
               onClick={() => {
@@ -3005,12 +3044,41 @@ export function MapEditor({
 
               {/* Type label — never a confusing Kind dropdown for hammer / markers / player */}
               {isHammerSolidEntity(selected) ? (
-                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 space-y-0.5">
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 space-y-1.5">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-amber-200">
                     Hammer solid
                   </p>
                   <p className="text-[10px] text-white/55 leading-snug">
-                    Solid brush block — set Material + size. No model upload.
+                    Solid brush — pick a shape, material, and size. Shape also sticks for the Hammer
+                    tool until you change it.
+                  </p>
+                  <label className="block text-xs text-white/60">
+                    Shape
+                    <select
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
+                      value={(selected.primitive as HammerPrimitive) || 'box'}
+                      onChange={(e) => {
+                        const shape = e.target.value as HammerPrimitive;
+                        const size =
+                          selected.collisionSize ?? defaultSizeForHammer(shape);
+                        setHammerShape(shape);
+                        patchSelected({
+                          primitive: shape,
+                          model: HAMMER_SOLID_MODEL,
+                          collisionSize: size,
+                          solid: true,
+                        });
+                      }}
+                    >
+                      {HAMMER_PRIMITIVES.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="text-[10px] text-white/40">
+                    {HAMMER_PRIMITIVES.find((p) => p.id === (selected.primitive || 'box'))?.hint}
                   </p>
                 </div>
               ) : selected.kind === 'player' ? (
@@ -3436,8 +3504,23 @@ export function MapEditor({
               {selected.kind === 'spawn_monster' && (
                 <div className="space-y-2 border-t border-white/10 pt-2">
                   <p className="text-[10px] tracking-widest text-rose-300/80 uppercase">
-                    Monster spawn
+                    Enemy Editor
                   </p>
+                  <label className="block text-xs text-white/60">
+                    Display name
+                    <input
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureMonsterSpawn(selected).displayName ?? ''}
+                      onChange={(e) =>
+                        patchSelected({
+                          monsterSpawn: {
+                            ...ensureMonsterSpawn(selected),
+                            displayName: e.target.value || undefined,
+                          },
+                        })
+                      }
+                    />
+                  </label>
                   <label className="block text-xs text-white/60">
                     Type
                     <select
@@ -3451,7 +3534,8 @@ export function MapEditor({
                               | 'basic'
                               | 'fast'
                               | 'brute'
-                              | 'boss',
+                              | 'boss'
+                              | 'custom',
                           },
                         })
                       }
@@ -3460,7 +3544,72 @@ export function MapEditor({
                       <option value="fast">Fast</option>
                       <option value="brute">Brute</option>
                       <option value="boss">Boss</option>
+                      <option value="custom">Custom</option>
                     </select>
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Level
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureMonsterSpawn(selected).level ?? 1}
+                      onChange={(e) =>
+                        patchSelected({
+                          monsterSpawn: {
+                            ...ensureMonsterSpawn(selected),
+                            level: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <div className="grid grid-cols-2 gap-1">
+                    {([
+                      ['hp', 'HP (0=default)'],
+                      ['damage', 'Dmg (0=default)'],
+                      ['speed', 'Speed'],
+                      ['radius', 'Radius'],
+                    ] as const).map(([key, label]) => (
+                      <label key={key} className="block text-[10px] text-white/55">
+                        {label}
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-1 py-0.5 text-xs"
+                          value={ensureMonsterSpawn(selected)[key] ?? 0}
+                          onChange={(e) =>
+                            patchSelected({
+                              monsterSpawn: {
+                                ...ensureMonsterSpawn(selected),
+                                [key]: Math.max(0, Number(e.target.value) || 0),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <label className="block text-xs text-white/60">
+                    Model upload URL
+                    <input
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[11px]"
+                      placeholder="/uploads/… or https://"
+                      value={
+                        ensureMonsterSpawn(selected).modelUrl ?? selected.customModelUrl ?? ''
+                      }
+                      onChange={(e) =>
+                        patchSelected({
+                          customModelUrl: e.target.value || undefined,
+                          monsterSpawn: {
+                            ...ensureMonsterSpawn(selected),
+                            modelUrl: e.target.value || undefined,
+                          },
+                        })
+                      }
+                    />
                   </label>
                   <label className="block text-xs text-white/60">
                     Wave min
@@ -3752,8 +3901,28 @@ export function MapEditor({
               {selected.kind === 'light' && (
                 <div className="space-y-2 border-t border-white/10 pt-2">
                   <p className="text-[10px] tracking-widest text-white/50 uppercase flex items-center gap-1">
-                    <Lightbulb className="w-3.5 h-3.5 text-amber-200" /> Light bulb
+                    <Lightbulb className="w-3.5 h-3.5 text-amber-200" /> Light
                   </p>
+                  <label className="block text-xs text-white/60">
+                    Type
+                    <select
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
+                      value={ensureLight(selected).type ?? 'point'}
+                      onChange={(e) =>
+                        patchSelected({
+                          light: {
+                            ...ensureLight(selected),
+                            type: e.target.value as EntityLightType,
+                          },
+                        })
+                      }
+                    >
+                      <option value="point">Point</option>
+                      <option value="spot">Spotlight</option>
+                      <option value="flashlight">Flashlight</option>
+                      <option value="beam">Beam light</option>
+                    </select>
+                  </label>
                   <label className="block text-xs text-white/60">
                     Color
                     <input
@@ -3806,9 +3975,420 @@ export function MapEditor({
                       }
                     />
                   </label>
+                  {(ensureLight(selected).type === 'spot' ||
+                    ensureLight(selected).type === 'flashlight' ||
+                    ensureLight(selected).type === 'beam') && (
+                    <>
+                      <label className="block text-xs text-white/60">
+                        Cone angle ({ensureLight(selected).angleDeg ?? 40}°)
+                        <input
+                          type="range"
+                          min={5}
+                          max={90}
+                          step={1}
+                          className="w-full"
+                          value={ensureLight(selected).angleDeg ?? 40}
+                          onChange={(e) =>
+                            patchSelected({
+                              light: {
+                                ...ensureLight(selected),
+                                angleDeg: Number(e.target.value),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="block text-xs text-white/60">
+                        Penumbra ({(ensureLight(selected).penumbra ?? 0.35).toFixed(2)})
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          className="w-full"
+                          value={ensureLight(selected).penumbra ?? 0.35}
+                          onChange={(e) =>
+                            patchSelected({
+                              light: {
+                                ...ensureLight(selected),
+                                penumbra: Number(e.target.value),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="block text-xs text-white/60">
+                        Pitch ({ensureLight(selected).pitchDeg ?? -12}°)
+                        <input
+                          type="range"
+                          min={-80}
+                          max={40}
+                          step={1}
+                          className="w-full"
+                          value={ensureLight(selected).pitchDeg ?? -12}
+                          onChange={(e) =>
+                            patchSelected({
+                              light: {
+                                ...ensureLight(selected),
+                                pitchDeg: Number(e.target.value),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="block text-xs text-white/60">
+                        Beam length ({ensureLight(selected).beamLength ?? ensureLight(selected).distance})
+                        <input
+                          type="range"
+                          min={2}
+                          max={80}
+                          step={1}
+                          className="w-full"
+                          value={
+                            ensureLight(selected).beamLength ?? ensureLight(selected).distance
+                          }
+                          onChange={(e) =>
+                            patchSelected({
+                              light: {
+                                ...ensureLight(selected),
+                                beamLength: Number(e.target.value),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    </>
+                  )}
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={!!ensureLight(selected).castShadow}
+                      onChange={(e) =>
+                        patchSelected({
+                          light: {
+                            ...ensureLight(selected),
+                            castShadow: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    Cast shadow
+                  </label>
                   <p className="text-[10px] text-white/40">
                     Lights are visual in editor + match overlay (client-side).
                   </p>
+                </div>
+              )}
+
+              {selected.kind === 'spinner' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-orange-300/80 uppercase">
+                    Rotating material
+                  </p>
+                  <label className="block text-xs text-white/60">
+                    Shape
+                    <select
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureSpinHazard(selected).shape}
+                      onChange={(e) =>
+                        patchSelected({
+                          spinHazard: {
+                            ...ensureSpinHazard(selected),
+                            shape: e.target.value as
+                              | 'blade'
+                              | 'bar'
+                              | 'disc'
+                              | 'cross'
+                              | 'box',
+                          },
+                        })
+                      }
+                    >
+                      <option value="blade">Blade</option>
+                      <option value="bar">Bar</option>
+                      <option value="disc">Disc</option>
+                      <option value="cross">Cross</option>
+                      <option value="box">Box</option>
+                    </select>
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Speed ({ensureSpinHazard(selected).speed.toFixed(2)} rps)
+                    <input
+                      type="range"
+                      min={0.05}
+                      max={4}
+                      step={0.05}
+                      className="w-full"
+                      value={ensureSpinHazard(selected).speed}
+                      onChange={(e) =>
+                        patchSelected({
+                          spinHazard: {
+                            ...ensureSpinHazard(selected),
+                            speed: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Axis
+                    <select
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureSpinHazard(selected).axis}
+                      onChange={(e) =>
+                        patchSelected({
+                          spinHazard: {
+                            ...ensureSpinHazard(selected),
+                            axis: e.target.value as 'x' | 'y' | 'z',
+                          },
+                        })
+                      }
+                    >
+                      <option value="y">Y (yaw)</option>
+                      <option value="x">X</option>
+                      <option value="z">Z</option>
+                    </select>
+                  </label>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(['W', 'H', 'D'] as const).map((axis, i) => (
+                      <label key={axis} className="text-[9px] text-white/50">
+                        {axis}
+                        <input
+                          type="number"
+                          min={0.1}
+                          step={0.1}
+                          className="w-full bg-black/40 border border-white/10 rounded px-1 py-0.5 text-xs"
+                          value={Number(ensureSpinHazard(selected).size[i].toFixed(2))}
+                          onChange={(e) => {
+                            const size: [number, number, number] = [
+                              ...ensureSpinHazard(selected).size,
+                            ] as [number, number, number];
+                            size[i] = Math.max(0.1, Number(e.target.value) || 0.1);
+                            patchSelected({
+                              spinHazard: { ...ensureSpinHazard(selected), size },
+                            });
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <label className="block text-xs text-white/60">
+                    Texture / model URL
+                    <input
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[11px]"
+                      value={
+                        ensureSpinHazard(selected).modelUrl ||
+                        ensureSpinHazard(selected).textureUrl ||
+                        selected.customModelUrl ||
+                        selected.textureUrl ||
+                        ''
+                      }
+                      onChange={(e) => {
+                        const v = e.target.value || undefined;
+                        const looksModel = !!v && /\.(glb|gltf)(\?|$)/i.test(v);
+                        patchSelected({
+                          customModelUrl: looksModel ? v : selected.customModelUrl,
+                          textureUrl: !looksModel ? v : selected.textureUrl,
+                          spinHazard: {
+                            ...ensureSpinHazard(selected),
+                            modelUrl: looksModel ? v : undefined,
+                            textureUrl: !looksModel ? v : undefined,
+                          },
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={ensureSpinHazard(selected).damageOnTouch}
+                      onChange={(e) =>
+                        patchSelected({
+                          spinHazard: {
+                            ...ensureSpinHazard(selected),
+                            damageOnTouch: e.target.checked,
+                            enabled: true,
+                          },
+                          hazard: {
+                            ...ensureHazard(selected),
+                            enabled: e.target.checked,
+                            damage: ensureSpinHazard(selected).damage,
+                          },
+                        })
+                      }
+                    />
+                    Causes damage
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Damage amount
+                    <input
+                      type="number"
+                      min={1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensureSpinHazard(selected).damage}
+                      onChange={(e) =>
+                        patchSelected({
+                          spinHazard: {
+                            ...ensureSpinHazard(selected),
+                            damage: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              )}
+
+              {selected.kind === 'push_rail' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-sky-300/80 uppercase">
+                    Push rail
+                  </p>
+                  <p className="text-[10px] text-white/50">
+                    Team A end is −length/2 along yaw; Team B is +length/2. Rotate the rail to aim
+                    between spawns.
+                  </p>
+                  <label className="block text-xs text-white/60">
+                    Length
+                    <input
+                      type="number"
+                      min={4}
+                      step={0.5}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensurePushRail(selected).length}
+                      onChange={(e) =>
+                        patchSelected({
+                          pushRail: {
+                            ...ensurePushRail(selected),
+                            length: Math.max(4, Number(e.target.value) || 4),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Width
+                    <input
+                      type="number"
+                      min={1}
+                      step={0.1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensurePushRail(selected).width}
+                      onChange={(e) =>
+                        patchSelected({
+                          pushRail: {
+                            ...ensurePushRail(selected),
+                            width: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Start T (0=A … 1=B)
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensurePushRail(selected).startT}
+                      onChange={(e) =>
+                        patchSelected({
+                          pushRail: {
+                            ...ensurePushRail(selected),
+                            startT: Math.min(1, Math.max(0, Number(e.target.value) || 0.5)),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              )}
+
+              {selected.kind === 'push_block' && (
+                <div className="space-y-2 border-t border-white/10 pt-2">
+                  <p className="text-[10px] tracking-widest text-amber-300/80 uppercase">
+                    Push block
+                  </p>
+                  <label className="block text-xs text-white/60">
+                    Linked rail
+                    <select
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensurePushBlock(selected).railEntityId ?? ''}
+                      onChange={(e) =>
+                        patchSelected({
+                          pushBlock: {
+                            ...ensurePushBlock(selected),
+                            railEntityId: e.target.value || undefined,
+                          },
+                        })
+                      }
+                    >
+                      <option value="">— nearest rail —</option>
+                      {doc.entities
+                        .filter((e) => e.kind === 'push_rail')
+                        .map((e) => (
+                          <option key={e.id} value={e.id}>
+                            {e.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Push strength
+                    <input
+                      type="number"
+                      min={0.5}
+                      step={0.1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensurePushBlock(selected).pushStrength}
+                      onChange={(e) =>
+                        patchSelected({
+                          pushBlock: {
+                            ...ensurePushBlock(selected),
+                            pushStrength: Math.max(0.5, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Push radius
+                    <input
+                      type="number"
+                      min={0.5}
+                      step={0.1}
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
+                      value={ensurePushBlock(selected).pushRadius}
+                      onChange={(e) =>
+                        patchSelected({
+                          pushBlock: {
+                            ...ensurePushBlock(selected),
+                            pushRadius: Math.max(0.5, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs text-white/60">
+                    Model URL (optional)
+                    <input
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[11px]"
+                      value={
+                        ensurePushBlock(selected).modelUrl ?? selected.customModelUrl ?? ''
+                      }
+                      onChange={(e) =>
+                        patchSelected({
+                          customModelUrl: e.target.value || undefined,
+                          pushBlock: {
+                            ...ensurePushBlock(selected),
+                            modelUrl: e.target.value || undefined,
+                          },
+                        })
+                      }
+                    />
+                  </label>
                 </div>
               )}
 

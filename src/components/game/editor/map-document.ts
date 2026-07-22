@@ -6,8 +6,11 @@ import type {
   TpsCrosshairSettings,
   TpsPlayerViewSettings,
 } from '../tps/tps-view-settings';
+import type { HammerPrimitive } from './hammer-shapes';
+import { isHammerPrimitive } from './hammer-shapes';
 
 export type { KilrunMode };
+export type { HammerPrimitive } from './hammer-shapes';
 
 export type EditorEntityKind =
   | 'prop'
@@ -25,6 +28,8 @@ export type EditorEntityKind =
   | 'door'
   | 'jump_pad'
   | 'action'
+  /** Spinning damaging prop (saw / blade / crushing bar). */
+  | 'spinner'
   // Horde
   | 'spawn_monster'
   | 'red_zone'
@@ -33,9 +38,11 @@ export type EditorEntityKind =
   | 'wave_anchor'
   // Competitive
   | 'spawn_team_a'
-  | 'spawn_team_b';
+  | 'spawn_team_b'
+  | 'push_rail'
+  | 'push_block';
 
-/** Built-in Hammer++ solid box (no GLB) — resize with Scale, paint textures. */
+/** Built-in Hammer++ solid (no GLB) — resize with Scale, paint textures. */
 export const HAMMER_SOLID_MODEL = 'hammer-solid';
 
 /**
@@ -58,9 +65,10 @@ export function isInvisibleMarkerKind(kind: EditorEntityKind): boolean {
   return INVISIBLE_MARKER_KINDS.includes(kind);
 }
 
-/** Hammer++ solid box (no catalog GLB) — material + size authoring only. */
+/** Hammer++ solid (no catalog GLB) — material + size authoring only. */
 export function isHammerSolidEntity(ent: Pick<EditorEntity, 'model' | 'primitive'>): boolean {
-  return ent.primitive === 'box' || ent.model === HAMMER_SOLID_MODEL;
+  if (ent.model === HAMMER_SOLID_MODEL) return true;
+  return isHammerPrimitive(ent.primitive);
 }
 
 /**
@@ -78,6 +86,7 @@ export function entityShowsModelPicker(ent: Pick<EditorEntity, 'kind' | 'model' 
   if (isHammerSolidEntity(ent)) return false;
   if (ent.kind === 'light') return false;
   if (ent.kind === 'action' || ent.kind === 'checkpoint' || ent.kind === 'wave_anchor') return false;
+  if (ent.kind === 'push_rail') return false;
   return true;
 }
 
@@ -94,10 +103,26 @@ export function entityShowsGameplayMaterial(
   return true;
 }
 
-/** Monster spawn authoring for Horde maps. */
+/** Monster spawn authoring for Horde maps (Enemy Editor). */
 export interface EntityMonsterSpawn {
-  /** basic | fast | brute | boss */
-  monsterType: 'basic' | 'fast' | 'brute' | 'boss';
+  /** basic | fast | brute | boss | custom */
+  monsterType: 'basic' | 'fast' | 'brute' | 'boss' | 'custom';
+  /** Display name in Enemy Editor. */
+  displayName?: string;
+  /** Optional custom GLB / uploaded model for this enemy. */
+  modelUrl?: string;
+  /** Catalog prototype model id (optional). */
+  modelId?: string;
+  /** Combat level — scales HP / damage when > 0. */
+  level?: number;
+  /** Override HP (0 = use type default × level). */
+  hp?: number;
+  /** Override touch damage. */
+  damage?: number;
+  /** Override move speed. */
+  speed?: number;
+  /** Override hit radius. */
+  radius?: number;
   /** First wave this spawn is active (1-based). */
   waveMin: number;
   /** Last wave inclusive; 0 = infinite. */
@@ -140,6 +165,12 @@ export interface EntityWaveAnchor {
 export function defaultMonsterSpawn(): EntityMonsterSpawn {
   return {
     monsterType: 'basic',
+    displayName: 'Basic',
+    level: 1,
+    hp: 0,
+    damage: 0,
+    speed: 0,
+    radius: 0,
     waveMin: 1,
     waveMax: 0,
     countPerWave: 2,
@@ -389,14 +420,133 @@ export interface EntityInteract {
   pushStrength?: number;
 }
 
-/** Point light for map atmosphere (client visual; not simulated). */
+/** Point / spot / flashlight / beam for map atmosphere (client visual; not simulated). */
+export type EntityLightType = 'point' | 'spot' | 'flashlight' | 'beam';
+
 export interface EntityLight {
+  type?: EntityLightType;
   color: string;
   intensity: number;
   /** Attenuation distance in world units */
   distance: number;
   castShadow?: boolean;
+  /** Spot / flashlight / beam cone angle in degrees. */
+  angleDeg?: number;
+  /** Spot penumbra 0–1. */
+  penumbra?: number;
+  /** Beam length override (defaults to distance). */
+  beamLength?: number;
+  /** Flashlight / beam aim pitch in degrees (down = negative). */
+  pitchDeg?: number;
 }
+
+/** Rotating damaging material (spinner entity or prop with spinHazard enabled). */
+export interface EntitySpinHazard {
+  enabled: boolean;
+  /** Revolutions per second (visual + damage volume stays AABB for now). */
+  speed: number;
+  /** Local axis to spin around. */
+  axis: 'y' | 'x' | 'z';
+  /** Visual primitive when no custom model. */
+  shape: 'blade' | 'bar' | 'disc' | 'cross' | 'box';
+  /** Size [W,H,D] for the built-in shape. */
+  size: [number, number, number];
+  /** Optional texture URL. */
+  textureUrl?: string;
+  /** Optional uploaded / catalog model overrides shape. */
+  modelUrl?: string;
+  modelId?: string;
+  /** Damages on touch. */
+  damageOnTouch: boolean;
+  damage: number;
+  intervalMs: number;
+  instantKill?: boolean;
+}
+
+/** Competitive payload rail — block slides between Team A and Team B ends. */
+export interface EntityPushRail {
+  /** World length of the rail. */
+  length: number;
+  /** Width of the travel corridor. */
+  width: number;
+  /** Starting t (0 = Team A end, 1 = Team B end). Default 0.5. */
+  startT: number;
+}
+
+/** Competitive pushable block / model riding a rail. */
+export interface EntityPushBlock {
+  /** Linked push_rail entity id. */
+  railEntityId?: string;
+  /** Push force applied per nearby teammate (units / sec²). */
+  pushStrength: number;
+  /** How close a player must be to shove. */
+  pushRadius: number;
+  /** Optional custom model. */
+  modelUrl?: string;
+  modelId?: string;
+  /** Win when |t - goal| <= this epsilon. */
+  winEpsilon: number;
+}
+
+export function defaultLight(color = '#ffe9a8'): EntityLight {
+  return {
+    type: 'point',
+    color,
+    intensity: 1.4,
+    distance: 18,
+    castShadow: false,
+    angleDeg: 40,
+    penumbra: 0.35,
+    beamLength: 18,
+    pitchDeg: -12,
+  };
+}
+
+export function ensureLight(ent: EditorEntity): EntityLight {
+  return {
+    ...defaultLight(ent.color ?? '#ffe9a8'),
+    ...ent.light,
+  };
+}
+
+export function defaultSpinHazard(): EntitySpinHazard {
+  return {
+    enabled: true,
+    speed: 0.8,
+    axis: 'y',
+    shape: 'blade',
+    size: [2.4, 0.15, 0.35],
+    damageOnTouch: true,
+    damage: 20,
+    intervalMs: 400,
+    instantKill: false,
+  };
+}
+
+export function ensureSpinHazard(ent: EditorEntity): EntitySpinHazard {
+  return { ...defaultSpinHazard(), ...ent.spinHazard };
+}
+
+export function defaultPushRail(): EntityPushRail {
+  return { length: 16, width: 2.5, startT: 0.5 };
+}
+
+export function ensurePushRail(ent: EditorEntity): EntityPushRail {
+  return { ...defaultPushRail(), ...ent.pushRail };
+}
+
+export function defaultPushBlock(): EntityPushBlock {
+  return {
+    pushStrength: 3.2,
+    pushRadius: 1.8,
+    winEpsilon: 0.08,
+  };
+}
+
+export function ensurePushBlock(ent: EditorEntity): EntityPushBlock {
+  return { ...defaultPushBlock(), ...ent.pushBlock };
+}
+
 
 export interface EditorEntity {
   id: string;
@@ -424,10 +574,10 @@ export interface EditorEntity {
   /** UV rotation in radians (default 0). */
   textureRotation?: number;
   /**
-   * Built-in solid box (Hammer++) — no GLB. Size comes from scale × unit box
-   * and `collisionSize` for match export.
+   * Built-in Hammer++ solid — no GLB. Shape from `primitive`, size from
+   * `collisionSize` (× scale) for visual + match export.
    */
-  primitive?: 'box';
+  primitive?: HammerPrimitive;
   /**
    * Cached local-space mesh half-extents / size from the loaded GLB (editor).
    * Used for collision pad export so stairs/walls match visual size.
@@ -450,6 +600,12 @@ export interface EditorEntity {
   playerAuthoredClips?: PlayerAuthoredClip[];
   /** Death zone / damage on touch */
   hazard?: EntityHazard;
+  /** Spinning damaging material (spinner entity). */
+  spinHazard?: EntitySpinHazard;
+  /** Competitive push rail. */
+  pushRail?: EntityPushRail;
+  /** Competitive push block. */
+  pushBlock?: EntityPushBlock;
   /**
    * Explicit standable collider for match export.
    * When true, entity becomes a server platform pad (top-plane AABB).
@@ -764,22 +920,6 @@ export function ensureTeleport(ent: EditorEntity): EntityTeleport {
   };
 }
 
-export function defaultLight(color = '#ffe9a8'): EntityLight {
-  return {
-    color,
-    intensity: 1.4,
-    distance: 18,
-    castShadow: false,
-  };
-}
-
-export function ensureLight(ent: EditorEntity): EntityLight {
-  return {
-    ...defaultLight(ent.color ?? '#ffe9a8'),
-    ...ent.light,
-  };
-}
-
 /** Whether this entity should export as a standable / jump-pad platform. */
 export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   if (ent.visible === false) return false;
@@ -791,7 +931,10 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
     ent.kind === 'trap' ||
     ent.kind === 'door' ||
     ent.kind === 'action' ||
-    ent.kind === 'red_zone'
+    ent.kind === 'red_zone' ||
+    ent.kind === 'spinner' ||
+    ent.kind === 'push_rail' ||
+    ent.kind === 'push_block'
   ) {
     return false;
   }
@@ -869,6 +1012,12 @@ export function entityKindLabel(kind: EditorEntityKind): string {
       return 'Player A Spawn';
     case 'spawn_team_b':
       return 'Player B Spawn';
+    case 'spinner':
+      return 'Rotating hazard';
+    case 'push_rail':
+      return 'Push rail';
+    case 'push_block':
+      return 'Push block';
     default:
       return kind;
   }
@@ -889,7 +1038,7 @@ export function entityKindHint(kind: EditorEntityKind): string | null {
     case 'spawn_team_b':
       return 'Invisible Team B / Player B spawn marker. Spawn point only — no model upload.';
     case 'spawn_monster':
-      return 'Invisible enemy spawn marker for Horde waves. Configure monster type below — no model upload.';
+      return 'Enemy spawn for Horde — set type, level, model, HP / damage in Enemy Editor.';
     case 'prop':
       return 'Floors / walls / stairs / decoration. Set Material (Solid / Water / Sand / Ice / Walkthrough) for collision.';
     case 'finish':
@@ -900,6 +1049,8 @@ export function entityKindHint(kind: EditorEntityKind): string | null {
     case 'red_zone':
     case 'trap':
       return 'Damages or kills on touch (see Interaction / Death).';
+    case 'spinner':
+      return 'Rotating damaging material — set spin speed, shape / model, and damage.';
     case 'button':
       return 'Press Use / E nearby to trigger linked doors or traps.';
     case 'door':
@@ -909,7 +1060,11 @@ export function entityKindHint(kind: EditorEntityKind): string | null {
     case 'action':
       return 'Invisible trigger volume for scripted actions / signals.';
     case 'light':
-      return 'Point light (visible bulb in editor; light in game).';
+      return 'Map light — pick Point / Spot / Flashlight / Beam and tune cone / distance.';
+    case 'push_rail':
+      return 'Competitive payload rail from Team A end → Team B end. Place a Push Block on it.';
+    case 'push_block':
+      return 'Pushable payload — teams shove it toward their end of the rail to win the round.';
     default:
       return null;
   }
@@ -925,6 +1080,7 @@ export function entityKindsForMode(mode: KilrunMode): EditorEntityKind[] {
       'start',
       'spawn_monster',
       'hazard',
+      'spinner',
       'light',
       'door',
       'red_zone',
@@ -934,7 +1090,17 @@ export function entityKindsForMode(mode: KilrunMode): EditorEntityKind[] {
     ];
   }
   if (mode === 'competitive') {
-    return ['spawn_team_a', 'spawn_team_b', 'hazard', 'light', 'door', 'player'];
+    return [
+      'spawn_team_a',
+      'spawn_team_b',
+      'push_rail',
+      'push_block',
+      'hazard',
+      'spinner',
+      'light',
+      'door',
+      'player',
+    ];
   }
   return [
     'start',
@@ -943,6 +1109,7 @@ export function entityKindsForMode(mode: KilrunMode): EditorEntityKind[] {
     'button',
     'trap',
     'hazard',
+    'spinner',
     'door',
     'jump_pad',
     'action',

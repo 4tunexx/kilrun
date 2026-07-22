@@ -60,6 +60,7 @@ import {
   mapDocToSimButtons,
   mapDocToSimTeleports,
   mapDocToWorldBounds,
+  mapDocPushPayloads,
 } from './editor/prefab-storage';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
@@ -221,6 +222,7 @@ export default function KilrunEngine({
     const healthFloors = mapDocHealthFloors(doc);
     const redZones = mapDocRedZones(doc);
     const revivePads = mapDocRevivePads(doc);
+    const pushPayloads = mapDocPushPayloads(doc);
     const worldBounds = mapDocToWorldBounds(doc, platforms, finishes);
     customDocRef.current = doc;
     customLoadedRef.current = true;
@@ -240,6 +242,7 @@ export default function KilrunEngine({
       healthFloors,
       redZones,
       revivePads,
+      pushPayloads,
       worldBounds,
       modeSettings: doc.modeSettings,
     });

@@ -8,6 +8,7 @@ import type { MapDocument } from './map-document';
 import {
   HAMMER_SOLID_MODEL,
   ensureEnvironment,
+  isHammerSolidEntity,
   isInvisibleMarkerKind,
   suggestPlayerBindings,
 } from './map-document';
@@ -25,6 +26,7 @@ import {
   makeGameplayFallback,
   shouldUseGameplayFallback,
 } from './map-scene-visuals';
+import { makeHammerSolidObject, type HammerPrimitive } from './hammer-shapes';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
@@ -418,17 +420,10 @@ export function MapPlayPreview({
           }
         };
 
-        if (ent.primitive === 'box' || ent.model === HAMMER_SOLID_MODEL) {
+        if (isHammerSolidEntity(ent) || ent.model === HAMMER_SOLID_MODEL) {
           const size = ent.collisionSize ?? [2, 0.25, 2];
-          const mesh = new THREE.Mesh(
-            new THREE.BoxGeometry(size[0], size[1], size[2]),
-            new THREE.MeshStandardMaterial({
-              color: ent.color ? new THREE.Color(ent.color) : 0x64748b,
-              roughness: 0.85,
-            })
-          );
-          mesh.position.y = size[1] * 0.5;
-          placeVisual(mesh);
+          const shape = (ent.primitive as HammerPrimitive) || 'box';
+          placeVisual(makeHammerSolidObject(shape, size, ent.color || '#64748b'));
           continue;
         }
 

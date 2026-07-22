@@ -370,7 +370,15 @@ export class GameConnection {
       x: number;
       y: number;
       z: number;
-      monsterType?: 'basic' | 'fast' | 'brute' | 'boss';
+      monsterType?: 'basic' | 'fast' | 'brute' | 'boss' | 'custom';
+      displayName?: string;
+      modelUrl?: string;
+      modelId?: string;
+      level?: number;
+      hp?: number;
+      damage?: number;
+      speed?: number;
+      radius?: number;
       waveMin?: number;
       waveMax?: number;
       countPerWave?: number;
@@ -378,6 +386,22 @@ export class GameConnection {
     }[];
     teamASpawns?: { x: number; y: number; z: number }[];
     teamBSpawns?: { x: number; y: number; z: number }[];
+    pushPayloads?: {
+      railId: string;
+      blockId: string;
+      x: number;
+      y: number;
+      z: number;
+      yaw: number;
+      length: number;
+      width: number;
+      t: number;
+      pushStrength: number;
+      pushRadius: number;
+      winEpsilon: number;
+      blockModelUrl?: string;
+      blockModelId?: string;
+    }[];
     healthFloors?: {
       id: string;
       x: number;
