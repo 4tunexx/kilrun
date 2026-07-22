@@ -56,9 +56,11 @@ export function ensureMapPlayerEntity(doc: MapDocument): {
     name: 'Player Avatar',
     kind: 'player',
     layerId,
-    position: [0, 0, -2],
+    // Not placed on the map — platform settings only (Player Model / 3rd View).
+    position: [0, -1000, 0],
     rotation: [0, 0, 0],
     scale: [1, 1, 1],
+    visible: false,
     animation: defaultAnimation(),
     playerAnims: {},
   };

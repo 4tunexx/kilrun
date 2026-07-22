@@ -58,6 +58,42 @@ export function isInvisibleMarkerKind(kind: EditorEntityKind): boolean {
   return INVISIBLE_MARKER_KINDS.includes(kind);
 }
 
+/** Hammer++ solid box (no catalog GLB) — material + size authoring only. */
+export function isHammerSolidEntity(ent: Pick<EditorEntity, 'model' | 'primitive'>): boolean {
+  return ent.primitive === 'box' || ent.model === HAMMER_SOLID_MODEL;
+}
+
+/**
+ * Player avatar is platform-wide look/settings (Player Model studio), not a placeable map prop.
+ * Kept in the document for Play Test / match, but never shown as a mesh in the map viewport.
+ */
+export function isPlatformPlayerKind(kind: EditorEntityKind): boolean {
+  return kind === 'player';
+}
+
+/** Whether Properties should offer Model / GLB upload for this entity. */
+export function entityShowsModelPicker(ent: Pick<EditorEntity, 'kind' | 'model' | 'primitive'>): boolean {
+  if (isPlatformPlayerKind(ent.kind)) return false;
+  if (isInvisibleMarkerKind(ent.kind)) return false;
+  if (isHammerSolidEntity(ent)) return false;
+  if (ent.kind === 'light') return false;
+  if (ent.kind === 'action' || ent.kind === 'checkpoint' || ent.kind === 'wave_anchor') return false;
+  return true;
+}
+
+/** Whether Properties should offer Material / jump pad / conveyor gameplay block. */
+export function entityShowsGameplayMaterial(
+  ent: Pick<EditorEntity, 'kind' | 'model' | 'primitive'>
+): boolean {
+  if (isPlatformPlayerKind(ent.kind)) return false;
+  if (isInvisibleMarkerKind(ent.kind)) return false;
+  if (ent.kind === 'light') return false;
+  if (ent.kind === 'spawn_team_a' || ent.kind === 'spawn_team_b' || ent.kind === 'spawn_monster') {
+    return false;
+  }
+  return true;
+}
+
 /** Monster spawn authoring for Horde maps. */
 export interface EntityMonsterSpawn {
   /** basic | fast | brute | boss */
@@ -842,18 +878,18 @@ export function entityKindLabel(kind: EditorEntityKind): string {
 export function entityKindHint(kind: EditorEntityKind): string | null {
   switch (kind) {
     case 'player':
-      return 'Sets how you LOOK (model + animations). Spawn is automatic in Play Test — optional Runner Spawn only if you want an exact spot.';
+      return 'Platform-wide player look (model + animations). Open Player Model — this is not a spawn point and is not placed on the map.';
     case 'start':
     case 'spawn_runner':
-      return 'Optional spawn marker. If missing, Play Test auto-spawns on the first solid floor.';
+      return 'Spawn marker only (where runners appear). Does not change the player model — use Player Model for that.';
     case 'spawn_trapper':
-      return 'Invisible Trapper spawn marker for Deathrun.';
+      return 'Invisible Trapper spawn marker for Deathrun. No model upload — spawn point only.';
     case 'spawn_team_a':
-      return 'Invisible Team A / Player A spawn marker.';
+      return 'Invisible Team A / Player A spawn marker. Spawn point only — no model upload.';
     case 'spawn_team_b':
-      return 'Invisible Team B / Player B spawn marker.';
+      return 'Invisible Team B / Player B spawn marker. Spawn point only — no model upload.';
     case 'spawn_monster':
-      return 'Invisible enemy spawn marker for Horde waves.';
+      return 'Invisible enemy spawn marker for Horde waves. Configure monster type below — no model upload.';
     case 'prop':
       return 'Floors / walls / stairs / decoration. Set Material (Solid / Water / Sand / Ice / Walkthrough) for collision.';
     case 'finish':

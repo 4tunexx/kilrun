@@ -21,6 +21,7 @@ import {
   entityKindLabel,
   generateId,
   isInvisibleMarkerKind,
+  isPlatformPlayerKind,
   snapToGrid,
   ensureEnvironment,
 } from './map-document';
@@ -189,6 +190,8 @@ export function createEditorViewport(
     onMeasureChange?: (distance: number | null) => void;
     /** Fired when place is blocked (e.g. locked build level). */
     onPlaceResult?: (result: 'locked' | 'ok', layerName?: string) => void;
+    /** Fired when click-to-place arming changes (Select / Escape / after place). */
+    onPendingPlaceChange?: (kind: EditorEntity['kind'] | null) => void;
   }
 ): EditorViewportApi {
   let doc: MapDocument = structuredClone(initial);
@@ -204,6 +207,14 @@ export function createEditorViewport(
   /** Click-to-place: next ground click places this entity kind on the floor surface. */
   let pendingPlaceKind: EditorEntity['kind'] | null = null;
   let pendingPlaceModel: string | undefined;
+  const setPendingPlace = (
+    kind: EditorEntity['kind'] | null,
+    model?: string
+  ) => {
+    pendingPlaceKind = kind;
+    pendingPlaceModel = kind ? model : undefined;
+    handlers.onPendingPlaceChange?.(kind);
+  };
   let activeLayerId = doc.layers[0]?.id ?? '';
   let gridSnap = true;
   let snapY = false;
@@ -660,6 +671,16 @@ export function createEditorViewport(
 
   async function syncEntity(ent: EditorEntity) {
     let root = roots.get(ent.id);
+
+    // Platform player avatar is settings-only — never show / pick it on the map.
+    if (isPlatformPlayerKind(ent.kind)) {
+      if (root) {
+        scene.remove(root);
+        roots.delete(ent.id);
+        entityClips.delete(ent.id);
+      }
+      return;
+    }
 
     if (!root) {
       const wantsMarker =
@@ -1627,16 +1648,15 @@ export function createEditorViewport(
     }
 
     // Armed entity placement: click floor (or stack on mesh) to place on surface top.
+    // Default = place once then return to select. Hold Shift to keep placing.
     if (pendingPlaceKind) {
       const placedPt = pickPlacePoint(true);
       const p = placedPt?.point ?? groundHits[0]?.point;
       if (p) {
         const kind = pendingPlaceKind;
         const model = pendingPlaceModel;
-        // Keep armed for multi-place unless Shift is held to place-once.
-        if (ev.shiftKey) {
-          pendingPlaceKind = null;
-          pendingPlaceModel = undefined;
+        if (!ev.shiftKey) {
+          setPendingPlace(null);
         }
         placeAt(p, kind, model);
         updateCursor();
@@ -1963,6 +1983,15 @@ export function createEditorViewport(
       paintTextureUrl = url;
     },
     setEditTool: (tool) => {
+      // Clear armed entity placement when switching to a paint/place tool.
+      // Select does NOT clear here — Select button / Esc / V call clearPendingPlace
+      // so placeSpawn can leave the tool on Select while still armed.
+      if (
+        pendingPlaceKind &&
+        (tool === 'brush' || tool === 'bucket' || tool === 'hammer' || tool === 'paint')
+      ) {
+        setPendingPlace(null);
+      }
       editTool = tool;
       bucketPainting = false;
       lastPaintCellKey = null;
@@ -2050,31 +2079,43 @@ export function createEditorViewport(
     },
     placeSpawn: (kind) => {
       // Click-to-place on the floor — not camera-forward dump.
-      pendingPlaceKind = kind;
-      pendingPlaceModel = undefined;
-      if (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer') {
+      setPendingPlace(kind);
+      if (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer' || editTool === 'brush') {
         editTool = 'select';
       }
       if (freeFly) setFreeFly(false);
       applyToolCameraLock();
       updateCursor();
-      handlers.onPlaceResult?.('ok', `Click floor to place ${entityKindLabel(kind)}`);
+      handlers.onPlaceResult?.(
+        'ok',
+        `Click once to place ${entityKindLabel(kind)} (Shift+click keeps placing)`
+      );
     },
     placeEntity: (kind, model) => {
-      pendingPlaceKind = kind;
-      pendingPlaceModel = model;
-      if (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer') {
+      // Player avatar is platform settings — never arm map placement.
+      if (isPlatformPlayerKind(kind)) {
+        handlers.onPlaceResult?.(
+          'ok',
+          'Player Model is platform settings — open Player Model from the top bar'
+        );
+        return;
+      }
+      setPendingPlace(kind, model);
+      if (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer' || editTool === 'brush') {
         editTool = 'select';
       }
       if (freeFly) setFreeFly(false);
       applyToolCameraLock();
       updateCursor();
-      handlers.onPlaceResult?.('ok', `Click floor to place ${entityKindLabel(kind)}`);
+      handlers.onPlaceResult?.(
+        'ok',
+        `Click once to place ${entityKindLabel(kind)} (Shift+click keeps placing)`
+      );
     },
     armPlaceKind: (kind, model) => {
-      pendingPlaceKind = kind;
-      pendingPlaceModel = model;
-      if (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer') {
+      if (isPlatformPlayerKind(kind)) return;
+      setPendingPlace(kind, model);
+      if (editTool === 'bucket' || editTool === 'paint' || editTool === 'hammer' || editTool === 'brush') {
         editTool = 'select';
       }
       if (freeFly) setFreeFly(false);
@@ -2083,8 +2124,7 @@ export function createEditorViewport(
     },
     getPendingPlaceKind: () => pendingPlaceKind,
     clearPendingPlace: () => {
-      pendingPlaceKind = null;
-      pendingPlaceModel = undefined;
+      setPendingPlace(null);
       updateCursor();
     },
     stampEntities: (entities) => {

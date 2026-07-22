@@ -43,8 +43,8 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'spawns',
     title: 'Spawns, Player & Buttons',
-    body: 'Green START flag = where you spawn in Play Test / as Runner. Blue Player entity = avatar model + animations ONLY (not a spawn). Red = Trapper spawn. Yellow button = Interact (E) / Use.',
-    tip: 'Place floors with Solid on, then START on that floor, then configure Player Model. Play Test without START feels empty.',
+    body: 'Green START flag = runner spawn marker (click once to place; Select/Esc cancels). Player Model (top bar) = platform-wide avatar look & animations — it does NOT place anything on the map. Red = Trapper spawn. Yellow button = Interact (E) / Use.',
+    tip: 'Place floors with Solid on, then START on that floor, then open Player Model for the avatar. Hammer solids only need Material + size in Properties.',
   },
   {
     id: 'anim',
