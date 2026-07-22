@@ -10,7 +10,7 @@ _Last updated: 2026-07-22 (branch `cursor/home-daily-missions-count-200f`)_
 
 Full checklist with env vars also lives in the root [`README.md`](../README.md).
 
-1. Admin → **Dashboard → Sync database schema** (`2026-07-22-match-rewards-audit`)
+1. Admin → **Dashboard → Sync database schema** (`2026-07-22-party-seasons`)
 2. Admin → **Dashboard → Load built-in Kilrun defaults** (seed progression)
 3. **Restart Colyseus** — Admin → Dashboard → **Restart Colyseus** (or redeploy the game server). Requires `GAME_SERVER_ADMIN_SECRET` on both web + game server.
 4. Map Editor: set **Active** map for Deathrun / Horde / Competitive
@@ -57,9 +57,9 @@ Full checklist with env vars also lives in the root [`README.md`](../README.md).
 |------|--------|-------------|
 | **Stripe $2.99 checkout** | Deferred | Placeholder support-ticket flow; VP Premium path is real |
 | **Deep anti-cheat** | Deferred | Pulsar + Premium Ranked gate only for now |
-| **Party / party queue** | Not built | Solo joinOrCreate only |
-| **Dedicated Ranked season resets** | Not built | Peak ranks persist; no soft reset seasons |
-| **Horde monster AI polish** | Basic | Playable waves; balance / bosses can iterate |
+| **Party / party queue** | Done | Faceit-style party panel + shared room follow; Horde waits for 4 |
+| **Dedicated Ranked season resets** | Done | Admin → Ranks: season config + End season (keeps peak KP/rank) |
+| **Horde monster AI polish** | Improved | Separation + attack-range stop; further polish iterative |
 | **Mobile Ranked UX** | Works via hub | Same queues; touch controls shared with Deathrun |
 
 ---
