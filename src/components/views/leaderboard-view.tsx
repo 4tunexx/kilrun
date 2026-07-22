@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Crown, Gem, Loader2, Medal, Trophy } from 'lucide-react';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
+import { RankLabel } from '@/components/ui/rank-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,7 +15,8 @@ import {
   type LeaderboardRow,
   type LeaderboardSort,
 } from '@/lib/social-actions';
-import { recordLeaderboardVisit } from '@/lib/progression-actions';
+import { getSiteSettings, recordLeaderboardVisit } from '@/lib/progression-actions';
+import { parseRankConfig, type RankTierDef } from '@/lib/rank-config';
 import { getLevelFromXp } from '@/lib/progression';
 import { UserHoverCard } from '@/components/user-hover-card';
 import { useProfileNavigation } from '@/components/providers/profile-navigation-context';
@@ -43,12 +45,23 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
   const [friendMap, setFriendMap] = useState<Record<string, FriendStatus>>({});
   const [loading, setLoading] = useState(true);
   const [addingId, setAddingId] = useState<string | null>(null);
+  const [rankTiers, setRankTiers] = useState<RankTierDef[] | undefined>();
+  const [seasonName, setSeasonName] = useState<string | null>(null);
   const { toast } = useToast();
   const { openProfile } = useProfileNavigation();
 
   useEffect(() => {
     void recordLeaderboardVisit().catch(() => {});
     void getMyFriendshipMap().then(setFriendMap).catch(() => {});
+    void getSiteSettings()
+      .then((s) => {
+        const cfg = parseRankConfig(
+          (s as { rankConfigJson?: string }).rankConfigJson ?? '{}'
+        );
+        setRankTiers(cfg.tiers);
+        setSeasonName(cfg.seasonName || null);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -93,6 +106,7 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
 
       <p className="text-xs text-slate-400 -mt-3">
         {SORT_TABS.find((t) => t.id === sort)?.hint}
+        {sort === 'ranked' && seasonName ? ` · ${seasonName}` : ''}
       </p>
 
       {loading ? (
@@ -114,6 +128,7 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
               place={2}
               sort={sort}
               userId={userId}
+              rankTiers={rankTiers}
               className="order-1 w-[30%] max-w-[11rem]"
               pedestalClass="h-16 sm:h-20 bg-slate-600/50 border-slate-400/30"
             />
@@ -122,6 +137,7 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
               place={1}
               sort={sort}
               userId={userId}
+              rankTiers={rankTiers}
               className="order-2 w-[36%] max-w-[13rem] -mt-4"
               pedestalClass="h-24 sm:h-28 bg-amber-500/25 border-amber-400/40"
               crown
@@ -131,6 +147,7 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
               place={3}
               sort={sort}
               userId={userId}
+              rankTiers={rankTiers}
               className="order-3 w-[30%] max-w-[11rem]"
               pedestalClass="h-12 sm:h-16 bg-orange-700/30 border-orange-500/30"
             />
@@ -151,6 +168,7 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
                   row={row}
                   sort={sort}
                   userId={userId}
+                  rankTiers={rankTiers}
                   friendMap={friendMap}
                   addingId={addingId}
                   setAddingId={setAddingId}
@@ -195,9 +213,34 @@ function metricLine(row: LeaderboardRow, sort: LeaderboardSort) {
   if (sort === 'vp') return `${(row.vpCurrency ?? 0).toLocaleString()} VP`;
   if (sort === 'stats')
     return `${row.wins} W · ${row.kills} K · ${row.kd.toFixed(2)} K/D`;
-  if (sort === 'ranked')
-    return `${(row.kp ?? 0).toLocaleString()} KP · ${row.currentRank || 'Unranked'}`;
+  if (sort === 'ranked') return `${(row.kp ?? 0).toLocaleString()} KP`;
   return `Lv ${getLevelFromXp(row.xpProgress)} · ${row.xpProgress.toLocaleString()} XP`;
+}
+
+function RowRankLabel({
+  rank,
+  tiers,
+  size = 12,
+  textClassName = 'text-xs',
+}: {
+  rank?: string | null;
+  tiers?: RankTierDef[];
+  size?: number;
+  textClassName?: string;
+}) {
+  const name = rank || 'Unranked';
+  if (name === 'Go Premium') {
+    return <span className="text-amber-300/90">Go Premium</span>;
+  }
+  return (
+    <RankLabel
+      rank={name}
+      tiers={tiers}
+      size={size}
+      textClassName={textClassName}
+      className="min-w-0"
+    />
+  );
 }
 
 function PodiumSeat({
@@ -205,6 +248,7 @@ function PodiumSeat({
   place,
   sort,
   userId,
+  rankTiers,
   className,
   pedestalClass,
   crown,
@@ -213,6 +257,7 @@ function PodiumSeat({
   place: 1 | 2 | 3;
   sort: LeaderboardSort;
   userId?: string;
+  rankTiers?: RankTierDef[];
   className?: string;
   pedestalClass: string;
   crown?: boolean;
@@ -271,9 +316,15 @@ function PodiumSeat({
           You
         </Badge>
       )}
-      <p className="text-[10px] sm:text-xs text-slate-400 mt-1 px-1 leading-snug">
-        {metricLine(row, sort)}
-      </p>
+      <div className="text-[10px] sm:text-xs text-slate-400 mt-1 px-1 leading-snug flex flex-col items-center gap-0.5">
+        <span>{metricLine(row, sort)}</span>
+        <RowRankLabel
+          rank={row.currentRank}
+          tiers={rankTiers}
+          size={place === 1 ? 14 : 12}
+          textClassName="text-[10px] sm:text-xs"
+        />
+      </div>
       <div className={cn('mt-3 w-full rounded-t-lg border-t border-x', pedestalClass)} />
     </div>
   );
@@ -283,6 +334,7 @@ function RankRow({
   row,
   sort,
   userId,
+  rankTiers,
   friendMap,
   addingId,
   setAddingId,
@@ -293,6 +345,7 @@ function RankRow({
   row: LeaderboardRow;
   sort: LeaderboardSort;
   userId?: string;
+  rankTiers?: RankTierDef[];
   friendMap: Record<string, FriendStatus>;
   addingId: string | null;
   setAddingId: (id: string | null) => void;
@@ -356,10 +409,20 @@ function RankRow({
               </span>
             )}
           </p>
-          <p className="text-xs text-slate-400">
-            {sort === 'ranked'
-              ? metricLine(row, sort)
-              : `${row.currentRank || 'Unranked'} · ${metricLine(row, sort)}`}
+          <p className="text-xs text-slate-400 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+            {sort === 'ranked' ? (
+              <>
+                <span className="tabular-nums">{metricLine(row, sort)}</span>
+                <span className="text-slate-600">·</span>
+                <RowRankLabel rank={row.currentRank} tiers={rankTiers} />
+              </>
+            ) : (
+              <>
+                <RowRankLabel rank={row.currentRank} tiers={rankTiers} />
+                <span className="text-slate-600">·</span>
+                <span className="tabular-nums">{metricLine(row, sort)}</span>
+              </>
+            )}
           </p>
         </div>
         <div className="flex gap-2 w-full sm:w-auto">

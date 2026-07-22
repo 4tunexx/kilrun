@@ -45,6 +45,7 @@ import {
 } from '@/lib/showcase';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { getSiteUrl } from '@/lib/site-url';
 
 type Editor = NonNullable<Awaited<ReturnType<typeof getMyShowcaseEditor>>>;
 
@@ -87,8 +88,7 @@ export function ShowcaseEditor() {
     reload();
   }, []);
 
-  const embedOrigin =
-    typeof window !== 'undefined' ? window.location.origin : 'https://kilrun.com';
+  const embedOrigin = getSiteUrl();
   const embedUrl = data?.preview?.id
     ? `${embedOrigin}/embed/profile/${data.preview.id}`
     : '';

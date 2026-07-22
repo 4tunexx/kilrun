@@ -1,69 +1,57 @@
 # Kilrun
 
-Kilrun is a real-time multiplayer arcade shooter built on Next.js 15, with an authoritative Colyseus game server and a PixiJS 2.5D isometric renderer. Players sign in with Steam, optionally verify their email for a welcome bonus, and drop into fast CS 1.6-inspired game modes.
+Kilrun is a real-time multiplayer arcade hub built on Next.js 15, with an authoritative Colyseus game server and a Three.js 3D client. Players sign in with Steam, optionally verify email for a welcome bonus, and play Deathrun, Horde, and Competitive (casual + ranked).
 
 ## Game modes
 
 | Mode | Status | Description |
 | --- | --- | --- |
-| **Deathrun** | Live | 1 random player is the **Trapper** (controls traps), everyone else are **Runners** racing an obstacle course to the finish line. |
-| **Horde** | Coming soon | Solo or co-op waves of AI enemies. |
-| **Competitive** | Coming soon | 4v4 team elimination. |
+| **Deathrun** | Live | 1 random **Trapper** controls traps; **Runners** race the course. |
+| **Horde** | Live | Co-op wave survival against AI monsters. |
+| **Competitive Casual** | Live | Team elimination — XP/VP, no KP. |
+| **Competitive Ranked** | Live | Premium (or free Ranked week) — KP Elo ladder. |
 
 ## Tech stack
 
 - **Frontend**: Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS, ShadCN UI
-- **Auth**: Steam OpenID 2.0 + NextAuth.js v5 (primary login), Clerk (secondary email verification/OTP)
-- **Database**: MongoDB Atlas via Prisma ORM
-- **Realtime game server**: [Colyseus](https://colyseus.io/) (authoritative state sync) -- see [`server/README.md`](./server/README.md)
-- **Game rendering**: [PixiJS](https://pixijs.com/) 2.5D isometric renderer, client-predicted input over a networked room
+- **Auth**: Steam OpenID 2.0 + NextAuth.js v5 (primary), Clerk (email OTP verification)
+- **Database**: MongoDB Atlas via Prisma ORM (`db push` — no SQL migration history)
+- **Realtime game server**: [Colyseus](https://colyseus.io/) — see [`server/README.md`](./server/README.md)
+- **Game rendering**: Three.js world + map/model editors (Pixi isometric path removed)
 
 ## Project structure
 
 ```
 src/
-  app/                        # Next.js routes (pages, API routes, webhooks)
+  app/                        # Next.js routes + API
     api/auth/steam/           # Steam OpenID login + callback
-    api/webhooks/clerk/       # Syncs Clerk user.created -> MongoDB
-    verify-email/             # Arcade-themed email OTP verification UI
+    api/webhooks/clerk/       # Email verification webhook
+    api/game/match-result/    # Colyseus → hub server-authored rewards
   components/
-    game/                     # Client-side game engine (mode-agnostic + Deathrun)
-      editor/                 # Map editor, Model Editor (skins/weapons), Play Test
-      net/                    # Colyseus connection + React state bridge
-      renderer/               # Three.js world, camera, overlays
-      entities/               # Player/obstacle visual representations
-      input/                  # Keyboard/mouse + mobile dual-joystick input
-      modes/deathrun/         # Deathrun-specific HUD, lobby, countdown, results
-      ui/                     # Shared HUD, crosshair
-    views/                    # App screens (play, lobby, profile, dashboard)
-  lib/                        # Prisma client, server actions, player-skins, weapons
-  auth.ts, middleware.ts      # NextAuth + Clerk middleware
-docs/
-  MODEL_EDITOR_AND_SKINS.md   # Skins / weapons pipeline + later stages
-  MAP_EDITOR_AND_PHYSICS_AUDIT.md
+    game/                     # Engine, net, Three.js renderer, modes, editors
+    views/                    # Hub screens + admin panels
+  lib/                        # Server actions, progression, prisma, join tokens
 prisma/
-  schema.prisma               # User, Mission, MatchResult models (MongoDB)
-server/                       # Separate deployable: Colyseus game server
-  src/rooms/                  # Room logic (DeathrunRoom, ...)
-  src/schema/                 # Networked state schema
-  src/sim/                    # Server-authoritative movement/collision/maps
+  schema.prisma               # MongoDB models
+server/                       # Separate Colyseus deployable
+docs/
+  AUDIT.md                    # Modes / Premium / ranks / deploy checklist
+  MODEL_EDITOR_AND_SKINS.md
+  MAP_EDITOR_AND_PHYSICS_AUDIT.md
 ```
-
-### Cosmetics & Model Editor
-
-Player skins (hats, gear, weapons, tails, etc.) are authored in the **Model Editor** inside the map editor, published to the shop, and equipped via inventory. See **[`docs/MODEL_EDITOR_AND_SKINS.md`](./docs/MODEL_EDITOR_AND_SKINS.md)** for the full pipeline and what is still planned for the game server (authoritative weapon damage, remote skin sync).
 
 ## Getting started
 
-1. Copy `.env.example` to `.env` and fill in your own values (MongoDB Atlas connection string, Steam API key, Clerk keys, etc).
-2. Install dependencies and generate the Prisma client:
+1. Copy `.env.example` → `.env` and fill values (MongoDB, Steam, Clerk, secrets).
+2. Install and push schema:
 
    ```bash
    npm install
    npm run db:push
+   npm run db:seed   # optional local seed
    ```
 
-3. Run the Next.js app:
+3. Hub:
 
    ```bash
    npm run dev
@@ -71,54 +59,123 @@ Player skins (hats, gear, weapons, tails, etc.) are authored in the **Model Edit
 
    Open [http://localhost:3000](http://localhost:3000).
 
-4. (Optional, for live Deathrun matches) Run the game server in a second terminal:
+4. Game server (second terminal):
 
    ```bash
-   cd server
-   npm install
-   npm run dev
+   cd server && npm install && npm run dev
    ```
 
-   See [`server/README.md`](./server/README.md) for full game server docs and free/paid deployment options (Koyeb, Fly.io, Railway).
+   See [`server/README.md`](./server/README.md).
 
 ## Scripts
 
-- `npm run dev` — Start the Next.js development server (Turbopack)
-- `npm run build` — Create a production build
-- `npm run start` — Run the production server
-- `npm run lint` — Run ESLint
-- `npm run typecheck` — Run TypeScript checks
-- `npm run db:push` — Push the Prisma schema to MongoDB Atlas
-- `npm run db:seed` — Seed the database
+| Script | Purpose |
+| --- | --- |
+| `npm run dev` | Next.js (Turbopack) |
+| `npm run build` / `start` | Production build / serve |
+| `npm run typecheck` | TypeScript (`tsc --noEmit`) — **preferred CI gate** |
+| `npm run lint` | ESLint via `next lint` |
+| `npm test` | Vitest unit tests |
+| `npm run db:push` | Push Prisma schema to MongoDB |
+| `npm run db:seed` | Seed progression catalogs locally |
 
 ## Environment variables
 
-See `.env.example` for the full list with comments. In short:
+See `.env.example` for the full commented list.
 
-| Variable | Required | Purpose |
+| Variable | Where | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | Yes | MongoDB Atlas connection string (Prisma) |
-| `STEAM_API_KEY` | Recommended | Enriches player profile (username/avatar) after Steam login |
-| `AUTH_SECRET` | Yes | NextAuth/Auth.js session signing secret |
-| `NEXTAUTH_URL` | Local dev only | Not used to derive redirect origin/cookies in production (see note below) |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` / `CLERK_WEBHOOK_SECRET` | Yes (for email verification) | Clerk email-OTP verification layer |
-| `NEXT_PUBLIC_GAME_SERVER_URL` | Yes (for Deathrun) | WebSocket URL of the deployed Colyseus server |
-| `ADMIN_STEAM_IDS` | Recommended | Comma-separated SteamID64 values promoted to `admin` on login |
+| `DATABASE_URL` | Web | MongoDB Atlas (use `maxPoolSize=1` on Vercel) |
+| `AUTH_SECRET` | Web | NextAuth session signing |
+| `STEAM_API_KEY` | Web | Profile username/avatar after Steam login |
+| `NEXT_PUBLIC_SITE_URL` | Web | Canonical site origin (emails, embeds) |
+| `NEXT_PUBLIC_CLERK_*` / `CLERK_*` | Web | Email OTP verification |
+| `NEXT_PUBLIC_GAME_SERVER_URL` | Web | `ws://` / `wss://` Colyseus URL (build-time) |
+| `GAME_SERVER_ADMIN_SECRET` | **Web + game** | Restart Colyseus + authorize match-result POSTs |
+| `GAME_JOIN_TOKEN_SECRET` | **Web + game** | HMAC join tokens (falls back to admin secret) |
+| `WEB_APP_URL` | **Game** | HTTPS origin of Next.js so Colyseus can POST `/api/game/match-result` |
+| `CLIENT_ORIGIN` | Game | CORS + fallback for `WEB_APP_URL` |
+| `ADMIN_STEAM_IDS` | Web | Extra SteamID64s promoted to admin (owner `76561198001993310` is always admin in code) |
 
-> **Note on Steam auth in production**: the Steam login/callback routes derive the redirect origin and secure-cookie flag directly from the incoming request (`req.nextUrl`), not from `NEXTAUTH_URL`. This avoids a class of bugs where a stale/unset `NEXTAUTH_URL` causes Steam to redirect to the wrong domain, or the session cookie's `__Secure-` prefix to mismatch what Auth.js expects.
+> **Steam auth on Vercel**: login/callback derive origin + secure cookies from the request (`req.nextUrl`), not from `NEXTAUTH_URL`.
 
-> **Note on Prisma + serverless**: `src/lib/prisma.ts` always caches the `PrismaClient` singleton on `globalThis`, in every environment. Vercel reuses the same warm serverless instance across requests; without this cache, each request would spin up a brand-new client with its own MongoDB connection pool that never closed, eventually exhausting Atlas's connection limit. On connection failures it recreates the client once (so a poisoned warm instance can recover) and defaults `maxPoolSize=1` on the connection string when unset.
+> **MongoDB Atlas**: Network Access must allow `0.0.0.0/0` for Vercel; cluster must not be paused; set `DATABASE_URL` with `maxPoolSize=1`.
 
-> **MongoDB Atlas checklist (required for Steam login on Vercel)**:
-> 1. **Network Access** → Add IP Access List entry `0.0.0.0/0` (allow from anywhere). Vercel serverless IPs are dynamic; locking to a single IP will cause Steam callback `prisma.user.findUnique()` to fail with `Server selection timeout` / `received fatal alert: InternalError`.
-> 2. Confirm the Atlas cluster is **not paused**.
-> 3. Set `DATABASE_URL` in the Vercel project env (same value as local `.env`), including `maxPoolSize=1`.
-> 4. Redeploy after changing Atlas Network Access or `DATABASE_URL`.
+---
+
+## Admin panel (post-deploy checklist)
+
+Admins open the hub → **Admin**. Owner Steam ID is always promoted on login; add others via `ADMIN_STEAM_IDS`.
+
+### After every schema / progression deploy
+
+1. **Admin → Dashboard → Sync database schema**  
+   - Runs `prisma db push` when the CLI is available, then verifies writable fields (KP, peak ranks, Premium, rank config, MatchResult, `equippedSkins`, etc.).  
+   - Expected version constant: `2026-07-22-party-seasons` (see `src/lib/admin-db-sync.ts`).  
+   - Dashboard shows **up to date** / **needs sync**. Safe on Mongo — does not wipe players.  
+   - If cloud map publish fails with missing `GameMap`, run this sync first.  
+   - Sync also creates the `Party` collection (invite-code squad queue).
+
+2. **Admin → Dashboard → Load built-in Kilrun defaults** (Seed progression)  
+   - Upserts mission / achievement / badge / shop catalog seeds. Does **not** delete player data.  
+   - Also supports **Upload SQL / JSON seed** for custom catalogs.
+
+3. **Admin → Dashboard → Restart Colyseus**  
+   - Soft-restarts the game server (`POST /admin/restart`).  
+   - Requires `GAME_SERVER_ADMIN_SECRET` on **both** web and game server, plus `NEXT_PUBLIC_GAME_SERVER_URL`.
+
+4. **Admin → Map Editor**  
+   - Set an **Active** map for Deathrun / Horde / Competitive after deploy.
+
+### Matchmaking notes
+
+- **Horde** waits for **4 players** before auto-start. Admins can **Launch now** from the lobby with 1+ players.
+- **Party** (Play view): invite **Steam friends** (needs public Steam friends list + `STEAM_API_KEY`) and hub friends, or share a 6-char code. Leader queues; members follow into the same room. Notifications have **Accept** for party invites.
+- **Ranked seasons** (Admin → Ranks): set season name / dates / KP reset; **End season & reset KP** keeps peak KP/rank and bumps `seasonId`.
+
+### Admin tabs (what each is for)
+
+| Tab | Who | What |
+| --- | --- | --- |
+| **Dashboard** | Admin | Schema sync, seed/import, Colyseus restart, service toggles (game/chat), audit snapshot |
+| **Site** | Admin | Logos, hero, background, hub layout / nav / chrome |
+| **Users** | Staff | Lookup players, adjust VP (**admin only**), inspect inventory |
+| **Moderation** | Staff | Ban / mute (mods cannot ban/mute other staff; admins can) |
+| **Audit** | Staff | Staff action log |
+| **Awards** | Admin | Award XP / VP / badges |
+| **Missions / Achievements / Badges** | Staff | Edit definitions |
+| **Support** | Staff | Tickets |
+| **Shop** | Staff | Catalog, fire sales, cosmetics |
+| **Premium** | Admin | VP/$ prices, offers, free Ranked week |
+| **Ranks** | Admin | KP tiers, badge images, matchmaking wait / min same-rank, **ranked seasons** |
+| **Map Editor** | Admin | Per-mode maps + Active publish (needs schema sync) |
+| **Content** | Staff | News / guides |
+
+### Local vs production schema
+
+| Environment | How to sync |
+| --- | --- |
+| Local | `npm run db:push` (and optional `npm run db:seed`) |
+| Production (Vercel) | Prefer **Admin → Sync database schema** (no laptop CLI required). Field verify still runs if Prisma CLI is missing on serverless. |
+
+---
+
+## Match rewards & join security
+
+- **Join**: hub mints a short-lived HMAC token (`mintMyGameJoinToken`); Colyseus `onAuth` verifies admin / Premium / KP claims when a join secret is configured.
+- **Rewards**: when a match ends, Colyseus POSTs to `${WEB_APP_URL}/api/game/match-result` with `GAME_SERVER_ADMIN_SECRET`. Results UI prefers room `xpEarned` / `vpEarned`; client `record*` is a local/dev fallback only.
+- Set on the **game server**: `WEB_APP_URL=https://your-app.vercel.app` and the same `GAME_SERVER_ADMIN_SECRET` as Vercel.
 
 ## Deployment
 
-- **Production domain**: set Vercel **Production Branch** to `main`. Only merges into `main` update `https://kilrun.vercel.app/`. Pull request previews use temporary URLs like `kilrun-xxx.vercel.app` — those are for testing, not the live site.
-- After merging a PR: Vercel auto-deploys Production to `kilrun.vercel.app` (or trigger **Redeploy** on the Production deployment).
-- **Frontend**: deploy to Vercel. Set all env vars above in the Vercel project settings (values from `.env` are not synced automatically). Steam login and the Clerk webhook both require the deployed HTTPS origin to be reachable.
-- Set `ADMIN_STEAM_IDS` to your SteamID64 so your account becomes `admin` on login and can open the Admin Panel.
-- **Game server**: deploy separately (Vercel cannot run always-on WebSocket processes) -- see [`server/README.md`](./server/README.md) for step-by-step instructions for Koyeb (free), Fly.io, and Railway.
+- **Production branch**: `main` → `https://kilrun.vercel.app/`
+- **Web**: Vercel — set all web env vars; redeploy after changing `NEXT_PUBLIC_*`
+- **Game server**: always-on host (Koyeb / Fly / Railway) — see [`server/README.md`](./server/README.md)
+- After merge: run Admin **Sync database schema** + **Seed defaults** + **Restart Colyseus** + set Active maps
+
+## Further docs
+
+- [`docs/AUDIT.md`](./docs/AUDIT.md) — modes, Premium, ranks, remaining product gaps (Stripe / anticheat deferred)
+- [`docs/MODEL_EDITOR_AND_SKINS.md`](./docs/MODEL_EDITOR_AND_SKINS.md)
+- [`docs/MAP_EDITOR_AND_PHYSICS_AUDIT.md`](./docs/MAP_EDITOR_AND_PHYSICS_AUDIT.md)
+- [`server/README.md`](./server/README.md)

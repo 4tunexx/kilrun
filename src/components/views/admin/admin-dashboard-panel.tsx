@@ -453,14 +453,10 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-slate-400">
-              After deploying schema changes (KP, peak ranks, Premium, rank config, MatchResult, skins), press this once
-              so Mongo gets the new fields. Also run <strong>Seed progression</strong> below for Horde /
-              Competitive missions &amp; badges.
-              so Mongo gets the latest Prisma fields (
-              <code className="text-slate-300">User.kp</code>,{' '}
-              <code className="text-slate-300">MatchResult.kpDelta</code>,{' '}
-              <code className="text-slate-300">equippedSkins</code>
-              ). No CLI needed on your laptop.
+              After deploying schema changes (KP, peak ranks, Premium, rank config, MatchResult,
+              equippedSkins), press this once so Mongo gets the new fields. No CLI needed on your
+              laptop. Then run <strong>Seed progression</strong> below for Horde / Competitive
+              missions &amp; badges.
             </p>
             <div className="rounded-lg border border-slate-700/50 bg-slate-950/40 px-3 py-2 text-xs text-slate-400 space-y-1">
               <p>

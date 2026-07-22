@@ -10,6 +10,7 @@ import {
   resolveMarkLogo,
 } from '@/lib/branding';
 import { getLandingPageData } from '@/lib/actions';
+import { getSiteUrl } from '@/lib/site-url';
 
 interface ClerkEmailAddress {
   id: string;
@@ -113,9 +114,7 @@ async function handleEmailCreated(data: ClerkEmailCreatedData) {
   }
 
   try {
-    const site = (
-      process.env.NEXT_PUBLIC_SITE_URL || 'https://kilrun.vercel.app'
-    ).replace(/\/$/, '');
+    const site = getSiteUrl();
 
     const toAbsolute = (pathOrUrl: string, fallbackPath: string) => {
       const v = pathOrUrl?.trim() || fallbackPath;
@@ -188,9 +187,8 @@ function extractOtpFromText(text: string): string | null {
 }
 
 async function handleUserEmailVerified(data: ClerkUserData) {
-  const steamId =
-    (data.unsafe_metadata?.steamId as string | undefined) ??
-    (data.public_metadata?.steamId as string | undefined);
+  // Only trust public_metadata — unsafe_metadata is client-writable.
+  const steamId = data.public_metadata?.steamId as string | undefined;
 
   const primaryEmail =
     data.email_addresses.find((e) => e.id === data.primary_email_address_id)
@@ -227,7 +225,10 @@ async function handleUserEmailVerified(data: ClerkUserData) {
   if (!alreadyVerified) {
     try {
       const { processWebsiteAction } = await import('@/lib/progression-actions');
-      await processWebsiteAction(existing.id, 'email');
+      const { runAsTrustedServer } = await import('@/lib/trusted-server');
+      await runAsTrustedServer(async () => {
+        await processWebsiteAction(existing.id, 'email');
+      });
     } catch (err) {
       console.error('[clerk webhook] email progression failed', err);
     }

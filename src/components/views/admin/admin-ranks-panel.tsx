@@ -7,7 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ImageUploadField } from '@/components/ui/image-upload-field';
-import { getSiteSettings, updateSiteSettings } from '@/lib/progression-actions';
+import {
+  adminEndRankedSeason,
+  getSiteSettings,
+  updateSiteSettings,
+} from '@/lib/progression-actions';
 import {
   DEFAULT_RANK_CONFIG,
   parseRankConfig,
@@ -34,6 +38,8 @@ export function AdminRanksPanel() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [endingSeason, setEndingSeason] = useState(false);
+  const [nextSeasonName, setNextSeasonName] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +77,38 @@ export function AdminRanksPanel() {
     }
   };
 
+  const endSeason = async () => {
+    if (
+      !window.confirm(
+        `End ${cfg.seasonName} and reset all players to KP ${cfg.seasonKpResetTo}? Peak KP / peak ranks are kept.`
+      )
+    ) {
+      return;
+    }
+    setEndingSeason(true);
+    try {
+      const result = await adminEndRankedSeason({
+        nextSeasonName: nextSeasonName.trim() || undefined,
+      });
+      const s = await getSiteSettings();
+      setCfg(
+        parseRankConfig((s as { rankConfigJson?: string }).rankConfigJson ?? '{}')
+      );
+      setNextSeasonName('');
+      toast({
+        title: 'Season ended',
+        description: `Reset ${result.playersReset} players → ${result.seasonName}`,
+      });
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Season end failed',
+        variant: 'destructive',
+      });
+    } finally {
+      setEndingSeason(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-slate-400 py-10 justify-center">
@@ -81,6 +119,94 @@ export function AdminRanksPanel() {
 
   return (
     <div className="space-y-4">
+      <Card className="bg-slate-900/50 border-amber-500/30">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Medal className="h-4 w-4 text-amber-300" />
+            Ranked season
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label>Season name</Label>
+            <Input
+              value={cfg.seasonName}
+              onChange={(e) =>
+                setCfg((c) => ({ ...c, seasonName: e.target.value }))
+              }
+            />
+            <p className="text-[11px] text-slate-500">
+              Shown on the Ranked leaderboard and Premium page. Id: {cfg.seasonId}
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>KP reset to (on season end)</Label>
+            <Input
+              type="number"
+              min={0}
+              value={cfg.seasonKpResetTo}
+              onChange={(e) =>
+                setCfg((c) => ({
+                  ...c,
+                  seasonKpResetTo: Math.max(0, Number(e.target.value) || 0),
+                }))
+              }
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Season starts at (ISO, optional)</Label>
+            <Input
+              value={cfg.seasonStartsAt ?? ''}
+              placeholder="2026-07-01T00:00:00.000Z"
+              onChange={(e) =>
+                setCfg((c) => ({
+                  ...c,
+                  seasonStartsAt: e.target.value.trim() || null,
+                }))
+              }
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Season ends at (ISO, optional)</Label>
+            <Input
+              value={cfg.seasonEndsAt ?? ''}
+              placeholder="2026-09-30T23:59:59.000Z"
+              onChange={(e) =>
+                setCfg((c) => ({
+                  ...c,
+                  seasonEndsAt: e.target.value.trim() || null,
+                }))
+              }
+            />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Next season name (when ending)</Label>
+            <div className="flex flex-wrap gap-2">
+              <Input
+                value={nextSeasonName}
+                placeholder="Season 2"
+                onChange={(e) => setNextSeasonName(e.target.value)}
+                className="max-w-xs"
+              />
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={endingSeason}
+                onClick={() => void endSeason()}
+              >
+                {endingSeason ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                End season & reset KP
+              </Button>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Keeps peakKp / peakRank for every player. Saves a new season id automatically.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="bg-slate-900/50 border-amber-500/30">
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">

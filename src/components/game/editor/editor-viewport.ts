@@ -918,14 +918,24 @@ export function createEditorViewport(
       const showSolid = entityExportsAsPlatform(ent);
       if (drawCollision && showSolid && !isHz) {
         const color = ent.jumpPad?.enabled || ent.kind === 'jump_pad' ? 0x38bdf8 : 0x22c55e;
+        const hammerVol =
+          ent.primitive === 'box' || ent.model === HAMMER_SOLID_MODEL;
+        // Hammer solids are full volumes — show full-height wire, not flat pad.
         const pad =
-          (root && makeBoundsWireBox(root, color, { flattenY: true })) ||
+          (root &&
+            makeBoundsWireBox(root, color, {
+              flattenY: !hammerVol,
+            })) ||
           (() => {
+            const foot = ent.collisionSize ?? [2, 0.25, 2];
+            const hy = hammerVol
+              ? Math.max(0.4, Math.abs(foot[1] * (ent.scale?.[1] ?? 1)))
+              : 0.08;
             const m = new THREE.Mesh(
               new THREE.BoxGeometry(
-                Math.max(0.5, Math.abs(ent.scale[0]) * 2),
-                0.08,
-                Math.max(0.5, Math.abs(ent.scale[2]) * 2)
+                Math.max(0.5, Math.abs((ent.collisionSize?.[0] ?? ent.scale[0]) * (hammerVol ? 1 : 2))),
+                hy,
+                Math.max(0.5, Math.abs((ent.collisionSize?.[2] ?? ent.scale[2]) * (hammerVol ? 1 : 2)))
               ),
               new THREE.MeshBasicMaterial({
                 color,
@@ -935,7 +945,11 @@ export function createEditorViewport(
                 depthTest: false,
               })
             );
-            m.position.set(ent.position[0], ent.position[1] + 0.04, ent.position[2]);
+            m.position.set(
+              ent.position[0],
+              ent.position[1] + (hammerVol ? hy * 0.5 : 0.04),
+              ent.position[2]
+            );
             return m;
           })();
         gizmoGroup.add(pad);

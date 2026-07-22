@@ -4,10 +4,10 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import {
   ensurePlayerMissions,
-  grantXp,
-  processMatchProgression,
 } from '@/lib/progression-actions';
+import { missionPeriodKey } from '@/lib/daily-missions';
 import { resolveShopImageUrl } from '@/lib/shop-images';
+import { canAccessAdmin } from '@/lib/roles';
 
 export type StatsSummary = {
   totalRuns: number;
@@ -33,6 +33,35 @@ async function requireSelfUserId(claimedUserId: string) {
   if (user.isBanned) throw new Error('Account banned');
   if (user.id !== claimedUserId) throw new Error('Forbidden');
   return user;
+}
+
+/** Read helpers: self or staff. */
+async function requireSelfOrStaffUserId(claimedUserId: string) {
+  const user = await getSessionUser();
+  if (!user) throw new Error('Not authenticated');
+  if (user.isBanned) throw new Error('Account banned');
+  if (user.id === claimedUserId) return user;
+  if (canAccessAdmin(user.role)) return user;
+  throw new Error('Forbidden');
+}
+
+const MATCH_RATE_LIMIT_MS = 15_000;
+
+async function assertMatchRateLimit(userId: string, mode: string) {
+  const recent = await prisma.matchResult.findFirst({
+    where: {
+      userId,
+      mode,
+      playedAt: { gte: new Date(Date.now() - MATCH_RATE_LIMIT_MS) },
+    },
+    orderBy: { playedAt: 'desc' },
+  });
+  if (recent) throw new Error('Too many requests');
+}
+
+function clampNonNegInt(value: number | undefined, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(max, Math.floor(value)));
 }
 
 /** Backfill StoreItem docs created before createdAt / sale fields existed. */
@@ -277,14 +306,27 @@ export async function getLandingPageData(): Promise<{
 
 /** A player's live mission board, replacing the old hardcoded mission arrays. */
 export async function getActiveMissions(userId: string) {
-  return prisma.activeMission.findMany({
+  const viewer = await requireSelfOrStaffUserId(userId);
+  // Reset today's daily board for self; staff viewing another player skips mutation.
+  if (viewer.id === userId) {
+    await ensurePlayerMissions(userId);
+  }
+  const rows = await prisma.activeMission.findMany({
     where: { userId },
     orderBy: [{ isCompleted: 'asc' }, { rewardXp: 'desc' }],
+  });
+  const today = missionPeriodKey();
+  return rows.filter((m) => {
+    const daily =
+      m.category === 'daily' || m.templateKey.startsWith('daily_');
+    if (!daily) return true;
+    return !m.periodKey || m.periodKey === today;
   });
 }
 
 /** Most recent deathrun sessions for a player, newest first. */
 export async function getMatchStats(userId: string, take = 10) {
+  await requireSelfOrStaffUserId(userId);
   return prisma.matchStat.findMany({
     where: { userId },
     orderBy: { datePlayed: 'desc' },
@@ -294,6 +336,7 @@ export async function getMatchStats(userId: string, take = 10) {
 
 /** Aggregate performance summary derived from real MatchStat telemetry. */
 export async function getStatsSummary(userId: string): Promise<StatsSummary> {
+  await requireSelfOrStaffUserId(userId);
   const stats = await prisma.matchStat.findMany({ where: { userId } });
 
   if (stats.length === 0) {
@@ -321,27 +364,22 @@ export async function recordMatchStat(input: {
   livesRemaining: number;
 }) {
   await requireSelfUserId(input.userId);
+  const score = clampNonNegInt(input.score, 1_000_000);
+  const distance = clampNonNegInt(input.distance, 100_000);
+  const livesRemaining = clampNonNegInt(input.livesRemaining, 99);
   return prisma.matchStat.create({
     data: {
       userId: input.userId,
-      score: input.score,
-      distance: input.distance,
-      livesRemaining: input.livesRemaining,
+      score,
+      distance,
+      livesRemaining,
     },
   });
 }
 
-const DEATHRUN_REWARDS: Record<'win' | 'loss' | 'survived' | 'eliminated', { xp: number; vp: number }> = {
-  win: { xp: 150, vp: 40 },
-  survived: { xp: 90, vp: 20 },
-  loss: { xp: 40, vp: 10 },
-  eliminated: { xp: 25, vp: 5 },
-};
-
 /**
- * Persists a mode-agnostic `MatchResult` for a finished Deathrun round and
- * credits the player's running XP/VP totals on `User`. Called by the
- * client's results screen the moment the Colyseus room reports `results`.
+ * Client/dev fallback: persist a Deathrun result when Colyseus could not reach
+ * the web API. Prefer server-authored awards via `/api/game/match-result`.
  */
 export async function recordDeathrunResult(input: {
   userId: string;
@@ -349,101 +387,101 @@ export async function recordDeathrunResult(input: {
   outcome: 'win' | 'loss' | 'survived' | 'eliminated';
   score?: number;
   distance?: number;
+  /** When set, skips duplicate if this match was already recorded. */
+  matchId?: string;
 }): Promise<{ xpEarned: number; vpEarned: number }> {
   await requireSelfUserId(input.userId);
-  const reward = DEATHRUN_REWARDS[input.outcome];
+  const {
+    applyServerMatchBatch,
+    findMatchResultByMatchId,
+  } = await import('@/lib/match-rewards');
 
-  await prisma.matchResult.create({
-    data: {
-      userId: input.userId,
-      mode: 'deathrun',
-      role: input.role,
-      outcome: input.outcome,
-      xpEarned: reward.xp,
-      vpEarned: reward.vp,
-    },
-  });
+  const matchId =
+    typeof input.matchId === 'string' && input.matchId.trim()
+      ? input.matchId.trim()
+      : `client-deathrun-${input.userId}-${Date.now()}`;
 
-  await prisma.user.update({
-    where: { id: input.userId },
-    data: {
-      vpCurrency: { increment: reward.vp },
-    },
-  });
+  if (input.matchId) {
+    const existing = await findMatchResultByMatchId(input.userId, matchId);
+    if (existing) {
+      return { xpEarned: existing.xpEarned, vpEarned: existing.vpEarned };
+    }
+  } else {
+    await assertMatchRateLimit(input.userId, 'deathrun');
+  }
 
-  await grantXp(input.userId, reward.xp, 'Deathrun match');
-  await processMatchProgression({
-    userId: input.userId,
+  const batch = await applyServerMatchBatch({
+    matchId,
     mode: 'deathrun',
-    outcome: input.outcome,
-    role: input.role,
-    score: input.score,
-    distance: input.distance,
+    players: [
+      {
+        userId: input.userId,
+        role: input.role,
+        outcome: input.outcome,
+        score: input.score,
+        distance: input.distance,
+      },
+    ],
   });
-
-  return { xpEarned: reward.xp, vpEarned: reward.vp };
+  const award = batch.players[0];
+  return {
+    xpEarned: award?.xpEarned ?? 0,
+    vpEarned: award?.vpEarned ?? 0,
+  };
 }
 
-const HORDE_REWARDS: Record<'win' | 'loss' | 'survived' | 'eliminated', { xp: number; vp: number }> = {
-  win: { xp: 160, vp: 45 },
-  survived: { xp: 110, vp: 30 },
-  loss: { xp: 45, vp: 12 },
-  eliminated: { xp: 30, vp: 8 },
-};
-
-/** Persist a finished Horde match + missions / achievements. */
+/** Client/dev fallback for Horde — prefer server-authored match-result API. */
 export async function recordHordeResult(input: {
   userId: string;
   outcome: 'win' | 'loss' | 'survived' | 'eliminated';
   wavesCleared?: number;
   kills?: number;
   score?: number;
+  matchId?: string;
 }): Promise<{ xpEarned: number; vpEarned: number }> {
   await requireSelfUserId(input.userId);
-  const reward = HORDE_REWARDS[input.outcome];
-  const bonusXp = Math.min(80, (input.wavesCleared ?? 0) * 4);
+  const {
+    applyServerMatchBatch,
+    findMatchResultByMatchId,
+  } = await import('@/lib/match-rewards');
 
-  await prisma.matchResult.create({
-    data: {
-      userId: input.userId,
-      mode: 'horde',
-      role: 'survivor',
-      outcome: input.outcome,
-      xpEarned: reward.xp + bonusXp,
-      vpEarned: reward.vp,
-      stats: {
-        wavesCleared: input.wavesCleared ?? 0,
-        kills: input.kills ?? 0,
-      },
-    },
-  });
+  const matchId =
+    typeof input.matchId === 'string' && input.matchId.trim()
+      ? input.matchId.trim()
+      : `client-horde-${input.userId}-${Date.now()}`;
 
-  await prisma.user.update({
-    where: { id: input.userId },
-    data: { vpCurrency: { increment: reward.vp } },
-  });
+  if (input.matchId) {
+    const existing = await findMatchResultByMatchId(input.userId, matchId);
+    if (existing) {
+      return { xpEarned: existing.xpEarned, vpEarned: existing.vpEarned };
+    }
+  } else {
+    await assertMatchRateLimit(input.userId, 'horde');
+  }
 
-  await grantXp(input.userId, reward.xp + bonusXp, 'Horde match');
-  await processMatchProgression({
-    userId: input.userId,
+  const batch = await applyServerMatchBatch({
+    matchId,
     mode: 'horde',
-    outcome: input.outcome,
-    role: 'survivor',
-    score: input.score,
-    wavesCleared: input.wavesCleared,
-    kills: input.kills,
+    players: [
+      {
+        userId: input.userId,
+        role: 'survivor',
+        outcome: input.outcome,
+        wavesCleared: input.wavesCleared,
+        kills: input.kills,
+        score: input.score,
+      },
+    ],
   });
-
-  return { xpEarned: reward.xp + bonusXp, vpEarned: reward.vp };
+  const award = batch.players[0];
+  return {
+    xpEarned: award?.xpEarned ?? 0,
+    vpEarned: award?.vpEarned ?? 0,
+  };
 }
 
-const COMPETITIVE_REWARDS = {
-  win: { xp: 140, vp: 35 },
-  loss: { xp: 50, vp: 12 },
-} as const;
-
 /**
- * Persist a Competitive 4v4 result.
+ * Client/dev fallback for Competitive.
  * - ranked (Premium): Elo KP applied
  * - casual: XP/VP + missions only — no KP / rank change
  */
@@ -457,100 +495,65 @@ export async function recordCompetitiveResult(input: {
   kills?: number;
   /** Default ranked for backward compat; casual skips KP. */
   queue?: 'casual' | 'ranked';
+  matchId?: string;
 }): Promise<{ xpEarned: number; vpEarned: number; kpDelta: number; kp: number; rank: string }> {
   await requireSelfUserId(input.userId);
-  const { applyKpDelta } = await import('@/lib/progression-actions');
-  const { computeCompetitiveKpDelta, KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
-  const { isPremiumActive } = await import('@/lib/premium');
+  const {
+    applyServerMatchBatch,
+    findMatchResultByMatchId,
+  } = await import('@/lib/match-rewards');
+  const { KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
 
-  const user = await prisma.user.findUnique({ where: { id: input.userId } });
-  if (!user) throw new Error('User not found');
-
-  // Ranked KP when Premium OR free Ranked week is active.
-  const { parsePremiumConfig, isFreeRankedWeekActive } = await import('@/lib/premium-config');
-  const { getSiteSettings } = await import('@/lib/progression-actions');
-  const settings = await getSiteSettings();
-  const premiumCfg = parsePremiumConfig(
-    (settings as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
-  );
-  const freeWeek = isFreeRankedWeekActive(premiumCfg);
-  const premium = isPremiumActive({
-    isVip: user.isVip,
-    premiumExpiresAt: (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt,
-  });
-  const requested = input.queue ?? 'ranked';
-  const queue = requested === 'ranked' && (premium || freeWeek) ? 'ranked' : 'casual';
-
-  const playerKp =
-    typeof (user as { kp?: number }).kp === 'number'
-      ? (user as { kp: number }).kp
-      : KP_DEFAULT;
-
-  const kpDelta =
-    queue === 'ranked'
-      ? computeCompetitiveKpDelta({
-          playerKp,
-          opponentAvgKp: input.opponentAvgKp,
-          won: input.outcome === 'win',
-          roundsWon: input.roundsWon,
-          roundsLost: input.roundsLost,
-        })
-      : 0;
-
-  const reward = COMPETITIVE_REWARDS[input.outcome];
+  const queue = input.queue ?? 'ranked';
   const modeTag = queue === 'ranked' ? 'competitive_ranked' : 'competitive';
+  const matchId =
+    typeof input.matchId === 'string' && input.matchId.trim()
+      ? input.matchId.trim()
+      : `client-competitive-${input.userId}-${Date.now()}`;
 
-  await prisma.matchResult.create({
-    data: {
-      userId: input.userId,
-      mode: modeTag,
-      role: input.team,
-      outcome: input.outcome,
-      xpEarned: reward.xp,
-      vpEarned: reward.vp,
-      kpDelta,
-      stats: {
-        queue,
-        roundsWon: input.roundsWon ?? 0,
-        roundsLost: input.roundsLost ?? 0,
-        kills: input.kills ?? 0,
-        opponentAvgKp: input.opponentAvgKp,
-      },
-    },
-  });
-
-  await prisma.user.update({
-    where: { id: input.userId },
-    data: { vpCurrency: { increment: reward.vp } },
-  });
-
-  await grantXp(
-    input.userId,
-    reward.xp,
-    queue === 'ranked' ? 'Competitive Ranked' : 'Competitive Casual'
-  );
-
-  let nextKp = playerKp;
-  let rank = user.currentRank || getRankForKp(playerKp);
-  if (queue === 'ranked' && kpDelta) {
-    const kpResult = await applyKpDelta(input.userId, kpDelta, 'Competitive Ranked');
-    nextKp = kpResult?.kp ?? playerKp + kpDelta;
-    rank = kpResult?.rank ?? getRankForKp(nextKp);
+  if (input.matchId) {
+    const existing = await findMatchResultByMatchId(input.userId, matchId);
+    if (existing) {
+      const user = await prisma.user.findUnique({ where: { id: input.userId } });
+      const kp =
+        typeof (user as { kp?: number } | null)?.kp === 'number'
+          ? (user as { kp: number }).kp
+          : KP_DEFAULT;
+      return {
+        xpEarned: existing.xpEarned,
+        vpEarned: existing.vpEarned,
+        kpDelta: existing.kpDelta ?? 0,
+        kp,
+        rank: user?.currentRank || getRankForKp(kp),
+      };
+    }
+  } else {
+    await assertMatchRateLimit(input.userId, modeTag);
   }
 
-  await processMatchProgression({
-    userId: input.userId,
-    mode: 'competitive',
-    outcome: input.outcome,
-    role: input.team,
+  const batch = await applyServerMatchBatch({
+    matchId,
+    mode: modeTag,
+    players: [
+      {
+        userId: input.userId,
+        role: input.team,
+        outcome: input.outcome,
+        opponentAvgKp: input.opponentAvgKp,
+        roundsWon: input.roundsWon,
+        roundsLost: input.roundsLost,
+        kills: input.kills,
+        queue,
+      },
+    ],
   });
-
+  const award = batch.players[0];
   return {
-    xpEarned: reward.xp,
-    vpEarned: reward.vp,
-    kpDelta,
-    kp: nextKp,
-    rank,
+    xpEarned: award?.xpEarned ?? 0,
+    vpEarned: award?.vpEarned ?? 0,
+    kpDelta: award?.kpDelta ?? 0,
+    kp: award?.kp ?? KP_DEFAULT,
+    rank: award?.rank ?? getRankForKp(KP_DEFAULT),
   };
 }
 
@@ -584,6 +587,7 @@ export type RankedStatsSummary = {
 
 /** Own-profile Ranked panel — KP / peak / competitive win-loss. */
 export async function getMyRankedStats(userId: string): Promise<RankedStatsSummary> {
+  await requireSelfOrStaffUserId(userId);
   const { isPremiumActive } = await import('@/lib/premium');
   const { KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
   const { parseRankConfig, findRankTierDef } = await import('@/lib/rank-config');
@@ -679,4 +683,56 @@ export async function getMyRankedStats(userId: string): Promise<RankedStatsSumma
     casualLosses,
     matchesPlayed: results.length,
   };
+}
+
+/**
+ * Mint a short-lived Colyseus join token for the signed-in player.
+ * Privilege claims (admin / premium / ranked / kp) come from the DB — not the client.
+ * Returns null when no join secret is configured (local/dev without secrets).
+ */
+export async function mintMyGameJoinToken(): Promise<string | null> {
+  const user = await getSessionUser();
+  if (!user) throw new Error('Not authenticated');
+  if (user.isBanned) throw new Error('Account banned');
+
+  const { mintGameJoinToken } = await import('@/lib/game-join-token');
+  const { isPremiumActive, canAccessRankedCompetitive } = await import(
+    '@/lib/premium'
+  );
+  const { parsePremiumConfig } = await import('@/lib/premium-config');
+  const { getSiteSettings } = await import('@/lib/progression-actions');
+  const { KP_DEFAULT } = await import('@/lib/kp');
+
+  const settings = await getSiteSettings();
+  const premiumCfg = parsePremiumConfig(
+    (settings as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
+  );
+  const isPremium = isPremiumActive({
+    isVip: user.isVip,
+    premiumExpiresAt: (user as { premiumExpiresAt?: Date | null })
+      .premiumExpiresAt,
+  });
+  const rankedAccess = canAccessRankedCompetitive({
+    isPremium,
+    config: premiumCfg,
+  });
+  const kp =
+    typeof (user as { kp?: number }).kp === 'number'
+      ? (user as { kp: number }).kp
+      : KP_DEFAULT;
+
+  try {
+    return mintGameJoinToken({
+      userId: user.id,
+      username: user.username || 'Player',
+      avatarUrl: user.avatarUrl || '',
+      isAdmin: user.role === 'admin',
+      isPremium,
+      rankedAccess,
+      kp,
+    });
+  } catch {
+    // No GAME_JOIN_TOKEN_SECRET / GAME_SERVER_ADMIN_SECRET / AUTH_SECRET — local/dev.
+    return null;
+  }
 }

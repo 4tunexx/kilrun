@@ -2,7 +2,6 @@
 
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import { canAccessAdmin } from '@/lib/roles';
 import { writeAuditLog } from '@/lib/audit';
 
 async function requireAdmin() {

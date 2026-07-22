@@ -12,6 +12,11 @@ export interface JoinOptions {
   userId: string;
   username: string;
   avatarUrl?: string;
+  /**
+   * HMAC join token minted by the hub (`mintMyGameJoinToken`).
+   * Required when the game server has a join secret configured.
+   */
+  token?: string;
   /** Allows pushing MAIN custom maps into the room. */
   isAdmin?: boolean;
   /** Competitive KP snapshot (optional). */
@@ -25,6 +30,11 @@ export interface JoinOptions {
    * Used with Colyseus filterBy on competitive_ranked.
    */
   rankKey?: string;
+  /**
+   * When set, join this Colyseus room by id (party members following the leader)
+   * instead of joinOrCreate.
+   */
+  joinByRoomId?: string;
   /** Seconds to wait for same-rank peers before falling back to open. */
   mmWaitSec?: number;
   /** Keep same-rank lobby if at least this many players. */
@@ -62,10 +72,20 @@ function resolveGameServerUrl(): string {
   const configured = process.env.NEXT_PUBLIC_GAME_SERVER_URL;
   if (configured) return configured;
   if (typeof window !== 'undefined') {
+    warnMissingGameServerUrlOnce();
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.hostname}:2567`;
   }
   return 'ws://localhost:2567';
+}
+
+let warnedMissingGameServerUrl = false;
+function warnMissingGameServerUrlOnce() {
+  if (warnedMissingGameServerUrl) return;
+  warnedMissingGameServerUrl = true;
+  console.warn(
+    '[kilrun] NEXT_PUBLIC_GAME_SERVER_URL is unset — falling back to local ws host:2567. Set it for production.'
+  );
 }
 
 export class GameConnection {
@@ -93,9 +113,19 @@ export class GameConnection {
       options.rankKey && options.rankKey !== 'open' ? options.rankKey : null;
     const waitSec = Math.max(3, options.mmWaitSec ?? 12);
     const minSame = Math.max(2, options.minSameRankPlayers ?? 4);
+    const { joinByRoomId, ...joinPayload } = options;
+
+    if (joinByRoomId) {
+      this.room = await this.client.joinById(joinByRoomId, {
+        ...joinPayload,
+        rankKey: preferredKey ?? 'open',
+      });
+      this.bindRoom(callbacks);
+      return;
+    }
 
     this.room = await this.client.joinOrCreate(roomName, {
-      ...options,
+      ...joinPayload,
       rankKey: preferredKey ?? 'open',
     });
     this.bindRoom(callbacks);
@@ -105,6 +135,20 @@ export class GameConnection {
         void this.maybeFallbackToOpenLobby(roomName, options, callbacks, minSame);
       }, waitSec * 1000);
     }
+  }
+
+  /** Join an existing room by id (party follow). */
+  public async joinById(
+    roomId: string,
+    options: JoinOptions,
+    callbacks: RoomCallbacks
+  ): Promise<void> {
+    return this.connect(
+      // roomName unused when joinByRoomId is set
+      'deathrun',
+      { ...options, joinByRoomId: roomId },
+      callbacks
+    );
   }
 
   private async maybeFallbackToOpenLobby(
@@ -205,6 +249,8 @@ export class GameConnection {
         roundIndex: s.roundIndex,
         scoreA: s.scoreA,
         scoreB: s.scoreB,
+        matchId: s.matchId,
+        rewardsReady: s.rewardsReady,
       });
     };
     [
@@ -222,6 +268,8 @@ export class GameConnection {
       'roundIndex',
       'scoreA',
       'scoreB',
+      'matchId',
+      'rewardsReady',
     ].forEach((field) => {
       proxy.listen(field, emitRoomChange);
     });
@@ -232,9 +280,14 @@ export class GameConnection {
     this.room?.send('input', input);
   }
 
-  /** Admin-only: start competitive matchmaking countdown even with 1 player. */
+  /** Admin-only: start matchmaking countdown even with 1 player (competitive / horde / deathrun). */
   public sendForceStart(): void {
     this.room?.send('forceStart', {});
+  }
+
+  /** Colyseus room id after a successful connect (for party queue sync). */
+  public get roomId(): string | undefined {
+    return this.room?.roomId;
   }
 
   public sendLoadCustomMap(payload: {

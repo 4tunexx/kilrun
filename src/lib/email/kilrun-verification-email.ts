@@ -7,6 +7,8 @@
  * Kilrun wordmark inside the email body (below).
  */
 
+import { getSiteUrl } from '@/lib/site-url';
+
 export type EmailHubStats = {
   registeredPlayers: number;
   matchesPlayed: number;
@@ -25,10 +27,7 @@ export function buildKilrunVerificationEmailHtml(opts: {
   stats?: EmailHubStats | null;
 }): { subject: string; html: string; text: string } {
   const code = opts.code.replace(/\D/g, '').slice(0, 8) || '------';
-  const site = (process.env.NEXT_PUBLIC_SITE_URL || 'https://kilrun.vercel.app').replace(
-    /\/$/,
-    ''
-  );
+  const site = getSiteUrl();
   const wordmark = opts.wordmarkUrl?.trim() || `${site}/kilrun.png`;
   const mark = opts.markUrl?.trim() || `${site}/K2.png`;
   const year = new Date().getFullYear();

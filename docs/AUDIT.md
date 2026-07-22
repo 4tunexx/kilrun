@@ -1,17 +1,20 @@
 # Kilrun audit — modes, Premium, ranks, matchmaking
 
-_Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6`)_
+_Last updated: 2026-07-22 (branch `cursor/home-daily-missions-count-200f`)_
 
 ## Merge
 
-- **Merge only [PR #21](https://github.com/4tunexx/kilrun/pull/21).** Close **#20** without merging (#21 already includes it).
+- Current work: [PR #36](https://github.com/4tunexx/kilrun/pull/36) (`cursor/home-daily-missions-count-200f`) — daily mission count fix + security/progression audit hardening + server-authored match rewards.
 
 ## After deploy (required once)
 
-1. Admin → **Dashboard → Sync database schema** (`2026-07-20-rank-config-mm`)
-2. Admin → **Dashboard → Seed progression** (Horde / Competitive missions, achievements, badges)
+Full checklist with env vars also lives in the root [`README.md`](../README.md).
+
+1. Admin → **Dashboard → Sync database schema** (`2026-07-22-party-seasons`)
+2. Admin → **Dashboard → Load built-in Kilrun defaults** (seed progression)
 3. **Restart Colyseus** — Admin → Dashboard → **Restart Colyseus** (or redeploy the game server). Requires `GAME_SERVER_ADMIN_SECRET` on both web + game server.
 4. Map Editor: set **Active** map for Deathrun / Horde / Competitive
+5. Game server: set `WEB_APP_URL` + matching secrets so match rewards POST back to the hub
 
 ---
 
@@ -26,19 +29,22 @@ _Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6
 | **Competitive Ranked** | Live | Room `competitive_ranked`, Premium (or free week), **KP Elo** |
 
 ### Premium
-- Page + hub nav, **5000 VP / 30d** (admin-editable) or **$2.99/mo** request
+- Page + hub nav, **5000 VP / 30d** (admin-editable) or **$2.99/mo** request (Stripe deferred)
 - Gem badge next to Steam/email; hub shows **Go Premium** when inactive
 - Admin → **Premium**: prices, offers, free Ranked week
 - Peak KP / peak rank kept forever on **public profile**
 
-### Ranks (new)
+### Ranks
 - Admin → **Ranks**: edit tier **name**, **min KP**, **image**, color
 - Matchmaking wait + min same-rank players
 - Ranked MM: prefer **same KP tier**; if not enough players after wait → **open lobby** (all ranks)
+- Leaderboard / hub / profile use `RankBadge` / `RankLabel` from admin config
 
 ### Progression
 - Missions / achievements / badges for Deathrun + Horde + Competitive (seed)
 - Map Editor (3 modes) + Model Editor skins (`equippedSkins` verified in sync)
+- **Match rewards** are server-authored: Colyseus POSTs to `/api/game/match-result` (shared `GAME_SERVER_ADMIN_SECRET`)
+- **Join tokens**: hub-minted HMAC verified in Colyseus `onAuth`
 
 ### Leaderboard
 - Tabs: Top XP · VP · Combat · **Ranked** (Premium by KP)
@@ -49,26 +55,27 @@ _Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6
 
 | Item | Status | Explanation |
 |------|--------|-------------|
-| **Stripe $2.99 checkout** | Placeholder | Card button creates support ticket + notification; VP path is real |
-| **Deep anti-cheat** | Light | Client Pulsar activate (hub pulsar + “Anticheat Online”); Ranked = Premium-only (or free week); no replay/VAC-style system yet |
-| **Colyseus restart** | Yes | Admin Dashboard → Restart Colyseus (`POST /admin/restart` + `GAME_SERVER_ADMIN_SECRET`) |
-| **Party / party queue** | Not built | Solo joinOrCreate only |
-| **Dedicated Ranked season resets** | Not built | Peak ranks persist; no soft reset seasons |
-| **Rank images on every surface** | Partial | Public profile + admin; hub/leaderboard can reuse `RankBadge` more widely |
-| **Server-authoritative KP** | Client records result | `recordCompetitiveResult` from results screen; free week / Premium gated server-side |
-| **Horde monster AI polish** | Basic | Playable waves; balance / bosses can iterate |
+| **Stripe $2.99 checkout** | Deferred | Placeholder support-ticket flow; VP Premium path is real |
+| **Deep anti-cheat** | Deferred | Pulsar + Premium Ranked gate only for now |
+| **Party / party queue** | Done | Faceit-style party panel + shared room follow; Horde waits for 4 |
+| **Dedicated Ranked season resets** | Done | Admin → Ranks: season config + End season (keeps peak KP/rank) |
+| **Horde monster AI polish** | Improved | Separation + attack-range stop; further polish iterative |
 | **Mobile Ranked UX** | Works via hub | Same queues; touch controls shared with Deathrun |
 
 ---
 
 ## Admin map (where to click)
 
-- **Dashboard** — schema sync, seed progression, service toggles  
+- **Dashboard** — schema sync (`2026-07-22-match-rewards-audit`), seed/import, Colyseus restart, game/chat toggles  
+- **Site** — logos, hero, hub layout  
+- **Users / Moderation / Audit / Awards** — player ops (VP mint = admin-only; mods can’t ban staff)  
+- **Missions / Achievements / Badges** — edit seeded definitions  
+- **Support** — tickets  
+- **Shop / Cosmetics** — catalog + Model Editor skins  
 - **Premium** — VP/$ prices, offers, free Ranked week  
 - **Ranks** — KP thresholds, badge images, MM wait / min players  
-- **Missions / Achievements / Badges** — edit seeded definitions  
 - **Map Editor** — Deathrun / Horde / Competitive maps + Active per mode  
-- **Shop / Cosmetics** — Model Editor skins, VIP cosmetics  
+- **Content** — news / guides  
 
 ---
 
@@ -76,4 +83,5 @@ _Last updated: 2026-07-20 (PR #21 branch `cursor/competitive-premium-ranked-a0d6
 
 - Schema fields to sync: `User.kp`, `peakKp`, `peakRank`, `premiumExpiresAt`, `MatchResult.kpDelta`/`stats`, `SiteSettings.premiumConfigJson`, `rankConfigJson`, `equippedSkins`
 - Ranked join options: `rankKey`, `mmWaitSec`, `minSameRankPlayers`, `isPremium` / `rankedAccess`
-- Fullscreen lobby now passes `competitiveQueue` + Premium access (bugfix in this pass)
+- Match rewards: set `WEB_APP_URL` (or `CLIENT_ORIGIN`) on Colyseus + matching `GAME_SERVER_ADMIN_SECRET` on web
+- Join tokens: `GAME_JOIN_TOKEN_SECRET` (or admin secret) on web + game server

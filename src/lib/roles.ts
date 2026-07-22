@@ -12,6 +12,11 @@ export function canAccessAdmin(role: string | null | undefined): boolean {
   return role === 'admin' || role === 'moderator';
 }
 
+/** Full admin only — economy minting, role changes, banning staff. */
+export function isAdminRole(role: string | null | undefined): boolean {
+  return role === 'admin';
+}
+
 export function canModerate(role: string | null | undefined): boolean {
   return role === 'admin' || role === 'moderator';
 }

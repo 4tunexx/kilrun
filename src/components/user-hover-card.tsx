@@ -20,6 +20,7 @@ import { NicknameEffectText } from '@/components/nickname-effect';
 import { useHoverCapable } from '@/hooks/use-hover-capable';
 import { useProfileNavigation } from '@/components/providers/profile-navigation-context';
 import { getPublicProfileSummary } from '@/lib/public-profile-actions';
+import { getSiteUrl } from '@/lib/site-url';
 import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
 import {
   DEFAULT_SHOWCASE_LAYOUT,
@@ -191,8 +192,7 @@ export function MiniProfileCard({
   const position: ShowcasePosition = layout.position;
   const align: ShowcaseAlign = layout.align;
   const markSrc = resolveMarkLogo(markLogoUrl) || DEFAULT_MARK_LOGO;
-  const siteUrl =
-    typeof window !== 'undefined' ? window.location.origin : 'https://kilrun.vercel.app';
+  const siteUrl = getSiteUrl();
 
   const showcaseBlock =
     summary.showcase.length > 0 ? (

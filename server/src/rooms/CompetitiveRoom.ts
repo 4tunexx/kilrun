@@ -30,8 +30,22 @@ import {
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import {
+  authenticateJoin,
+  claimsFromAuth,
+  type GameJoinClaims,
+} from '../join-token.js';
+import {
+  applyAwardsByUserId,
+  displayCompetitiveOutcome,
+  DISPLAY_COMPETITIVE_REWARDS,
+  reportMatchResults,
+} from '../match-report.js';
+
+const KP_DEFAULT = 1000;
 
 interface JoinOptions {
+  token?: string;
   userId?: string;
   username?: string;
   avatarUrl?: string;
@@ -78,7 +92,7 @@ const DEFAULT_MIN_SAME_RANK = 4;
 
 /**
  * Competitive 4v4 — best of 6 rounds (first to 4). Team elimination via hitscan.
- * KP is applied client-side via recordCompetitiveResult on the results screen.
+ * Match rewards / KP are posted to Next.js via reportMatchResults when the match ends.
  */
 export class CompetitiveRoom extends Room<RoomState> {
   maxClients = 8;
@@ -242,22 +256,32 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
   }
 
+  onAuth(_client: Client, options: JoinOptions): GameJoinClaims {
+    return authenticateJoin(options);
+  }
+
   onJoin(client: Client, options: JoinOptions) {
+    const claims = claimsFromAuth(client.auth, options);
     const ranked = this.state.modeTag === 'competitive_ranked';
-    const allowed = !!(options.isPremium || options.rankedAccess || options.isAdmin);
+    const allowed = !!(
+      claims.isPremium ||
+      claims.rankedAccess ||
+      claims.isAdmin
+    );
     if (ranked && !allowed) {
       throw new Error('Premium required for Ranked Competitive');
     }
 
     if (!this.hostSessionId) this.hostSessionId = client.sessionId;
-    if (options.isAdmin) this.adminSessions.add(client.sessionId);
+    if (claims.isAdmin) this.adminSessions.add(client.sessionId);
 
     const player = new PlayerState();
     player.sessionId = client.sessionId;
-    player.userId = options.userId ?? client.sessionId;
-    player.username = options.username ?? `Player${client.sessionId.slice(0, 4)}`;
-    player.avatarUrl = options.avatarUrl ?? '';
-    player.kp = typeof options.kp === 'number' ? options.kp : 1000;
+    player.userId = claims.userId || client.sessionId;
+    player.username =
+      claims.username || `Player${client.sessionId.slice(0, 4)}`;
+    player.avatarUrl = claims.avatarUrl || '';
+    player.kp = claims.kp;
     applyLoadoutToPlayer(player, options);
     player.energy = MAX_ENERGY;
 
@@ -375,6 +399,15 @@ export class CompetitiveRoom extends Room<RoomState> {
           this.state.scoreA = 0;
           this.state.scoreB = 0;
           this.state.roundIndex = 0;
+          this.state.rewardsReady = false;
+          for (const player of this.state.players.values()) {
+            player.kills = 0;
+            player.score = 0;
+            player.distance = 0;
+            player.xpEarned = 0;
+            player.vpEarned = 0;
+            player.kpDelta = 0;
+          }
         }
         break;
     }
@@ -386,7 +419,17 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.state.scoreB = 0;
     this.state.roundIndex = 0;
     this.state.winnerRole = '';
+    this.state.matchId = `${this.roomId}-${Date.now()}`;
+    this.state.rewardsReady = false;
     this.assignTeamsAndSpawn();
+    for (const player of this.state.players.values()) {
+      player.kills = 0;
+      player.score = 0;
+      player.distance = 0;
+      player.xpEarned = 0;
+      player.vpEarned = 0;
+      player.kpDelta = 0;
+    }
     this.state.phase = 'countdown';
     this.state.countdownMs = this.roundCountdownMs + this.buyTimeMs;
   }
@@ -455,6 +498,8 @@ export class CompetitiveRoom extends Room<RoomState> {
   }
 
   private endRound(winner: 'team_a' | 'team_b') {
+    if (this.state.phase === 'results' || this.betweenRounds) return;
+
     if (winner === 'team_a') this.state.scoreA += 1;
     else this.state.scoreB += 1;
 
@@ -473,12 +518,71 @@ export class CompetitiveRoom extends Room<RoomState> {
       this.state.winnerRole = matchWinner;
       this.resultsElapsedMs = 0;
       this.matchStarted = false;
+      void this.reportRewards(matchWinner);
       return;
     }
 
     // Short pause then countdown for next round
     this.betweenRounds = true;
     this.betweenRoundMs = 2000;
+  }
+
+  private avgEnemyKp(role: string): number {
+    const enemyRole = role === 'team_a' ? 'team_b' : 'team_a';
+    const enemies = Array.from(this.state.players.values()).filter(
+      (p) => p.role === enemyRole
+    );
+    if (!enemies.length) return KP_DEFAULT;
+    const sum = enemies.reduce(
+      (acc, p) => acc + (typeof p.kp === 'number' ? p.kp : KP_DEFAULT),
+      0
+    );
+    return sum / enemies.length;
+  }
+
+  private async reportRewards(matchWinner: 'team_a' | 'team_b') {
+    const matchId = this.state.matchId || `${this.roomId}-${Date.now()}`;
+    this.state.matchId = matchId;
+    const ranked = this.state.modeTag === 'competitive_ranked';
+    const queue = ranked ? 'ranked' : 'casual';
+    const mode = ranked ? 'competitive_ranked' : 'competitive';
+
+    const players = Array.from(this.state.players.values()).map((p) => {
+      const team = p.role === 'team_b' ? 'team_b' : 'team_a';
+      return {
+        userId: p.userId,
+        role: team,
+        isAlive: p.isAlive,
+        kills: p.kills,
+        score: p.score,
+        opponentAvgKp: this.avgEnemyKp(team),
+        roundsWon: team === 'team_a' ? this.state.scoreA : this.state.scoreB,
+        roundsLost: team === 'team_a' ? this.state.scoreB : this.state.scoreA,
+      };
+    });
+
+    const awards = await reportMatchResults({
+      matchId,
+      mode,
+      winnerRole: matchWinner,
+      queue,
+      room: { scoreA: this.state.scoreA, scoreB: this.state.scoreB },
+      players,
+    });
+
+    if (awards) {
+      applyAwardsByUserId(this.state.players.values(), awards.players);
+      this.state.rewardsReady = true;
+    } else {
+      for (const player of this.state.players.values()) {
+        const outcome = displayCompetitiveOutcome(matchWinner, player.role);
+        const reward = DISPLAY_COMPETITIVE_REWARDS[outcome];
+        player.xpEarned = reward.xp;
+        player.vpEarned = reward.vp;
+        player.kpDelta = 0;
+      }
+      this.state.rewardsReady = false;
+    }
   }
 
   private roundsToWin() {
@@ -554,14 +658,21 @@ export class CompetitiveRoom extends Room<RoomState> {
           }
         )
       ) {
-        this.damagePlayer(target, damage);
+        this.damagePlayer(target, damage, shooter);
         break;
       }
     }
   }
 
-  private damagePlayer(player: PlayerState, amount: number) {
+  private damagePlayer(player: PlayerState, amount: number, shooter?: PlayerState) {
+    const wasAlive = player.isAlive && player.health > 0;
     player.health = Math.max(0, player.health - amount);
-    if (player.health <= 0) player.isAlive = false;
+    if (player.health <= 0) {
+      player.isAlive = false;
+      if (wasAlive && shooter && shooter.sessionId !== player.sessionId) {
+        shooter.kills += 1;
+        shooter.score = shooter.kills;
+      }
+    }
   }
 }

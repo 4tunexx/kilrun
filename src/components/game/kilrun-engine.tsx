@@ -87,6 +87,8 @@ interface KilrunEngineProps {
   mode?: KilrunMode;
   /** Competitive only — casual skips KP; ranked requires Premium. */
   competitiveQueue?: 'casual' | 'ranked';
+  /** Fired once after Colyseus connect (party leader publishes room id). */
+  onRoomConnected?: (roomId: string) => void;
 }
 
 export default function KilrunEngine({
@@ -97,6 +99,7 @@ export default function KilrunEngine({
   equippedSkins = null,
   mode = 'deathrun',
   competitiveQueue = 'casual',
+  onRoomConnected,
 }: KilrunEngineProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -119,6 +122,22 @@ export default function KilrunEngine({
     playerCount,
     connectionError,
   } = useRoomState(joinOptions, roomName);
+
+  useEffect(() => {
+    if (!onRoomConnected) return;
+    let published = false;
+    const publish = () => {
+      if (published) return;
+      const rid = connectionRef.current?.roomId;
+      if (!rid) return;
+      published = true;
+      onRoomConnected(rid);
+    };
+    publish();
+    const t = setInterval(publish, 200);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onRoomConnected]);
 
   const isMobile = detectTouchDevice();
   const [assetsReady, setAssetsReady] = useState(false);
@@ -603,14 +622,22 @@ export default function KilrunEngine({
               room={room}
               xpProgress={xpProgress}
               runnersLeft={runnersLeft}
-              coins={Math.floor(xpProgress / 10)}
+              weaponKind={resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind}
             />
             <ModeStatusHud mode={mode} room={room} />
           </>
         )}
         {room.phase === 'lobby' &&
           (mode === 'horde' ? (
-            <HordeLobbyOverlay playerCount={playerCount} />
+            <HordeLobbyOverlay
+              playerCount={playerCount}
+              isAdmin={isAdmin}
+              onForceStart={
+                isAdmin
+                  ? () => connectionRef.current?.sendForceStart()
+                  : undefined
+              }
+            />
           ) : mode === 'competitive' ? (
             <CompetitiveLobbyOverlay
               playerCount={playerCount}
@@ -624,7 +651,15 @@ export default function KilrunEngine({
               }
             />
           ) : (
-            <LobbyOverlay playerCount={playerCount} />
+            <LobbyOverlay
+              playerCount={playerCount}
+              isAdmin={isAdmin}
+              onForceStart={
+                isAdmin
+                  ? () => connectionRef.current?.sendForceStart()
+                  : undefined
+              }
+            />
           ))}
         {room.phase === 'countdown' && <CountdownOverlay countdownMs={room.countdownMs} />}
         {room.phase === 'results' && localPlayer && (

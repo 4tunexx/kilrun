@@ -515,3 +515,20 @@ model GameMap {
   @@index([localId])
   @@index([updatedAt])
 }
+
+/// Lightweight Faceit-style party for shared queue (invite code + room sync).
+model Party {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// Short 6-char invite code.
+  code         String   @unique
+  leaderId     String
+  memberIds    String[]
+  /// Intended queue mode: deathrun | horde | competitive | competitive_ranked
+  mode         String?
+  /// Colyseus room id once the leader has joined — members joinById.
+  activeRoomId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([leaderId])
+}

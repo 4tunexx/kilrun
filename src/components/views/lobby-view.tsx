@@ -9,6 +9,13 @@ import { packMatchLoadout } from '@/lib/match-loadout';
 import { getSiteSettings } from '@/lib/progression-actions';
 import { getRankForKp, KP_DEFAULT } from '@/lib/kp';
 import { parseRankConfig, RANK_MM_OPEN_KEY } from '@/lib/rank-config';
+import { mintMyGameJoinToken } from '@/lib/actions';
+import {
+  clearPartyQueueRoom,
+  getMyParty,
+  setPartyQueueRoom,
+  type PartyDto,
+} from '@/lib/party-actions';
 
 interface LobbyViewProps {
   mode: KilrunMode;
@@ -47,6 +54,12 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   const [rankKey, setRankKey] = useState(RANK_MM_OPEN_KEY);
   const [mmWaitSec, setMmWaitSec] = useState(12);
   const [minSameRankPlayers, setMinSameRankPlayers] = useState(4);
+  const [joinToken, setJoinToken] = useState<string | undefined>(undefined);
+  const [tokenReady, setTokenReady] = useState(false);
+  const [partyReady, setPartyReady] = useState(false);
+  const [party, setParty] = useState<PartyDto | null>(null);
+  const [joinByRoomId, setJoinByRoomId] = useState<string | undefined>(undefined);
+  const [waitingForLeaderRoom, setWaitingForLeaderRoom] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +74,26 @@ const LobbyView: React.FC<LobbyViewProps> = ({
         if (!cancelled) {
           setEquippedSkins([]);
           setSkinsReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void mintMyGameJoinToken()
+      .then((token) => {
+        if (!cancelled) {
+          setJoinToken(token ?? undefined);
+          setTokenReady(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setJoinToken(undefined);
+          setTokenReady(true);
         }
       });
     return () => {
@@ -99,6 +132,64 @@ const LobbyView: React.FC<LobbyViewProps> = ({
     };
   }, [mode, competitiveQueue, kp]);
 
+  // Party join: leader joinOrCreate + publish roomId; members wait then joinById.
+  useEffect(() => {
+    let cancelled = false;
+    let poll: ReturnType<typeof setInterval> | null = null;
+
+    const resolveParty = async () => {
+      try {
+        const p = await getMyParty();
+        if (cancelled) return;
+        setParty(p);
+        if (!p || p.memberIds.length < 2) {
+          setJoinByRoomId(undefined);
+          setWaitingForLeaderRoom(false);
+          setPartyReady(true);
+          return;
+        }
+        if (p.isLeader) {
+          setJoinByRoomId(undefined);
+          setWaitingForLeaderRoom(false);
+          setPartyReady(true);
+          return;
+        }
+        // Member: wait for leader's activeRoomId
+        if (p.activeRoomId) {
+          setJoinByRoomId(p.activeRoomId);
+          setWaitingForLeaderRoom(false);
+          setPartyReady(true);
+          return;
+        }
+        setWaitingForLeaderRoom(true);
+        setPartyReady(false);
+        poll = setInterval(() => {
+          void getMyParty().then((next) => {
+            if (cancelled || !next) return;
+            setParty(next);
+            if (next.activeRoomId) {
+              setJoinByRoomId(next.activeRoomId);
+              setWaitingForLeaderRoom(false);
+              setPartyReady(true);
+              if (poll) clearInterval(poll);
+            }
+          });
+        }, 1500);
+      } catch {
+        if (!cancelled) {
+          setParty(null);
+          setPartyReady(true);
+        }
+      }
+    };
+
+    void resolveParty();
+    return () => {
+      cancelled = true;
+      if (poll) clearInterval(poll);
+    };
+  }, [userId, mode, competitiveQueue]);
+
   const canRanked = rankedAccess ?? isPremium;
   const loadout = useMemo(() => packMatchLoadout(equippedSkins), [equippedSkins]);
   const joinOptions = useMemo(
@@ -106,12 +197,16 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       userId,
       username,
       avatarUrl,
+      ...(joinToken ? { token: joinToken } : {}),
+      // Privilege fields are unused when a verified token is present; kept for
+      // local/dev servers with no join secret (onAuth falls back to options).
       isAdmin,
       kp,
       isPremium,
       rankedAccess: canRanked,
       equippedSkinsJson: loadout.equippedSkinsJson,
       weaponCombat: loadout.weaponCombat,
+      ...(joinByRoomId ? { joinByRoomId } : {}),
       ...(mode === 'competitive' && competitiveQueue === 'ranked'
         ? { rankKey, mmWaitSec, minSameRankPlayers }
         : {}),
@@ -120,6 +215,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       userId,
       username,
       avatarUrl,
+      joinToken,
       isAdmin,
       kp,
       isPremium,
@@ -130,16 +226,35 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       mmWaitSec,
       minSameRankPlayers,
       loadout,
+      joinByRoomId,
     ]
   );
 
-  // Wait for equipped skins so the local avatar spawns with shop gear once.
-  if (!skinsReady || !rankReady) {
+  const handleRoomConnected = (roomId: string) => {
+    void getMyParty()
+      .then((p) => {
+        if (!p?.isLeader || p.memberIds.length < 2) return;
+        return setPartyQueueRoom(p.id, roomId);
+      })
+      .catch(() => {});
+  };
+
+  const handleExit = () => {
+    if (party?.isLeader) {
+      void clearPartyQueueRoom().catch(() => {});
+    }
+    onCancel();
+  };
+
+  // Wait for equipped skins + join token so privileges are server-minted.
+  if (!skinsReady || !rankReady || !tokenReady || !partyReady) {
     return (
       <div className="fixed inset-0 z-[200] bg-[#0a1220] flex items-center justify-center text-white/60 text-sm">
-        {mode === 'competitive' && competitiveQueue === 'ranked'
-          ? 'Finding Ranked match…'
-          : 'Loading avatar skins…'}
+        {waitingForLeaderRoom
+          ? 'Waiting for party leader…'
+          : mode === 'competitive' && competitiveQueue === 'ranked'
+            ? 'Finding Ranked match…'
+            : 'Loading avatar skins…'}
       </div>
     );
   }
@@ -149,7 +264,8 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       mode={mode}
       competitiveQueue={competitiveQueue}
       joinOptions={joinOptions}
-      onExit={onCancel}
+      onExit={handleExit}
+      onRoomConnected={handleRoomConnected}
       xpProgress={xpProgress}
       isAdmin={isAdmin}
       equippedSkins={equippedSkins}

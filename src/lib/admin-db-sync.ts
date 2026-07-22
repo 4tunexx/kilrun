@@ -16,7 +16,7 @@ import { writeAuditLog } from '@/lib/audit';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-20-gamemap-loadout';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-22-party-seasons';
 
 async function requireAdmin() {
   const session = await auth();
@@ -273,6 +273,18 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`rankConfigJson verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — SiteSettings.rankConfigJson not writable. (${msg})`
+    );
+  }
+
+  // Runtime verify: Party collection (squad invite queue)
+  try {
+    await prisma.party.count();
+    steps.push('Party collection verified (count OK)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`Party verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — Party model not available. Run db push. (${msg})`
     );
   }
 

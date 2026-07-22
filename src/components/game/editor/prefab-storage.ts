@@ -275,39 +275,51 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
 
   const model = e.model ?? '';
   const isHammerSolid = e.primitive === 'box' || model === 'hammer-solid';
+  const wantsSolidVolume =
+    mat === 'solid' || e.solid === true || e.kind === 'door';
+  // Hammer++ / box solids are authoring volumes — always full collision when marked
+  // solid (even short blocks). Do NOT force top-only for sizeY < 0.6.
   const topOnly =
-    e.kind === 'finish' ||
-    e.kind === 'checkpoint' ||
-    e.kind === 'jump_pad' ||
-    jump ||
-    ice ||
-    conveyor ||
-    mat === 'sand' ||
-    !!e.teleport?.enabled ||
-    model.includes('floor') ||
-    model.startsWith('platform') ||
-    (isHammerSolid && sizeY < 0.6);
+    !isHammerSolid &&
+    (e.kind === 'finish' ||
+      e.kind === 'checkpoint' ||
+      e.kind === 'jump_pad' ||
+      jump ||
+      ice ||
+      conveyor ||
+      mat === 'sand' ||
+      !!e.teleport?.enabled ||
+      model.includes('floor') ||
+      model.startsWith('platform'));
   // Water keeps full volume so deep pools can swim; floors stay thin tops.
   const wallLike =
     !topOnly &&
-    (model.startsWith('wall') ||
+    (isHammerSolid ||
+      model.startsWith('wall') ||
       model.startsWith('column') ||
       model.includes('door') ||
       e.kind === 'door' ||
       sizeY >= 1.0 ||
-      (isHammerSolid && sizeY >= 0.6) ||
-      (!isHammerSolid && (mat === 'solid' || e.solid === true)));
+      wantsSolidVolume);
   const height =
     mat === 'water'
       ? Math.max(0.5, sizeY)
       : topOnly
         ? Math.min(0.35, Math.max(0.2, sizeY))
-        : wallLike
-          ? Math.max(1.0, sizeY)
-          : mat === 'solid' || e.solid === true
-            ? Math.max(0.8, sizeY)
-            : Math.max(0.35, sizeY * 0.5);
-  const topZ = topOnly && mat !== 'water' ? ty + sizeY * 0.5 : ty + height * 0.5;
+        : isHammerSolid
+          ? // Full authored height (even thin walls must side-collide).
+            Math.max(0.4, sizeY)
+          : wallLike
+            ? Math.max(1.0, sizeY)
+            : wantsSolidVolume
+              ? Math.max(0.8, sizeY)
+              : Math.max(0.35, sizeY * 0.5);
+  // Hammer meshes are bottom-aligned at position.y — pad top = feet + sizeY.
+  const topZ = isHammerSolid
+    ? ty + sizeY
+    : topOnly && mat !== 'water'
+      ? ty + sizeY * 0.5
+      : ty + height * 0.5;
 
   const dirSimX = Math.cos(yaw);
   const dirSimY = Math.sin(yaw);

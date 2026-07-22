@@ -58,6 +58,50 @@ describe('mapDocToSimPlatforms', () => {
     expect(wall!.x).toBe(4);
   });
 
+  it('exports hammer solid as full-volume collision (not top-only walk-through)', () => {
+    const doc = baseDoc([
+      {
+        id: 'h1',
+        name: 'Hammer Solid',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        collisionSize: [2, 0.25, 2],
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+      {
+        id: 'h2',
+        name: 'Tall Hammer',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        collisionSize: [1, 2, 1],
+        layerId: 'l1',
+        position: [3, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads.length).toBe(2);
+    for (const pad of pads) {
+      // Side collision requires height > 0.35
+      expect(pad.height ?? 0).toBeGreaterThan(0.35);
+      expect(pad.kind).toBe('solid');
+    }
+    const tall = pads.find((p) => (p.height ?? 0) >= 2);
+    expect(tall).toBeTruthy();
+    // Bottom-aligned: topZ ≈ position.y + sizeY
+    expect(tall!.z).toBeCloseTo(2, 5);
+  });
+
   it('exports jump pads with boost', () => {
     const doc = baseDoc([
       {

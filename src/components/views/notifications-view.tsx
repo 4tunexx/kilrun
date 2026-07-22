@@ -11,8 +11,14 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
 } from '@/lib/social-actions';
+import { acceptPartyInvite } from '@/lib/party-actions';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+
+function extractPartyCode(body: string): string | null {
+  const m = body.match(/\bparty\s+([A-Z0-9]{4,8})\b/i);
+  return m?.[1]?.toUpperCase() ?? null;
+}
 
 export default function NotificationsView() {
   const [items, setItems] = useState<any[]>([]);
@@ -105,6 +111,43 @@ export default function NotificationsView() {
                   </p>
                 </div>
                 <div className="flex gap-1 shrink-0">
+                  {n.type === 'party_invite' && extractPartyCode(n.body || '') && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy === n.id}
+                      onClick={async () => {
+                        const code = extractPartyCode(n.body || '');
+                        if (!code) return;
+                        setBusy(n.id);
+                        try {
+                          await acceptPartyInvite(code);
+                          await markNotificationRead(n.id);
+                          setItems((prev) =>
+                            prev.map((x) =>
+                              x.id === n.id ? { ...x, isRead: true } : x
+                            )
+                          );
+                          toast({
+                            title: 'Joined party',
+                            description: `You’re in party ${code}. Open Play to queue.`,
+                          });
+                        } catch (e: unknown) {
+                          toast({
+                            title:
+                              e instanceof Error
+                                ? e.message
+                                : 'Could not join party',
+                            variant: 'destructive',
+                          });
+                        } finally {
+                          setBusy(null);
+                        }
+                      }}
+                    >
+                      Accept
+                    </Button>
+                  )}
                   {!n.isRead && (
                     <Button
                       variant="ghost"

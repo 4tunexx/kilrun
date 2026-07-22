@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { linkVerifiedClerkEmail } from '@/lib/email-link-actions';
 
 type Step = 'email' | 'code' | 'success';
 
@@ -44,7 +45,6 @@ export function EmailVerificationForm({
     try {
       await signUp.create({
         emailAddress: email.trim(),
-        unsafeMetadata: { steamId },
       });
       await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
       setStep('code');
@@ -72,6 +72,21 @@ export function EmailVerificationForm({
       if (result.status === 'complete') {
         if (result.createdSessionId) {
           await setActive({ session: result.createdSessionId });
+        }
+        const clerkUserId =
+          (result as { createdUserId?: string | null }).createdUserId ??
+          signUp.createdUserId ??
+          null;
+        if (clerkUserId) {
+          try {
+            await linkVerifiedClerkEmail(clerkUserId);
+          } catch (linkErr) {
+            console.error('[email verify] linkVerifiedClerkEmail failed', linkErr);
+            setError(
+              'Email verified with Clerk, but linking to your Steam profile failed. Refresh or contact support.'
+            );
+            return;
+          }
         }
         setStep('success');
         toast({ title: 'Email confirmed!' });

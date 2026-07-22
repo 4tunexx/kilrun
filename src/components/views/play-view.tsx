@@ -24,6 +24,11 @@ import { Badge } from '@/components/ui/badge';
 import { getSiteSettings } from '@/lib/progression-actions';
 import { resolveGameDisabled } from '@/lib/branding';
 import { KILRUN_MODE_INFO, type KilrunMode } from '@/lib/game-modes';
+import { PartyPanel } from '@/components/party-panel';
+import {
+  getMyParty,
+  setPartyMode,
+} from '@/lib/party-actions';
 
 export type { KilrunMode };
 export type CompetitiveQueue = 'casual' | 'ranked';
@@ -42,6 +47,11 @@ const modes: ModeDefinition[] = [
 
 interface PlayViewProps {
   onPlay: (mode: KilrunMode, opts?: { competitiveQueue?: CompetitiveQueue }) => void;
+  /** Party members auto-follow leader into lobby (skips Competitive confirm). */
+  onPartyFollow?: (
+    mode: KilrunMode,
+    opts?: { competitiveQueue?: CompetitiveQueue }
+  ) => void;
   isPremium?: boolean;
   /** Premium or free Ranked week — can enter Ranked queue. */
   rankedAccess?: boolean;
@@ -50,16 +60,19 @@ interface PlayViewProps {
   pulsarOn?: boolean;
   onOpenPremium?: () => void;
   onOpenPulsar?: () => void;
+  userId?: string;
 }
 
 export default function PlayView({
   onPlay,
+  onPartyFollow,
   isPremium = false,
   rankedAccess,
   freeRankedWeek = false,
   pulsarOn = false,
   onOpenPremium,
   onOpenPulsar,
+  userId,
 }: PlayViewProps) {
   const canRanked = rankedAccess ?? isPremium;
   const [gameDisabled, setGameDisabled] = useState(false);
@@ -76,6 +89,30 @@ export default function PlayView({
       setDisabledMsg(s.gameDisabledMsg);
     });
   }, []);
+
+  const startQueue = async (
+    mode: KilrunMode,
+    opts?: { competitiveQueue?: CompetitiveQueue }
+  ) => {
+    try {
+      const party = await getMyParty();
+      if (party?.isLeader) {
+        const partyMode =
+          mode === 'competitive'
+            ? opts?.competitiveQueue === 'ranked'
+              ? 'competitive_ranked'
+              : 'competitive'
+            : mode;
+        await setPartyMode(partyMode);
+      } else if (party && !party.isLeader) {
+        // Members wait for leader — ignore solo queue clicks while in a party.
+        return;
+      }
+    } catch {
+      // Solo queue if party lookup fails.
+    }
+    onPlay(mode, opts);
+  };
 
   return (
     <div className="space-y-6">
@@ -107,6 +144,10 @@ export default function PlayView({
           </span>
         </button>
       )}
+
+      {userId ? (
+        <PartyPanel userId={userId} onFollowLeader={onPartyFollow ?? onPlay} />
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-3">
         {modes.map((mode) => {
@@ -140,7 +181,7 @@ export default function PlayView({
                         onOpenPulsar?.();
                         return;
                       }
-                      onPlay('competitive', { competitiveQueue: 'casual' });
+                      void startQueue('competitive', { competitiveQueue: 'casual' });
                     }}
                   >
                     {!pulsarOn ? (
@@ -163,7 +204,7 @@ export default function PlayView({
                         onOpenPremium?.();
                         return;
                       }
-                      onPlay('competitive', { competitiveQueue: 'ranked' });
+                      void startQueue('competitive', { competitiveQueue: 'ranked' });
                     }}
                   >
                     {!pulsarOn ? (
@@ -216,7 +257,7 @@ export default function PlayView({
                 <Button
                   className="w-full"
                   disabled={!canPlay}
-                  onClick={() => onPlay(mode.id)}
+                  onClick={() => void startQueue(mode.id)}
                 >
                   {canPlay ? (
                     <>
