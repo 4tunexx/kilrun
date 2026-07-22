@@ -623,19 +623,12 @@ export async function updateLoginStreak(userId: string) {
   if (!user) return;
 
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const last = user.lastLoginAt
-    ? new Date(
-        user.lastLoginAt.getFullYear(),
-        user.lastLoginAt.getMonth(),
-        user.lastLoginAt.getDate()
-      )
-    : null;
-
-  if (last && last.getTime() === today.getTime()) {
-    return; // already counted today
+  const today = startOfLocalDay(now);
+  if (isSameLocalDay(user.lastLoginAt, now)) {
+    return; // already counted today (UTC day)
   }
 
+  const last = user.lastLoginAt ? startOfLocalDay(user.lastLoginAt) : null;
   const oneDayMs = 24 * 60 * 60 * 1000;
   const isConsecutive = last && today.getTime() - last.getTime() <= oneDayMs;
   const nextStreak = isConsecutive ? user.loginStreak + 1 : 1;

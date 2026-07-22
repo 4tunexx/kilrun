@@ -67,10 +67,20 @@ function resolveGameServerUrl(): string {
   const configured = process.env.NEXT_PUBLIC_GAME_SERVER_URL;
   if (configured) return configured;
   if (typeof window !== 'undefined') {
+    warnMissingGameServerUrlOnce();
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.hostname}:2567`;
   }
   return 'ws://localhost:2567';
+}
+
+let warnedMissingGameServerUrl = false;
+function warnMissingGameServerUrlOnce() {
+  if (warnedMissingGameServerUrl) return;
+  warnedMissingGameServerUrl = true;
+  console.warn(
+    '[kilrun] NEXT_PUBLIC_GAME_SERVER_URL is unset — falling back to local ws host:2567. Set it for production.'
+  );
 }
 
 export class GameConnection {

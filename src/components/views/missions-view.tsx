@@ -91,7 +91,7 @@ export default function MissionsView({ userId }: { userId: string }) {
               empty="No daily missions yet. They unlock automatically on hub load."
               tone="green"
               title="Daily Missions"
-              description="Resets every day at midnight (local time). Complete all five for full daily progress."
+              description={`Resets every day at midnight (UTC). Complete all ${DAILY_MISSION_SEEDS.length} for full daily progress.`}
             />
           </TabsContent>
           <TabsContent value="game" className="mt-4">

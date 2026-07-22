@@ -20,19 +20,23 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ room, player, onCo
   const outcome: 'win' | 'loss' | 'eliminated' = isVictory ? 'win' : !player.isAlive ? 'eliminated' : 'loss';
 
   useEffect(() => {
-    if (hasRecordedRef.current || !player.userId) return;
+    if (hasRecordedRef.current) return;
+    if (!player.userId) return; // wait until userId is available
     hasRecordedRef.current = true;
+    // NetPlayerState has no score/distance yet — minimal telemetry fallbacks.
+    const score = outcome === 'win' ? 100 : 25;
     recordDeathrunResult({
       userId: player.userId,
       role: player.role === 'trapper' ? 'trapper' : 'runner',
       outcome,
+      score,
+      distance: 0,
     })
       .then((result) => setRewards(result))
       .catch(() => {
         // Non-fatal: the player still sees their result even if the write fails.
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [player.userId, player.role, outcome]);
 
   return (
     <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 z-[300]">

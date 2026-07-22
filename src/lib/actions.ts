@@ -7,6 +7,7 @@ import {
   grantXp,
   processMatchProgression,
 } from '@/lib/progression-actions';
+import { missionPeriodKey } from '@/lib/daily-missions';
 import { resolveShopImageUrl } from '@/lib/shop-images';
 import { canAccessAdmin } from '@/lib/roles';
 
@@ -307,10 +308,21 @@ export async function getLandingPageData(): Promise<{
 
 /** A player's live mission board, replacing the old hardcoded mission arrays. */
 export async function getActiveMissions(userId: string) {
-  await requireSelfOrStaffUserId(userId);
-  return prisma.activeMission.findMany({
+  const viewer = await requireSelfOrStaffUserId(userId);
+  // Reset today's daily board for self; staff viewing another player skips mutation.
+  if (viewer.id === userId) {
+    await ensurePlayerMissions(userId);
+  }
+  const rows = await prisma.activeMission.findMany({
     where: { userId },
     orderBy: [{ isCompleted: 'asc' }, { rewardXp: 'desc' }],
+  });
+  const today = missionPeriodKey();
+  return rows.filter((m) => {
+    const daily =
+      m.category === 'daily' || m.templateKey.startsWith('daily_');
+    if (!daily) return true;
+    return !m.periodKey || m.periodKey === today;
   });
 }
 

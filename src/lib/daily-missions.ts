@@ -1,14 +1,14 @@
-/** Shared helpers for calendar-day daily missions. */
+/** Shared helpers for calendar-day daily missions (UTC, serverless-safe). */
 
 export function missionPeriodKey(date = new Date()): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
 
 export function startOfLocalDay(date = new Date()): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
 export function isSameLocalDay(a: Date | string | null | undefined, b = new Date()): boolean {
@@ -16,9 +16,9 @@ export function isSameLocalDay(a: Date | string | null | undefined, b = new Date
   const left = new Date(a);
   if (Number.isNaN(left.getTime())) return false;
   return (
-    left.getFullYear() === b.getFullYear() &&
-    left.getMonth() === b.getMonth() &&
-    left.getDate() === b.getDate()
+    left.getUTCFullYear() === b.getUTCFullYear() &&
+    left.getUTCMonth() === b.getUTCMonth() &&
+    left.getUTCDate() === b.getUTCDate()
   );
 }
 

@@ -10,6 +10,8 @@ import {
   steamIdsPromotedToAdmin,
   type AccountRole,
   isAccountRole,
+  isAdminRole,
+  isStaff,
 } from '@/lib/roles';
 import { processWebsiteAction } from '@/lib/progression-actions';
 import { normalizeForumCategory } from '@/lib/forum-categories';
@@ -35,6 +37,12 @@ async function requireSessionUser() {
 async function requireStaff() {
   const user = await requireSessionUser();
   if (!canAccessAdmin(user.role)) throw new Error('Forbidden');
+  return user;
+}
+
+async function requireAdmin() {
+  const user = await requireSessionUser();
+  if (!isAdminRole(user.role)) throw new Error('Forbidden');
   return user;
 }
 
@@ -308,17 +316,29 @@ export async function unlockVipWithVp() {
   if (user.isVip || user.role === 'vip') {
     return { ok: true as const, already: true };
   }
-  if (user.vpCurrency < VIP_UNLOCK_VP_COST) {
-    return { ok: false as const, error: 'Not enough VP' };
-  }
-  await prisma.user.update({
-    where: { id: user.id },
+
+  const nextRole = user.role === 'player' ? 'vip' : user.role;
+  const updated = await prisma.user.updateMany({
+    where: {
+      id: user.id,
+      isVip: false,
+      vpCurrency: { gte: VIP_UNLOCK_VP_COST },
+    },
     data: {
       vpCurrency: { decrement: VIP_UNLOCK_VP_COST },
       isVip: true,
-      role: user.role === 'player' ? 'vip' : user.role,
+      role: nextRole,
     },
   });
+
+  if (updated.count === 0) {
+    const fresh = await prisma.user.findUnique({ where: { id: user.id } });
+    if (fresh?.isVip || fresh?.role === 'vip') {
+      return { ok: true as const, already: true };
+    }
+    return { ok: false as const, error: 'Not enough VP' };
+  }
+
   try {
     await grantVipCosmetics(user.id);
   } catch {
@@ -365,10 +385,6 @@ export async function purchasePremiumWithVp(offerId?: string) {
     label = offer.label;
   }
 
-  if (vpCost > 0 && user.vpCurrency < vpCost) {
-    return { ok: false as const, error: `Need ${vpCost} VP` };
-  }
-
   const currentExpires =
     typeof (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt !== 'undefined'
       ? (user as { premiumExpiresAt?: Date | null }).premiumExpiresAt
@@ -381,13 +397,23 @@ export async function purchasePremiumWithVp(offerId?: string) {
     durationDays
   );
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      ...(vpCost > 0 ? { vpCurrency: { decrement: vpCost } } : {}),
-      premiumExpiresAt: nextExpires,
-    },
-  });
+  if (vpCost > 0) {
+    const paid = await prisma.user.updateMany({
+      where: { id: user.id, vpCurrency: { gte: vpCost } },
+      data: {
+        vpCurrency: { decrement: vpCost },
+        premiumExpiresAt: nextExpires,
+      },
+    });
+    if (paid.count === 0) {
+      return { ok: false as const, error: `Need ${vpCost} VP` };
+    }
+  } else {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { premiumExpiresAt: nextExpires },
+    });
+  }
   await prisma.notification.create({
     data: {
       userId: user.id,
@@ -1173,35 +1199,54 @@ export async function purchaseStoreItem(itemId: string) {
 
   const { getEffectiveVpPrice } = await import('@/lib/shop-catalog');
   const price = getEffectiveVpPrice(item);
-  if (user.vpCurrency < price) return { ok: false as const, error: 'Not enough VP' };
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { vpCurrency: { decrement: price } },
-  });
-  await prisma.purchase.create({
-    data: {
-      userId: user.id,
-      itemSku: item.itemSku,
-      itemName: item.itemName,
-      vpSpent: price,
-    },
-  });
-  // Snapshot cosmetic data onto a personal inventory copy so later admin
-  // edits to the shop catalog never retroactively change owned items.
-  await prisma.inventoryItem.create({
-    data: {
-      userId: user.id,
-      itemSku: item.itemSku,
-      itemName: item.itemName,
-      itemCategory: item.itemCategory,
-      cosmeticSlot: item.cosmeticSlot ?? null,
-      bannerConfig: item.bannerConfig ?? undefined,
-      cosmeticConfig: item.cosmeticConfig ?? undefined,
-      imageUrl: item.imageUrl ?? null,
-      vpValue: price,
-    },
-  });
+  if (price > 0) {
+    const paid = await prisma.user.updateMany({
+      where: { id: user.id, vpCurrency: { gte: price } },
+      data: { vpCurrency: { decrement: price } },
+    });
+    if (paid.count === 0) return { ok: false as const, error: 'Not enough VP' };
+  }
+
+  try {
+    await prisma.purchase.create({
+      data: {
+        userId: user.id,
+        itemSku: item.itemSku,
+        itemName: item.itemName,
+        vpSpent: price,
+      },
+    });
+    // Snapshot cosmetic data onto a personal inventory copy so later admin
+    // edits to the shop catalog never retroactively change owned items.
+    await prisma.inventoryItem.create({
+      data: {
+        userId: user.id,
+        itemSku: item.itemSku,
+        itemName: item.itemName,
+        itemCategory: item.itemCategory,
+        cosmeticSlot: item.cosmeticSlot ?? null,
+        bannerConfig: item.bannerConfig ?? undefined,
+        cosmeticConfig: item.cosmeticConfig ?? undefined,
+        imageUrl: item.imageUrl ?? null,
+        vpValue: price,
+      },
+    });
+  } catch (err) {
+    // Best-effort refund if inventory/purchase write fails after debit.
+    if (price > 0) {
+      try {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { vpCurrency: { increment: price } },
+        });
+      } catch {
+        // ignore refund failure
+      }
+    }
+    throw err;
+  }
+
   await prisma.storeItem.update({
     where: { id: item.id },
     data: { purchaseCount: { increment: 1 } },
@@ -1596,9 +1641,9 @@ export async function adminListUsers(take = 50) {
   });
 }
 
-/** Adjust VP (+ give / − take). Floor at 0. */
+/** Adjust VP (+ give / − take). Floor at 0. Admin-only. */
 export async function adminAdjustVp(userId: string, delta: number) {
-  const staff = await requireStaff();
+  const staff = await requireAdmin();
   const amount = Math.trunc(delta);
   if (!amount) throw new Error('Amount required');
   const target = await prisma.user.findUnique({ where: { id: userId } });
@@ -1821,6 +1866,13 @@ export async function searchPlayers(query: string) {
 
 export async function adminSetBanned(userId: string, isBanned: boolean) {
   const staff = await requireStaff();
+  const existing = await prisma.user.findUnique({ where: { id: userId } });
+  if (!existing) throw new Error('User not found');
+  // Moderators may only ban players/VIP; admins can ban anyone except themselves.
+  if (isAdminRole(existing.role) || isStaff(existing.role)) {
+    if (!isAdminRole(staff.role)) throw new Error('Forbidden');
+  }
+  if (isBanned && staff.id === userId) throw new Error('Cannot ban yourself');
   const target = await prisma.user.update({
     where: { id: userId },
     data: { isBanned },
@@ -1839,6 +1891,12 @@ export async function adminSetBanned(userId: string, isBanned: boolean) {
 /** Moderator tool: silence a player's global chat / forum posting without banning them. */
 export async function adminSetMuted(userId: string, isMuted: boolean) {
   const staff = await requireStaff();
+  const existing = await prisma.user.findUnique({ where: { id: userId } });
+  if (!existing) throw new Error('User not found');
+  // Moderators may only mute players/VIP; admins can mute staff.
+  if (isAdminRole(existing.role) || isStaff(existing.role)) {
+    if (!isAdminRole(staff.role)) throw new Error('Forbidden');
+  }
   const target = await prisma.user.update({
     where: { id: userId },
     data: { isMuted },

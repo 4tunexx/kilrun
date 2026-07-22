@@ -47,7 +47,8 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
   }, [players, team]);
 
   useEffect(() => {
-    if (hasRecordedRef.current || !player.userId) return;
+    if (hasRecordedRef.current) return;
+    if (!player.userId) return; // wait until userId is available
     hasRecordedRef.current = true;
     recordCompetitiveResult({
       userId: player.userId,
@@ -60,8 +61,15 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
     })
       .then(setRewards)
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [
+    player.userId,
+    team,
+    outcome,
+    opponentAvgKp,
+    room.scoreA,
+    room.scoreB,
+    ranked,
+  ]);
 
   return (
     <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 z-[300]">

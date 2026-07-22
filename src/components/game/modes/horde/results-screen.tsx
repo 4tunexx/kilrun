@@ -26,18 +26,19 @@ export const HordeResultsScreen: React.FC<Props> = ({ room, player, onContinue }
       : 'eliminated';
 
   useEffect(() => {
-    if (hasRecordedRef.current || !player.userId) return;
+    if (hasRecordedRef.current) return;
+    if (!player.userId) return; // wait until userId is available
     hasRecordedRef.current = true;
     recordHordeResult({
       userId: player.userId,
       outcome,
       wavesCleared: Math.max(0, (room.wave ?? 1) - (survived ? 0 : 1)),
-      kills: room.teamKills ?? 0,
+      // Per-player kills are not tracked yet — do not credit teamKills to everyone.
+      kills: 0,
     })
       .then(setRewards)
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [player.userId, outcome, room.wave, survived]);
 
   return (
     <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 z-[300]">
