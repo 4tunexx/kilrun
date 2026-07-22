@@ -133,26 +133,33 @@ export default function KilrunEngine({
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
   const cloudDocRef = useRef<MapDocument | null>(null);
+  const [cloudReady, setCloudReady] = useState(false);
   const equippedSkinsRef = useRef<SkinAttachment[] | null>(equippedSkins ?? null);
   equippedSkinsRef.current = equippedSkins ?? null;
 
   // Prefer cloud Active map for this mode (works for all clients), fall back to localStorage.
   useEffect(() => {
     let cancelled = false;
+    setCloudReady(false);
     void getActiveCloudMapDocument(mode)
       .then((cloud) => {
-        if (cancelled || !cloud?.document) return;
-        cloudDocRef.current = cloud.document;
-        if (cloud.document.tpsView) {
-          const merged = resolveTpsView(cloud.document.tpsView as TpsViewSettings);
-          tpsRef.current = merged;
-          setTpsHud(merged);
+        if (cancelled) return;
+        if (cloud?.document) {
+          cloudDocRef.current = cloud.document;
+          if (cloud.document.tpsView) {
+            const merged = resolveTpsView(cloud.document.tpsView as TpsViewSettings);
+            tpsRef.current = merged;
+            setTpsHud(merged);
+          }
+          // Allow lobby effect to re-push if we already short-circuited on local-only miss.
+          customLoadedRef.current = false;
         }
-        // Allow lobby effect to re-push if we already short-circuited on local-only miss.
-        customLoadedRef.current = false;
       })
       .catch(() => {
         /* local fallback only */
+      })
+      .finally(() => {
+        if (!cancelled) setCloudReady(true);
       });
     return () => {
       cancelled = true;
@@ -161,6 +168,7 @@ export default function KilrunEngine({
 
   // Push Active editor map for this mode to the server when lobby is ready
   useEffect(() => {
+    if (!cloudReady) return;
     if (room.phase === 'results') {
       customLoadedRef.current = false;
       return;
@@ -216,7 +224,7 @@ export default function KilrunEngine({
       worldBounds,
       modeSettings: doc.modeSettings,
     });
-  }, [room.phase, connectionRef, playerCount, connectionError, mode]);
+  }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode]);
 
   useEffect(() => {
     pausedRef.current = paused || editorOpen;

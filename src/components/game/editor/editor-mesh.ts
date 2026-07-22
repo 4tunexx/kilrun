@@ -29,12 +29,28 @@ export function entityWorldBox(root: THREE.Object3D): THREE.Box3 | null {
   return box.isEmpty() ? null : box;
 }
 
+/** Optional UV controls so painted textures tile instead of stretch. */
+export type TextureApplyOpts = {
+  repeat?: [number, number] | null;
+  offset?: [number, number] | null;
+  rotation?: number | null;
+};
+
 /** Apply texture URL to all standard materials under a root. */
-export function applyTextureToObject(root: THREE.Object3D, url: string | undefined | null) {
+export function applyTextureToObject(
+  root: THREE.Object3D,
+  url: string | undefined | null,
+  opts?: TextureApplyOpts
+) {
   if (!url) return;
   new THREE.TextureLoader().load(url, (tex) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(opts?.repeat?.[0] ?? 1, opts?.repeat?.[1] ?? 1);
+    tex.offset.set(opts?.offset?.[0] ?? 0, opts?.offset?.[1] ?? 0);
+    tex.rotation = opts?.rotation ?? 0;
+    tex.center.set(0.5, 0.5);
+    tex.needsUpdate = true;
     root.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -42,7 +58,9 @@ export function applyTextureToObject(root: THREE.Object3D, url: string | undefin
           const m = mats[i];
           if (m && 'map' in m) {
             const cloned = m.clone();
-            (cloned as THREE.MeshStandardMaterial).map = tex;
+            const localTex = tex.clone();
+            localTex.needsUpdate = true;
+            (cloned as THREE.MeshStandardMaterial).map = localTex;
             (cloned as THREE.MeshStandardMaterial).needsUpdate = true;
             if (Array.isArray(o.material)) o.material[i] = cloned;
             else o.material = cloned;

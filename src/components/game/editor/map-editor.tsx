@@ -56,12 +56,16 @@ import {
   Magnet,
   PaintBucket,
   Settings2,
+  Hammer,
+  LayoutGrid,
+  Square,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
 import type { EditorEntity, EntityCollideMaterial, FloorPreset, MapDocument, SkyPreset } from './map-document';
 import {
+  HAMMER_SOLID_MODEL,
   ensureAnimation,
   ensureCompetitiveSettings,
   ensureDeathrunSettings,
@@ -105,6 +109,7 @@ import {
   createEditorViewport,
   type EditTool,
   type EditorCameraState,
+  type EditorViewLayout,
   type EditorViewportApi,
   type TransformMode,
 } from './editor-viewport';
@@ -189,6 +194,8 @@ export function MapEditor({
   /** Select = pick objects; Brush = paint/place. Defaults to Select so clicks don't stack. */
   const [editTool, setEditTool] = useState<EditTool>('select');
   const [paintTextureUrl, setPaintTextureUrl] = useState<string | null>(null);
+  const [viewLayout, setViewLayout] = useState<EditorViewLayout>('single');
+  const [paintRepeat, setPaintRepeat] = useState<[number, number]>([2, 2]);
   const [mode, setMode] = useState<TransformMode>('translate');
   const [gridSnap, setGridSnap] = useState(true);
   const [query, setQuery] = useState('');
@@ -220,7 +227,7 @@ export function MapEditor({
   /** Mobile/desktop properties inspector visibility when something is selected. */
   const [propsOpen, setPropsOpen] = useState(!mobileFirst);
   /** Bottom transform/place toolbar. */
-  const [toolsOpen, setToolsOpen] = useState(!mobileFirst);
+  const [toolsOpen, setToolsOpen] = useState(true);
   const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
   const [modelEditorOpen, setModelEditorOpen] = useState(false);
   const [tpsViewOpen, setTpsViewOpen] = useState(false);
@@ -512,8 +519,22 @@ export function MapEditor({
       void import('./map-thumbnail').then(({ ensureMapThumbnail }) =>
         ensureMapThumbnail(mapId, { force: true })
       );
+      // Keep cloud draft in sync so other devices see the same map.
+      void publishCloudMap({
+        localId: mapId,
+        name: next.name,
+        mode: gameMode,
+        document: next,
+        thumbnailDataUrl: liveThumb ?? getMapThumbnail(mapId),
+        setActive: false,
+      }).catch((err) => {
+        console.warn('[map persist cloud]', err);
+      });
       if (!opts?.quiet) {
-        toast({ title: 'Map saved', description: `“${next.name}” stored in this browser.` });
+        toast({
+          title: 'Map saved',
+          description: `“${next.name}” saved locally and synced to cloud.`,
+        });
       }
       return true;
     } catch (err) {
@@ -583,6 +604,12 @@ export function MapEditor({
     apiRef.current?.setPaintTexture(paintTextureUrl);
   }, [paintTextureUrl]);
   useEffect(() => {
+    apiRef.current?.setPaintUv({ repeat: paintRepeat });
+  }, [paintRepeat]);
+  useEffect(() => {
+    apiRef.current?.setViewLayout(viewLayout);
+  }, [viewLayout]);
+  useEffect(() => {
     apiRef.current?.setActiveLayerId(activeLayerId);
   }, [activeLayerId]);
   useEffect(() => {
@@ -646,13 +673,18 @@ export function MapEditor({
       if (e.key === 'v' || e.key === 'V') setEditTool('select');
       if (e.key === 'b' || e.key === 'B') {
         setEditTool('brush');
-        if (!brush) setBrush('floor-square');
+        if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
       }
       if (e.key === 'p' || e.key === 'P') {
         const selModel = docRef.current.entities.find((ent) => ent.id === selectedId)?.model;
-        if (selModel) setBrush(selModel);
-        else if (!brush) setBrush('floor-square');
+        if (selModel && selModel !== HAMMER_SOLID_MODEL) setBrush(selModel);
+        else if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
         setEditTool('bucket');
+        if (freeFly) apiRef.current?.setFreeFly(false);
+      }
+      if (e.key === 'h' || e.key === 'H') {
+        setEditTool('hammer');
+        setMode('scale');
         if (freeFly) apiRef.current?.setFreeFly(false);
       }
       if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey) {
@@ -1459,7 +1491,7 @@ export function MapEditor({
                     }`}
                     onClick={() => {
                       setEditTool('brush');
-                      if (!brush) setBrush('floor-square');
+                      if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
                     }}
                     title="Brush (B) — click once to place"
                   >
@@ -1476,8 +1508,8 @@ export function MapEditor({
                     onClick={() => {
                       // If a scene object is selected, paint that model; else keep library brush.
                       const selModel = selected?.model;
-                      if (selModel) setBrush(selModel);
-                      else if (!brush) setBrush('floor-square');
+                      if (selModel && selModel !== HAMMER_SOLID_MODEL) setBrush(selModel);
+                      else if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
                       setEditTool('bucket');
                       if (freeFly) apiRef.current?.setFreeFly(false);
                     }}
@@ -1495,7 +1527,7 @@ export function MapEditor({
                     type="button"
                     onClick={() => {
                       setBrush(name);
-                      // Keep Bucket if already painting; otherwise arm normal Brush.
+                      // Keep Bucket if already painting; Hammer++ / Select return to Brush.
                       setEditTool((t) => (t === 'bucket' ? 'bucket' : 'brush'));
                       // Free the canvas after picking a brush on mobile.
                       if (isMobile) {
@@ -1504,7 +1536,8 @@ export function MapEditor({
                       }
                     }}
                     className={`rounded border p-1 text-left ${
-                      brush === name && (editTool === 'brush' || editTool === 'bucket')
+                      brush === name &&
+                      (editTool === 'brush' || editTool === 'bucket')
                         ? 'border-cyan-400 bg-cyan-500/10'
                         : brush === name
                           ? 'border-white/30 bg-white/5'
@@ -1526,7 +1559,9 @@ export function MapEditor({
                   ? 'Paint Bucket: camera locked — hold and drag to paint the selected model along a path.'
                   : editTool === 'brush'
                     ? 'Brush: click ground to place. Same model cell selects it. Alt+click stacks.'
-                    : 'Select: click objects to pick them. Pick a model, then Brush or Bucket.'}{' '}
+                    : editTool === 'hammer'
+                      ? 'Hammer++: place/drag solid boxes. Use Scale (R) to resize. Catalog Brush/Bucket unchanged.'
+                      : 'Select: click objects to pick them. Pick a model, then Brush or Bucket.'}{' '}
                 Orbit drag = move view. Ctrl = free fly.
               </p>
             </>
@@ -2022,9 +2057,23 @@ export function MapEditor({
                 <PaintBucket className="w-4 h-4 mr-1" /> Paint brush (release to paint)
               </Button>
               <p className="text-[10px] text-white/45 leading-snug">
-                Pick a texture below, then tap/click a model and release — paints instantly. No
-                properties menu.
+                Pick a texture below, then tap/click a model and release — paints texture + UV tile.
               </p>
+              <label className="block text-[10px] text-white/55">
+                Paint UV tile ({paintRepeat[0].toFixed(1)} × {paintRepeat[1].toFixed(1)})
+                <input
+                  type="range"
+                  min={0.25}
+                  max={16}
+                  step={0.25}
+                  className="w-full"
+                  value={paintRepeat[0]}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    setPaintRepeat([n, n]);
+                  }}
+                />
+              </label>
               <input
                 ref={texFileRef}
                 type="file"
@@ -2350,9 +2399,11 @@ export function MapEditor({
               : ''}
             {editTool === 'paint'
               ? ' · texture paint'
-              : editTool === 'bucket' && brush
+              : editTool === 'hammer'
+                ? ' · Hammer++ solid'
+              : editTool === 'bucket' && brush && brush !== HAMMER_SOLID_MODEL
               ? ` · bucket: ${brush}`
-              : editTool === 'brush' && brush
+              : editTool === 'brush' && brush && brush !== HAMMER_SOLID_MODEL
                 ? ` · brush: ${brush}`
                 : editTool === 'brush' || editTool === 'bucket'
                   ? ' · pick a model'
@@ -2456,10 +2507,10 @@ export function MapEditor({
               active={editTool === 'brush'}
               onClick={() => {
                 setEditTool('brush');
-                if (!brush) setBrush('floor-square');
+                if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
               }}
               title={
-                brush
+                brush && brush !== HAMMER_SOLID_MODEL
                   ? `Brush (B) — click to place ${brush}`
                   : 'Brush (B) — pick a model in Assets'
               }
@@ -2471,18 +2522,76 @@ export function MapEditor({
               onClick={() => {
                 // If a scene object is selected, paint that model; else keep library brush.
                 const selModel = selected?.model;
-                if (selModel) setBrush(selModel);
-                else if (!brush) setBrush('floor-square');
+                if (selModel && selModel !== HAMMER_SOLID_MODEL) setBrush(selModel);
+                else if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
                 setEditTool('bucket');
                 if (freeFly) apiRef.current?.setFreeFly(false);
               }}
               title={
-                brush
+                brush && brush !== HAMMER_SOLID_MODEL
                   ? `Paint Bucket (P) — hold+drag paints ${brush}; camera locked`
                   : 'Paint Bucket (P) — pick a model, then hold+drag'
               }
             >
               <PaintBucket className="w-4 h-4 text-fuchsia-300" />
+            </ToolBtn>
+            <ToolBtn
+              active={editTool === 'hammer'}
+              onClick={() => {
+                setEditTool('hammer');
+                setMode('scale');
+                if (freeFly) apiRef.current?.setFreeFly(false);
+              }}
+              title="Hammer++ (H) — place resizable solid boxes; hold-drag to paint; Scale to size"
+            >
+              <Hammer className="w-4 h-4 text-amber-300" />
+            </ToolBtn>
+            <ToolBtn
+              active={editTool === 'paint'}
+              onClick={() => {
+                setEditTool('paint');
+                if (freeFly) apiRef.current?.setFreeFly(false);
+                setTab('textures');
+              }}
+              title="Texture brush — tap objects to apply selected texture + UV tile"
+            >
+              <Palette className="w-4 h-4 text-sky-300" />
+            </ToolBtn>
+            <div className="w-px h-6 bg-white/15 mx-1" />
+            <ToolBtn
+              active={viewLayout === 'single'}
+              onClick={() => setViewLayout('single')}
+              title="Single 3D view"
+            >
+              <Square className="w-4 h-4" />
+            </ToolBtn>
+            <ToolBtn
+              active={viewLayout === 'split'}
+              onClick={() => setViewLayout('split')}
+              title="Split: 3D + top (shared scene)"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </ToolBtn>
+            <ToolBtn
+              active={viewLayout === 'triple'}
+              onClick={() => setViewLayout('triple')}
+              title="Triple: 3D + top + side"
+            >
+              <Box className="w-4 h-4" />
+            </ToolBtn>
+            <ToolBtn
+              active={false}
+              onClick={() => apiRef.current?.setCameraPreset('top')}
+              title="Camera: top view"
+            >
+              <span className="text-[9px] font-bold">TOP</span>
+            </ToolBtn>
+            <ToolBtn
+              active={false}
+              onClick={() => apiRef.current?.setCameraPreset('side')}
+              title="Camera: side view"
+            >
+              <span className="text-[9px] font-bold">SIDE</span>
             </ToolBtn>
             <div className="w-px h-6 bg-white/15 mx-1" />
             <ToolBtn active={mode === 'translate'} onClick={() => setMode('translate')} title="Move (W)">
@@ -3777,6 +3886,88 @@ export function MapEditor({
                     >
                       Clear texture
                     </Button>
+                  </div>
+                )}
+                <label className="block text-[10px] text-white/55">
+                  Texture tile X ({(selected.textureRepeat?.[0] ?? 1).toFixed(2)})
+                  <input
+                    type="range"
+                    min={0.25}
+                    max={16}
+                    step={0.25}
+                    className="w-full"
+                    value={selected.textureRepeat?.[0] ?? 1}
+                    onChange={(e) => {
+                      const x = Number(e.target.value);
+                      const y = selected.textureRepeat?.[1] ?? x;
+                      patchSelected({ textureRepeat: [x, y] });
+                    }}
+                  />
+                </label>
+                <label className="block text-[10px] text-white/55">
+                  Texture tile Y ({(selected.textureRepeat?.[1] ?? 1).toFixed(2)})
+                  <input
+                    type="range"
+                    min={0.25}
+                    max={16}
+                    step={0.25}
+                    className="w-full"
+                    value={selected.textureRepeat?.[1] ?? 1}
+                    onChange={(e) => {
+                      const y = Number(e.target.value);
+                      const x = selected.textureRepeat?.[0] ?? y;
+                      patchSelected({ textureRepeat: [x, y] });
+                    }}
+                  />
+                </label>
+                <label className="block text-[10px] text-white/55">
+                  Texture rotate ({(((selected.textureRotation ?? 0) * 180) / Math.PI).toFixed(0)}°)
+                  <input
+                    type="range"
+                    min={-180}
+                    max={180}
+                    step={5}
+                    className="w-full"
+                    value={((selected.textureRotation ?? 0) * 180) / Math.PI}
+                    onChange={(e) =>
+                      patchSelected({
+                        textureRotation: (Number(e.target.value) * Math.PI) / 180,
+                      })
+                    }
+                  />
+                </label>
+                {(selected.primitive === 'box' ||
+                  selected.model === HAMMER_SOLID_MODEL) && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-amber-200">
+                      Hammer++ solid
+                    </p>
+                    <p className="text-[10px] text-white/55">
+                      Use Scale (R) to resize. Collision follows the box size.
+                    </p>
+                    <div className="grid grid-cols-3 gap-1">
+                      {(['X', 'Y', 'Z'] as const).map((axis, i) => (
+                        <label key={axis} className="text-[9px] text-white/50">
+                          Size {axis}
+                          <input
+                            type="number"
+                            min={0.1}
+                            step={0.1}
+                            className="w-full bg-black/40 border border-white/10 rounded px-1 py-0.5 text-xs"
+                            value={Number(
+                              (selected.collisionSize?.[i] ?? [2, 0.25, 2][i]).toFixed(2)
+                            )}
+                            onChange={(e) => {
+                              const next: [number, number, number] = [
+                                ...(selected.collisionSize ?? [2, 0.25, 2]),
+                              ] as [number, number, number];
+                              next[i] = Math.max(0.1, Number(e.target.value) || 0.1);
+                              patchSelected({ collisionSize: next, scale: [1, 1, 1] });
+                            }}
+                          />
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 )}
                 <p className="text-[10px] text-white/40">

@@ -35,6 +35,9 @@ export type EditorEntityKind =
   | 'spawn_team_a'
   | 'spawn_team_b';
 
+/** Built-in Hammer++ solid box (no GLB) — resize with Scale, paint textures. */
+export const HAMMER_SOLID_MODEL = 'hammer-solid';
+
 /**
  * Invisible gameplay markers — shown as flags/cones in the editor only.
  * Never rendered in Play Test or live match.
@@ -375,6 +378,20 @@ export interface EditorEntity {
   opacity?: number;
   visible?: boolean;
   textureUrl?: string;
+  /**
+   * UV tiling for entity texture (default [1,1]). Use with Hammer++ solids /
+   * floors so textures are not stretched.
+   */
+  textureRepeat?: [number, number];
+  /** UV offset in texture units (default [0,0]). */
+  textureOffset?: [number, number];
+  /** UV rotation in radians (default 0). */
+  textureRotation?: number;
+  /**
+   * Built-in solid box (Hammer++) — no GLB. Size comes from scale × unit box
+   * and `collisionSize` for match export.
+   */
+  primitive?: 'box';
   /**
    * Cached local-space mesh half-extents / size from the loaded GLB (editor).
    * Used for collision pad export so stairs/walls match visual size.

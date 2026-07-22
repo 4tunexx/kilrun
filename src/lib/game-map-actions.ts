@@ -144,6 +144,68 @@ export async function listCloudMaps(mode?: string): Promise<CloudMapListItem[]> 
   }));
 }
 
+export type CloudMapDocumentRow = CloudMapListItem & {
+  document: MapDocument;
+};
+
+/**
+ * Staff: pull full map documents for editor hydrate across devices.
+ * Caps at 40 newest maps for the mode to keep payloads reasonable.
+ */
+export async function listCloudMapDocuments(
+  mode: string
+): Promise<CloudMapDocumentRow[]> {
+  await requireStaff();
+  const normalized = normalizeKilrunMode(mode);
+  const rows = await prisma.gameMap.findMany({
+    where: { mode: normalized },
+    orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
+    take: 40,
+  });
+  const out: CloudMapDocumentRow[] = [];
+  for (const row of rows) {
+    try {
+      const document = JSON.parse(row.documentJson) as MapDocument;
+      out.push({
+        id: row.id,
+        localId: row.localId,
+        name: row.name,
+        mode: normalizeKilrunMode(row.mode),
+        thumbnailUrl: row.thumbnailUrl,
+        isActive: row.isActive,
+        updatedAt: row.updatedAt.toISOString(),
+        document,
+      });
+    } catch {
+      /* skip corrupt rows */
+    }
+  }
+  return out;
+}
+
+/** Staff: load one cloud map document by Mongo id. */
+export async function getCloudMapDocument(
+  mapId: string
+): Promise<CloudMapDocumentRow | null> {
+  await requireStaff();
+  const row = await prisma.gameMap.findUnique({ where: { id: mapId } });
+  if (!row) return null;
+  try {
+    return {
+      id: row.id,
+      localId: row.localId,
+      name: row.name,
+      mode: normalizeKilrunMode(row.mode),
+      thumbnailUrl: row.thumbnailUrl,
+      isActive: row.isActive,
+      updatedAt: row.updatedAt.toISOString(),
+      document: JSON.parse(row.documentJson) as MapDocument,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Public: active cloud map document for a mode (used by match clients). */
 export async function getActiveCloudMapDocument(
   mode: string
