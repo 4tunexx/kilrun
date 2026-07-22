@@ -68,7 +68,8 @@ describe('stepPlatformer (Foundry feel)', () => {
       scratch,
       bounds
     );
-    expect(body.vz).toBeCloseTo(10, 0);
+    expect(body.vz).toBeCloseTo(10 - 20 / 30, 5);
+    expect(scratch.jumpCount).toBe(1);
     // Release then press again for double jump
     stepPlatformer(
       body,
@@ -86,7 +87,8 @@ describe('stepPlatformer (Foundry feel)', () => {
       scratch,
       bounds
     );
-    expect(body.vz).toBeCloseTo(8, 0);
+    // Double-jump sets 8, then same-frame gravity applies (GRAVITY=20).
+    expect(body.vz).toBeCloseTo(8 - 20 / 60, 5);
     expect(scratch.jumpCount).toBe(2);
   });
 

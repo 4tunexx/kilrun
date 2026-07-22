@@ -33,9 +33,20 @@ export interface NetPlayerState {
   equippedSkinsJson?: string;
 }
 
+/** Keep in sync with server PlatformState.kind / SimPlatformKind. */
+export type NetPlatformKind =
+  | 'solid'
+  | 'checkpoint'
+  | 'jumpPad'
+  | 'finish'
+  | 'ice'
+  | 'conveyor'
+  | 'water'
+  | 'sand';
+
 export interface NetPlatformState {
   id: string;
-  kind: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor';
+  kind: NetPlatformKind;
   x: number;
   y: number;
   z: number;
@@ -61,6 +72,8 @@ export interface NetObstacleState {
   active: boolean;
   damage?: number;
   alwaysActive?: boolean;
+  /** When true, hazard only arms while a linked button is held. */
+  buttonControlled?: boolean;
 }
 
 export interface NetRoomState {

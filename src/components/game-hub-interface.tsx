@@ -1069,7 +1069,7 @@ export default function GameHubInterface({
               {renderContent()}
             </ScrollArea>
             {currentPage !== 'lobby' && hubChrome.showFooter && (
-              <HubFooter markLogoUrl={logoUrl} />
+              <HubFooter markLogoUrl={logoUrl} onNavigate={navigate} />
             )}
           </div>
 

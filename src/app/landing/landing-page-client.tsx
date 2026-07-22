@@ -548,17 +548,9 @@ export default function LandingPageClient({
                 &copy; {new Date().getFullYear()} Kilrun. All Rights Reserved.
               </p>
             </div>
-            <div className="flex items-center space-x-6">
-              <a href="#" className="hover:text-primary transition">
-                Terms of Service
-              </a>
-              <a href="#" className="hover:text-primary transition">
-                Privacy Policy
-              </a>
-              <a href="#" className="hover:text-primary transition">
-                Support
-              </a>
-            </div>
+            <p className="text-slate-500">
+              Login to reach Support from the hub.
+            </p>
           </div>
         </footer>
       </div>

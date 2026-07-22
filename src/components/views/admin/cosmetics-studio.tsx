@@ -414,7 +414,7 @@ function FramePanel({ onCreated }: { onCreated?: () => void }) {
       <div className="space-y-4">
         <div className="flex items-center justify-center rounded-lg border border-slate-700/50 bg-slate-950/50 p-8">
           <AvatarWithFrame
-            src="/K2.png"
+            src="/api/site-favicon"
             alt="Preview"
             fallback="K"
             frameConfig={frame}

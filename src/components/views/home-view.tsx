@@ -138,19 +138,19 @@ export default function HomeView({
       setForumTopics(forum.slice(0, 5));
       setChat([...c].reverse());
       setChatEnabled(settings.chatEnabled);
-      // SiteSettings first — prop is only a fallback while settings load.
+      // Prefer fetched settings (including empty clears) over stale props.
       setWordmarkSrc(
-        resolveHeaderLogo(settings.headerLogoUrl || headerLogoUrlProp)
+        resolveHeaderLogo(settings.headerLogoUrl ?? headerLogoUrlProp)
       );
       setLogoStyle(
         normalizeHeaderLogoStyle(
-          (settings as { headerLogoStyle?: string }).headerLogoStyle ||
-            headerLogoStyleProp ||
+          (settings as { headerLogoStyle?: string }).headerLogoStyle ??
+            headerLogoStyleProp ??
             DEFAULT_HEADER_LOGO_STYLE
         )
       );
       setHeroSrc(
-        resolveHomeHeroImage(settings.homeHeroImage || homeHeroImage)
+        resolveHomeHeroImage(settings.homeHeroImage ?? homeHeroImage)
       );
       setIsLoading(false);
     });
