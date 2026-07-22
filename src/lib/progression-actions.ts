@@ -633,10 +633,15 @@ export async function updateLoginStreak(userId: string) {
   const isConsecutive = last && today.getTime() - last.getTime() <= oneDayMs;
   const nextStreak = isConsecutive ? user.loginStreak + 1 : 1;
 
-  await prisma.user.update({
-    where: { id: userId },
+  // Atomic claim for today — prevents double-increment across tabs/callbacks.
+  const claimed = await prisma.user.updateMany({
+    where: {
+      id: userId,
+      OR: [{ lastLoginAt: null }, { lastLoginAt: { lt: today } }],
+    },
     data: { loginStreak: nextStreak, lastLoginAt: now },
   });
+  if (claimed.count === 0) return;
 
   await tryUnlockAchievement(userId, 'daily_login_streak');
   await tryUnlockBadge(userId, 'daily_login_streak');

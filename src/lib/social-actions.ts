@@ -1735,7 +1735,7 @@ export async function adminGetUserDetail(userId: string) {
       prisma.activeMission.findMany({
         where: { userId },
         orderBy: [{ isCompleted: 'asc' }, { rewardXp: 'desc' }],
-        take: 40,
+        take: 80,
       }),
     ]);
   return { user, inventory, purchases, badges, achievements, missions };
