@@ -555,6 +555,36 @@ export default function GameHubInterface({
     }
   };
 
+  /** Party members following the leader — skip Competitive confirm dialog. */
+  const handlePartyFollow = (
+    mode: KilrunMode,
+    opts?: { competitiveQueue?: CompetitiveQueue }
+  ) => {
+    if (mode === 'competitive') {
+      if (!pulsarOn) {
+        toast({
+          title: 'Pulsar required',
+          description: 'Activate Pulsar anticheat before joining the party lobby.',
+          variant: 'destructive',
+        });
+        setIsMenuOpen(true);
+        return;
+      }
+      const queue = opts?.competitiveQueue ?? 'casual';
+      if (queue === 'ranked' && !rankedAccess) {
+        navigate('premium');
+        return;
+      }
+      setCompetitiveQueue(queue);
+      setLobbyMode(mode);
+      navigate('lobby');
+      return;
+    }
+    setCompetitiveQueue('casual');
+    setLobbyMode(mode);
+    navigate('lobby');
+  };
+
   const handleAgreeAndPlay = () => {
     if (!pulsarOn && pendingCompetitiveMode === 'competitive') {
       toast({
@@ -663,6 +693,8 @@ export default function GameHubInterface({
       let props: any = {};
       if (currentPage === 'play') {
         props.onPlay = handlePlay;
+        props.onPartyFollow = handlePartyFollow;
+        props.userId = user.id;
         props.isPremium = isPremium;
         props.rankedAccess = rankedAccess;
         props.freeRankedWeek = freeRankedWeek;
@@ -741,6 +773,8 @@ export default function GameHubInterface({
         return (
           <PlayView
             onPlay={handlePlay}
+            onPartyFollow={handlePartyFollow}
+            userId={user.id}
             isPremium={isPremium}
             rankedAccess={rankedAccess}
             freeRankedWeek={freeRankedWeek}

@@ -7,9 +7,9 @@ import {
   type PlatformBlueprint,
 } from '../sim/platforms.js';
 import {
+  HORDE_MIN_PLAYERS_TO_START,
   LOBBY_COUNTDOWN_MS,
   MAX_ENERGY,
-  MIN_PLAYERS_TO_START,
   OBSTACLE_DAMAGE,
   OBSTACLE_HIT_COOLDOWN_MS,
   PLAYER_HEIGHT,
@@ -192,6 +192,18 @@ export class HordeRoom extends Room<RoomState> {
       });
     });
 
+    this.onMessage('forceStart', (client) => {
+      if (this.state.phase !== 'lobby') return;
+      if (!this.adminSessions.has(client.sessionId)) return;
+      if (this.state.players.size < 1) return;
+      // Admin can launch even alone — skip waiting for a full squad of 4.
+      this.state.phase = 'countdown';
+      this.state.countdownMs = this.lobbyCountdownMs;
+      console.log(
+        `[HordeRoom] admin forceStart (${this.state.players.size} player(s))`
+      );
+    });
+
     this.onMessage('loadCustomMap', (client, data: Record<string, unknown>) => {
       if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
       const allowed =
@@ -351,7 +363,7 @@ export class HordeRoom extends Room<RoomState> {
   private update(dtMs: number) {
     switch (this.state.phase) {
       case 'lobby':
-        if (this.state.players.size >= MIN_PLAYERS_TO_START) {
+        if (this.state.players.size >= HORDE_MIN_PLAYERS_TO_START) {
           this.state.phase = 'countdown';
           this.state.countdownMs = this.lobbyCountdownMs;
         }
@@ -568,6 +580,9 @@ export class HordeRoom extends Room<RoomState> {
     const players = Array.from(this.state.players.values()).filter((p) => p.isAlive);
     if (!players.length) return;
 
+    const SEPARATION_DIST = 0.9;
+    const ATTACK_PAD = 0.7;
+
     for (const mon of this.monsters) {
       let nearest = players[0];
       let best = Infinity;
@@ -581,8 +596,26 @@ export class HordeRoom extends Room<RoomState> {
       const dx = nearest.x - mon.x;
       const dy = nearest.y - mon.y;
       const dist = Math.hypot(dx, dy) || 1;
-      mon.x += (dx / dist) * mon.speed * dtSec;
-      mon.y += (dy / dist) * mon.speed * dtSec;
+      const attackRadius = ATTACK_PAD + mon.radius;
+
+      // Approach until within attack range — then stand and deal contact damage only.
+      if (dist > attackRadius) {
+        mon.x += (dx / dist) * mon.speed * dtSec;
+        mon.y += (dy / dist) * mon.speed * dtSec;
+      }
+
+      // Separation: push monsters apart so they don't stack on the same spot.
+      for (const other of this.monsters) {
+        if (other.id === mon.id) continue;
+        const ox = mon.x - other.x;
+        const oy = mon.y - other.y;
+        const od = Math.hypot(ox, oy);
+        if (od > 0 && od < SEPARATION_DIST) {
+          const push = ((SEPARATION_DIST - od) / SEPARATION_DIST) * mon.speed * dtSec * 0.85;
+          mon.x += (ox / od) * push;
+          mon.y += (oy / od) * push;
+        }
+      }
 
       const obs = this.state.obstacles.find((o) => o.id === mon.id);
       if (obs) {

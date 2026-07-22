@@ -1603,6 +1603,71 @@ export async function adminAwardVp(userId: string, amount: number) {
   return { ok: true };
 }
 
+/**
+ * End the current Ranked season: reset every player's KP to seasonKpResetTo,
+ * keep peakKp / peakRank, bump seasonId, and write an audit log.
+ */
+export async function adminEndRankedSeason(input?: {
+  nextSeasonName?: string;
+}) {
+  const staff = await requireAdmin();
+  const { parseRankConfig, serializeRankConfig, getRankForKpWithTiers } =
+    await import('@/lib/rank-config');
+
+  const settings = await getSiteSettings();
+  const cfg = parseRankConfig(
+    (settings as { rankConfigJson?: string }).rankConfigJson ?? '{}'
+  );
+  const resetKp = Math.max(0, Math.floor(cfg.seasonKpResetTo));
+  const newRank = getRankForKpWithTiers(resetKp, cfg.tiers);
+
+  // Batch update all users — keep peaks, reset current KP/rank.
+  const result = await prisma.user.updateMany({
+    data: {
+      kp: resetKp,
+      currentRank: newRank,
+    },
+  });
+
+  const prevId = cfg.seasonId;
+  const match = /^s(\d+)$/i.exec(prevId);
+  const nextNum = match ? Number(match[1]) + 1 : Date.now();
+  const nextSeasonId = `s${nextNum}`;
+  const nextName =
+    typeof input?.nextSeasonName === 'string' && input.nextSeasonName.trim()
+      ? input.nextSeasonName.trim()
+      : `Season ${nextNum}`;
+
+  const nextCfg = {
+    ...cfg,
+    seasonId: nextSeasonId,
+    seasonName: nextName,
+    seasonStartsAt: new Date().toISOString(),
+    seasonEndsAt: null,
+  };
+
+  await updateSiteSettings({
+    rankConfigJson: serializeRankConfig(nextCfg),
+  });
+
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'end_ranked_season',
+    detail: `Ended ${prevId} (${cfg.seasonName}) → ${nextSeasonId} (${nextName}); reset ${result.count} players to KP ${resetKp}`,
+  });
+
+  return {
+    ok: true as const,
+    playersReset: result.count,
+    resetKp,
+    previousSeasonId: prevId,
+    seasonId: nextSeasonId,
+    seasonName: nextName,
+  };
+}
+
 export async function adminAwardBadge(userId: string, badgeKey: string) {
   const staff = await requireStaff();
   const badge = await prisma.badgeDefinition.findUnique({ where: { key: badgeKey } });

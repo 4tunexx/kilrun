@@ -111,9 +111,10 @@ Admins open the hub → **Admin**. Owner Steam ID is always promoted on login; a
 
 1. **Admin → Dashboard → Sync database schema**  
    - Runs `prisma db push` when the CLI is available, then verifies writable fields (KP, peak ranks, Premium, rank config, MatchResult, `equippedSkins`, etc.).  
-   - Expected version constant: `2026-07-22-match-rewards-audit` (see `src/lib/admin-db-sync.ts`).  
+   - Expected version constant: `2026-07-22-party-seasons` (see `src/lib/admin-db-sync.ts`).  
    - Dashboard shows **up to date** / **needs sync**. Safe on Mongo — does not wipe players.  
-   - If cloud map publish fails with missing `GameMap`, run this sync first.
+   - If cloud map publish fails with missing `GameMap`, run this sync first.  
+   - Sync also creates the `Party` collection (invite-code squad queue).
 
 2. **Admin → Dashboard → Load built-in Kilrun defaults** (Seed progression)  
    - Upserts mission / achievement / badge / shop catalog seeds. Does **not** delete player data.  
@@ -125,6 +126,12 @@ Admins open the hub → **Admin**. Owner Steam ID is always promoted on login; a
 
 4. **Admin → Map Editor**  
    - Set an **Active** map for Deathrun / Horde / Competitive after deploy.
+
+### Matchmaking notes
+
+- **Horde** waits for **4 players** before auto-start. Admins can **Launch now** from the lobby with 1+ players.
+- **Party** (Play view): create/join with a 6-char code; the leader queues a mode and members follow into the same Colyseus room.
+- **Ranked seasons** (Admin → Ranks): set season name / dates / KP reset; **End season & reset KP** keeps peak KP/rank and bumps `seasonId`.
 
 ### Admin tabs (what each is for)
 
@@ -140,7 +147,7 @@ Admins open the hub → **Admin**. Owner Steam ID is always promoted on login; a
 | **Support** | Staff | Tickets |
 | **Shop** | Staff | Catalog, fire sales, cosmetics |
 | **Premium** | Admin | VP/$ prices, offers, free Ranked week |
-| **Ranks** | Admin | KP tiers, badge images, matchmaking wait / min same-rank |
+| **Ranks** | Admin | KP tiers, badge images, matchmaking wait / min same-rank, **ranked seasons** |
 | **Map Editor** | Admin | Per-mode maps + Active publish (needs schema sync) |
 | **Content** | Staff | News / guides |
 

@@ -24,4 +24,11 @@ describe('rank-config', () => {
     expect(getRankForKpWithTiers(1500, cfg.tiers)).toBe('Pro');
     expect(getRankForKp(1600, cfg.tiers)).toBe('Pro');
   });
+
+  it('parses season fields with defaults', () => {
+    const cfg = parseRankConfig('{}');
+    expect(cfg.seasonId).toBe(DEFAULT_RANK_CONFIG.seasonId);
+    expect(cfg.seasonName).toBe(DEFAULT_RANK_CONFIG.seasonName);
+    expect(cfg.seasonKpResetTo).toBe(DEFAULT_RANK_CONFIG.seasonKpResetTo);
+  });
 });

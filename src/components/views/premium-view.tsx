@@ -34,6 +34,7 @@ import {
   type PremiumConfig,
 } from '@/lib/premium-config';
 import { getSiteSettings } from '@/lib/progression-actions';
+import { parseRankConfig } from '@/lib/rank-config';
 import { useToast } from '@/hooks/use-toast';
 
 interface PremiumViewProps {
@@ -86,6 +87,7 @@ export default function PremiumView({
   const [balance, setBalance] = useState(vpBalance);
   const [now, setNow] = useState(Date.now());
   const [cfg, setCfg] = useState<PremiumConfig>(DEFAULT_PREMIUM_CONFIG);
+  const [seasonName, setSeasonName] = useState<string | null>(null);
 
   useEffect(() => {
     setExpiresAt(premiumExpiresAt ?? null);
@@ -97,13 +99,17 @@ export default function PremiumView({
 
   useEffect(() => {
     getSiteSettings()
-      .then((s) =>
+      .then((s) => {
         setCfg(
           parsePremiumConfig(
             (s as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
           )
-        )
-      )
+        );
+        const rankCfg = parseRankConfig(
+          (s as { rankConfigJson?: string }).rankConfigJson ?? '{}'
+        );
+        setSeasonName(rankCfg.seasonName || null);
+      })
       .catch(() => {});
   }, []);
 
@@ -179,6 +185,9 @@ export default function PremiumView({
             <p className="mt-2 text-slate-300 max-w-xl text-sm sm:text-base">
               Compete in Premium Ranked 4v4 with Killrun Points (KP), climb Immortal, and show your
               Premium badge next to Steam & email verification.
+              {seasonName ? (
+                <span className="text-amber-200/80"> Current ladder: {seasonName}.</span>
+              ) : null}
             </p>
             {freeWeek && (
               <Badge className="mt-3 bg-emerald-500/20 text-emerald-200 border-emerald-400/40">

@@ -171,6 +171,17 @@ export class DeathrunRoom extends Room<RoomState> {
       });
     });
 
+    this.onMessage('forceStart', (client) => {
+      if (this.state.phase !== 'lobby') return;
+      if (!this.adminSessions.has(client.sessionId)) return;
+      if (this.state.players.size < 1) return;
+      this.state.phase = 'countdown';
+      this.state.countdownMs = this.lobbyCountdownMs;
+      console.log(
+        `[DeathrunRoom] admin forceStart (${this.state.players.size} player(s))`
+      );
+    });
+
     this.onMessage(
       'loadCustomMap',
       (

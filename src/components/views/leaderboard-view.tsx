@@ -46,6 +46,7 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
   const [loading, setLoading] = useState(true);
   const [addingId, setAddingId] = useState<string | null>(null);
   const [rankTiers, setRankTiers] = useState<RankTierDef[] | undefined>();
+  const [seasonName, setSeasonName] = useState<string | null>(null);
   const { toast } = useToast();
   const { openProfile } = useProfileNavigation();
 
@@ -58,6 +59,7 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
           (s as { rankConfigJson?: string }).rankConfigJson ?? '{}'
         );
         setRankTiers(cfg.tiers);
+        setSeasonName(cfg.seasonName || null);
       })
       .catch(() => {});
   }, []);
@@ -104,6 +106,7 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
 
       <p className="text-xs text-slate-400 -mt-3">
         {SORT_TABS.find((t) => t.id === sort)?.hint}
+        {sort === 'ranked' && seasonName ? ` · ${seasonName}` : ''}
       </p>
 
       {loading ? (

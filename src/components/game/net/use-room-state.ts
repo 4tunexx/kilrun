@@ -98,7 +98,7 @@ export function useRoomState(
       connection.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [joinOptions?.userId, roomName]);
+  }, [joinOptions?.userId, joinOptions?.joinByRoomId, roomName]);
 
   return {
     connectionRef,

@@ -20,6 +20,13 @@ export type RankConfig = {
   matchmakingWaitSec: number;
   /** Minimum players before we keep a same-rank lobby (else open sooner). */
   minSameRankPlayers: number;
+  /** Opaque season id (bumped when an admin ends a season). */
+  seasonId: string;
+  seasonName: string;
+  seasonStartsAt: string | null;
+  seasonEndsAt: string | null;
+  /** KP value applied to all players when a season ends. */
+  seasonKpResetTo: number;
 };
 
 export const DEFAULT_RANK_TIERS: RankTierDef[] = [
@@ -32,10 +39,17 @@ export const DEFAULT_RANK_TIERS: RankTierDef[] = [
   { name: 'Immortal', minKp: 1800, imageUrl: '', color: '#f97316' },
 ];
 
+const KP_RESET_DEFAULT = 1000;
+
 export const DEFAULT_RANK_CONFIG: RankConfig = {
   tiers: DEFAULT_RANK_TIERS,
   matchmakingWaitSec: 12,
   minSameRankPlayers: 4,
+  seasonId: 's1',
+  seasonName: 'Season 1',
+  seasonStartsAt: null,
+  seasonEndsAt: null,
+  seasonKpResetTo: KP_RESET_DEFAULT,
 };
 
 function num(v: unknown, fallback: number): number {
@@ -65,6 +79,12 @@ function parseTier(raw: unknown): RankTierDef[] {
   return tiers.sort((a, b) => a.minKp - b.minKp);
 }
 
+function strOrNull(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t.length ? t : null;
+}
+
 export function parseRankConfig(raw: unknown): RankConfig {
   let obj: Record<string, unknown> = {};
   try {
@@ -88,6 +108,20 @@ export function parseRankConfig(raw: unknown): RankConfig {
     minSameRankPlayers: Math.max(
       2,
       Math.floor(num(obj.minSameRankPlayers, DEFAULT_RANK_CONFIG.minSameRankPlayers))
+    ),
+    seasonId:
+      typeof obj.seasonId === 'string' && obj.seasonId.trim()
+        ? obj.seasonId.trim()
+        : DEFAULT_RANK_CONFIG.seasonId,
+    seasonName:
+      typeof obj.seasonName === 'string' && obj.seasonName.trim()
+        ? obj.seasonName.trim()
+        : DEFAULT_RANK_CONFIG.seasonName,
+    seasonStartsAt: strOrNull(obj.seasonStartsAt),
+    seasonEndsAt: strOrNull(obj.seasonEndsAt),
+    seasonKpResetTo: Math.max(
+      0,
+      Math.floor(num(obj.seasonKpResetTo, DEFAULT_RANK_CONFIG.seasonKpResetTo))
     ),
   };
 }
