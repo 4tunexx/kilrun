@@ -235,7 +235,7 @@ export default function GameHubInterface({
   const [vpBalance, setVpBalance] = useState(user.vpCurrency);
   const [xpProgress, setXpProgress] = useState(user.xpProgress);
   const [dailyDone, setDailyDone] = useState(0);
-  const [dailyTotal, setDailyTotal] = useState(DAILY_MISSION_SEEDS.length);
+  const [dailyTotal, setDailyTotal] = useState<number>(DAILY_MISSION_SEEDS.length);
   const [currentRank, setCurrentRank] = useState(user.currentRank);
   const [kp, setKp] = useState(user.kp ?? 1000);
   const [emailVerified, setEmailVerified] = useState(user.emailVerified);
