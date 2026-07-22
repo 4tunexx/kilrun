@@ -195,6 +195,64 @@ export function getMapThumbnail(id: string): string | null {
   return localStorage.getItem(THUMB_PREFIX + id);
 }
 
+/** Store a remote/cloud thumbnail URL (or data URL) into local thumb cache. */
+export function setMapThumbnail(id: string, url: string | null | undefined) {
+  if (typeof window === 'undefined' || !url) return;
+  try {
+    localStorage.setItem(THUMB_PREFIX + id, url);
+  } catch {
+    /* quota */
+  }
+}
+
+/**
+ * Merge cloud maps into localStorage so another device sees the same drafts
+ * and Active MAIN. Cloud wins when it is newer (or local is missing).
+ */
+export function hydrateCloudMapsIntoLocal(
+  rows: Array<{
+    localId: string | null;
+    id: string;
+    name: string;
+    isActive: boolean;
+    updatedAt: string;
+    thumbnailUrl: string | null;
+    document: MapDocument;
+  }>,
+  mode: KilrunMode,
+  setActive: (mode: KilrunMode, mapId: string | null) => void
+): { pulled: number; activeLocalId: string | null } {
+  let pulled = 0;
+  let activeLocalId: string | null = null;
+  for (const row of rows) {
+    const localId = row.localId?.trim() || row.id;
+    const local = loadMap(localId);
+    const cloudUpdated = row.updatedAt;
+    const localUpdated = local?.meta?.updatedAt ?? '';
+    const shouldWrite =
+      !local ||
+      !localUpdated ||
+      cloudUpdated.localeCompare(localUpdated) > 0;
+    if (shouldWrite) {
+      const doc: MapDocument = {
+        ...row.document,
+        name: row.name || row.document.name || 'Untitled map',
+        gameMode: mode,
+      };
+      saveMap(localId, doc);
+      setMapThumbnail(localId, row.thumbnailUrl);
+      pulled += 1;
+    } else if (row.thumbnailUrl && !getMapThumbnail(localId)) {
+      setMapThumbnail(localId, row.thumbnailUrl);
+    }
+    if (row.isActive) {
+      activeLocalId = localId;
+      setActive(mode, localId);
+    }
+  }
+  return { pulled, activeLocalId };
+}
+
 export function deleteMap(id: string): void {
   localStorage.removeItem(DOC_PREFIX + id);
   localStorage.removeItem(THUMB_PREFIX + id);

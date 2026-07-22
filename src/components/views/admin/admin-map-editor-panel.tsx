@@ -29,6 +29,7 @@ import {
   exportJson,
   formatBytes,
   getMapThumbnail,
+  hydrateCloudMapsIntoLocal,
   importJson,
   listMaps,
   loadMap,
@@ -47,7 +48,7 @@ import {
   type KilrunMode,
 } from '@/lib/game-modes';
 import { getMapGameMode } from '@/components/game/editor/map-document';
-import { publishCloudMap } from '@/lib/game-map-actions';
+import { listCloudMapDocuments, publishCloudMap } from '@/lib/game-map-actions';
 
 const MapEditor = dynamic(() => import('@/components/game/editor/map-editor'), {
   ssr: false,
@@ -68,6 +69,8 @@ export function AdminMapEditorPanel() {
   const [query, setQuery] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [syncingCloud, setSyncingCloud] = useState(false);
+
   const refresh = useCallback(() => {
     if (!selectedMode) {
       setMaps([]);
@@ -79,9 +82,53 @@ export function AdminMapEditorPanel() {
     setActiveId(getActivePlayMapIdForMode(selectedMode));
   }, [selectedMode]);
 
+  const syncFromCloud = useCallback(async () => {
+    if (!selectedMode) return;
+    setSyncingCloud(true);
+    try {
+      const rows = await listCloudMapDocuments(selectedMode);
+      const { pulled, activeLocalId } = hydrateCloudMapsIntoLocal(
+        rows,
+        selectedMode,
+        setActivePlayMapIdForMode
+      );
+      refresh();
+      toast({
+        title: pulled
+          ? `Synced ${pulled} map${pulled === 1 ? '' : 's'} from cloud`
+          : 'Cloud maps up to date',
+        description: activeLocalId
+          ? 'Active MAIN restored for this mode.'
+          : rows.length
+            ? 'No newer cloud drafts.'
+            : 'No cloud maps for this mode yet — Save or set Active to publish.',
+      });
+    } catch (err) {
+      console.warn('[map cloud sync]', err);
+      toast({
+        title: 'Cloud sync failed',
+        description:
+          err instanceof Error
+            ? err.message
+            : 'Could not pull maps. Check staff login / DB schema.',
+        variant: 'destructive',
+      });
+      refresh();
+    } finally {
+      setSyncingCloud(false);
+    }
+  }, [selectedMode, refresh, toast]);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Pull cloud library whenever a mode is opened (fixes different-device maps).
+  useEffect(() => {
+    if (!selectedMode) return;
+    void syncFromCloud();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMode]);
 
   const filtered = maps.filter(
     (m) => !query.trim() || m.name.toLowerCase().includes(query.trim().toLowerCase())
@@ -208,8 +255,14 @@ export function AdminMapEditorPanel() {
               <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()}>
                 <Upload className="h-4 w-4 mr-1" /> Import JSON
               </Button>
-              <Button size="sm" variant="ghost" onClick={refresh}>
-                <RefreshCw className="h-4 w-4" />
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={syncingCloud}
+                onClick={() => void syncFromCloud()}
+                title="Pull maps from cloud (other devices)"
+              >
+                <RefreshCw className={`h-4 w-4 ${syncingCloud ? 'animate-spin' : ''}`} />
               </Button>
             </div>
           </div>

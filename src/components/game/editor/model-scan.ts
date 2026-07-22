@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { loadGltf, cloneGltfScene, cloneSkinnedScene } from '../renderer/asset-loader';
 import { modelUrl } from './prototype-catalog';
+import { HAMMER_SOLID_MODEL } from './map-document';
 
 const clipCache = new Map<string, string[]>();
 
@@ -12,8 +13,8 @@ export function extractClipNames(gltf: GLTF): string[] {
 /** Resolve model source: catalog name or custom URL. */
 export function resolveModelSrc(model?: string, customModelUrl?: string): string | null {
   if (customModelUrl) return customModelUrl;
-  if (model) return modelUrl(model);
-  return null;
+  if (!model || model === HAMMER_SOLID_MODEL) return null;
+  return modelUrl(model);
 }
 
 export async function scanModelClips(src: string): Promise<string[]> {

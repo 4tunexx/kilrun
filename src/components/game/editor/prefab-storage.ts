@@ -274,6 +274,7 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   else if (mat === 'sand') kind = 'sand';
 
   const model = e.model ?? '';
+  const isHammerSolid = e.primitive === 'box' || model === 'hammer-solid';
   const topOnly =
     e.kind === 'finish' ||
     e.kind === 'checkpoint' ||
@@ -284,7 +285,8 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
     mat === 'sand' ||
     !!e.teleport?.enabled ||
     model.includes('floor') ||
-    model.startsWith('platform');
+    model.startsWith('platform') ||
+    (isHammerSolid && sizeY < 0.6);
   // Water keeps full volume so deep pools can swim; floors stay thin tops.
   const wallLike =
     !topOnly &&
@@ -293,8 +295,8 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
       model.includes('door') ||
       e.kind === 'door' ||
       sizeY >= 1.0 ||
-      mat === 'solid' ||
-      e.solid === true);
+      (isHammerSolid && sizeY >= 0.6) ||
+      (!isHammerSolid && (mat === 'solid' || e.solid === true)));
   const height =
     mat === 'water'
       ? Math.max(0.5, sizeY)

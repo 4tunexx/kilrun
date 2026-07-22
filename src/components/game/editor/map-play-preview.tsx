@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
 import type { MapDocument } from './map-document';
 import {
+  HAMMER_SOLID_MODEL,
   ensureEnvironment,
   isInvisibleMarkerKind,
   suggestPlayerBindings,
@@ -386,11 +387,18 @@ export function MapPlayPreview({
           scene.add(makeAuthoredLight(ent));
           continue;
         }
-        const src = resolveModelSrc(ent.model, ent.customModelUrl);
         const placeVisual = (visual: THREE.Object3D, clips: THREE.AnimationClip[] = []) => {
           const planted = new THREE.Group();
           planted.add(visual);
-          applyTextureToObject(planted, ent.textureUrl || playDoc.environment?.defaultTextureUrl);
+          applyTextureToObject(
+            planted,
+            ent.textureUrl || playDoc.environment?.defaultTextureUrl,
+            {
+              repeat: ent.textureRepeat,
+              offset: ent.textureOffset,
+              rotation: ent.textureRotation,
+            }
+          );
           applyEntityOpacity(planted, ent.opacity);
           planted.position.set(...ent.position);
           planted.rotation.set(
@@ -409,6 +417,22 @@ export function MapPlayPreview({
             }
           }
         };
+
+        if (ent.primitive === 'box' || ent.model === HAMMER_SOLID_MODEL) {
+          const size = ent.collisionSize ?? [2, 0.25, 2];
+          const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(size[0], size[1], size[2]),
+            new THREE.MeshStandardMaterial({
+              color: ent.color ? new THREE.Color(ent.color) : 0x64748b,
+              roughness: 0.85,
+            })
+          );
+          mesh.position.y = size[1] * 0.5;
+          placeVisual(mesh);
+          continue;
+        }
+
+        const src = resolveModelSrc(ent.model, ent.customModelUrl);
         try {
           if (src) {
             const { root, clips } = await loadAnimatedPrefab(src);

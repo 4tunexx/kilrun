@@ -6,6 +6,7 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import type { EditorEntity, EditorLayer, MapDocument, MapEnvironment } from './map-document';
 import {
   DEFAULT_ENVIRONMENT,
+  HAMMER_SOLID_MODEL,
   defaultAnimation,
   defaultHazard,
   defaultHealthFloor,
@@ -96,8 +97,11 @@ export interface EditorCameraState {
   pitch: number;
 }
 
-/** Primary pointer tool: Select picks; Brush places one click; Bucket hold-drags paint models; Paint applies texture on release. */
-export type EditTool = 'select' | 'brush' | 'bucket' | 'paint';
+/** Primary pointer tool: Select / Brush / Bucket / Paint / Hammer++ solid. */
+export type EditTool = 'select' | 'brush' | 'bucket' | 'paint' | 'hammer';
+
+/** Multi-viewport layout — shares one scene (cheap). */
+export type EditorViewLayout = 'single' | 'split' | 'triple';
 
 export interface EditorViewportApi {
   setDoc: (doc: MapDocument) => void;
@@ -160,6 +164,15 @@ export interface EditorViewportApi {
   previewAnim: (which: 'default' | 'active') => void;
   captureThumbnail: () => string | null;
   setTouchAxes: (axes: { moveX: number; moveY: number; lookX: number; lookY: number; sprint?: boolean }) => void;
+  setViewLayout: (layout: EditorViewLayout) => void;
+  getViewLayout: () => EditorViewLayout;
+  /** Snap perspective camera to top / front / side / perspective. */
+  setCameraPreset: (preset: 'perspective' | 'top' | 'front' | 'side') => void;
+  setPaintUv: (uv: {
+    repeat?: [number, number];
+    offset?: [number, number];
+    rotation?: number;
+  }) => void;
   destroy: () => void;
 }
 
@@ -206,6 +219,21 @@ export function createEditorViewport(
   /** Paint Bucket only: hold LMB and drag to paint continuously. */
   let bucketPainting = false;
   let lastPaintCellKey: string | null = null;
+  /** UV defaults applied with the texture paint brush. */
+  let paintUv = {
+    repeat: [2, 2] as [number, number],
+    offset: [0, 0] as [number, number],
+    rotation: 0,
+  };
+  /** Multi-viewport layout (shared scene). */
+  let viewLayout: EditorViewLayout = 'single';
+  const topCam = new THREE.OrthographicCamera(-24, 24, 24, -24, 0.1, 500);
+  topCam.position.set(0, 80, 0);
+  topCam.up.set(0, 0, -1);
+  topCam.lookAt(0, 0, 0);
+  const sideCam = new THREE.OrthographicCamera(-24, 24, 24, -24, 0.1, 500);
+  sideCam.position.set(80, 8, 0);
+  sideCam.lookAt(0, 8, 0);
   /** Long-press multi-select (mobile): hold ~400ms to toggle additive pick. */
   let longPressTimer: number | null = null;
   let longPressId: string | null = null;
@@ -578,7 +606,30 @@ export function createEditorViewport(
 
   function applyEntityTexture(root: THREE.Object3D, ent: EditorEntity) {
     const url = ent.textureUrl || doc.environment?.defaultTextureUrl;
-    applyTextureToObject(root, url);
+    applyTextureToObject(root, url, {
+      repeat: ent.textureRepeat,
+      offset: ent.textureOffset,
+      rotation: ent.textureRotation,
+    });
+  }
+
+  function makeHammerSolidMesh(ent: EditorEntity): THREE.Mesh {
+    const size = ent.collisionSize ?? [2, 0.25, 2];
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(size[0], size[1], size[2]),
+      new THREE.MeshStandardMaterial({
+        color: ent.color ? new THREE.Color(ent.color) : 0x64748b,
+        roughness: 0.85,
+        metalness: 0.05,
+      })
+    );
+    mesh.position.y = size[1] * 0.5;
+    mesh.userData.isHammerSolid = true;
+    return mesh;
+  }
+
+  function isHammerSolidEntity(ent: EditorEntity): boolean {
+    return ent.primitive === 'box' || ent.model === HAMMER_SOLID_MODEL;
   }
 
   function clearSelectionOutlines() {
@@ -624,7 +675,26 @@ export function createEditorViewport(
           !ent.model &&
           !ent.customModelUrl);
 
-      if (!wantsMarker && (ent.model || ent.customModelUrl)) {
+      if (!wantsMarker && isHammerSolidEntity(ent)) {
+        root = new THREE.Group();
+        root.add(makeHammerSolidMesh(ent));
+        const size = ent.collisionSize ?? [2, 0.25, 2];
+        const idx = doc.entities.findIndex((e) => e.id === ent.id);
+        if (idx >= 0 && !doc.entities[idx].collisionSize) {
+          const entities = doc.entities.slice();
+          entities[idx] = {
+            ...entities[idx],
+            collisionSize: size,
+            primitive: 'box',
+            model: HAMMER_SOLID_MODEL,
+            solid: true,
+            collideMaterial: entities[idx].collideMaterial ?? 'solid',
+          };
+          doc = { ...doc, entities };
+          ent = entities[idx];
+          handlers.onDocChange(doc);
+        }
+      } else if (!wantsMarker && (ent.model || ent.customModelUrl)) {
         try {
           const loaded = await loadModel(ent.model, ent.customModelUrl);
           // Wrap + plant feet so entity.position.y is the stand surface (no gap/clip)
@@ -1038,25 +1108,30 @@ export function createEditorViewport(
         : 0;
 
     const foot = defaultModel ? modelFootprint(defaultModel) : null;
+    const isHammer = defaultModel === HAMMER_SOLID_MODEL;
 
+    const hammerSize: [number, number, number] = [2, 0.25, 2];
     const ent: EditorEntity = {
       id: generateId(),
       name:
         kind === 'start' || kind === 'spawn_runner'
           ? `Runner Spawn ${runnerCount}`
-          : entityKindLabel(kind),
+          : isHammer
+            ? 'Hammer Solid'
+            : entityKindLabel(kind),
       kind,
-      model: defaultModel,
+      model: isHammer ? HAMMER_SOLID_MODEL : defaultModel,
+      primitive: isHammer ? 'box' : undefined,
       layerId: activeLayerId,
       position: [x, Math.max(0, y), z],
       rotation: [0, 0, 0],
-      scale: padKinds ? [2, 1, 2] : [1, 1, 1],
-      color: defaultColor,
+      scale: isHammer ? [1, 1, 1] : padKinds ? [2, 1, 2] : [1, 1, 1],
+      color: isHammer ? '#64748b' : defaultColor,
       opacity: 1,
       visible: true,
-      solid: kind === 'door' ? true : padKinds && kind !== 'red_zone' ? true : undefined,
+      solid: isHammer ? true : kind === 'door' ? true : padKinds && kind !== 'red_zone' ? true : undefined,
       collideMaterial:
-        kind === 'door' || (padKinds && kind !== 'red_zone')
+        isHammer || kind === 'door' || (padKinds && kind !== 'red_zone')
           ? 'solid'
           : defaultModel &&
               (defaultModel.includes('floor') ||
@@ -1068,7 +1143,8 @@ export function createEditorViewport(
                 defaultModel.startsWith('crate'))
             ? 'solid'
             : undefined,
-      collisionSize: foot ?? undefined,
+      collisionSize: isHammer ? hammerSize : foot ?? undefined,
+      textureRepeat: isHammer ? [2, 2] : undefined,
       animation: defaultAnimation(),
       playerAnims: kind === 'player' ? {} : undefined,
       hazard: kind === 'hazard' ? defaultHazard() : undefined,
@@ -1146,9 +1222,22 @@ export function createEditorViewport(
     handlers.onFreeFlyChange?.(on);
   }
 
+  function placeBrushModel(): string | null {
+    if (editTool === 'hammer') return HAMMER_SOLID_MODEL;
+    return brush;
+  }
+
   /** Continuous place for Paint Bucket only (active library model / brush). */
   function paintBucketAtEvent(ev: { clientX: number; clientY: number }): boolean {
-    if (editTool !== 'bucket' || !brush || measureMode || freeFly) return false;
+    const model = placeBrushModel();
+    if (
+      (editTool !== 'bucket' && editTool !== 'hammer') ||
+      !model ||
+      measureMode ||
+      freeFly
+    ) {
+      return false;
+    }
     const rect = renderer.domElement.getBoundingClientRect();
     pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
@@ -1167,7 +1256,7 @@ export function createEditorViewport(
     // Skip cells that already have this model (no spam stacks while dragging).
     const hit = doc.entities.find(
       (e) =>
-        e.model === brush &&
+        e.model === model &&
         Math.abs((gridSnap ? snapToGrid(e.position[0], gridSize) : e.position[0]) - px) <
           Math.max(0.2, gridSize * 0.45) &&
         Math.abs((gridSnap ? snapToGrid(e.position[2], gridSize) : e.position[2]) - pz) <
@@ -1178,7 +1267,7 @@ export function createEditorViewport(
       return false;
     }
     lastPaintCellKey = cellKey;
-    placeAt(new THREE.Vector3(px, 0, pz), 'prop', brush);
+    placeAt(new THREE.Vector3(px, 0, pz), 'prop', model);
     return true;
   }
 
@@ -1203,6 +1292,24 @@ export function createEditorViewport(
       !measureMode &&
       editTool === 'bucket' &&
       brush &&
+      !ev.shiftKey
+    ) {
+      bucketPainting = true;
+      lastPaintCellKey = null;
+      orbit.enabled = false;
+      paintBucketAtEvent(ev);
+      try {
+        renderer.domElement.setPointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    // Hammer++ hold-drag paints solids (same continuous path as bucket).
+    if (
+      !freeFly &&
+      !measureMode &&
+      editTool === 'hammer' &&
       !ev.shiftKey
     ) {
       bucketPainting = true;
@@ -1412,7 +1519,15 @@ export function createEditorViewport(
           doc = {
             ...doc,
             entities: doc.entities.map((e) =>
-              e.id === id ? { ...e, textureUrl: tex } : e
+              e.id === id
+                ? {
+                    ...e,
+                    textureUrl: tex ?? e.textureUrl,
+                    textureRepeat: paintUv.repeat,
+                    textureOffset: paintUv.offset,
+                    textureRotation: paintUv.rotation,
+                  }
+                : e
             ),
           };
           const ent = doc.entities.find((e) => e.id === id);
@@ -1536,14 +1651,16 @@ export function createEditorViewport(
       return;
     }
 
-    // Brush paint: place on ground / stack. Select tool never places.
-    // Same-model click on that object's own cell → select (not stack). Alt = force stack.
+    // Brush / Hammer++ paint: place on ground / stack. Select tool never places.
+    const placeModel = placeBrushModel();
     const canPaint =
-      editTool === 'brush' && Boolean(brush) && !measureMode && !ev.shiftKey;
-    if (canPaint && brush) {
+      ((editTool === 'brush' && Boolean(brush)) || editTool === 'hammer') &&
+      !measureMode &&
+      !ev.shiftKey;
+    if (canPaint && placeModel) {
       if (hitEntityId && !ev.altKey) {
         const ent = doc.entities.find((e) => e.id === hitEntityId);
-        if (ent?.model === brush) {
+        if (ent?.model === placeModel) {
           const placed = pickPlacePoint(true);
           if (placed) {
             let px = placed.point.x;
@@ -1560,15 +1677,14 @@ export function createEditorViewport(
               select(hitEntityId, false);
               return;
             }
-            // Ray grazed this mesh but snaps to a neighbor cell — paint there.
-            placeAt(new THREE.Vector3(px, 0, pz), 'prop', brush);
+            placeAt(new THREE.Vector3(px, 0, pz), 'prop', placeModel);
             return;
           }
         }
       }
       const placed = pickPlacePoint(true);
       if (placed) {
-        placeAt(placed.point, 'prop', brush);
+        placeAt(placed.point, 'prop', placeModel);
         return;
       }
     }
@@ -1580,11 +1696,10 @@ export function createEditorViewport(
 
     if (
       groundHits[0] &&
-      editTool === 'brush' &&
-      brush &&
+      ((editTool === 'brush' && brush) || editTool === 'hammer') &&
       !measureMode
     ) {
-      placeAt(groundHits[0].point, 'prop', brush);
+      placeAt(groundHits[0].point, 'prop', placeBrushModel() ?? undefined);
     } else if (!ev.shiftKey) {
       select(null);
     }
@@ -1596,7 +1711,12 @@ export function createEditorViewport(
       longPressTimer = null;
       longPressId = null;
     }
-    if (bucketPainting && editTool === 'bucket' && !freeFly && !measureMode) {
+    if (
+      bucketPainting &&
+      (editTool === 'bucket' || editTool === 'hammer') &&
+      !freeFly &&
+      !measureMode
+    ) {
       paintBucketAtEvent(ev);
       return;
     }
@@ -1721,7 +1841,64 @@ export function createEditorViewport(
         /* ignore */
       }
     }
-    renderer.render(scene, camera);
+
+    const w = host.clientWidth || 1;
+    const h = host.clientHeight || 1;
+    if (viewLayout === 'single') {
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, w, h);
+      renderer.render(scene, camera);
+    } else if (viewLayout === 'split') {
+      // Main perspective (left) + top ortho (right) — shared scene.
+      renderer.setScissorTest(true);
+      const half = Math.floor(w / 2);
+      camera.aspect = half / Math.max(1, h);
+      camera.updateProjectionMatrix();
+      renderer.setViewport(0, 0, half, h);
+      renderer.setScissor(0, 0, half, h);
+      renderer.render(scene, camera);
+      const span = Math.max(8, orbit.target.length() + camera.position.distanceTo(orbit.target));
+      topCam.left = -span;
+      topCam.right = span;
+      topCam.top = span * (h / Math.max(1, half));
+      topCam.bottom = -span * (h / Math.max(1, half));
+      topCam.position.set(orbit.target.x, orbit.target.y + 80, orbit.target.z);
+      topCam.lookAt(orbit.target);
+      topCam.updateProjectionMatrix();
+      renderer.setViewport(half, 0, w - half, h);
+      renderer.setScissor(half, 0, w - half, h);
+      renderer.render(scene, topCam);
+    } else {
+      // Triple: perspective | top | side
+      renderer.setScissorTest(true);
+      const col = Math.floor(w / 3);
+      camera.aspect = col / Math.max(1, h);
+      camera.updateProjectionMatrix();
+      renderer.setViewport(0, 0, col, h);
+      renderer.setScissor(0, 0, col, h);
+      renderer.render(scene, camera);
+      const span = Math.max(8, orbit.target.length() + camera.position.distanceTo(orbit.target));
+      topCam.left = -span;
+      topCam.right = span;
+      topCam.top = span * (h / Math.max(1, col));
+      topCam.bottom = -span * (h / Math.max(1, col));
+      topCam.position.set(orbit.target.x, orbit.target.y + 80, orbit.target.z);
+      topCam.lookAt(orbit.target);
+      topCam.updateProjectionMatrix();
+      renderer.setViewport(col, 0, col, h);
+      renderer.setScissor(col, 0, col, h);
+      renderer.render(scene, topCam);
+      sideCam.left = -span;
+      sideCam.right = span;
+      sideCam.top = span * (h / Math.max(1, col));
+      sideCam.bottom = -span * (h / Math.max(1, col));
+      sideCam.position.set(orbit.target.x + 80, orbit.target.y + 8, orbit.target.z);
+      sideCam.lookAt(orbit.target.x, orbit.target.y + 8, orbit.target.z);
+      sideCam.updateProjectionMatrix();
+      renderer.setViewport(col * 2, 0, w - col * 2, h);
+      renderer.setScissor(col * 2, 0, w - col * 2, h);
+      renderer.render(scene, sideCam);
+    }
   };
   raf = requestAnimationFrame(tick);
 
@@ -2204,7 +2381,16 @@ export function createEditorViewport(
       const prev = doc.entities.find((e) => e.id === id);
       const modelChanged = patch.model !== undefined || patch.customModelUrl !== undefined;
       const kindChanged = patch.kind !== undefined && patch.kind !== prev?.kind;
-      if (modelChanged || kindChanged) {
+      const hammerGeomChanged =
+        (patch.collisionSize !== undefined || patch.primitive !== undefined) &&
+        Boolean(
+          prev &&
+            (prev.primitive === 'box' ||
+              prev.model === HAMMER_SOLID_MODEL ||
+              patch.primitive === 'box' ||
+              patch.model === HAMMER_SOLID_MODEL)
+        );
+      if (modelChanged || kindChanged || hammerGeomChanged) {
         transform.detach();
         disposeRoot(id);
       }
@@ -2276,6 +2462,45 @@ export function createEditorViewport(
         lookY: axes.lookY || 0,
         sprint: !!axes.sprint,
       };
+    },
+    setViewLayout: (layout) => {
+      viewLayout = layout;
+      setSize();
+    },
+    getViewLayout: () => viewLayout,
+    setCameraPreset: (preset) => {
+      const t = orbit.target.clone();
+      if (preset === 'top') {
+        camera.position.set(t.x, t.y + 40, t.z + 0.01);
+        camera.up.set(0, 0, -1);
+        camera.lookAt(t);
+        freeFly = false;
+        handlers.onFreeFlyChange?.(false);
+        applyToolCameraLock();
+      } else if (preset === 'front') {
+        camera.up.set(0, 1, 0);
+        camera.position.set(t.x, t.y + 6, t.z + 36);
+        camera.lookAt(t);
+      } else if (preset === 'side') {
+        camera.up.set(0, 1, 0);
+        camera.position.set(t.x + 36, t.y + 6, t.z);
+        camera.lookAt(t);
+      } else {
+        camera.up.set(0, 1, 0);
+        camera.position.copy(DEFAULT_CAM_POS);
+        orbit.target.copy(DEFAULT_CAM_TARGET);
+        camera.lookAt(orbit.target);
+      }
+      orbit.update();
+    },
+    setPaintUv: (uv: {
+      repeat?: [number, number];
+      offset?: [number, number];
+      rotation?: number;
+    }) => {
+      if (uv.repeat) paintUv.repeat = uv.repeat;
+      if (uv.offset) paintUv.offset = uv.offset;
+      if (typeof uv.rotation === 'number') paintUv.rotation = uv.rotation;
     },
     destroy: () => {
       cancelAnimationFrame(raf);
