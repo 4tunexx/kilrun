@@ -71,10 +71,12 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
     steamFriendsAvailable: false,
     steamFriendsPrivate: false,
     noSteamApiKey: false,
+    totalSteamFriends: 0,
+    onKilrunSteamFriends: 0,
   });
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteFilter, setInviteFilter] = useState<'all' | 'steam' | 'hub'>(
-    'all'
+    'steam'
   );
   const followedRoomRef = useRef<string | null>(null);
 
@@ -123,6 +125,8 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
           steamFriendsAvailable: data.steamFriendsAvailable,
           steamFriendsPrivate: data.steamFriendsPrivate,
           noSteamApiKey: data.noSteamApiKey,
+          totalSteamFriends: data.totalSteamFriends,
+          onKilrunSteamFriends: data.onKilrunSteamFriends,
         });
       })
       .catch(() => {
@@ -293,7 +297,8 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
       )}
       {party.isLeader && (
         <p className="text-xs text-slate-500">
-          Invite Steam or hub friends, then pick a mode below to queue together.
+          Invite your Steam friends who play Kilrun, then pick a mode to queue
+          together.
         </p>
       )}
 
@@ -305,15 +310,26 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
           onClick={() => setInviteOpen((o) => !o)}
         >
           <UserPlus className="h-3.5 w-3.5 mr-1.5" />
-          Invite Steam / hub friends
+          Invite Steam friends
         </Button>
         {inviteOpen && (
           <div className="absolute z-20 mt-1 left-0 right-0 sm:right-auto sm:min-w-[16rem] rounded-lg border border-slate-700 bg-slate-950 shadow-xl overflow-hidden">
-            <div className="flex gap-1 p-2 border-b border-slate-800">
+            <div className="px-3 pt-2 pb-1">
+              <p className="text-[11px] font-semibold text-slate-200">
+                Your Steam friends on Kilrun
+              </p>
+              {steamMeta.steamFriendsAvailable && (
+                <p className="text-[10px] text-slate-500">
+                  {steamMeta.onKilrunSteamFriends} of {steamMeta.totalSteamFriends}{' '}
+                  Steam friends play Kilrun
+                </p>
+              )}
+            </div>
+            <div className="flex gap-1 px-2 pb-2 border-b border-slate-800">
               {([
-                ['all', 'All'],
                 ['steam', 'Steam'],
                 ['hub', 'Hub'],
+                ['all', 'All'],
               ] as const).map(([id, label]) => (
                 <button
                   key={id}
@@ -333,20 +349,22 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
               {steamMeta.noSteamApiKey && inviteFilter !== 'hub' && (
                 <p className="text-[11px] text-amber-200/80 px-3 py-2 border-b border-slate-800">
                   Set <code className="text-amber-100">STEAM_API_KEY</code> to load
-                  Steam friends.
+                  your Steam friends list.
                 </p>
               )}
               {steamMeta.steamFriendsPrivate && inviteFilter !== 'hub' && (
                 <p className="text-[11px] text-amber-200/80 px-3 py-2 border-b border-slate-800">
-                  Your Steam friends list is private — set it Public in Steam
-                  profile privacy, or share the party code.
+                  Steam friends list is private — set Friends List to Public in
+                  Steam → Profile → Privacy, then reopen this menu.
                 </p>
               )}
               {filtered.length === 0 ? (
                 <p className="text-xs text-slate-500 p-3">
-                  {steamMeta.steamFriendsAvailable
-                    ? 'No Steam friends on Kilrun yet — they need to log in once. You can still share the code.'
-                    : 'No friends to invite. Share the party code, or add hub friends.'}
+                  {inviteFilter === 'steam' && steamMeta.steamFriendsAvailable
+                    ? steamMeta.totalSteamFriends > 0
+                      ? 'None of your Steam friends have logged into Kilrun yet. Ask them to sign in once, or share the party code.'
+                      : 'No Steam friends found on your account.'
+                    : 'No friends to invite here. Share the party code, or check the other tab.'}
                 </p>
               ) : (
                 filtered.map((f) => (

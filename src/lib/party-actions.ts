@@ -365,6 +365,10 @@ export async function getPartyInviteCandidates(): Promise<{
   steamFriendsAvailable: boolean;
   steamFriendsPrivate: boolean;
   noSteamApiKey: boolean;
+  /** Total Steam friends returned by the API (may include people not on Kilrun). */
+  totalSteamFriends: number;
+  /** Subset of Steam friends who have a Kilrun account. */
+  onKilrunSteamFriends: number;
 }> {
   const user = await requireSessionUser();
 
@@ -434,11 +438,16 @@ export async function getPartyInviteCandidates(): Promise<{
   const rows = [...byId.values()].sort((a, b) =>
     a.username.localeCompare(b.username)
   );
+  const onKilrunSteam = rows.filter(
+    (r) => r.source === 'steam' || r.source === 'both'
+  ).length;
   return {
     rows,
     steamFriendsAvailable,
     steamFriendsPrivate,
     noSteamApiKey,
+    totalSteamFriends: steam.ids.size,
+    onKilrunSteamFriends: onKilrunSteam,
   };
 }
 
