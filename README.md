@@ -130,7 +130,7 @@ Admins open the hub → **Admin**. Owner Steam ID is always promoted on login; a
 ### Matchmaking notes
 
 - **Horde** waits for **4 players** before auto-start. Admins can **Launch now** from the lobby with 1+ players.
-- **Party** (Play view): create/join with a 6-char code; the leader queues a mode and members follow into the same Colyseus room.
+- **Party** (Play view): invite **Steam friends** (needs public Steam friends list + `STEAM_API_KEY`) and hub friends, or share a 6-char code. Leader queues; members follow into the same room. Notifications have **Accept** for party invites.
 - **Ranked seasons** (Admin → Ranks): set season name / dates / KP reset; **End season & reset KP** keeps peak KP/rank and bumps `seasonId`.
 
 ### Admin tabs (what each is for)
