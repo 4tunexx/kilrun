@@ -102,6 +102,32 @@ describe('mapDocToSimPlatforms', () => {
     expect(tall!.z).toBeCloseTo(2, 5);
   });
 
+  it('keeps thin solid wall thickness exact (no 0.35 inflation)', () => {
+    const doc = baseDoc([
+      {
+        id: 'thin',
+        name: 'Thin Wall',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        // Thin along editor Z → sim width
+        collisionSize: [2, 3, 0.2],
+        layerId: 'l1',
+        position: [0, 0, 5],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads).toHaveLength(1);
+    // Must stay 0.2 — old Math.max(0.35) made Play Test stop short of the mesh.
+    expect(pads[0].width).toBeCloseTo(0.2, 5);
+    expect(pads[0].depth).toBeCloseTo(2, 5);
+    expect(pads[0].height ?? 0).toBeGreaterThan(0.35);
+  });
+
   it('exports jump pads with boost', () => {
     const doc = baseDoc([
       {
