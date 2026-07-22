@@ -4,6 +4,7 @@ import { withPrismaRetry } from '@/lib/prisma';
 import GameHubInterface from '@/components/game-hub-interface';
 import { isPremiumActive } from '@/lib/premium';
 import { getRankForKp, KP_DEFAULT } from '@/lib/kp';
+import { getSiteSettings } from '@/lib/progression-actions';
 
 export default async function Page() {
   const session = await auth();
@@ -51,6 +52,13 @@ export default async function Page() {
   });
   const kpRank = getRankForKp(kp);
 
+  let siteSettings: Awaited<ReturnType<typeof getSiteSettings>> | null = null;
+  try {
+    siteSettings = await getSiteSettings();
+  } catch (error) {
+    console.error('[home] failed to load site settings', error);
+  }
+
   return (
     <GameHubInterface
       user={{
@@ -74,6 +82,33 @@ export default async function Page() {
         equippedFrameConfig: user.equippedFrameConfig ?? null,
         equippedNicknameConfig: user.equippedNicknameConfig ?? null,
       }}
+      initialSiteSettings={
+        siteSettings
+          ? {
+              logoUrl: siteSettings.logoUrl ?? null,
+              headerLogoUrl:
+                (siteSettings as { headerLogoUrl?: string }).headerLogoUrl ??
+                null,
+              headerLogoStyle:
+                (siteSettings as { headerLogoStyle?: string })
+                  .headerLogoStyle ?? null,
+              homeHeroImage:
+                (siteSettings as { homeHeroImage?: string }).homeHeroImage ??
+                null,
+              backgroundUrl: siteSettings.backgroundUrl ?? null,
+              headerTitle: siteSettings.headerTitle ?? null,
+              headerSubtitle: siteSettings.headerSubtitle ?? null,
+              hubPagesJson:
+                (siteSettings as { hubPagesJson?: string }).hubPagesJson ??
+                null,
+              hubNavJson:
+                (siteSettings as { hubNavJson?: string }).hubNavJson ?? null,
+              hubChromeJson:
+                (siteSettings as { hubChromeJson?: string }).hubChromeJson ??
+                null,
+            }
+          : null
+      }
     />
   );
 }

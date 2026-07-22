@@ -205,7 +205,27 @@ const VIEWS_NEEDING_USER_ID = new Set([
   'badges',
 ]);
 
-export default function GameHubInterface({ user }: { user: SessionPlayer }) {
+/** Branding / layout fields loaded on the server for first paint (no default-logo flash). */
+export type HubInitialSiteSettings = {
+  logoUrl?: string | null;
+  headerLogoUrl?: string | null;
+  headerLogoStyle?: string | null;
+  homeHeroImage?: string | null;
+  backgroundUrl?: string | null;
+  headerTitle?: string | null;
+  headerSubtitle?: string | null;
+  hubPagesJson?: string | null;
+  hubNavJson?: string | null;
+  hubChromeJson?: string | null;
+};
+
+export default function GameHubInterface({
+  user,
+  initialSiteSettings,
+}: {
+  user: SessionPlayer;
+  initialSiteSettings?: HubInitialSiteSettings | null;
+}) {
   const isMobile = useIsMobile();
   // Both rails stay collapsed until the player opens them (esp. important on mobile).
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -231,12 +251,20 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
   const [emailVerified, setEmailVerified] = useState(user.emailVerified);
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const [bgUrl, setBgUrl] = useState(resolveHubBackground());
+  const [bgUrl, setBgUrl] = useState(() =>
+    resolveHubBackground(initialSiteSettings?.backgroundUrl)
+  );
   /** Raw SiteSettings values — resolve*() only at render so admin always wins. */
-  const [logoUrl, setLogoUrl] = useState('');
-  const [headerLogoUrl, setHeaderLogoUrl] = useState('');
-  const [headerLogoStyle, setHeaderLogoStyle] = useState('');
-  const [homeHeroImage, setHomeHeroImage] = useState('');
+  const [logoUrl, setLogoUrl] = useState(() => initialSiteSettings?.logoUrl ?? '');
+  const [headerLogoUrl, setHeaderLogoUrl] = useState(
+    () => initialSiteSettings?.headerLogoUrl ?? ''
+  );
+  const [headerLogoStyle, setHeaderLogoStyle] = useState(
+    () => initialSiteSettings?.headerLogoStyle ?? ''
+  );
+  const [homeHeroImage, setHomeHeroImage] = useState(
+    () => initialSiteSettings?.homeHeroImage ?? ''
+  );
   const [isVip, setIsVip] = useState(user.isVip);
   const [isPremium, setIsPremium] = useState(
     user.isPremium ??
@@ -261,11 +289,27 @@ export default function GameHubInterface({ user }: { user: SessionPlayer }) {
     user.equippedNicknameConfig ?? null
   );
   const [isEmailPromptOpen, setIsEmailPromptOpen] = useState(false);
-  const [homeTitle, setHomeTitle] = useState(PAGE_META.home.title);
-  const [homeSubtitle, setHomeSubtitle] = useState(PAGE_META.home.subtitle);
-  const [hubPages, setHubPages] = useState<HubPagesConfig>(() => defaultHubPages());
-  const [hubNav, setHubNav] = useState<HubNavLayout>(() => defaultHubNav());
-  const [hubChrome, setHubChrome] = useState<HubChromeConfig>(() => defaultHubChrome());
+  const [homeTitle, setHomeTitle] = useState(
+    () => initialSiteSettings?.headerTitle?.trim() || PAGE_META.home.title
+  );
+  const [homeSubtitle, setHomeSubtitle] = useState(
+    () => initialSiteSettings?.headerSubtitle?.trim() || PAGE_META.home.subtitle
+  );
+  const [hubPages, setHubPages] = useState<HubPagesConfig>(() =>
+    initialSiteSettings?.hubPagesJson
+      ? parseHubPages(initialSiteSettings.hubPagesJson)
+      : defaultHubPages()
+  );
+  const [hubNav, setHubNav] = useState<HubNavLayout>(() =>
+    initialSiteSettings?.hubNavJson
+      ? parseHubNav(initialSiteSettings.hubNavJson)
+      : defaultHubNav()
+  );
+  const [hubChrome, setHubChrome] = useState<HubChromeConfig>(() =>
+    initialSiteSettings?.hubChromeJson
+      ? parseHubChrome(initialSiteSettings.hubChromeJson)
+      : defaultHubChrome()
+  );
   const { toast } = useToast();
 
   const showAdmin = canAccessAdmin(user.role);

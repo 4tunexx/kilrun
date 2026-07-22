@@ -93,11 +93,11 @@ export function EmailVerificationForm({
     <div className="flex items-center gap-3 mb-1">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src="/K2.png"
+        src="/api/site-favicon"
         alt="Kilrun"
         className="h-10 w-10 rounded-lg object-contain bg-slate-950/80 border border-slate-700/60 p-1"
         onError={(e) => {
-          (e.currentTarget as HTMLImageElement).src = '/api/site-favicon';
+          (e.currentTarget as HTMLImageElement).src = '/K2.png';
         }}
       />
       <div>
