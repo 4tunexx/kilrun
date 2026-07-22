@@ -59,6 +59,8 @@ import {
   Hammer,
   LayoutGrid,
   Square,
+  Link2,
+  Unlink2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -105,6 +107,8 @@ import {
   isHammerSolidEntity,
   isInvisibleMarkerKind,
   isPlatformPlayerKind,
+  isEntityEditLocked,
+  expandIdsWithGroups,
   patchCollideMaterial,
   resolveCollideMaterial,
 } from './map-document';
@@ -229,6 +233,17 @@ export function MapEditor({
   const [playTest, setPlayTest] = useState(false);
   const [customTextures, setCustomTextures] = useState<CustomTexture[]>([]);
   const [snapY, setSnapY] = useState(false);
+  const [scaleFromSide, setScaleFromSide] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const raw = window.localStorage.getItem('kilrun.scaleFromSide');
+      if (raw === '0') return false;
+      if (raw === '1') return true;
+    } catch {
+      /* ignore */
+    }
+    return true;
+  });
   const isMobile = useIsMobile();
   const { toast } = useToast();
   const isTouch = typeof window !== 'undefined' && detectTouchDevice();
@@ -400,8 +415,10 @@ export function MapEditor({
           if (now - lastLockedToastAt.current < 1600) return;
           lastLockedToastAt.current = now;
           toast({
-            title: 'Build level locked',
-            description: `“${layerName ?? 'This level'}” is locked — unlock it in Layers, or Build here on another level.`,
+            title: 'Locked',
+            description: layerName
+              ? `“${layerName}” is locked — unlock it in Properties or Layers.`
+              : 'Selection is locked — unlock in Properties.',
             variant: 'destructive',
           });
           return;
@@ -427,6 +444,9 @@ export function MapEditor({
     api.setBrush(brush);
     api.setEditTool(editTool);
     api.setActiveLayerId(activeLayerId);
+    api.setGridSnap(gridSnap);
+    api.setSnapY(snapY);
+    api.setScaleFromSide(scaleFromSide);
     if (detectTouchDevice()) {
       // Mobile defaults to free-fly so joysticks control look + move immediately
       api.setFreeFly(true);
@@ -662,6 +682,14 @@ export function MapEditor({
   useEffect(() => {
     apiRef.current?.setSnapY(snapY);
   }, [snapY]);
+  useEffect(() => {
+    apiRef.current?.setScaleFromSide(scaleFromSide);
+    try {
+      window.localStorage.setItem('kilrun.scaleFromSide', scaleFromSide ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [scaleFromSide]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -753,7 +781,15 @@ export function MapEditor({
           });
         }
       }
-      if (e.key === 'g' || e.key === 'G') setGridSnap((v) => !v);
+      if (e.key === 'g' || e.key === 'G') {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          if (e.shiftKey) ungroupSelection();
+          else groupSelection();
+          return;
+        }
+        setGridSnap((v) => !v);
+      }
       if (e.key === 'f' || e.key === 'F') apiRef.current?.focusSelected();
       if (e.key === 'Delete' || e.key === 'Backspace') apiRef.current?.deleteSelected();
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
@@ -787,6 +823,73 @@ export function MapEditor({
       entities: d.entities.map((e) => (e.id === selectedId ? { ...e, ...patch } : e)),
     }));
   };
+
+  /** Apply a patch to the current selection (multi + group members). */
+  const patchSelection = (patch: Partial<EditorEntity>) => {
+    const base = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+    if (!base.length) return;
+    scheduleHistory();
+    setDoc((d) => {
+      const ids = new Set(expandIdsWithGroups(d.entities, base));
+      const entities = d.entities.map((e) => (ids.has(e.id) ? { ...e, ...patch } : e));
+      const next = { ...d, entities };
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+  };
+
+  const groupSelection = () => {
+    const base = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+    if (base.length < 2) {
+      toast({
+        title: 'Select 2+ objects',
+        description: 'Shift+click multiple objects, then Group.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const groupId = generateId('grp');
+    patchSelection({ groupId });
+    toast({ title: 'Grouped', description: `${base.length} objects linked.` });
+  };
+
+  const ungroupSelection = () => {
+    const base = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+    if (!base.length) return;
+    scheduleHistory();
+    setDoc((d) => {
+      const ids = new Set(expandIdsWithGroups(d.entities, base));
+      const anyGrouped = d.entities.some((e) => ids.has(e.id) && e.groupId);
+      if (!anyGrouped) return d;
+      const entities = d.entities.map((e) => {
+        if (!ids.has(e.id) || !e.groupId) return e;
+        const { groupId: _removed, ...rest } = e;
+        return rest;
+      });
+      const next = { ...d, entities };
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+    toast({ title: 'Ungrouped', description: 'Objects are independent again.' });
+  };
+
+  const selectionIds = useMemo(() => {
+    const base = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+    return expandIdsWithGroups(doc.entities, base);
+  }, [doc.entities, selectedId, selectedIds]);
+
+  const selectionMeta = useMemo(() => {
+    const ents = doc.entities.filter((e) => selectionIds.includes(e.id));
+    if (!ents.length) {
+      return { count: 0, allVisible: true, allLocked: false, anyGrouped: false };
+    }
+    return {
+      count: ents.length,
+      allVisible: ents.every((e) => e.visible !== false),
+      allLocked: ents.every((e) => Boolean(e.locked)),
+      anyGrouped: ents.some((e) => Boolean(e.groupId)),
+    };
+  }, [doc.entities, selectionIds]);
 
   const patchEntityById = (id: string, patch: Partial<EditorEntity>) => {
     scheduleHistory();
@@ -1774,32 +1877,69 @@ export function MapEditor({
               {doc.entities
                 .filter((e) => !isPlatformPlayerKind(e.kind))
                 .map((e) => (
-                <button
+                <div
                   key={e.id}
-                  type="button"
-                  onClick={(ev) => {
-                    if (ev.shiftKey) {
-                      const next = selectedIds.includes(e.id)
-                        ? selectedIds.filter((id) => id !== e.id)
-                        : [...(selectedIds.length ? selectedIds : selectedId ? [selectedId] : []), e.id];
-                      setSelectedIds(next);
-                      setSelectedId(next[next.length - 1] ?? null);
-                      apiRef.current?.setSelectedIds(next);
-                    } else {
-                      setSelectedId(e.id);
-                      setSelectedIds([e.id]);
-                      apiRef.current?.setSelectedId(e.id);
-                    }
-                  }}
-                  className={`w-full text-left px-2 py-1.5 rounded text-sm truncate ${
+                  className={`flex items-center gap-0.5 rounded ${
                     selectedId === e.id || selectedIds.includes(e.id)
                       ? 'bg-cyan-500/20 text-cyan-100'
                       : 'hover:bg-white/5'
                   }`}
                 >
-                  <span className="text-white/40 text-[10px] mr-1">{e.kind}</span>
-                  {e.name}
-                </button>
+                  <button
+                    type="button"
+                    onClick={(ev) => {
+                      if (ev.shiftKey) {
+                        const next = selectedIds.includes(e.id)
+                          ? selectedIds.filter((id) => id !== e.id)
+                          : [...(selectedIds.length ? selectedIds : selectedId ? [selectedId] : []), e.id];
+                        setSelectedIds(next);
+                        setSelectedId(next[next.length - 1] ?? null);
+                        apiRef.current?.setSelectedIds(next);
+                      } else {
+                        setSelectedId(e.id);
+                        // select() expands groups in the viewport
+                        apiRef.current?.setSelectedId(e.id);
+                      }
+                    }}
+                    className="flex-1 text-left px-2 py-1.5 text-sm truncate min-w-0"
+                  >
+                    <span className="text-white/40 text-[10px] mr-1">{e.kind}</span>
+                    {e.name}
+                    {e.groupId ? (
+                      <span className="ml-1 text-[9px] text-sky-300/80">grp</span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    className="w-7 h-7 shrink-0 rounded flex items-center justify-center text-white/50 hover:bg-white/10"
+                    title={e.visible === false ? 'Show' : 'Hide'}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      patchEntityById(e.id, { visible: e.visible === false });
+                    }}
+                  >
+                    {e.visible === false ? (
+                      <EyeOff className="w-3.5 h-3.5" />
+                    ) : (
+                      <Eye className="w-3.5 h-3.5 text-emerald-300/80" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="w-7 h-7 shrink-0 rounded flex items-center justify-center text-white/50 hover:bg-white/10"
+                    title={e.locked ? 'Unlock' : 'Lock'}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      patchEntityById(e.id, { locked: !e.locked });
+                    }}
+                  >
+                    {e.locked ? (
+                      <Lock className="w-3.5 h-3.5 text-amber-300" />
+                    ) : (
+                      <Unlock className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
               ))}
               <button
                 type="button"
@@ -2500,7 +2640,7 @@ export function MapEditor({
                   <p>· <b className="text-white">Player Model</b> = platform avatar (not map spawn)</p>
                   <p>· <b className="text-white">Hammer (H)</b> solids: Material + size in Properties</p>
                   <p>· <b className="text-white">Textures</b> tab: drag atlas region · paint brush</p>
-                  <p>· <b className="text-white">Ctrl</b> free fly · <b className="text-white">G</b> snap · <b className="text-white">W/E/R</b> gizmo</p>
+                  <p>· <b className="text-white">Ctrl</b> free fly · <b className="text-white">G</b> snap · <b className="text-white">W/E/R</b> gizmo · <b className="text-white">Shift</b> exact grid</p>
                   <p>· Set as <b className="text-white">MAIN map</b> for Deathrun Play</p>
                 </>
               )}
@@ -3042,6 +3182,92 @@ export function MapEditor({
                 />
               </label>
 
+              <div className="rounded-lg border border-white/10 bg-black/30 p-2 space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-white/50">
+                  Selection
+                  {selectionMeta.count > 1 ? ` · ${selectionMeta.count}` : ''}
+                  {selectionMeta.anyGrouped ? ' · grouped' : ''}
+                </p>
+                {selectionMeta.count > 1 && (
+                  <p className="text-[10px] text-white/45 leading-snug">
+                    Move / rotate / scale the gizmo to transform the whole selection as one.
+                    Duplicate (Ctrl+D) keeps a new group.
+                  </p>
+                )}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => patchSelection({ visible: !selectionMeta.allVisible })}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs ${
+                      selectionMeta.allVisible
+                        ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-100'
+                        : 'border-white/15 bg-white/5 text-white/55'
+                    }`}
+                    title="Show / hide in viewport"
+                  >
+                    {selectionMeta.allVisible ? (
+                      <Eye className="w-3.5 h-3.5" />
+                    ) : (
+                      <EyeOff className="w-3.5 h-3.5" />
+                    )}
+                    Visible
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextLocked = !selectionMeta.allLocked;
+                      patchSelection({ locked: nextLocked });
+                      toast({
+                        title: nextLocked ? 'Locked' : 'Unlocked',
+                        description: nextLocked
+                          ? 'Cannot move, scale, rotate, or delete until unlocked.'
+                          : 'Transforms enabled again.',
+                      });
+                    }}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs ${
+                      selectionMeta.allLocked
+                        ? 'border-amber-500/50 bg-amber-500/20 text-amber-100'
+                        : 'border-white/15 bg-white/5 text-white/55'
+                    }`}
+                    title="Lock — no move / rotate / scale / delete"
+                  >
+                    {selectionMeta.allLocked ? (
+                      <Lock className="w-3.5 h-3.5" />
+                    ) : (
+                      <Unlock className="w-3.5 h-3.5" />
+                    )}
+                    {selectionMeta.allLocked ? 'Locked' : 'Lock'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={groupSelection}
+                    disabled={selectionMeta.count < 2}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-xs text-sky-100 disabled:opacity-35"
+                    title="Group selected objects (selecting one picks all)"
+                  >
+                    <Link2 className="w-3.5 h-3.5" />
+                    Group
+                  </button>
+                  <button
+                    type="button"
+                    onClick={ungroupSelection}
+                    disabled={!selectionMeta.anyGrouped}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white/70 disabled:opacity-35"
+                    title="Ungroup selection"
+                  >
+                    <Unlink2 className="w-3.5 h-3.5" />
+                    Ungroup
+                  </button>
+                </div>
+                {(selected.locked || isEntityEditLocked(selected, doc.layers)) && (
+                  <p className="text-[10px] text-amber-200/80">
+                    {selected.locked
+                      ? 'This object is locked — unlock to edit transforms.'
+                      : 'Build level is locked — unlock the level in Layers.'}
+                  </p>
+                )}
+              </div>
+
               {/* Type label — never a confusing Kind dropdown for hammer / markers / player */}
               {isHammerSolidEntity(selected) ? (
                 <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 space-y-1.5">
@@ -3348,7 +3574,8 @@ export function MapEditor({
                         Solid size
                       </p>
                       <p className="text-[10px] text-white/55">
-                        Or use Scale (R) in the viewport. Collision matches these dimensions.
+                        Or use Scale (R) in the viewport. Enable Scale one side below so only the
+                        pulled face grows. Collision matches these dimensions.
                       </p>
                       <div className="grid grid-cols-3 gap-1">
                         {(['W', 'H', 'D'] as const).map((axis, i) => (
@@ -4574,6 +4801,21 @@ export function MapEditor({
               )}
 
               <div className="grid grid-cols-3 gap-1 border-t border-white/10 pt-2">
+                <label className="col-span-3 flex items-start gap-2 rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs text-white/75">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={scaleFromSide}
+                    onChange={(e) => setScaleFromSide(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium text-white/90">Scale one side</span>
+                    <span className="mt-0.5 block text-[10px] text-white/45">
+                      Pull a Scale (R) handle — only that side grows. Opposite face stays put.
+                      Off = expand both ways from center.
+                    </span>
+                  </span>
+                </label>
                 {(['position', 'rotation', 'scale'] as const).map((key) => (
                   <div key={key} className="col-span-3">
                     <p className="text-[10px] text-white/50 uppercase mb-0.5">{key}</p>

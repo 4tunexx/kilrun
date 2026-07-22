@@ -32,7 +32,7 @@ import {
   voteReputation,
 } from '@/lib/social-actions';
 import { getPublicProfile, type PublicProfile } from '@/lib/public-profile-actions';
-import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import { normalizeBannerConfig } from '@/lib/banner';
 import {
   ProfileHeroBanner,
 } from '@/components/profile-hero-banner';

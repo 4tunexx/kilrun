@@ -26,7 +26,8 @@ import {
   resellInventoryItem,
   unequipCosmeticSlot,
 } from '@/lib/social-actions';
-import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import { normalizeBannerConfig } from '@/lib/banner';
+import { BannerFill } from '@/components/banner-fill';
 import {
   frameAnimationClass,
   frameWrapperStyle,
@@ -61,12 +62,7 @@ const INV_TABS: { id: InvTabId; label: string }[] = [
 function InventoryPreview({ item }: { item: InventoryRow }) {
   if (item.bannerConfig) {
     const banner = normalizeBannerConfig(item.bannerConfig);
-    return (
-      <div
-        className={cn('h-16 w-full', bannerAnimationClass(banner))}
-        style={bannerStyle(banner)}
-      />
-    );
+    return <BannerFill banner={banner} className="h-16 w-full" />;
   }
   if (item.cosmeticSlot === 'frame' && item.cosmeticConfig) {
     const frame = normalizeFrameConfig(item.cosmeticConfig);

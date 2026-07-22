@@ -30,7 +30,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'transform',
     title: 'Move, rotate, scale',
-    body: 'Use Select (V) then click an object. W (move), E (rotate), R (scale), or the bottom toolbar. Numbers in Properties are exact. G toggles grid snap; enable Y snap to also snap height.',
+    body: 'Use Select (V) then click an object. W (move), E (rotate), R (scale), or the bottom toolbar. Hold Shift while dragging to snap move/rotate/scale to the exact grid (edges align). Properties → Scale one side grows only the pulled face. Numbers in Properties are exact. G toggles grid snap; enable Y snap to also snap height without Shift.',
     tip: 'F focuses the camera on your selection. Delete removes it. Ctrl+Z undoes.',
   },
   {
@@ -89,7 +89,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
       'Orbit: drag with left mouse (short click places in Brush mode; long drag orbits). Scroll to zoom.',
       'Tools: Select (V) picks objects without placing. Brush (B) paints the active model from Assets. In Brush, click the same model on its cell to select it; Alt+click stacks on top. Alt+drag = box select.',
       'Free Fly (Ctrl): WASD move, mouse look, Space up, C down. Placement disabled. Ctrl again to exit.',
-      'W / E / R = translate / rotate / scale. G = grid snap. F = focus selection. Alt+drag = box select. Measure tool = click two ground points.',
+      'W / E / R = translate / rotate / scale. Hold Shift = exact grid snap (move by cell, rotate 90°, scale to cell sizes, edges align). Properties: Visible / Lock / Group / Ungroup (works on multi-select). G = grid snap toggle. F = focus selection. Alt+drag = box select. Measure tool = click two ground points.',
       'Ctrl+D duplicate +X, Ctrl+Shift+D +Z. Ctrl+Z / Ctrl+Y undo/redo. Ctrl+S save. Red wire boxes = death zones; yellow lines = button→trap links.',
     ],
   },

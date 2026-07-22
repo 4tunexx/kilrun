@@ -1,11 +1,8 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import {
-  bannerAnimationClass,
-  bannerStyle,
-  type BannerConfig,
-} from '@/lib/banner';
+import { BannerFill } from '@/components/banner-fill';
+import type { BannerConfig } from '@/lib/banner';
 import { cn } from '@/lib/utils';
 
 /**
@@ -35,25 +32,12 @@ export function ProfileHeroBanner({
   return (
     <div className={cn('relative w-full', className)}>
       {/* Banner only — overflow clips art, NOT the identity row */}
-      <div
-        className={cn(
-          'relative w-full h-36 sm:h-44 md:h-52 overflow-hidden',
-          rounded && 'rounded-t-xl',
-          banner
-            ? bannerAnimationClass(banner)
-            : 'bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800'
-        )}
-        style={
-          banner
-            ? {
-                ...bannerStyle(banner),
-                backgroundPosition: 'center',
-                backgroundRepeat: 'no-repeat',
-              }
-            : undefined
-        }
-      >
-        <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/40 via-transparent to-black/10" />
+      <div className={cn('relative w-full h-36 sm:h-44 md:h-52', rounded && 'rounded-t-xl overflow-hidden')}>
+        <BannerFill
+          banner={banner}
+          showProfileOverlay
+          className="absolute inset-0"
+        />
         {topLeft ? (
           <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20">{topLeft}</div>
         ) : null}

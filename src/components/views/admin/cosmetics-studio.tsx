@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Plus, Sparkles, Trash2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Plus, Sparkles, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -17,16 +17,20 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { AvatarWithFrame } from '@/components/avatar-with-frame';
+import { BannerFill } from '@/components/banner-fill';
 import { NicknameEffectText } from '@/components/nickname-effect';
 import { adminUpsertStoreItem } from '@/lib/social-actions';
 import {
   BANNER_ANIMATION_STYLES,
+  BANNER_PATTERNS,
   BANNER_PRESET_SWATCHES,
-  bannerAnimationClass,
-  bannerStyle,
+  BANNER_TEXTURE_BLENDS,
   isValidHexColor,
+  skuFromName,
   type BannerAnimationStyle,
   type BannerConfig,
+  type BannerPattern,
+  type BannerTextureBlend,
 } from '@/lib/banner';
 import {
   DEFAULT_FRAME_CONFIG,
@@ -57,7 +61,7 @@ function ShopMetaFields({
   vpPrice,
   setVpPrice,
   namePlaceholder,
-  skuPlaceholder,
+  skuPrefix,
 }: {
   itemName: string;
   setItemName: (v: string) => void;
@@ -66,27 +70,48 @@ function ShopMetaFields({
   vpPrice: number;
   setVpPrice: (v: number) => void;
   namePlaceholder: string;
-  skuPlaceholder: string;
+  /** Auto SKU prefix: banner / frame / nick / skin */
+  skuPrefix: string;
 }) {
+  const skuManualRef = useRef(false);
+
+  const onNameChange = (value: string) => {
+    setItemName(value);
+    if (!skuManualRef.current) {
+      setItemSku(skuFromName(value, skuPrefix));
+    }
+  };
+
+  const onSkuChange = (value: string) => {
+    skuManualRef.current = true;
+    setItemSku(value);
+  };
+
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="space-y-1">
         <Label>Item name</Label>
         <Input
           value={itemName}
-          onChange={(e) => setItemName(e.target.value)}
+          onChange={(e) => onNameChange(e.target.value)}
           placeholder={namePlaceholder}
           className="bg-slate-900/50 border-slate-700"
         />
       </div>
       <div className="space-y-1">
-        <Label>SKU</Label>
+        <Label>
+          SKU{' '}
+          <span className="font-normal text-slate-500">(auto from name)</span>
+        </Label>
         <Input
           value={itemSku}
-          onChange={(e) => setItemSku(e.target.value)}
-          placeholder={skuPlaceholder}
-          className="bg-slate-900/50 border-slate-700"
+          onChange={(e) => onSkuChange(e.target.value)}
+          placeholder={skuFromName(namePlaceholder, skuPrefix)}
+          className="bg-slate-900/50 border-slate-700 font-mono text-xs"
         />
+        <p className="text-[10px] text-slate-500">
+          Fills as you type the name. Edit manually only if you need a custom id.
+        </p>
       </div>
       <div className="space-y-1 sm:col-span-2">
         <Label>VP price</Label>
@@ -109,11 +134,18 @@ function BannerPanel({ onCreated }: { onCreated?: () => void }) {
     useState<BannerAnimationStyle>('shimmer');
   const [blur, setBlur] = useState(0);
   const [opacity, setOpacity] = useState(1);
+  const [pattern, setPattern] = useState<BannerPattern>('none');
+  const [patternOpacity, setPatternOpacity] = useState(0.35);
+  const [patternScale, setPatternScale] = useState(1);
+  const [textureUrl, setTextureUrl] = useState<string | undefined>();
+  const [textureOpacity, setTextureOpacity] = useState(0.45);
+  const [textureBlend, setTextureBlend] = useState<BannerTextureBlend>('overlay');
   const [itemName, setItemName] = useState('');
   const [itemSku, setItemSku] = useState('');
   const [vpPrice, setVpPrice] = useState(1000);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+  const textureInputRef = useRef<HTMLInputElement>(null);
 
   const config: BannerConfig = {
     colors,
@@ -122,6 +154,12 @@ function BannerPanel({ onCreated }: { onCreated?: () => void }) {
     animationStyle,
     blur,
     opacity,
+    pattern,
+    patternOpacity,
+    patternScale,
+    textureUrl,
+    textureOpacity,
+    textureBlend,
   };
 
   const canSave =
@@ -129,6 +167,27 @@ function BannerPanel({ onCreated }: { onCreated?: () => void }) {
     itemSku.trim() &&
     colors.length >= 2 &&
     colors.every(isValidHexColor);
+
+  const onTextureFile = (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast({ title: 'Pick an image file', variant: 'destructive' });
+      return;
+    }
+    if (file.size > 2_500_000) {
+      toast({
+        title: 'Image too large',
+        description: 'Keep texture under ~2.5 MB.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setTextureUrl(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const save = async () => {
     if (!canSave) return;
@@ -243,6 +302,126 @@ function BannerPanel({ onCreated }: { onCreated?: () => void }) {
           />
         </div>
 
+        <div className="space-y-2 rounded-lg border border-slate-700/50 p-3">
+          <Label>Pattern overlay</Label>
+          <Select
+            value={pattern}
+            onValueChange={(v) => setPattern(v as BannerPattern)}
+          >
+            <SelectTrigger className="bg-slate-900/50 border-slate-700">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {BANNER_PATTERNS.map((p) => (
+                <SelectItem key={p.value} value={p.value}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {pattern !== 'none' && (
+            <>
+              <div className="space-y-2 pt-2">
+                <div className="flex justify-between text-sm">
+                  <Label>Pattern strength</Label>
+                  <span className="text-slate-400">{patternOpacity.toFixed(2)}</span>
+                </div>
+                <Slider
+                  min={0.05}
+                  max={1}
+                  step={0.05}
+                  value={[patternOpacity]}
+                  onValueChange={([v]) => setPatternOpacity(v)}
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <Label>Pattern scale</Label>
+                  <span className="text-slate-400">{patternScale.toFixed(2)}×</span>
+                </div>
+                <Slider
+                  min={0.5}
+                  max={3}
+                  step={0.1}
+                  value={[patternScale]}
+                  onValueChange={([v]) => setPatternScale(v)}
+                />
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="space-y-2 rounded-lg border border-slate-700/50 p-3">
+          <Label>Texture pattern (upload)</Label>
+          <p className="text-[11px] text-slate-500">
+            Optional image layered on top of the gradient (noise, fabric, logo wash…).
+          </p>
+          <input
+            ref={textureInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => onTextureFile(e.target.files?.[0] ?? null)}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => textureInputRef.current?.click()}
+            >
+              <Upload className="h-3.5 w-3.5 mr-1.5" />
+              {textureUrl ? 'Replace texture' : 'Upload texture'}
+            </Button>
+            {textureUrl && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-red-300"
+                onClick={() => setTextureUrl(undefined)}
+              >
+                Remove
+              </Button>
+            )}
+          </div>
+          {textureUrl && (
+            <>
+              <div className="space-y-2 pt-1">
+                <div className="flex justify-between text-sm">
+                  <Label>Texture strength</Label>
+                  <span className="text-slate-400">{textureOpacity.toFixed(2)}</span>
+                </div>
+                <Slider
+                  min={0.05}
+                  max={1}
+                  step={0.05}
+                  value={[textureOpacity]}
+                  onValueChange={([v]) => setTextureOpacity(v)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Blend mode</Label>
+                <Select
+                  value={textureBlend}
+                  onValueChange={(v) => setTextureBlend(v as BannerTextureBlend)}
+                >
+                  <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {BANNER_TEXTURE_BLENDS.map((b) => (
+                      <SelectItem key={b.value} value={b.value}>
+                        {b.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+        </div>
+
         <div className="flex items-center justify-between rounded-lg border border-slate-700/50 p-3">
           <div>
             <p className="font-medium">Animated</p>
@@ -273,17 +452,28 @@ function BannerPanel({ onCreated }: { onCreated?: () => void }) {
       </div>
 
       <div className="space-y-4">
-        <div className="space-y-1">
-          <Label>Live preview</Label>
-          <div
-            className={`aspect-[21/9] w-full min-h-[7rem] rounded-lg border border-slate-700 overflow-hidden ${bannerAnimationClass(config)}`}
-            style={{
-              ...bannerStyle(config),
-              backgroundPosition: 'center',
-            }}
-          />
+        <div className="space-y-2">
+          <Label>Full-scale profile preview</Label>
+          <div className="rounded-xl border border-slate-700 overflow-hidden bg-slate-950">
+            <div className="relative w-full h-36 sm:h-44">
+              <BannerFill
+                banner={config}
+                showProfileOverlay
+                className="absolute inset-0"
+              />
+            </div>
+            <div className="relative z-10 px-4 -mt-10 mb-3 flex items-end gap-3">
+              <div className="h-16 w-16 rounded-full bg-slate-800 border-2 border-slate-900 shrink-0" />
+              <div className="pb-1 min-w-0">
+                <p className="text-sm font-black truncate">
+                  {itemName.trim() || 'Preview Player'}
+                </p>
+                <p className="text-[10px] text-slate-400">Same size & overlay as profile</p>
+              </div>
+            </div>
+          </div>
           <p className="text-[11px] text-slate-500">
-            Same gradient fill players see on profile headers &amp; store cards.
+            Matches the profile header strip (height, dark wash, pattern &amp; texture layers).
           </p>
         </div>
         <ShopMetaFields
@@ -294,7 +484,7 @@ function BannerPanel({ onCreated }: { onCreated?: () => void }) {
           vpPrice={vpPrice}
           setVpPrice={setVpPrice}
           namePlaceholder="Crimson Wave"
-          skuPlaceholder="banner-crimson-wave"
+          skuPrefix="banner"
         />
         <Button className="w-full" disabled={saving || !canSave} onClick={() => void save()}>
           {saving ? 'Saving…' : 'Save banner to shop'}
@@ -435,7 +625,7 @@ function FramePanel({
           vpPrice={vpPrice}
           setVpPrice={setVpPrice}
           namePlaceholder="Crimson Ring"
-          skuPlaceholder="frame-crimson-ring"
+          skuPrefix="frame"
         />
         <Button
           className="w-full"
@@ -545,7 +735,7 @@ function NicknamePanel({ onCreated }: { onCreated?: () => void }) {
           vpPrice={vpPrice}
           setVpPrice={setVpPrice}
           namePlaceholder="Neon Pulse"
-          skuPlaceholder="nick-neon-pulse"
+          skuPrefix="nick"
         />
         <Button
           className="w-full"
@@ -686,7 +876,7 @@ function SkinPanel({ onCreated }: { onCreated?: () => void }) {
           vpPrice={vpPrice}
           setVpPrice={setVpPrice}
           namePlaceholder="Bronze Helm"
-          skuPlaceholder="skin-bronze-helm"
+          skuPrefix="skin"
         />
         <Button
           className="w-full"

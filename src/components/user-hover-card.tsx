@@ -21,7 +21,8 @@ import { useHoverCapable } from '@/hooks/use-hover-capable';
 import { useProfileNavigation } from '@/components/providers/profile-navigation-context';
 import { getPublicProfileSummary } from '@/lib/public-profile-actions';
 import { getSiteUrl } from '@/lib/site-url';
-import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import { BannerFill } from '@/components/banner-fill';
+import { normalizeBannerConfig } from '@/lib/banner';
 import {
   DEFAULT_SHOWCASE_LAYOUT,
   type ShowcaseAlign,
@@ -224,21 +225,12 @@ export function MiniProfileCard({
 
   const body = (
     <>
-      <div
-        className={cn(
-          'relative h-24 w-full',
-          banner ? bannerAnimationClass(banner) : 'bg-gradient-to-r from-slate-800 to-slate-700'
-        )}
-        style={
-          banner
-            ? {
-                ...bannerStyle(banner),
-                backgroundPosition: 'center',
-              }
-            : undefined
-        }
-      >
-        <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/35 via-transparent to-transparent" />
+      <div className="relative h-24 w-full">
+        <BannerFill
+          banner={banner}
+          showProfileOverlay
+          className="absolute inset-0"
+        />
         {logoButton}
       </div>
       <div className="-mt-8 px-4 pb-4 pt-0 min-w-0">

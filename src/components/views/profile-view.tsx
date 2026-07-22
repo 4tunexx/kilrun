@@ -59,7 +59,8 @@ import {
   updateProfileSettings,
 } from '@/lib/social-actions';
 import type { MatchStat, User as UserModel } from '@/generated/prisma';
-import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import { BannerFill } from '@/components/banner-fill';
+import { normalizeBannerConfig } from '@/lib/banner';
 import {
   ProfileHeroBanner,
 } from '@/components/profile-hero-banner';
@@ -687,18 +688,13 @@ export default function ProfileView({ userId }: { userId: string }) {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div
-                className={`h-20 sm:h-28 w-full rounded-lg border border-slate-700/50 overflow-hidden ${
-                  equippedBanner
-                    ? bannerAnimationClass(equippedBanner)
-                    : 'bg-gradient-to-r from-slate-800 to-slate-700'
-                }`}
-                style={
-                  equippedBanner
-                    ? { ...bannerStyle(equippedBanner), backgroundPosition: 'center' }
-                    : undefined
-                }
-              />
+              <div className="h-20 sm:h-28 w-full rounded-lg border border-slate-700/50 overflow-hidden relative">
+                <BannerFill
+                  banner={equippedBanner}
+                  showProfileOverlay
+                  className="absolute inset-0"
+                />
+              </div>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm text-slate-400">
                   {user?.equippedBannerItemName
@@ -732,10 +728,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                           item.isEquipped ? 'border-primary ring-2 ring-primary' : 'border-slate-700/50'
                         }`}
                       >
-                        <div
-                          className={`h-12 w-full ${cfg ? bannerAnimationClass(cfg) : 'bg-slate-900'}`}
-                          style={cfg ? bannerStyle(cfg) : undefined}
-                        />
+                        <BannerFill banner={cfg} className="h-12 w-full" />
                         <div className="p-2 bg-slate-900/40 space-y-1">
                           <p className="text-xs font-semibold truncate flex items-center gap-1">
                             {item.itemName}

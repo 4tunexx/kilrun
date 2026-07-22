@@ -71,6 +71,29 @@ export function isHammerSolidEntity(ent: Pick<EditorEntity, 'model' | 'primitive
   return isHammerPrimitive(ent.primitive);
 }
 
+/** Entity is locked by its own flag or by its build level. */
+export function isEntityEditLocked(
+  ent: Pick<EditorEntity, 'locked' | 'layerId'>,
+  layers: EditorLayer[]
+): boolean {
+  if (ent.locked) return true;
+  return Boolean(layers.find((l) => l.id === ent.layerId)?.locked);
+}
+
+/** Expand a selection to include every member of any selected group. */
+export function expandIdsWithGroups(entities: EditorEntity[], ids: string[]): string[] {
+  const idSet = new Set(ids);
+  const groupIds = new Set<string>();
+  for (const e of entities) {
+    if (idSet.has(e.id) && e.groupId) groupIds.add(e.groupId);
+  }
+  if (!groupIds.size) return [...idSet];
+  for (const e of entities) {
+    if (e.groupId && groupIds.has(e.groupId)) idSet.add(e.id);
+  }
+  return [...idSet];
+}
+
 /**
  * Player avatar is platform-wide look/settings (Player Model studio), not a placeable map prop.
  * Kept in the document for Play Test / match, but never shown as a mesh in the map viewport.
@@ -556,13 +579,20 @@ export interface EditorEntity {
   /** Custom uploaded model URL (data URL or /uploads path) */
   customModelUrl?: string;
   layerId: string;
+  /** Shared id for grouped entities — selecting one selects the whole group. */
   groupId?: string;
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
   color?: string;
   opacity?: number;
+  /** When false, hidden in the editor viewport (still listed in Outliner). */
   visible?: boolean;
+  /**
+   * When true, this entity cannot be moved / rotated / scaled / deleted
+   * until unlocked (separate from layer lock).
+   */
+  locked?: boolean;
   textureUrl?: string;
   /**
    * UV tiling for entity texture (default [1,1]). Use with Hammer++ solids /
@@ -1143,6 +1173,89 @@ export function generateId(prefix = 'ent'): string {
 export function snapToGrid(v: number, grid: number): number {
   if (grid <= 0) return v;
   return Math.round(v / grid) * grid;
+}
+
+/** World AABB size = collisionSize (or unit cube) × scale. */
+export function entityWorldSize(
+  collisionSize: [number, number, number] | undefined,
+  scale: [number, number, number]
+): [number, number, number] {
+  const base = collisionSize ?? [1, 1, 1];
+  return [
+    Math.max(1e-6, Math.abs(base[0] * scale[0])),
+    Math.max(1e-6, Math.abs(base[1] * scale[1])),
+    Math.max(1e-6, Math.abs(base[2] * scale[2])),
+  ];
+}
+
+/**
+ * Snap each scale axis so world size (base × scale) lands on exact grid multiples.
+ * Returns a new scale tuple; never collapses an axis below one grid cell.
+ */
+export function snapScaleToGrid(
+  scale: [number, number, number],
+  base: [number, number, number],
+  grid: number
+): [number, number, number] {
+  if (grid <= 0) return [...scale] as [number, number, number];
+  const axis = (s: number, b: number) => {
+    const sign = s < 0 ? -1 : 1;
+    const baseAbs = Math.max(1e-6, Math.abs(b));
+    const world = Math.abs(s) * baseAbs;
+    let snapped = snapToGrid(world, grid);
+    if (snapped < grid * 0.5) snapped = grid;
+    return sign * (snapped / baseAbs);
+  };
+  return [axis(scale[0], base[0]), axis(scale[1], base[1]), axis(scale[2], base[2])];
+}
+
+/**
+ * Snap position so XZ edges and Y feet sit on grid lines (bottom-aligned solids).
+ */
+export function snapPoseToGridEdges(
+  position: [number, number, number],
+  worldSize: [number, number, number],
+  grid: number
+): [number, number, number] {
+  if (grid <= 0) return [...position] as [number, number, number];
+  return [
+    snapToGrid(position[0] - worldSize[0] / 2, grid) + worldSize[0] / 2,
+    snapToGrid(position[1], grid),
+    snapToGrid(position[2] - worldSize[2] / 2, grid) + worldSize[2] / 2,
+  ];
+}
+
+/**
+ * Axis-aligned footprint after yaw (degrees). At 90°/270° local X/Z swap.
+ * Used so Shift-grid edge snap stays correct for rotated Hammer solids.
+ */
+export function yawAlignedSize(
+  localSize: [number, number, number],
+  yawDeg: number
+): [number, number, number] {
+  const yaw = ((Math.round(yawDeg / 90) * 90) % 360 + 360) % 360;
+  if (yaw === 90 || yaw === 270) {
+    return [localSize[2], localSize[1], localSize[0]];
+  }
+  return [localSize[0], localSize[1], localSize[2]];
+}
+
+/**
+ * Position offset so scale grows from one side (opposite face stays put).
+ * Y defaults to 0 for bottom-aligned props (feet stay, grow upward).
+ */
+export function scaleFromSideOffset(
+  oldScale: [number, number, number],
+  newScale: [number, number, number],
+  base: [number, number, number],
+  opts?: { compensateY?: boolean }
+): [number, number, number] {
+  const compensateY = opts?.compensateY === true;
+  return [
+    (base[0] * (newScale[0] - oldScale[0])) / 2,
+    compensateY ? (base[1] * (newScale[1] - oldScale[1])) / 2 : 0,
+    (base[2] * (newScale[2] - oldScale[2])) / 2,
+  ];
 }
 
 export function createEmptyMap(

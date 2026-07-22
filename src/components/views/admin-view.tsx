@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import {
   Award,
@@ -95,7 +95,8 @@ import { adminListAuditLogs } from '@/lib/audit';
 import { syncClerkBrandingToKilrun } from '@/lib/clerk-branding';
 import { normalizeLandingSlides, type LandingHeroSlide } from '@/lib/cosmetics';
 import { ACCOUNT_ROLES } from '@/lib/roles';
-import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import { normalizeBannerConfig, skuFromName } from '@/lib/banner';
+import { BannerFill } from '@/components/banner-fill';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import {
   formatFireSaleCountdown,
@@ -186,6 +187,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
     imageUrl: '',
     cosmeticSlot: 'skin_hat' as string,
   });
+  const itemSkuManualRef = useRef(false);
   const [fireSaleSelected, setFireSaleSelected] = useState<string[]>([]);
   const [fireSaleForm, setFireSaleForm] = useState({
     percent: 25,
@@ -2065,9 +2067,16 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   <Label>Name</Label>
                   <Input
                     value={itemForm.itemName}
-                    onChange={(e) =>
-                      setItemForm((f) => ({ ...f, itemName: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      setItemForm((f) => ({
+                        ...f,
+                        itemName: name,
+                        itemSku: itemSkuManualRef.current
+                          ? f.itemSku
+                          : skuFromName(name, 'ITEM'),
+                      }));
+                    }}
                     className="bg-slate-900/50 border-slate-700"
                   />
                 </div>
@@ -2075,11 +2084,16 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                   <Label>SKU</Label>
                   <Input
                     value={itemForm.itemSku}
-                    onChange={(e) =>
-                      setItemForm((f) => ({ ...f, itemSku: e.target.value }))
-                    }
-                    className="bg-slate-900/50 border-slate-700"
+                    onChange={(e) => {
+                      itemSkuManualRef.current = true;
+                      setItemForm((f) => ({ ...f, itemSku: e.target.value }));
+                    }}
+                    placeholder={skuFromName(itemForm.itemName, 'ITEM')}
+                    className="bg-slate-900/50 border-slate-700 font-mono text-xs"
                   />
+                  <p className="text-[11px] text-slate-500">
+                    Auto-fills from the name. Edit to override.
+                  </p>
                 </div>
                 <div className="space-y-1">
                   <Label>Category</Label>
@@ -2147,6 +2161,7 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                         imageUrl: itemForm.imageUrl || undefined,
                         cosmeticSlot: null,
                       });
+                      itemSkuManualRef.current = false;
                       setItemForm({
                         itemName: '',
                         itemCategory: 'Perks',
@@ -2197,9 +2212,9 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                           aria-label={`Select ${item.itemName}`}
                         />
                         {banner ? (
-                          <div
-                            className={`w-12 h-8 rounded shrink-0 ${bannerAnimationClass(banner)}`}
-                            style={bannerStyle(banner)}
+                          <BannerFill
+                            banner={banner}
+                            className="w-12 h-8 rounded shrink-0"
                           />
                         ) : item.imageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element

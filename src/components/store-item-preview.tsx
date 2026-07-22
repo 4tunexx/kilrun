@@ -1,7 +1,8 @@
 'use client';
 
 import Image from 'next/image';
-import { bannerAnimationClass, bannerStyle, normalizeBannerConfig } from '@/lib/banner';
+import { BannerFill } from '@/components/banner-fill';
+import { normalizeBannerConfig } from '@/lib/banner';
 import {
   frameAnimationClass,
   frameWrapperStyle,
@@ -32,12 +33,7 @@ export function StoreItemPreview({
 }) {
   if (item.bannerConfig) {
     const cfg = normalizeBannerConfig(item.bannerConfig);
-    return (
-      <div
-        className={cn('absolute inset-0', bannerAnimationClass(cfg), className)}
-        style={bannerStyle(cfg)}
-      />
-    );
+    return <BannerFill banner={cfg} className={cn('absolute inset-0', className)} />;
   }
   if (item.cosmeticSlot === 'frame' && item.cosmeticConfig) {
     const frame = normalizeFrameConfig(item.cosmeticConfig);

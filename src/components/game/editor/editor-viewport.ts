@@ -26,7 +26,13 @@ import {
   isHammerSolidEntity as isHammerSolidEntityDoc,
   isInvisibleMarkerKind,
   isPlatformPlayerKind,
+  isEntityEditLocked,
   snapToGrid,
+  snapScaleToGrid,
+  snapPoseToGridEdges,
+  entityWorldSize,
+  yawAlignedSize,
+  scaleFromSideOffset,
   ensureEnvironment,
 } from './map-document';
 import {
@@ -183,6 +189,9 @@ export interface EditorViewportApi {
   setGridSnap: (on: boolean) => void;
   setGridSize: (n: number) => void;
   setSnapY: (on: boolean) => void;
+  /** When true, scale gizmo grows/shrinks from the pulled side (opposite face fixed). */
+  setScaleFromSide: (on: boolean) => void;
+  getScaleFromSide: () => boolean;
   setFreeFly: (on: boolean) => void;
   isFreeFly: () => boolean;
   setShowAllCollisionGizmos: (on: boolean) => void;
@@ -284,6 +293,8 @@ export function createEditorViewport(
   let gridSnap = true;
   let snapY = false;
   let gridSize = doc.gridSize || 1;
+  /** Scale from pulled side (opposite face fixed) instead of both ways from center. */
+  let scaleFromSide = true;
   let shiftHeld = false;
   let freeFly = false;
   /** Pause render loop while Play Test overlays (keeps WebGL context alive). */
@@ -464,20 +475,219 @@ export function createEditorViewport(
   const transform = new TransformControls(camera, renderer.domElement);
   transform.setMode('translate');
   let lastPrimaryPos = new THREE.Vector3();
+  let lastPrimaryScale = new THREE.Vector3(1, 1, 1);
+
+  /** Invisible pivot so multi-select / groups move·rotate·scale as one unit. */
+  const groupProxy = new THREE.Object3D();
+  groupProxy.name = 'selection-group-proxy';
+  scene.add(groupProxy);
+  let proxyActive = false;
+  type ProxyMemberStart = {
+    id: string;
+    localPos: THREE.Vector3;
+    quat: THREE.Quaternion;
+    scale: THREE.Vector3;
+  };
+  let proxyMembers: ProxyMemberStart[] = [];
+
+  const selectionTransformIds = (): string[] => {
+    const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+    return ids.filter((id) => {
+      const e = doc.entities.find((x) => x.id === id);
+      return e && !isLockedEnt(e) && roots.has(id);
+    });
+  };
+
+  const computeSelectionPivot = (ids: string[]): THREE.Vector3 => {
+    const pivot = new THREE.Vector3();
+    let n = 0;
+    for (const id of ids) {
+      const root = roots.get(id);
+      if (!root) continue;
+      pivot.add(root.position);
+      n += 1;
+    }
+    if (n > 0) pivot.divideScalar(n);
+    return pivot;
+  };
+
+  const captureProxyMembers = () => {
+    const ids = selectionTransformIds();
+    proxyMembers = [];
+    for (const id of ids) {
+      const root = roots.get(id);
+      if (!root) continue;
+      proxyMembers.push({
+        id,
+        localPos: root.position.clone().sub(groupProxy.position),
+        quat: root.quaternion.clone(),
+        scale: root.scale.clone(),
+      });
+    }
+  };
+
+  const applyProxyTransformToMembers = () => {
+    const applyPose = (eId: string, root: THREE.Object3D) => {
+      const e = doc.entities.find((x) => x.id === eId);
+      if (!e) return;
+      e.position = [root.position.x, root.position.y, root.position.z];
+      e.rotation = [
+        THREE.MathUtils.radToDeg(root.rotation.x),
+        THREE.MathUtils.radToDeg(root.rotation.y),
+        THREE.MathUtils.radToDeg(root.rotation.z),
+      ];
+      e.scale = [root.scale.x, root.scale.y, root.scale.z];
+    };
+
+    for (const m of proxyMembers) {
+      const root = roots.get(m.id);
+      if (!root) continue;
+      const scaled = m.localPos.clone();
+      scaled.x *= groupProxy.scale.x;
+      scaled.y *= groupProxy.scale.y;
+      scaled.z *= groupProxy.scale.z;
+      scaled.applyQuaternion(groupProxy.quaternion);
+      root.position.copy(groupProxy.position).add(scaled);
+      root.quaternion.copy(groupProxy.quaternion).multiply(m.quat);
+      root.rotation.setFromQuaternion(root.quaternion);
+      root.scale.set(
+        m.scale.x * groupProxy.scale.x,
+        m.scale.y * groupProxy.scale.y,
+        m.scale.z * groupProxy.scale.z
+      );
+      applyPose(m.id, root);
+    }
+  };
+
+  /** Hold Shift → exact grid for move / rotate / scale (TransformControls snaps). */
+  const syncTransformSnaps = () => {
+    if (shiftHeld) {
+      transform.setTranslationSnap(gridSize);
+      transform.setRotationSnap(Math.PI / 2);
+      // Scale is snapped in objectChange to world-size × grid (not raw scale steps).
+      transform.setScaleSnap(null);
+    } else {
+      transform.setTranslationSnap(null);
+      transform.setRotationSnap(0);
+      transform.setScaleSnap(null);
+    }
+  };
+
+  const applyScaleFromSide = (
+    obj: THREE.Object3D,
+    ent: EditorEntity,
+    oldScale: [number, number, number],
+    newScale: [number, number, number]
+  ) => {
+    if (!scaleFromSide) return;
+    const base = (ent.collisionSize ?? [1, 1, 1]) as [number, number, number];
+    // Bottom-aligned meshes (Hammer / planted) keep feet fixed on Y.
+    const offset = scaleFromSideOffset(oldScale, newScale, base, { compensateY: false });
+    const axis = (transform as unknown as { axis: string | null }).axis;
+    let ox = offset[0];
+    let oy = offset[1];
+    let oz = offset[2];
+    if (axis === 'X') {
+      oy = 0;
+      oz = 0;
+    } else if (axis === 'Y') {
+      ox = 0;
+      oz = 0;
+    } else if (axis === 'Z') {
+      ox = 0;
+      oy = 0;
+    }
+    if (ox === 0 && oy === 0 && oz === 0) return;
+    const delta = new THREE.Vector3(ox, oy, oz);
+    delta.applyEuler(obj.rotation);
+    obj.position.add(delta);
+  };
+
   transform.addEventListener('dragging-changed', (e) => {
     orbit.enabled = !(e as { value: boolean }).value && !freeFly;
-    if ((e as { value: boolean }).value && selectedId && roots.get(selectedId)) {
-      lastPrimaryPos.copy(roots.get(selectedId)!.position);
+    const dragging = (e as { value: boolean }).value;
+    if (dragging) {
+      if (proxyActive) {
+        // Reset proxy pose so local offsets stay valid for this drag.
+        const ids = selectionTransformIds();
+        const pivot = computeSelectionPivot(ids);
+        groupProxy.position.copy(pivot);
+        groupProxy.rotation.set(0, 0, 0);
+        groupProxy.quaternion.identity();
+        groupProxy.scale.set(1, 1, 1);
+        captureProxyMembers();
+        lastPrimaryPos.copy(groupProxy.position);
+        lastPrimaryScale.copy(groupProxy.scale);
+      } else if (selectedId && roots.get(selectedId)) {
+        const root = roots.get(selectedId)!;
+        lastPrimaryPos.copy(root.position);
+        lastPrimaryScale.copy(root.scale);
+      }
+    } else if (proxyActive) {
+      // Re-seat proxy at the new group center with identity pose for the next drag.
+      const ids = selectionTransformIds();
+      const pivot = computeSelectionPivot(ids);
+      groupProxy.position.copy(pivot);
+      groupProxy.rotation.set(0, 0, 0);
+      groupProxy.quaternion.identity();
+      groupProxy.scale.set(1, 1, 1);
+      captureProxyMembers();
+      refreshSelectionOutlines();
     }
   });
   transform.addEventListener('objectChange', () => {
+    // —— Multi-select / group: transform proxy drives every member as one ——
+    if (proxyActive && (transform as unknown as { object?: THREE.Object3D }).object === groupProxy) {
+      if (shiftHeld) {
+        if (transform.mode === 'translate') {
+          groupProxy.position.x = snapToGrid(groupProxy.position.x, gridSize);
+          groupProxy.position.z = snapToGrid(groupProxy.position.z, gridSize);
+          groupProxy.position.y = snapToGrid(groupProxy.position.y, gridSize);
+        } else if (transform.mode === 'rotate') {
+          const snapDeg = 90;
+          const sx = Math.round(THREE.MathUtils.radToDeg(groupProxy.rotation.x) / snapDeg) * snapDeg;
+          const sy = Math.round(THREE.MathUtils.radToDeg(groupProxy.rotation.y) / snapDeg) * snapDeg;
+          const sz = Math.round(THREE.MathUtils.radToDeg(groupProxy.rotation.z) / snapDeg) * snapDeg;
+          groupProxy.rotation.set(
+            THREE.MathUtils.degToRad(sx),
+            THREE.MathUtils.degToRad(sy),
+            THREE.MathUtils.degToRad(sz)
+          );
+          groupProxy.quaternion.setFromEuler(groupProxy.rotation);
+        } else if (transform.mode === 'scale') {
+          const snapAxis = (v: number) => {
+            let s = snapToGrid(v, gridSize);
+            if (Math.abs(s) < gridSize * 0.5) s = Math.sign(v || 1) * gridSize;
+            return s;
+          };
+          // Prefer uniform-ish grid steps from average scale.
+          const avg = (groupProxy.scale.x + groupProxy.scale.y + groupProxy.scale.z) / 3;
+          const snapped = Math.max(gridSize, snapToGrid(avg, gridSize));
+          if (Math.abs(groupProxy.scale.x - groupProxy.scale.y) < 1e-4 &&
+              Math.abs(groupProxy.scale.y - groupProxy.scale.z) < 1e-4) {
+            groupProxy.scale.setScalar(snapped);
+          } else {
+            groupProxy.scale.x = snapAxis(groupProxy.scale.x);
+            groupProxy.scale.y = snapAxis(groupProxy.scale.y);
+            groupProxy.scale.z = snapAxis(groupProxy.scale.z);
+          }
+        }
+      }
+      applyProxyTransformToMembers();
+      lastPrimaryPos.copy(groupProxy.position);
+      lastPrimaryScale.copy(groupProxy.scale);
+      handlers.onDocChange(doc);
+      refreshSelectionOutlines();
+      return;
+    }
+
     if (!selectedId) return;
     const ent = doc.entities.find((x) => x.id === selectedId);
     const obj = roots.get(selectedId);
     if (!ent || !obj) return;
     const layer = layerMeta(ent.layerId);
-    if (layer?.locked) {
-      // Locked build level — snap visual back to stored pose and ignore the drag.
+    if (layer?.locked || ent.locked) {
+      // Locked build level or entity — snap visual back to stored pose and ignore the drag.
       obj.position.set(...ent.position);
       obj.rotation.set(
         THREE.MathUtils.degToRad(ent.rotation[0]),
@@ -487,22 +697,96 @@ export function createEditorViewport(
       obj.scale.set(...ent.scale);
       return;
     }
-    if (gridSnap && transform.mode === 'translate') {
+
+    if (transform.mode === 'scale') {
+      const oldScale: [number, number, number] = [
+        lastPrimaryScale.x,
+        lastPrimaryScale.y,
+        lastPrimaryScale.z,
+      ];
+      let nextScale: [number, number, number] = [obj.scale.x, obj.scale.y, obj.scale.z];
+      const base = (ent.collisionSize ?? [1, 1, 1]) as [number, number, number];
+
+      if (shiftHeld) {
+        nextScale = snapScaleToGrid(nextScale, base, gridSize);
+        obj.scale.set(...nextScale);
+      }
+
+      if (scaleFromSide && shiftHeld) {
+        // One-sided + Shift: keep min faces fixed (grid-snapped), grow the pulled side.
+        const yawDeg = THREE.MathUtils.radToDeg(obj.rotation.y);
+        const world = yawAlignedSize(entityWorldSize(ent.collisionSize, nextScale), yawDeg);
+        const oldWorld = yawAlignedSize(entityWorldSize(ent.collisionSize, oldScale), yawDeg);
+        const prevPos = lastPrimaryPos;
+        const left = snapToGrid(prevPos.x - oldWorld[0] / 2, gridSize);
+        const back = snapToGrid(prevPos.z - oldWorld[2] / 2, gridSize);
+        const feet = snapToGrid(prevPos.y, gridSize);
+        obj.position.x = left + world[0] / 2;
+        obj.position.z = back + world[2] / 2;
+        obj.position.y = feet;
+      } else if (scaleFromSide) {
+        // Grow/shrink from the pulled handle; opposite face stays put.
+        applyScaleFromSide(obj, ent, oldScale, nextScale);
+      } else if (shiftHeld) {
+        // Centered scale + Shift → seat both edges on the grid.
+        const yawDeg = THREE.MathUtils.radToDeg(obj.rotation.y);
+        const world = yawAlignedSize(entityWorldSize(ent.collisionSize, nextScale), yawDeg);
+        obj.position.set(
+          ...snapPoseToGridEdges(
+            [obj.position.x, obj.position.y, obj.position.z],
+            world,
+            gridSize
+          )
+        );
+      }
+
+      lastPrimaryScale.set(...nextScale);
+    } else if (shiftHeld) {
+      const scaleTuple: [number, number, number] = [
+        obj.scale.x,
+        obj.scale.y,
+        obj.scale.z,
+      ];
+      const yawDeg = THREE.MathUtils.radToDeg(obj.rotation.y);
+      if (transform.mode === 'translate') {
+        const world = yawAlignedSize(
+          entityWorldSize(ent.collisionSize, scaleTuple),
+          yawDeg
+        );
+        obj.position.set(
+          ...snapPoseToGridEdges(
+            [obj.position.x, obj.position.y, obj.position.z],
+            world,
+            gridSize
+          )
+        );
+      } else if (transform.mode === 'rotate') {
+        const snapDeg = 90;
+        const sx = Math.round(THREE.MathUtils.radToDeg(obj.rotation.x) / snapDeg) * snapDeg;
+        const sy = Math.round(THREE.MathUtils.radToDeg(obj.rotation.y) / snapDeg) * snapDeg;
+        const sz = Math.round(THREE.MathUtils.radToDeg(obj.rotation.z) / snapDeg) * snapDeg;
+        obj.rotation.set(
+          THREE.MathUtils.degToRad(sx),
+          THREE.MathUtils.degToRad(sy),
+          THREE.MathUtils.degToRad(sz)
+        );
+        // After a 90° turn, re-seat edges on the grid with the new yaw footprint.
+        const world = yawAlignedSize(
+          entityWorldSize(ent.collisionSize, scaleTuple),
+          sy
+        );
+        obj.position.set(
+          ...snapPoseToGridEdges(
+            [obj.position.x, obj.position.y, obj.position.z],
+            world,
+            gridSize
+          )
+        );
+      }
+    } else if (gridSnap && transform.mode === 'translate') {
       obj.position.x = snapToGrid(obj.position.x, gridSize);
       obj.position.z = snapToGrid(obj.position.z, gridSize);
-      if (snapY || shiftHeld) obj.position.y = snapToGrid(obj.position.y, gridSize);
-    }
-    // Hold Shift while rotating → hard 90° (4-way) grid turns
-    if (transform.mode === 'rotate' && shiftHeld) {
-      const snapDeg = 90;
-      const sx = Math.round(THREE.MathUtils.radToDeg(obj.rotation.x) / snapDeg) * snapDeg;
-      const sy = Math.round(THREE.MathUtils.radToDeg(obj.rotation.y) / snapDeg) * snapDeg;
-      const sz = Math.round(THREE.MathUtils.radToDeg(obj.rotation.z) / snapDeg) * snapDeg;
-      obj.rotation.set(
-        THREE.MathUtils.degToRad(sx),
-        THREE.MathUtils.degToRad(sy),
-        THREE.MathUtils.degToRad(sz)
-      );
+      if (snapY) obj.position.y = snapToGrid(obj.position.y, gridSize);
     }
 
     const dx = obj.position.x - lastPrimaryPos.x;
@@ -527,6 +811,8 @@ export function createEditorViewport(
     if (transform.mode === 'translate' && selectedIds.length > 1) {
       for (const id of selectedIds) {
         if (id === selectedId) continue;
+        const otherEnt = doc.entities.find((x) => x.id === id);
+        if (isLockedEnt(otherEnt)) continue;
         const other = roots.get(id);
         if (!other) continue;
         other.position.x += dx;
@@ -678,6 +964,11 @@ export function createEditorViewport(
 
   function layerMeta(id: string): EditorLayer | undefined {
     return doc.layers.find((l) => l.id === id);
+  }
+
+  function isLockedEnt(ent: EditorEntity | undefined): boolean {
+    if (!ent) return false;
+    return isEntityEditLocked(ent, doc.layers);
   }
 
   function applyEntityTexture(root: THREE.Object3D, ent: EditorEntity) {
@@ -1050,12 +1341,31 @@ export function createEditorViewport(
   }
 
   function attachSelectionGizmo() {
-    if (!selectedId || !roots.has(selectedId) || freeFly || editTool === 'bucket' || editTool === 'paint' || bucketPainting) {
+    if (!selectedId || freeFly || editTool === 'bucket' || editTool === 'paint' || bucketPainting) {
+      proxyActive = false;
+      transform.detach();
+      return;
+    }
+    const ids = selectionTransformIds();
+    if (ids.length >= 2) {
+      const pivot = computeSelectionPivot(ids);
+      groupProxy.position.copy(pivot);
+      groupProxy.rotation.set(0, 0, 0);
+      groupProxy.quaternion.identity();
+      groupProxy.scale.set(1, 1, 1);
+      if (!groupProxy.parent) scene.add(groupProxy);
+      transform.attach(groupProxy);
+      proxyActive = true;
+      captureProxyMembers();
+      return;
+    }
+    proxyActive = false;
+    if (!roots.has(selectedId)) {
       transform.detach();
       return;
     }
     const selEnt = doc.entities.find((e) => e.id === selectedId);
-    if (selEnt && layerMeta(selEnt.layerId)?.locked) {
+    if (isLockedEnt(selEnt)) {
       transform.detach();
       return;
     }
@@ -1114,7 +1424,14 @@ export function createEditorViewport(
       selectedId = selectedIds[selectedIds.length - 1] ?? null;
     } else {
       selectedId = id;
-      selectedIds = [id];
+      const ent = doc.entities.find((e) => e.id === id);
+      if (ent?.groupId) {
+        selectedIds = doc.entities
+          .filter((e) => e.groupId === ent.groupId)
+          .map((e) => e.id);
+      } else {
+        selectedIds = [id];
+      }
     }
     if (selectedId && roots.has(selectedId) && !freeFly) {
       attachSelectionGizmo();
@@ -1885,7 +2202,7 @@ export function createEditorViewport(
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Shift') {
       shiftHeld = true;
-      if (transform.mode === 'rotate') transform.setRotationSnap(Math.PI / 2);
+      syncTransformSnaps();
     }
     keys.add(e.code);
     if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
@@ -1898,7 +2215,7 @@ export function createEditorViewport(
   const onKeyUp = (e: KeyboardEvent) => {
     if (e.key === 'Shift') {
       shiftHeld = false;
-      transform.setRotationSnap(0);
+      syncTransformSnaps();
     }
     keys.delete(e.code);
     if (
@@ -2121,7 +2438,7 @@ export function createEditorViewport(
         !freeFly
       ) {
         const selEnt = doc.entities.find((e) => e.id === selectedId);
-        if (!layerMeta(selEnt?.layerId ?? '')?.locked) {
+        if (!layerMeta(selEnt?.layerId ?? '')?.locked && !selEnt?.locked) {
           transform.attach(roots.get(selectedId)!);
         }
       }
@@ -2136,7 +2453,7 @@ export function createEditorViewport(
     },
     setTransformMode: (mode) => {
       transform.setMode(mode);
-      transform.setRotationSnap(mode === 'rotate' && shiftHeld ? Math.PI / 2 : 0);
+      syncTransformSnaps();
     },
     setGridSnap: (on) => {
       gridSnap = on;
@@ -2144,11 +2461,16 @@ export function createEditorViewport(
     setGridSize: (n) => {
       gridSize = n;
       doc = { ...doc, gridSize: n };
+      syncTransformSnaps();
       handlers.onDocChange(doc);
     },
     setSnapY: (on) => {
       snapY = on;
     },
+    setScaleFromSide: (on) => {
+      scaleFromSide = on;
+    },
+    getScaleFromSide: () => scaleFromSide,
     setFreeFly,
     isFreeFly: () => freeFly,
     setShowAllCollisionGizmos: (on) => {
@@ -2233,18 +2555,35 @@ export function createEditorViewport(
       if (!selectedIds.length && !selectedId) return;
       const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
       const copies: EditorEntity[] = [];
+      /** Old groupId → new groupId so each copied cluster stays a group. */
+      const groupMap = new Map<string, string>();
+      const offset: [number, number, number] = [
+        axis === 'x' ? gridSize : 0,
+        axis === 'y' ? gridSize : 0,
+        axis === 'z' ? gridSize : 0,
+      ];
       for (const sid of ids) {
         const src = doc.entities.find((e) => e.id === sid);
         if (!src) continue;
-        const offset: [number, number, number] = [
-          axis === 'x' ? gridSize : 0,
-          axis === 'y' ? gridSize : 0,
-          axis === 'z' ? gridSize : 0,
-        ];
+        let newGroupId: string | undefined;
+        if (src.groupId) {
+          if (!groupMap.has(src.groupId)) {
+            groupMap.set(src.groupId, generateId('grp'));
+          }
+          newGroupId = groupMap.get(src.groupId);
+        } else if (ids.length >= 2) {
+          // Multi-select copy of ungrouped pieces → one new group so they stay together.
+          if (!groupMap.has('__selection__')) {
+            groupMap.set('__selection__', generateId('grp'));
+          }
+          newGroupId = groupMap.get('__selection__');
+        }
         copies.push({
           ...src,
           id: generateId(),
           name: `${src.name} Copy`,
+          locked: false,
+          groupId: newGroupId,
           position: [
             src.position[0] + offset[0],
             src.position[1] + offset[1],
@@ -2260,12 +2599,7 @@ export function createEditorViewport(
       void Promise.all(copies.map((c) => syncEntity(c))).then(() => {
         selectedIds = copies.map((c) => c.id);
         selectedId = selectedIds[0] ?? null;
-        if (selectedId && roots.has(selectedId) && !freeFly) {
-          const selEnt = doc.entities.find((e) => e.id === selectedId);
-          const locked = selEnt ? Boolean(layerMeta(selEnt.layerId)?.locked) : false;
-          if (!locked) transform.attach(roots.get(selectedId)!);
-          else transform.detach();
-        }
+        attachSelectionGizmo();
         refreshGizmos();
         handlers.onSelect(selectedId);
         handlers.onSelectionChange?.(selectedIds);
@@ -2288,7 +2622,7 @@ export function createEditorViewport(
         .map((id) => doc.entities.find((e) => e.id === id))
         .filter((e): e is EditorEntity => !!e);
       if (ents.length < 2) return false;
-      if (ents.some((e) => layerMeta(e.layerId)?.locked)) {
+      if (ents.some((e) => isLockedEnt(e))) {
         handlers.onPlaceResult?.('locked', 'selection');
         return false;
       }
@@ -2458,7 +2792,7 @@ export function createEditorViewport(
       for (const id of ids) {
         const e = doc.entities.find((x) => x.id === id);
         if (!e) continue;
-        if (layerMeta(e.layerId)?.locked) continue;
+        if (isLockedEnt(e)) continue;
         const y = Math.max(0, surfaceYAt(e.position[0], e.position[2], id));
         updates.set(id, [e.position[0], y, e.position[2]]);
       }
@@ -2553,11 +2887,11 @@ export function createEditorViewport(
       if (!ids.length) return;
       const lockedHit = ids
         .map((id) => doc.entities.find((e) => e.id === id))
-        .find((e) => e && layerMeta(e.layerId)?.locked);
+        .find((e) => e && isLockedEnt(e));
       if (lockedHit) {
         handlers.onPlaceResult?.(
           'locked',
-          layerMeta(lockedHit.layerId)?.name
+          lockedHit.locked ? lockedHit.name : layerMeta(lockedHit.layerId)?.name
         );
         return;
       }
