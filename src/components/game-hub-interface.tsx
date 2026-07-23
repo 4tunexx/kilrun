@@ -1065,6 +1065,7 @@ export default function GameHubInterface({
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+            {currentPage !== 'lobby' && <HubAnnouncementCarousel />}
             {currentPage !== 'lobby' && hubChrome.showHeader && PAGE_META[currentPage] && (
               <PageBanner
                 title={
@@ -1091,7 +1092,6 @@ export default function GameHubInterface({
                 }
               />
             )}
-            {currentPage !== 'lobby' && <HubAnnouncementCarousel />}
             <ScrollArea className="relative z-0 flex-1 min-w-0">
               {renderContent()}
             </ScrollArea>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Radio, Save } from 'lucide-react';
+import { Loader2, Radio, Save, Flame, Trophy, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -185,11 +185,19 @@ export function AdminAnnouncementCarouselPanel() {
           </div>
           {/* Live preview strip */}
           <div
-            className="rounded border border-slate-700/50 bg-slate-900/60 overflow-hidden flex items-center px-4"
+            className="rounded border border-slate-700/50 bg-slate-900/60 overflow-hidden flex items-center gap-3 px-4"
             style={{ height: config.thickness }}
           >
-            <span className="text-xs text-slate-300 animate-pulse">
-              🔥 Fire Sale &nbsp;•&nbsp; 🏆 Won Match &nbsp;•&nbsp; 👋 New Member
+            <span className="flex items-center gap-1 text-xs text-slate-300 animate-pulse">
+              <Flame className="w-3 h-3 shrink-0" /> Fire Sale
+            </span>
+            <span className="text-slate-600 text-xs">•</span>
+            <span className="flex items-center gap-1 text-xs text-slate-300 animate-pulse">
+              <Trophy className="w-3 h-3 shrink-0" /> Won Match
+            </span>
+            <span className="text-slate-600 text-xs">•</span>
+            <span className="flex items-center gap-1 text-xs text-slate-300 animate-pulse">
+              <UserPlus className="w-3 h-3 shrink-0" /> New Member
             </span>
           </div>
         </div>

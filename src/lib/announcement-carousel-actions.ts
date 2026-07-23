@@ -91,7 +91,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               items.push({
                 id: `firesale-${item.id}`,
                 type: 'firesale',
-                label: '🔥 Fire Sale',
+                label: 'Fire Sale',
                 user: null,
                 detail: `${item.itemName} is −${item.fireSalePercent}% off!`,
                 createdAt: item.createdAt.toISOString(),
@@ -111,7 +111,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               items.push({
                 id: `earn_vp-${r.id}`,
                 type: 'user_earn_vp',
-                label: '💰 VP Earned',
+                label: 'VP Earned',
                 user: r.user,
                 detail: `earned ${r.vpEarned} VP in ${r.mode}`,
                 createdAt: r.playedAt.toISOString(),
@@ -131,7 +131,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               items.push({
                 id: `won_match-${r.id}`,
                 type: 'user_won_match',
-                label: '🏆 Won Match',
+                label: 'Won Match',
                 user: r.user,
                 detail: `won a ${r.mode} match`,
                 createdAt: r.playedAt.toISOString(),
@@ -151,7 +151,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               items.push({
                 id: `registered-${u.id}`,
                 type: 'user_registered',
-                label: '👋 New Member',
+                label: 'New Member',
                 user: u,
                 detail: 'just joined Kilrun!',
                 createdAt: u.createdAt.toISOString(),
@@ -174,7 +174,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               items.push({
                 id: `premium-${p.id}`,
                 type: 'user_is_premium',
-                label: '💎 Premium',
+                label: 'Premium',
                 user: p.user,
                 detail: 'unlocked Kilrun Premium',
                 createdAt: p.createdAt.toISOString(),
@@ -194,7 +194,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               items.push({
                 id: `vip-${u.id}`,
                 type: 'user_got_vip',
-                label: '👑 VIP',
+                label: 'VIP',
                 user: u,
                 detail: 'became a VIP member',
                 createdAt: u.createdAt.toISOString(),
@@ -217,7 +217,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               items.push({
                 id: `badge-${ub.id}`,
                 type: 'user_got_badge',
-                label: '🎖️ Badge',
+                label: 'Badge',
                 user: ub.user,
                 detail: `earned the "${ub.badge.title}" badge`,
                 createdAt: ub.earnedAt.toISOString(),
@@ -240,7 +240,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               items.push({
                 id: `achievement-${ua.id}`,
                 type: 'user_earn_achievement',
-                label: '🎯 Achievement',
+                label: 'Achievement',
                 user: ua.user,
                 detail: `unlocked "${ua.achievement.title}"`,
                 createdAt: ua.unlockedAt.toISOString(),
@@ -260,7 +260,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               items.push({
                 id: `news-${post.id}`,
                 type: 'news',
-                label: '📰 News',
+                label: 'News',
                 user: null,
                 detail: post.title,
                 createdAt: post.createdAt.toISOString(),
