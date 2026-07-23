@@ -65,6 +65,7 @@ import { getRoleTextColorClass } from '@/lib/role-colors';
 import { PageBanner, PAGE_META } from '@/components/page-banner';
 import { HubHeaderToolbar } from '@/components/hub-header-toolbar';
 import { HubFooter } from '@/components/hub-footer';
+import { HubAnnouncementCarousel } from '@/components/hub-announcement-carousel';
 import { resolveHubBackground, resolveMarkLogo } from '@/lib/branding';
 import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
 import {
@@ -1089,6 +1090,7 @@ export default function GameHubInterface({
                 }
               />
             )}
+            {currentPage !== 'lobby' && <HubAnnouncementCarousel />}
             <ScrollArea className="relative z-0 flex-1 min-w-0">
               {renderContent()}
             </ScrollArea>

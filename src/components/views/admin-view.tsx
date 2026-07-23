@@ -53,6 +53,7 @@ import { AdminSiteLayoutPanel } from '@/components/views/admin/admin-site-layout
 import { AdminNewsPanel } from '@/components/views/admin/admin-news-panel';
 import { AdminPremiumPanel } from '@/components/views/admin/admin-premium-panel';
 import { AdminRanksPanel } from '@/components/views/admin/admin-ranks-panel';
+import { AdminAnnouncementCarouselPanel } from '@/components/views/admin/admin-announcement-carousel-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -2313,6 +2314,8 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
 
         {isAdmin && (
           <TabsContent value="content" className="mt-4 space-y-6">
+            <AdminAnnouncementCarouselPanel />
+
             <AdminNewsPanel />
 
             <Card className="bg-slate-800/40 border-slate-700/30 max-w-xl">
