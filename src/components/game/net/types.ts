@@ -31,6 +31,12 @@ export interface NetPlayerState {
   kp?: number;
   /** Compact SkinAttachment[] JSON for remote cosmetics. */
   equippedSkinsJson?: string;
+  /** Current weapon kind (updated by buy phase). */
+  weaponKind?: string;
+  weaponDamage?: number;
+  weaponRange?: number;
+  weaponCooldownMs?: number;
+  weaponConeRadians?: number;
   /** Per-match telemetry / server-authored rewards. */
   kills?: number;
   score?: number;

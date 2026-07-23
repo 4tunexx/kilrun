@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
 import type { MapDocument } from './map-document';
+import { ensureCombatSettings } from './map-document';
 import {
   HAMMER_SOLID_MODEL,
   ensureEnvironment,
@@ -36,6 +37,7 @@ import {
   stepPlatformer,
   type SimBody,
   type SimPad,
+  type SimPhysicsOpts,
 } from '@/lib/platformer-sim';
 import {
   mapDocSpawnPoints,
@@ -173,6 +175,33 @@ export function MapPlayPreview({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
+  const physOpts = useMemo<SimPhysicsOpts>(() => {
+    const cs = ensureCombatSettings(doc);
+    return {
+      gravity: cs.gravity,
+      jumpVelocity: cs.jumpVelocity,
+      doubleJumpVelocity: cs.doubleJumpVelocity,
+      doubleJumpEnabled: cs.doubleJumpEnabled,
+      jumpCutMult: cs.jumpCutMult,
+      coyoteMs: cs.coyoteMs,
+      jumpBufferMs: cs.jumpBufferMs,
+      walkSpeed: cs.walkSpeed,
+      sprintMult: cs.sprintMult,
+      crouchMult: cs.crouchMult,
+      maxFallSpeed: cs.maxFallSpeed,
+      apexGravMult: cs.apexGravMult,
+      slideEnabled: cs.slideEnabled,
+      slideMult: cs.slideMult,
+      slideDurationMs: cs.slideDurationMs,
+      slideCooldownMs: cs.slideCooldownMs,
+      wallJumpEnabled: cs.wallJumpEnabled,
+      wallJumpHorizVel: cs.wallJumpHorizVel,
+      wallJumpVertVel: cs.wallJumpVertVel,
+      wallSlideGravMult: cs.wallSlideGravMult,
+    };
+  }, [doc]);
+  const physOptsRef = useRef(physOpts);
+  physOptsRef.current = physOpts;
   const resolvedTps = useMemo(
     () =>
       tpsViewOverride
@@ -566,7 +595,8 @@ export function MapPlayPreview({
           dt,
           pads,
           scratch,
-          bounds
+          bounds,
+          physOptsRef.current
         );
       }
 

@@ -264,6 +264,8 @@ export function createEditorViewport(
     onPlaceResult?: (result: 'locked' | 'ok', layerName?: string) => void;
     /** Fired when click-to-place arming changes (Select / Escape / after place). */
     onPendingPlaceChange?: (kind: EditorEntity['kind'] | null) => void;
+    /** Fired when a double-tap/double-click lands on a locked entity (open its props panel). */
+    onLockedEntityDoubleTap?: (id: string) => void;
   }
 ): EditorViewportApi {
   let doc: MapDocument = structuredClone(initial);
@@ -325,6 +327,9 @@ export function createEditorViewport(
   let longPressTimer: number | null = null;
   let longPressId: string | null = null;
   let longPressFired = false;
+  /** Double-tap on locked entity detection: track last tap time + entity id. */
+  let lastTapTime = 0;
+  let lastTapId: string | null = null;
   const selectionOutlines: THREE.BoxHelper[] = [];
   const keys = new Set<string>();
   let touchAxes = { moveX: 0, moveY: 0, lookX: 0, lookY: 0, sprint: false };
@@ -1415,6 +1420,12 @@ export function createEditorViewport(
       handlers.onSelectionChange?.([]);
       return;
     }
+    // Locked entities cannot be selected — they are immovable. Only
+    // double-tap (handled in onPointerUp) opens their properties panel.
+    const ent = doc.entities.find((e) => e.id === id);
+    if (isLockedEnt(ent)) {
+      return;
+    }
     if (additive) {
       if (selectedIds.includes(id)) {
         selectedIds = selectedIds.filter((x) => x !== id);
@@ -1424,7 +1435,6 @@ export function createEditorViewport(
       selectedId = selectedIds[selectedIds.length - 1] ?? null;
     } else {
       selectedId = id;
-      const ent = doc.entities.find((e) => e.id === id);
       if (ent?.groupId) {
         selectedIds = doc.entities
           .filter((e) => e.groupId === ent.groupId)
@@ -1804,7 +1814,7 @@ export function createEditorViewport(
       }
       return;
     }
-    // Mobile / touch long-press → additive multi-select.
+    // Mobile / touch long-press → additive multi-select (locked entities excluded).
     if (!freeFly && !measureMode && editTool === 'select' && !ev.shiftKey && !ev.altKey) {
       if (!setPointerFromClient(ev.clientX, ev.clientY)) return;
       raycaster.setFromCamera(pointer, camera);
@@ -1814,19 +1824,24 @@ export function createEditorViewport(
         let o: THREE.Object3D | null = hits[0].object;
         while (o && !o.userData.entityId) o = o.parent;
         if (o?.userData.entityId) {
-          longPressId = o.userData.entityId as string;
-          longPressTimer = window.setTimeout(() => {
-            if (!longPressId) return;
-            longPressFired = true;
-            select(longPressId, true);
-            try {
-              if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-                (navigator as Navigator & { vibrate?: (n: number) => void }).vibrate?.(12);
+          const candidateId = o.userData.entityId as string;
+          const candidateEnt = doc.entities.find((e) => e.id === candidateId);
+          // Don't arm a long-press for locked entities — they cannot be multi-selected.
+          if (!isLockedEnt(candidateEnt)) {
+            longPressId = candidateId;
+            longPressTimer = window.setTimeout(() => {
+              if (!longPressId) return;
+              longPressFired = true;
+              select(longPressId, true);
+              try {
+                if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+                  (navigator as Navigator & { vibrate?: (n: number) => void }).vibrate?.(12);
+                }
+              } catch {
+                /* ignore */
               }
-            } catch {
-              /* ignore */
-            }
-          }, 420);
+            }, 420);
+          }
         }
       }
     }
@@ -1889,6 +1904,9 @@ export function createEditorViewport(
     ];
     roots.forEach((root, id) => {
       if (!root.visible) return;
+      // Locked entities are never box-selected.
+      const boxEnt = doc.entities.find((e) => e.id === id);
+      if (isLockedEnt(boxEnt)) return;
       root.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(root);
       if (box.isEmpty()) {
@@ -2153,6 +2171,20 @@ export function createEditorViewport(
     }
 
     if (hitEntityId) {
+      const hitEnt = doc.entities.find((e) => e.id === hitEntityId);
+      if (isLockedEnt(hitEnt)) {
+        // Locked entity: detect double-tap/double-click to open its properties panel.
+        const now = Date.now();
+        if (lastTapId === hitEntityId && now - lastTapTime < 400) {
+          lastTapTime = 0;
+          lastTapId = null;
+          handlers.onLockedEntityDoubleTap?.(hitEntityId);
+        } else {
+          lastTapTime = now;
+          lastTapId = hitEntityId;
+        }
+        return;
+      }
       select(hitEntityId, ev.shiftKey);
       return;
     }

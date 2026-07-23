@@ -24,6 +24,7 @@ import {
   createSimScratch,
   DEFAULT_WORLD_BOUNDS,
   defaultInput,
+  type MovementPhysicsOpts,
   type PlayerInput,
   type PlayerSimScratch,
   type WorldBounds,
@@ -81,6 +82,9 @@ interface CompetitiveModeSettings {
   roundTimeSec?: number;
   roundCount?: number;
   overtimeSec?: number;
+  maxPlayersPerTeam?: number;
+  friendlyFire?: boolean;
+  respawnInRound?: boolean;
 }
 
 interface PushPayloadSim {
@@ -141,6 +145,10 @@ export class CompetitiveRoom extends Room<RoomState> {
   private maxRounds = MAX_ROUNDS;
   private buyTimeMs = 0;
   private overtimeMs = 60_000;
+  private maxPlayersPerTeam = 3;
+  private friendlyFire = false;
+  private respawnInRound = false;
+  private combatPhysOpts: MovementPhysicsOpts = {};
 
   onCreate(options: JoinOptions = {}) {
     this.setState(new RoomState());
@@ -204,6 +212,28 @@ export class CompetitiveRoom extends Room<RoomState> {
       );
     });
 
+    this.onMessage('buyWeapon', (client, preset: {
+      kind?: string;
+      damage?: number;
+      range?: number;
+      cooldownMs?: number;
+      coneRadians?: number;
+    }) => {
+      // Only allowed during the buy phase (countdown with remaining time > roundCountdownMs).
+      if (this.state.phase !== 'countdown') return;
+      const buyRemaining = this.state.countdownMs - this.roundCountdownMs;
+      if (buyRemaining <= 0) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const { sanitizeWeaponCombat } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+      const sanitized = sanitizeWeaponCombat(preset);
+      player.weaponKind = sanitized.kind;
+      player.weaponDamage = sanitized.damage;
+      player.weaponRange = sanitized.range;
+      player.weaponCooldownMs = sanitized.cooldownMs;
+      player.weaponConeRadians = sanitized.coneRadians;
+    });
+
     this.onMessage('loadCustomMap', (client, data: Record<string, unknown>) => {
       if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
       const allowed =
@@ -237,6 +267,19 @@ export class CompetitiveRoom extends Room<RoomState> {
           Number.isFinite(settings.overtimeSec)
         ) {
           this.overtimeMs = Math.max(0, settings.overtimeSec) * 1000;
+        }
+        if (
+          typeof settings.maxPlayersPerTeam === 'number' &&
+          Number.isFinite(settings.maxPlayersPerTeam)
+        ) {
+          this.maxPlayersPerTeam = Math.max(1, Math.min(8, Math.floor(settings.maxPlayersPerTeam)));
+          this.maxClients = this.maxPlayersPerTeam * 2;
+        }
+        if (typeof settings.friendlyFire === 'boolean') {
+          this.friendlyFire = settings.friendlyFire;
+        }
+        if (typeof settings.respawnInRound === 'boolean') {
+          this.respawnInRound = settings.respawnInRound;
         }
       }
 
@@ -274,6 +317,25 @@ export class CompetitiveRoom extends Room<RoomState> {
 
       if (data.worldBounds) {
         this.worldBounds = { ...(data.worldBounds as WorldBounds) };
+      }
+
+      // Apply combat/physics overrides.
+      const cs = data?.combatSettings as Record<string, unknown> | undefined;
+      if (cs && typeof cs === 'object') {
+        this.combatPhysOpts = {
+          gravity: typeof cs.gravity === 'number' ? cs.gravity : undefined,
+          jumpVelocity: typeof cs.jumpVelocity === 'number' ? cs.jumpVelocity : undefined,
+          doubleJumpVelocity: typeof cs.doubleJumpVelocity === 'number' ? cs.doubleJumpVelocity : undefined,
+          doubleJumpEnabled: typeof cs.doubleJumpEnabled === 'boolean' ? cs.doubleJumpEnabled : undefined,
+          jumpCutMult: typeof cs.jumpCutMult === 'number' ? cs.jumpCutMult : undefined,
+          coyoteMs: typeof cs.coyoteMs === 'number' ? cs.coyoteMs : undefined,
+          jumpBufferMs: typeof cs.jumpBufferMs === 'number' ? cs.jumpBufferMs : undefined,
+          walkSpeed: typeof cs.walkSpeed === 'number' ? cs.walkSpeed : undefined,
+          sprintMult: typeof cs.sprintMult === 'number' ? cs.sprintMult : undefined,
+          crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
+          maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
+          apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+        };
       }
 
       this.assignTeamsAndSpawn();
@@ -691,7 +753,7 @@ export class CompetitiveRoom extends Room<RoomState> {
         this.simScratch.set(sessionId, scratch);
       }
 
-      applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds);
+      applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
 
       for (const obstacle of this.state.obstacles) {
         if (!isPlayerHitByObstacle(player, obstacle)) continue;
@@ -729,7 +791,9 @@ export class CompetitiveRoom extends Room<RoomState> {
     const cone = shooter.weaponConeRadians > 0 ? shooter.weaponConeRadians : 0.18;
     for (const target of this.state.players.values()) {
       if (!target.isAlive) continue;
-      if (target.role === shooter.role) continue;
+      // Skip teammates unless friendly fire is enabled.
+      if (target.role === shooter.role && !this.friendlyFire) continue;
+      if (target.sessionId === shooter.sessionId) continue;
       if (
         isHitByShot(
           shooter.x,
@@ -756,10 +820,20 @@ export class CompetitiveRoom extends Room<RoomState> {
     const wasAlive = player.isAlive && player.health > 0;
     player.health = Math.max(0, player.health - amount);
     if (player.health <= 0) {
-      player.isAlive = false;
-      if (wasAlive && shooter && shooter.sessionId !== player.sessionId) {
-        shooter.kills += 1;
-        shooter.score = shooter.kills;
+      if (this.respawnInRound) {
+        // Respawn: send back to spawn point at full health after a brief moment.
+        player.health = 100;
+        this.applyTeamSpawn(player);
+        if (wasAlive && shooter && shooter.sessionId !== player.sessionId) {
+          shooter.kills += 1;
+          shooter.score = shooter.kills;
+        }
+      } else {
+        player.isAlive = false;
+        if (wasAlive && shooter && shooter.sessionId !== player.sessionId) {
+          shooter.kills += 1;
+          shooter.score = shooter.kills;
+        }
       }
     }
   }

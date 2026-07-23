@@ -56,16 +56,16 @@ export interface SimInput {
 }
 
 /** === Tunables (mirror server/src/sim/constants.ts — Foundry) === */
-const GRAVITY = 20;
-const JUMP_VELOCITY = 10;
-const DOUBLE_JUMP_VELOCITY = JUMP_VELOCITY / 1.25;
-const JUMP_CUT = 0.5;
+const BASE_GRAVITY = 20;
+const BASE_JUMP_VELOCITY = 10;
+const BASE_DOUBLE_JUMP_VELOCITY = BASE_JUMP_VELOCITY / 1.25;
+const BASE_JUMP_CUT = 0.5;
 const JUMP_PAD_BOOST = 14;
-const COYOTE_MS = 1000 / 6;
-const JUMP_BUFFER_MS = 200;
-const MAX_GROUND_SPEED = 5;
-const SPRINT_MULT = 1.35;
-const MAX_FALL = 40;
+const BASE_COYOTE_MS = 1000 / 6;
+const BASE_JUMP_BUFFER_MS = 200;
+const BASE_MAX_GROUND_SPEED = 5;
+const BASE_SPRINT_MULT = 1.35;
+const BASE_MAX_FALL = 40;
 /** Horizontal capsule radius — keep in sync with visual CapsuleGeometry(0.35). */
 const PLAYER_RADIUS = 0.35;
 const PLAYER_HEIGHT = 1.7;
@@ -80,7 +80,31 @@ const LAND_SNAP_FAST = 0.7;
 const LAND_SNAP_SLOW = 0.4;
 const LEDGE_ASSIST = 0.55;
 const MELEE_MOVE_MULT = 0.5;
-const CROUCH_MULT = 0.55;
+const BASE_CROUCH_MULT = 0.55;
+
+/** Optional per-map physics overrides from CombatSettings (passed via stepPlatformer opts). */
+export interface SimPhysicsOpts {
+  gravity?: number;
+  jumpVelocity?: number;
+  doubleJumpVelocity?: number;
+  doubleJumpEnabled?: boolean;
+  jumpCutMult?: number;
+  coyoteMs?: number;
+  jumpBufferMs?: number;
+  walkSpeed?: number;
+  sprintMult?: number;
+  crouchMult?: number;
+  maxFallSpeed?: number;
+  apexGravMult?: number;
+  slideEnabled?: boolean;
+  slideMult?: number;
+  slideDurationMs?: number;
+  slideCooldownMs?: number;
+  wallJumpEnabled?: boolean;
+  wallJumpHorizVel?: number;
+  wallJumpVertVel?: number;
+  wallSlideGravMult?: number;
+}
 
 export function createSimScratch(): SimScratch {
   return {
@@ -172,8 +196,22 @@ export function stepPlatformer(
   dt: number,
   pads: SimPad[],
   scratch: SimScratch,
-  bounds: SimBounds
+  bounds: SimBounds,
+  physOpts?: SimPhysicsOpts
 ): SimBody {
+  // Resolve tunables — prefer per-map overrides, fall back to base constants.
+  const GRAVITY = physOpts?.gravity ?? BASE_GRAVITY;
+  const JUMP_VELOCITY = physOpts?.jumpVelocity ?? BASE_JUMP_VELOCITY;
+  const DOUBLE_JUMP_VELOCITY = physOpts?.doubleJumpVelocity ?? BASE_DOUBLE_JUMP_VELOCITY;
+  const JUMP_CUT = physOpts?.jumpCutMult ?? BASE_JUMP_CUT;
+  const COYOTE_MS = physOpts?.coyoteMs ?? BASE_COYOTE_MS;
+  const JUMP_BUFFER_MS = physOpts?.jumpBufferMs ?? BASE_JUMP_BUFFER_MS;
+  const MAX_GROUND_SPEED = physOpts?.walkSpeed ?? BASE_MAX_GROUND_SPEED;
+  const SPRINT_MULT = physOpts?.sprintMult ?? BASE_SPRINT_MULT;
+  const MAX_FALL = physOpts?.maxFallSpeed ?? BASE_MAX_FALL;
+  const CROUCH_MULT = physOpts?.crouchMult ?? BASE_CROUCH_MULT;
+  const doubleJumpEnabled = physOpts?.doubleJumpEnabled ?? true;
+
   let wishX = input.moveX;
   let wishY = input.moveY;
   const wishMag = Math.hypot(wishX, wishY);

@@ -101,6 +101,22 @@ export const DEFAULT_WORLD_BOUNDS: WorldBounds = {
   maxY: WORLD_HEIGHT,
 };
 
+/** Optional per-map physics overrides (from map combatSettings). */
+export interface MovementPhysicsOpts {
+  gravity?: number;
+  jumpVelocity?: number;
+  doubleJumpVelocity?: number;
+  doubleJumpEnabled?: boolean;
+  jumpCutMult?: number;
+  coyoteMs?: number;
+  jumpBufferMs?: number;
+  walkSpeed?: number;
+  sprintMult?: number;
+  crouchMult?: number;
+  maxFallSpeed?: number;
+  apexGravMult?: number;
+}
+
 /**
  * Authoritative Deathrun platformer step — Foundry (Godot) feel:
  * direct wish×speed on XY, gravity + coyote/buffer + double jump on Z, energy sprint.
@@ -112,9 +128,23 @@ export function applyMovement(
   dtSeconds: number,
   platforms: Iterable<PlatformState>,
   scratch: PlayerSimScratch,
-  bounds: WorldBounds = DEFAULT_WORLD_BOUNDS
+  bounds: WorldBounds = DEFAULT_WORLD_BOUNDS,
+  physOpts?: MovementPhysicsOpts
 ): void {
   if (!player.isAlive || player.hasFinished) return;
+
+  // Resolve per-map overrides over base constants.
+  const effGravity = physOpts?.gravity ?? GRAVITY;
+  const effJumpVel = physOpts?.jumpVelocity ?? JUMP_VELOCITY;
+  const effDoubleJumpVel = physOpts?.doubleJumpVelocity ?? DOUBLE_JUMP_VELOCITY;
+  const effDoubleJumpEnabled = physOpts?.doubleJumpEnabled ?? true;
+  const effJumpCut = physOpts?.jumpCutMult ?? JUMP_CUT_MULTIPLIER;
+  const effCoyoteMs = physOpts?.coyoteMs ?? COYOTE_TIME_MS;
+  const effJumpBufferMs = physOpts?.jumpBufferMs ?? JUMP_BUFFER_MS;
+  const effWalkSpeed = physOpts?.walkSpeed ?? MAX_GROUND_SPEED;
+  const effSprintMult = physOpts?.sprintMult ?? SPRINT_MULTIPLIER;
+  const effCrouchMult = physOpts?.crouchMult ?? CROUCH_SPEED_MULTIPLIER;
+  const effMaxFall = physOpts?.maxFallSpeed ?? MAX_FALL_SPEED;
 
   player.cameraYaw = input.cameraYaw;
   player.aimAngle = input.aimAngle;
@@ -131,9 +161,9 @@ export function applyMovement(
   }
 
   const baseMax =
-    player.role === 'trapper' ? TRAPPER_MOVE_SPEED : MAX_GROUND_SPEED;
+    player.role === 'trapper' ? TRAPPER_MOVE_SPEED : effWalkSpeed;
   let maxSpeed = baseMax;
-  if (input.crouch) maxSpeed *= CROUCH_SPEED_MULTIPLIER;
+  if (input.crouch) maxSpeed *= effCrouchMult;
   if (input.meleeActive) maxSpeed *= MELEE_MOVE_MULT;
 
   // Energy / sprint (Kilrun stamina on top of Foundry base speed).
@@ -142,7 +172,7 @@ export function applyMovement(
   if (wantsSprint && player.energy > 0) {
     player.energy = Math.max(0, player.energy - ENERGY_DRAIN_RATE * dtSeconds);
     player.isSprinting = true;
-    maxSpeed *= SPRINT_MULTIPLIER;
+    maxSpeed *= effSprintMult;
     if (player.energy <= 0) scratch.exhausted = true;
   } else {
     player.isSprinting = false;
@@ -179,7 +209,7 @@ export function applyMovement(
   player.isGrounded = grounded;
 
   if (grounded && support) {
-    scratch.coyoteMs = COYOTE_TIME_MS;
+    scratch.coyoteMs = effCoyoteMs;
     scratch.jumpCount = 0;
     player.z = support.topZ;
     player.vz = 0;
@@ -206,19 +236,20 @@ export function applyMovement(
   const jumpEdge = input.jumpPressed && !scratch.wasJumpHeld;
   const jumpReleased = !input.jumpPressed && scratch.wasJumpHeld;
   if (jumpReleased && player.vz > 0 && scratch.jumpCount === 1) {
-    player.vz *= JUMP_CUT_MULTIPLIER;
+    player.vz *= effJumpCut;
     scratch.coyoteMs = 0;
   }
   scratch.wasJumpHeld = input.jumpPressed;
 
   if (jumpEdge) {
     if (scratch.jumpCount === 0 || scratch.jumpCount === 2) {
-      scratch.jumpBufferMs = JUMP_BUFFER_MS;
+      scratch.jumpBufferMs = effJumpBufferMs;
     } else if (
       scratch.jumpCount === 1 &&
+      effDoubleJumpEnabled &&
       player.energy >= JUMP_ENERGY_COST * 0.2
     ) {
-      player.vz = DOUBLE_JUMP_VELOCITY;
+      player.vz = effDoubleJumpVel;
       player.isGrounded = false;
       grounded = false;
       scratch.coyoteMs = 0;
@@ -234,7 +265,7 @@ export function applyMovement(
     scratch.jumpBufferMs > 0 &&
     player.energy >= JUMP_ENERGY_COST * 0.2
   ) {
-    player.vz = JUMP_VELOCITY;
+    player.vz = effJumpVel;
     player.isGrounded = false;
     grounded = false;
     scratch.coyoteMs = 0;
@@ -304,7 +335,7 @@ export function applyMovement(
 
   // Vertical — constant Foundry gravity
   if (!player.isGrounded) {
-    player.vz = Math.max(-MAX_FALL_SPEED, player.vz - GRAVITY * dtSeconds);
+    player.vz = Math.max(-effMaxFall, player.vz - effGravity * dtSeconds);
     player.z += player.vz * dtSeconds;
 
     const snap = player.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
@@ -341,11 +372,11 @@ export function applyMovement(
       } else {
         player.vz = 0;
         player.isGrounded = true;
-        scratch.coyoteMs = COYOTE_TIME_MS;
+        scratch.coyoteMs = effCoyoteMs;
         scratch.jumpCount = 0;
         // Same-frame buffered jump on landing
         if (scratch.jumpBufferMs > 0 && player.energy >= JUMP_ENERGY_COST * 0.2) {
-          player.vz = JUMP_VELOCITY;
+          player.vz = effJumpVel;
           player.isGrounded = false;
           scratch.coyoteMs = 0;
           scratch.jumpBufferMs = 0;

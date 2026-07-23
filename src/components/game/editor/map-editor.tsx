@@ -61,6 +61,8 @@ import {
   Square,
   Link2,
   Unlink2,
+  Sword,
+  Swords,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -77,6 +79,7 @@ import type {
 import {
   HAMMER_SOLID_MODEL,
   ensureAnimation,
+  ensureCombatSettings,
   ensureCompetitiveSettings,
   ensureDeathrunSettings,
   ensureEnvironment,
@@ -143,6 +146,8 @@ import { MapPlayPreview } from './map-play-preview';
 import { PlayerModelStudio } from './player-model-studio';
 import { ModelSkinEditor } from './model-skin-editor';
 import { TpsViewStudio } from './tps-view-studio';
+import { WeaponEditor } from './weapon-editor';
+import { CombatEditor } from './combat-editor';
 import { ensureMapPlayerEntity } from './player-avatar';
 import type { TpsViewSettings } from '../tps/tps-view-settings';
 import { sanitizeTpsView } from '../tps/tps-view-settings';
@@ -271,6 +276,8 @@ export function MapEditor({
   const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
   const [modelEditorOpen, setModelEditorOpen] = useState(false);
   const [tpsViewOpen, setTpsViewOpen] = useState(false);
+  const [weaponEditorOpen, setWeaponEditorOpen] = useState(false);
+  const [combatEditorOpen, setCombatEditorOpen] = useState(false);
   const [showAllCollisionGizmos, setShowAllCollisionGizmos] = useState(false);
   const lastLockedToastAt = useRef(0);
   const cameraBeforePlayRef = useRef<EditorCameraState | null>(null);
@@ -278,6 +285,7 @@ export function MapEditor({
   const touchLayerRef = useRef<HTMLDivElement>(null);
 
   const docRef = useRef(doc);
+  const uiCollapsedRef = useRef(mobileFirst);
   const undoStack = useRef<MapDocument[]>([]);
   const redoStack = useRef<MapDocument[]>([]);
   const skipHistory = useRef(false);
@@ -370,6 +378,9 @@ export function MapEditor({
     setShowHelp(false);
   }, [isMobile]);
 
+  // Keep ref in sync so viewport callbacks can read current value without stale closure.
+  uiCollapsedRef.current = uiCollapsed;
+
   // Re-open properties when selection changes (unless chrome is fully hidden).
   useEffect(() => {
     if (selectedId && !uiCollapsed) setPropsOpen(true);
@@ -418,8 +429,8 @@ export function MapEditor({
           toast({
             title: 'Locked',
             description: layerName
-              ? `“${layerName}” is locked — unlock it in Properties or Layers.`
-              : 'Selection is locked — unlock in Properties.',
+              ? `“${layerName}” is locked — unlock it in the Layers panel.`
+              : 'Object is locked — double-tap it to open properties, or unlock in Layers panel.',
             variant: 'destructive',
           });
           return;
@@ -439,6 +450,20 @@ export function MapEditor({
             description: 'Opens platform-wide avatar settings — not placed on the map.',
           });
         }
+      },
+      onLockedEntityDoubleTap: (id) => {
+        // Double-tap/double-click on a locked entity opens its properties panel
+        // so the user can review and unlock it.
+        setSelectedId(id);
+        setSelectedIds([id]);
+        if (!uiCollapsedRef.current) {
+          setPropsOpen(true);
+          setSidebarOpen(true);
+        }
+        toast({
+          title: 'Locked object',
+          description: 'Properties opened — unlock this object to edit it.',
+        });
       },
     });
     apiRef.current = api;
@@ -906,9 +931,11 @@ export function MapEditor({
 
   const patchEntityById = (id: string, patch: Partial<EditorEntity>) => {
     scheduleHistory();
+    setDirty(true);
     setDoc((d) => {
       const entities = d.entities.map((e) => (e.id === id ? { ...e, ...patch } : e));
       const next = { ...d, entities };
+      docRef.current = next;
       apiRef.current?.setDoc(next);
       return next;
     });
@@ -927,9 +954,11 @@ export function MapEditor({
     layersOrFn: typeof doc.layers | ((prev: typeof doc.layers) => typeof doc.layers)
   ) => {
     scheduleHistory();
+    setDirty(true);
     setDoc((d) => {
       const layers = typeof layersOrFn === 'function' ? layersOrFn(d.layers) : layersOrFn;
       const next = { ...d, layers };
+      docRef.current = next;
       apiRef.current?.setDoc(next);
       return next;
     });
@@ -1036,6 +1065,54 @@ export function MapEditor({
     setToolsOpen(false);
   };
 
+  const openWeaponEditor = () => {
+    setPlayerStudioOpen(false);
+    setModelEditorOpen(false);
+    setTpsViewOpen(false);
+    setCombatEditorOpen(false);
+    setWeaponEditorOpen(true);
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(false);
+    setToolsOpen(false);
+  };
+
+  const openCombatEditor = () => {
+    setPlayerStudioOpen(false);
+    setModelEditorOpen(false);
+    setTpsViewOpen(false);
+    setWeaponEditorOpen(false);
+    setCombatEditorOpen(true);
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(false);
+    setToolsOpen(false);
+  };
+
+  const saveWeaponDef = (def: Partial<import('./map-document').MapWeaponDef>) => {
+    scheduleHistory();
+    setDirty(true);
+    setDoc((d) => {
+      const next = { ...d, weaponDef: { ...d.weaponDef, ...def } };
+      docRef.current = next;
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+    toast({ title: 'Weapon saved', description: 'Weapon definition saved to map.' });
+  };
+
+  const saveCombatSettings = (settings: Partial<import('./map-document').CombatSettings>) => {
+    scheduleHistory();
+    setDirty(true);
+    setDoc((d) => {
+      const next = { ...d, combatSettings: { ...d.combatSettings, ...settings } };
+      docRef.current = next;
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+    toast({ title: 'Combat settings saved', description: 'Physics and combat applied to map.' });
+  };
+
   const applySkinsToPlayer = (attachments: SkinAttachment[]) => {
     const player = findPlayerEntity(docRef.current);
     if (!player) return;
@@ -1081,7 +1158,13 @@ export function MapEditor({
 
   const patchEnv = (partial: Partial<typeof env>) => {
     const next = { ...env, ...partial };
-    setDoc((d) => ({ ...d, environment: next }));
+    scheduleHistory();
+    setDirty(true);
+    setDoc((d) => {
+      const updated = { ...d, environment: next };
+      docRef.current = updated;
+      return updated;
+    });
     apiRef.current?.applyEnvironment(next);
   };
 
@@ -1454,6 +1537,26 @@ export function MapEditor({
         >
           <Shirt className="w-4 h-4 mr-1" />
           {isMobile ? 'Skins' : 'Model Editor'}
+        </Button>
+        <Button
+          size="sm"
+          variant={weaponEditorOpen ? 'default' : 'secondary'}
+          className={`shrink-0 ${weaponEditorOpen ? 'bg-rose-600 hover:bg-rose-500 text-white' : ''}`}
+          onClick={() => (weaponEditorOpen ? setWeaponEditorOpen(false) : openWeaponEditor())}
+          title="Weapon Editor — model, position, combat stats, recoil, sway"
+        >
+          <Sword className="w-4 h-4 mr-1" />
+          {isMobile ? 'Weapon' : 'Weapon Editor'}
+        </Button>
+        <Button
+          size="sm"
+          variant={combatEditorOpen ? 'default' : 'secondary'}
+          className={`shrink-0 ${combatEditorOpen ? 'bg-sky-700 hover:bg-sky-600 text-white' : ''}`}
+          onClick={() => (combatEditorOpen ? setCombatEditorOpen(false) : openCombatEditor())}
+          title="Combat Editor — physics, movement, jump, slide, wall-jump, recoil"
+        >
+          <Swords className="w-4 h-4 mr-1" />
+          {isMobile ? 'Combat' : 'Combat Editor'}
         </Button>
         <Button
           size="sm"
@@ -2453,29 +2556,50 @@ export function MapEditor({
                     };
                     return (
                       <>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-300/80">Timing</p>
                         <label className="block text-xs text-white/60">
-                          Warmup ({s.warmupSec}s)
-                          <input type="range" min={0} max={60} className="w-full" value={s.warmupSec}
+                          Warmup ({s.warmupSec}s) — lobby countdown before run starts
+                          <input type="range" min={0} max={60} className="w-full accent-sky-400" value={s.warmupSec}
                             onChange={(e) => patch({ warmupSec: Number(e.target.value) })} />
                         </label>
                         <label className="block text-xs text-white/60">
                           Round time ({s.roundTimeSec}s)
-                          <input type="range" min={30} max={600} step={10} className="w-full" value={s.roundTimeSec}
+                          <input type="range" min={30} max={600} step={10} className="w-full accent-sky-400" value={s.roundTimeSec}
                             onChange={(e) => patch({ roundTimeSec: Number(e.target.value) })} />
                         </label>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-300/80 mt-1">Players</p>
                         <label className="block text-xs text-white/60">
                           Max runners ({s.maxRunners}) — place that many Runner Spawns
-                          <input type="range" min={1} max={8} className="w-full" value={s.maxRunners}
+                          <input type="range" min={1} max={8} className="w-full accent-sky-400" value={s.maxRunners}
                             onChange={(e) => patch({ maxRunners: Number(e.target.value) })} />
                         </label>
+                        <label className="block text-xs text-white/60">
+                          Lives per runner ({s.livesPerRunner === 0 ? '∞' : s.livesPerRunner})
+                          <input type="range" min={0} max={10} className="w-full accent-sky-400" value={s.livesPerRunner}
+                            onChange={(e) => patch({ livesPerRunner: Number(e.target.value) })} />
+                        </label>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-300/80 mt-1">Trapper</p>
                         <label className="flex items-center gap-2 text-xs text-white/70">
                           <input type="checkbox" checked={s.trapperEnabled}
                             onChange={(e) => patch({ trapperEnabled: e.target.checked })} />
                           Trapper enabled
                         </label>
-                        <p className="text-[10px] text-white/45 leading-snug rounded-lg border border-white/10 bg-black/30 p-2">
-                          Entities: Runner Spawn ×{s.maxRunners}, Trapper, Light, Button, Trap, Death,
-                          Door, Jump pad, Finish, Action
+                        {s.trapperEnabled && (
+                          <label className="block text-xs text-white/60">
+                            Trap cooldown ({s.trapCooldownSec}s between activations)
+                            <input type="range" min={1} max={30} className="w-full accent-sky-400" value={s.trapCooldownSec}
+                              onChange={(e) => patch({ trapCooldownSec: Number(e.target.value) })} />
+                          </label>
+                        )}
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-300/80 mt-1">Respawn</p>
+                        <label className="flex items-center gap-2 text-xs text-white/70">
+                          <input type="checkbox" checked={s.checkpointRespawn}
+                            onChange={(e) => patch({ checkpointRespawn: e.target.checked })} />
+                          Checkpoint respawn (spawn at last checkpoint on death)
+                        </label>
+                        <p className="text-[10px] text-white/45 leading-snug rounded-lg border border-white/10 bg-black/30 p-2 mt-1">
+                          Entities: Runner Spawn ×{s.maxRunners}{s.trapperEnabled ? ', Trapper Spawn' : ''}, Light, Button, Trap, Death Zone,
+                          Door, Jump pad, Finish, Action, Checkpoint
                         </p>
                       </>
                     );
@@ -2504,33 +2628,59 @@ export function MapEditor({
                     };
                     return (
                       <>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-300/80">Timing</p>
                         <label className="block text-xs text-white/60">
-                          Warmup ({s.warmupSec}s)
-                          <input type="range" min={0} max={60} className="w-full" value={s.warmupSec}
+                          Warmup ({s.warmupSec}s) — countdown before wave 1
+                          <input type="range" min={0} max={60} className="w-full accent-violet-400" value={s.warmupSec}
                             onChange={(e) => patch({ warmupSec: Number(e.target.value) })} />
                         </label>
                         <label className="block text-xs text-white/60">
-                          Wave time ({s.waveTimeSec}s)
-                          <input type="range" min={30} max={300} step={5} className="w-full" value={s.waveTimeSec}
+                          Wave time limit ({s.waveTimeSec === 0 ? '∞ (kill all)' : s.waveTimeSec + 's'})
+                          <input type="range" min={0} max={300} step={5} className="w-full accent-violet-400" value={s.waveTimeSec}
                             onChange={(e) => patch({ waveTimeSec: Number(e.target.value) })} />
                         </label>
                         <label className="block text-xs text-white/60">
-                          Intermission ({s.intermissionSec}s)
-                          <input type="range" min={5} max={60} className="w-full" value={s.intermissionSec}
+                          Intermission / buy phase ({s.intermissionSec}s between waves)
+                          <input type="range" min={5} max={90} className="w-full accent-violet-400" value={s.intermissionSec}
                             onChange={(e) => patch({ intermissionSec: Number(e.target.value) })} />
                         </label>
                         <label className="block text-xs text-white/60">
-                          Max players ({s.maxPlayers})
-                          <input type="range" min={1} max={4} className="w-full" value={s.maxPlayers}
-                            onChange={(e) => patch({ maxPlayers: Number(e.target.value) })} />
+                          Weapon shop window ({Math.min(s.waveBuyTimeSec, s.intermissionSec)}s of intermission)
+                          <input type="range" min={0} max={s.intermissionSec} className="w-full accent-violet-400"
+                            value={Math.min(s.waveBuyTimeSec, s.intermissionSec)}
+                            onChange={(e) => patch({ waveBuyTimeSec: Number(e.target.value) })} />
+                        </label>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-300/80 mt-1">Waves</p>
+                        <label className="block text-xs text-white/60">
+                          Total waves ({s.totalWaves === 0 ? '∞ endless' : s.totalWaves})
+                          <input type="range" min={0} max={50} className="w-full accent-violet-400" value={s.totalWaves}
+                            onChange={(e) => patch({ totalWaves: Number(e.target.value) })} />
                         </label>
                         <label className="block text-xs text-white/60">
                           Starting wave ({s.startingWave})
-                          <input type="range" min={1} max={20} className="w-full" value={s.startingWave}
+                          <input type="range" min={1} max={20} className="w-full accent-violet-400" value={s.startingWave}
                             onChange={(e) => patch({ startingWave: Number(e.target.value) })} />
                         </label>
-                        <p className="text-[10px] text-white/45 leading-snug rounded-lg border border-white/10 bg-black/30 p-2">
-                          Entities: Player Spawn ×{s.maxPlayers}, Enemy Spawn, Death, Light, Door
+                        <label className="block text-xs text-white/60">
+                          Difficulty ramp ({s.difficultyScale.toFixed(1)}× per wave)
+                          <input type="range" min={0.5} max={3.0} step={0.1} className="w-full accent-violet-400"
+                            value={s.difficultyScale}
+                            onChange={(e) => patch({ difficultyScale: Number(e.target.value) })} />
+                        </label>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-300/80 mt-1">Players</p>
+                        <label className="block text-xs text-white/60">
+                          Max players ({s.maxPlayers})
+                          <input type="range" min={1} max={8} className="w-full accent-violet-400" value={s.maxPlayers}
+                            onChange={(e) => patch({ maxPlayers: Number(e.target.value) })} />
+                        </label>
+                        <label className="flex items-center gap-2 text-xs text-white/70">
+                          <input type="checkbox" checked={s.respawnOnWaveClear}
+                            onChange={(e) => patch({ respawnOnWaveClear: e.target.checked })} />
+                          Respawn downed players when a wave clears
+                        </label>
+                        <p className="text-[10px] text-white/45 leading-snug rounded-lg border border-white/10 bg-black/30 p-2 mt-1">
+                          Entities: Player Spawn ×{s.maxPlayers}, Enemy Spawn, Red Zone, Health Floor, Revive Pad,
+                          Wave Anchor, Death Zone, Light, Door
                         </p>
                       </>
                     );
@@ -2559,33 +2709,52 @@ export function MapEditor({
                     };
                     return (
                       <>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-300/80">Timing</p>
                         <label className="block text-xs text-white/60">
-                          Warmup ({s.warmupSec}s)
-                          <input type="range" min={0} max={60} className="w-full" value={s.warmupSec}
+                          Warmup ({s.warmupSec}s) — lobby countdown
+                          <input type="range" min={0} max={60} className="w-full accent-orange-400" value={s.warmupSec}
                             onChange={(e) => patch({ warmupSec: Number(e.target.value) })} />
                         </label>
                         <label className="block text-xs text-white/60">
-                          Buy / shop time ({s.buyTimeSec}s)
-                          <input type="range" min={5} max={60} className="w-full" value={s.buyTimeSec}
+                          Buy / weapon shop time ({s.buyTimeSec}s per round start)
+                          <input type="range" min={0} max={60} className="w-full accent-orange-400" value={s.buyTimeSec}
                             onChange={(e) => patch({ buyTimeSec: Number(e.target.value) })} />
                         </label>
                         <label className="block text-xs text-white/60">
                           Round time ({s.roundTimeSec}s)
-                          <input type="range" min={30} max={300} step={5} className="w-full" value={s.roundTimeSec}
+                          <input type="range" min={30} max={300} step={5} className="w-full accent-orange-400" value={s.roundTimeSec}
                             onChange={(e) => patch({ roundTimeSec: Number(e.target.value) })} />
                         </label>
                         <label className="block text-xs text-white/60">
-                          Rounds ({s.roundCount})
-                          <input type="range" min={1} max={12} className="w-full" value={s.roundCount}
+                          Overtime ({s.overtimeSec}s, 0 = sudden death)
+                          <input type="range" min={0} max={120} step={5} className="w-full accent-orange-400" value={s.overtimeSec}
+                            onChange={(e) => patch({ overtimeSec: Number(e.target.value) })} />
+                        </label>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-300/80 mt-1">Rounds &amp; Teams</p>
+                        <label className="block text-xs text-white/60">
+                          Rounds to win ({s.roundCount})
+                          <input type="range" min={1} max={12} className="w-full accent-orange-400" value={s.roundCount}
                             onChange={(e) => patch({ roundCount: Number(e.target.value) })} />
                         </label>
                         <label className="block text-xs text-white/60">
-                          Overtime ({s.overtimeSec}s)
-                          <input type="range" min={0} max={120} step={5} className="w-full" value={s.overtimeSec}
-                            onChange={(e) => patch({ overtimeSec: Number(e.target.value) })} />
+                          Max players per team ({s.maxPlayersPerTeam})
+                          <input type="range" min={1} max={8} className="w-full accent-orange-400" value={s.maxPlayersPerTeam}
+                            onChange={(e) => patch({ maxPlayersPerTeam: Number(e.target.value) })} />
                         </label>
-                        <p className="text-[10px] text-white/45 leading-snug rounded-lg border border-white/10 bg-black/30 p-2">
-                          Entities: Player A Spawn, Player B Spawn, Light, Door, Death
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-300/80 mt-1">Rules</p>
+                        <label className="flex items-center gap-2 text-xs text-white/70">
+                          <input type="checkbox" checked={s.friendlyFire}
+                            onChange={(e) => patch({ friendlyFire: e.target.checked })} />
+                          Friendly fire
+                        </label>
+                        <label className="flex items-center gap-2 text-xs text-white/70">
+                          <input type="checkbox" checked={s.respawnInRound}
+                            onChange={(e) => patch({ respawnInRound: e.target.checked })} />
+                          Respawn mid-round (unchecked = elimination)
+                        </label>
+                        <p className="text-[10px] text-white/45 leading-snug rounded-lg border border-white/10 bg-black/30 p-2 mt-1">
+                          Entities: Team A Spawn ×{s.maxPlayersPerTeam}, Team B Spawn ×{s.maxPlayersPerTeam},
+                          Push Rail, Push Block, Light, Door, Death Zone
                         </p>
                       </>
                     );
@@ -2954,18 +3123,40 @@ export function MapEditor({
             >
               <span className="text-[9px] font-bold text-emerald-300">COL</span>
             </ToolBtn>
-            <input
-              type="number"
-              min={0.25}
-              step={0.25}
-              value={doc.gridSize}
-              className="w-14 bg-black/50 border border-white/10 rounded px-1 py-0.5 text-xs"
-              onChange={(e) => {
-                const n = Math.max(0.25, Number(e.target.value) || 1);
-                setDoc((d) => ({ ...d, gridSize: n }));
-                apiRef.current?.setGridSize(n);
-              }}
-            />
+            <div className="flex items-center gap-0.5">
+              {([0.25, 0.5, 1, 2, 4] as const).map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => {
+                    setDoc((d) => ({ ...d, gridSize: g }));
+                    apiRef.current?.setGridSize(g);
+                  }}
+                  className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${
+                    doc.gridSize === g
+                      ? 'bg-sky-500/80 text-white'
+                      : 'bg-white/10 text-white/60 hover:bg-white/20'
+                  }`}
+                  title={`Grid size ${g}`}
+                >
+                  {g}
+                </button>
+              ))}
+              <input
+                type="number"
+                min={0.1}
+                max={16}
+                step={0.25}
+                value={doc.gridSize}
+                className="w-12 bg-black/50 border border-white/10 rounded px-1 py-0.5 text-[10px] ml-0.5"
+                onChange={(e) => {
+                  const n = Math.max(0.1, Math.min(16, Number(e.target.value) || 1));
+                  setDoc((d) => ({ ...d, gridSize: n }));
+                  apiRef.current?.setGridSize(n);
+                }}
+                title="Custom grid size"
+              />
+            </div>
             <ToolBtn onClick={() => apiRef.current?.focusSelected()} title="Focus selection (F)">
               <Crosshair className="w-4 h-4" />
             </ToolBtn>
@@ -3033,22 +3224,40 @@ export function MapEditor({
                   <Bug className="w-4 h-4 text-rose-400" />
                 </ToolBtn>
                 <ToolBtn
+                  onClick={() => armPlaceEntity('wave_anchor')}
+                  title="Wave anchor (marks wave zone)"
+                >
+                  <Zap className="w-4 h-4 text-amber-300" />
+                </ToolBtn>
+                <ToolBtn
                   onClick={() => armPlaceEntity('red_zone')}
-                  title="Death zone"
+                  title="Red death zone (damages players inside)"
                 >
                   <Skull className="w-4 h-4 text-red-400" />
                 </ToolBtn>
                 <ToolBtn
                   onClick={() => armPlaceEntity('health_floor')}
-                  title="Health floor"
+                  title="Health floor (heals players)"
                 >
                   <Heart className="w-4 h-4 text-emerald-400" />
                 </ToolBtn>
                 <ToolBtn
                   onClick={() => armPlaceEntity('revive_pad')}
-                  title="Revive pad"
+                  title="Revive pad (resurrects fallen players)"
                 >
                   <HeartPulse className="w-4 h-4 text-sky-400" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => armPlaceEntity('jump_pad')}
+                  title="Jump pad"
+                >
+                  <Rocket className="w-4 h-4 text-sky-300" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => armPlaceEntity('hazard')}
+                  title="Hazard / trap"
+                >
+                  <Zap className="w-4 h-4 text-violet-300" />
                 </ToolBtn>
                 <ToolBtn
                   onClick={() => armPlaceEntity('door')}
@@ -3074,9 +3283,27 @@ export function MapEditor({
                 </ToolBtn>
                 <ToolBtn
                   onClick={() => armPlaceEntity('hazard')}
-                  title="Death"
+                  title="Death zone / hazard"
                 >
                   <Skull className="w-4 h-4 text-red-400" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => armPlaceEntity('jump_pad')}
+                  title="Jump pad"
+                >
+                  <Rocket className="w-4 h-4 text-sky-300" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => armPlaceEntity('button')}
+                  title="Button trigger"
+                >
+                  <CircleDot className="w-4 h-4 text-amber-300" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => armPlaceEntity('action')}
+                  title="Action trigger"
+                >
+                  <Zap className="w-4 h-4 text-amber-200" />
                 </ToolBtn>
                 <ToolBtn
                   onClick={() => armPlaceEntity('door')}
@@ -3106,6 +3333,20 @@ export function MapEditor({
               title="Model Editor — skins, hats, gear"
             >
               <Shirt className="w-4 h-4 text-amber-300" />
+            </ToolBtn>
+            <ToolBtn
+              active={weaponEditorOpen}
+              onClick={() => (weaponEditorOpen ? setWeaponEditorOpen(false) : openWeaponEditor())}
+              title="Weapon Editor — model, position, combat stats, recoil, sway"
+            >
+              <Sword className="w-4 h-4 text-rose-300" />
+            </ToolBtn>
+            <ToolBtn
+              active={combatEditorOpen}
+              onClick={() => (combatEditorOpen ? setCombatEditorOpen(false) : openCombatEditor())}
+              title="Combat Editor — physics, movement, jump, slide, wall-jump"
+            >
+              <Swords className="w-4 h-4 text-sky-300" />
             </ToolBtn>
             <ToolBtn
               onClick={() => armPlaceEntity('light')}
@@ -3157,7 +3398,7 @@ export function MapEditor({
           </div>
           )}
 
-          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && (
+          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && !weaponEditorOpen && !combatEditorOpen && (
             <button
               type="button"
               onClick={() => setPropsOpen(true)}
@@ -3167,7 +3408,7 @@ export function MapEditor({
             </button>
           )}
 
-          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && (
+          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && !weaponEditorOpen && !combatEditorOpen && (
             <div
               className={`absolute z-[80] bg-black/80 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm overflow-y-auto ${
                 isMobile
@@ -3273,11 +3514,28 @@ export function MapEditor({
                   </button>
                 </div>
                 {(selected.locked || isEntityEditLocked(selected, doc.layers)) && (
-                  <p className="text-[10px] text-amber-200/80">
-                    {selected.locked
-                      ? 'This object is locked — unlock to edit transforms.'
-                      : 'Build level is locked — unlock the level in Layers.'}
-                  </p>
+                  <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 flex items-start gap-2">
+                    <Lock className="w-3.5 h-3.5 text-amber-300 mt-0.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold text-amber-200">
+                        {selected.locked ? 'Object is locked' : 'Layer is locked'}
+                      </p>
+                      <p className="text-[10px] text-white/55 mt-0.5">
+                        {selected.locked
+                          ? 'This object cannot be moved or edited.'
+                          : 'The build layer containing this object is locked.'}
+                      </p>
+                      {selected.locked && (
+                        <button
+                          className="mt-1.5 flex items-center gap-1 rounded bg-amber-400/20 border border-amber-400/40 px-2 py-0.5 text-[10px] text-amber-200 hover:bg-amber-400/30 transition-colors"
+                          onClick={() => patchEntityById(selected.id, { locked: false })}
+                        >
+                          <Unlock className="w-3 h-3" />
+                          Unlock object
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -5098,6 +5356,22 @@ export function MapEditor({
                   toast({ title: msg, variant: 'destructive' });
                 }
               }}
+            />
+          )}
+          {weaponEditorOpen && (
+            <WeaponEditor
+              isMobile={isMobile}
+              mapDoc={docRef.current}
+              onClose={() => setWeaponEditorOpen(false)}
+              onSaveToMap={saveWeaponDef}
+            />
+          )}
+          {combatEditorOpen && (
+            <CombatEditor
+              isMobile={isMobile}
+              mapDoc={docRef.current}
+              onClose={() => setCombatEditorOpen(false)}
+              onSaveToMap={saveCombatSettings}
             />
           )}
         </div>

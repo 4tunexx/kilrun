@@ -25,6 +25,7 @@ import {
   createSimScratch,
   DEFAULT_WORLD_BOUNDS,
   defaultInput,
+  type MovementPhysicsOpts,
   type PlayerInput,
   type PlayerSimScratch,
   type WorldBounds,
@@ -106,6 +107,10 @@ interface HordeModeSettings {
   intermissionSec?: number;
   maxPlayers?: number;
   startingWave?: number;
+  totalWaves?: number;
+  waveBuyTimeSec?: number;
+  respawnOnWaveClear?: boolean;
+  difficultyScale?: number;
 }
 
 interface MonsterSim {
@@ -167,6 +172,10 @@ export class HordeRoom extends Room<RoomState> {
   private startingWave = 1;
   private waveTimeMs = 0;
   private waveElapsedMs = 0;
+  private waveBuyTimeMs = 0;
+  private respawnOnWaveClear = true;
+  private difficultyScale = 1.0;
+  private combatPhysOpts: MovementPhysicsOpts = {};
 
   onCreate() {
     this.setState(new RoomState());
@@ -212,6 +221,30 @@ export class HordeRoom extends Room<RoomState> {
       );
     });
 
+    this.onMessage('buyWeapon', (client, preset: {
+      kind?: string;
+      damage?: number;
+      range?: number;
+      cooldownMs?: number;
+      coneRadians?: number;
+    }) => {
+      // Allowed during lobby countdown or between-waves intermission (playing + betweenWavesMs > 0).
+      const canBuy =
+        this.state.phase === 'countdown' ||
+        (this.state.phase === 'playing' && this.betweenWavesMs > 0 && this.waveBuyTimeMs > 0 &&
+          this.betweenWavesMs <= this.waveBuyTimeMs);
+      if (!canBuy) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const { sanitizeWeaponCombat } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+      const sanitized = sanitizeWeaponCombat(preset);
+      player.weaponKind = sanitized.kind;
+      player.weaponDamage = sanitized.damage;
+      player.weaponRange = sanitized.range;
+      player.weaponCooldownMs = sanitized.cooldownMs;
+      player.weaponConeRadians = sanitized.coneRadians;
+    });
+
     this.onMessage('loadCustomMap', (client, data: Record<string, unknown>) => {
       if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
       const allowed =
@@ -244,7 +277,19 @@ export class HordeRoom extends Room<RoomState> {
           this.maxWaves = Math.max(this.maxWaves, this.startingWave);
         }
         if (typeof settings.waveTimeSec === 'number' && Number.isFinite(settings.waveTimeSec)) {
-          this.waveTimeMs = Math.max(1, settings.waveTimeSec) * 1000;
+          this.waveTimeMs = settings.waveTimeSec > 0 ? Math.max(1, settings.waveTimeSec) * 1000 : 0;
+        }
+        if (typeof settings.totalWaves === 'number' && Number.isFinite(settings.totalWaves)) {
+          if (settings.totalWaves > 0) this.maxWaves = Math.max(1, Math.floor(settings.totalWaves));
+        }
+        if (typeof settings.waveBuyTimeSec === 'number' && Number.isFinite(settings.waveBuyTimeSec)) {
+          this.waveBuyTimeMs = Math.max(0, settings.waveBuyTimeSec) * 1000;
+        }
+        if (typeof settings.respawnOnWaveClear === 'boolean') {
+          this.respawnOnWaveClear = settings.respawnOnWaveClear;
+        }
+        if (typeof settings.difficultyScale === 'number' && Number.isFinite(settings.difficultyScale)) {
+          this.difficultyScale = Math.max(0.1, settings.difficultyScale);
         }
       }
 
@@ -255,6 +300,25 @@ export class HordeRoom extends Room<RoomState> {
         ? (data.obstacles as ObstacleBlueprint[])
         : [];
       this.rebuildStaticObstacles();
+
+      // Apply combat/physics overrides.
+      const cs = data?.combatSettings as Record<string, unknown> | undefined;
+      if (cs && typeof cs === 'object') {
+        this.combatPhysOpts = {
+          gravity: typeof cs.gravity === 'number' ? cs.gravity : undefined,
+          jumpVelocity: typeof cs.jumpVelocity === 'number' ? cs.jumpVelocity : undefined,
+          doubleJumpVelocity: typeof cs.doubleJumpVelocity === 'number' ? cs.doubleJumpVelocity : undefined,
+          doubleJumpEnabled: typeof cs.doubleJumpEnabled === 'boolean' ? cs.doubleJumpEnabled : undefined,
+          jumpCutMult: typeof cs.jumpCutMult === 'number' ? cs.jumpCutMult : undefined,
+          coyoteMs: typeof cs.coyoteMs === 'number' ? cs.coyoteMs : undefined,
+          jumpBufferMs: typeof cs.jumpBufferMs === 'number' ? cs.jumpBufferMs : undefined,
+          walkSpeed: typeof cs.walkSpeed === 'number' ? cs.walkSpeed : undefined,
+          sprintMult: typeof cs.sprintMult === 'number' ? cs.sprintMult : undefined,
+          crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
+          maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
+          apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+        };
+      }
 
       if (Array.isArray(data?.playerSpawns) && (data.playerSpawns as SpawnPoint[]).length) {
         this.playerSpawns = (data.playerSpawns as SpawnPoint[]).map((s) => ({ ...s }));
@@ -451,10 +515,22 @@ export class HordeRoom extends Room<RoomState> {
       return true;
     });
 
+    // Respawn downed players when a wave begins (after intermission).
+    if (this.respawnOnWaveClear && wave > this.startingWave) {
+      const players = Array.from(this.state.players.values());
+      players.forEach((player, index) => {
+        if (!player.isAlive) {
+          player.health = 100;
+          player.isAlive = true;
+          this.applySpawnPosition(player, index);
+        }
+      });
+    }
+
     const now = Date.now();
     for (const point of points.length ? points : this.monsterSpawnPoints) {
       const base = point.countPerWave ?? 2;
-      const scale = 1 + (wave - 1) * 0.35;
+      const scale = 1 + (wave - 1) * 0.35 * this.difficultyScale;
       const count = Math.max(1, Math.round(base * scale));
       const intervalMs = Math.max(400, (point.spawnIntervalSec ?? 1.5) * 1000);
       this.waveSpawnQueue.push({
@@ -499,10 +575,11 @@ export class HordeRoom extends Room<RoomState> {
     const base = MONSTER_STATS[type] ?? MONSTER_STATS.basic;
     const level = Math.max(1, point.level ?? 1);
     const levelScale = 1 + (level - 1) * 0.18;
+    const waveScaling = 1 + (this.state.wave - 1) * 0.12 * this.difficultyScale;
     const stats = {
-      hp: (point.hp && point.hp > 0 ? point.hp : base.hp * levelScale) * (1 + (this.state.wave - 1) * 0.12),
-      speed: point.speed && point.speed > 0 ? point.speed : base.speed,
-      damage: point.damage && point.damage > 0 ? point.damage : Math.round(base.damage * levelScale),
+      hp: (point.hp && point.hp > 0 ? point.hp : base.hp * levelScale) * waveScaling,
+      speed: point.speed && point.speed > 0 ? point.speed : base.speed * (1 + (this.state.wave - 1) * 0.04 * this.difficultyScale),
+      damage: point.damage && point.damage > 0 ? point.damage : Math.round(base.damage * levelScale * (1 + (this.state.wave - 1) * 0.08 * this.difficultyScale)),
       radius: point.radius && point.radius > 0 ? point.radius : base.radius,
     };
     const id = `mon_${Math.random().toString(36).slice(2, 9)}`;
@@ -660,7 +737,7 @@ export class HordeRoom extends Room<RoomState> {
         this.simScratch.set(sessionId, scratch);
       }
 
-      applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds);
+      applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
 
       for (const obstacle of this.state.obstacles) {
         if (!isPlayerHitByObstacle(player, obstacle)) continue;
