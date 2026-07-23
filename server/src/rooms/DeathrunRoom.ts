@@ -151,6 +151,9 @@ export class DeathrunRoom extends Room<RoomState> {
   private lobbyCountdownMs = LOBBY_COUNTDOWN_MS;
   private trapperEnabled = true;
   private maxRunners = 8;
+  private livesPerRunner = 3;
+  private trapCooldownSec = 5;
+  private checkpointRespawn = true;
 
   onCreate() {
     this.setState(new RoomState());
@@ -203,6 +206,9 @@ export class DeathrunRoom extends Room<RoomState> {
               roundTimeSec?: number;
               maxRunners?: number;
               trapperEnabled?: boolean;
+              livesPerRunner?: number;
+              trapCooldownSec?: number;
+              checkpointRespawn?: boolean;
             };
           };
         }
@@ -245,6 +251,15 @@ export class DeathrunRoom extends Room<RoomState> {
           }
           if (typeof settings.trapperEnabled === 'boolean') {
             this.trapperEnabled = settings.trapperEnabled;
+          }
+          if (typeof settings.livesPerRunner === 'number' && Number.isFinite(settings.livesPerRunner)) {
+            this.livesPerRunner = Math.max(0, Math.floor(settings.livesPerRunner));
+          }
+          if (typeof settings.trapCooldownSec === 'number' && Number.isFinite(settings.trapCooldownSec)) {
+            this.trapCooldownSec = Math.max(1, settings.trapCooldownSec);
+          }
+          if (typeof settings.checkpointRespawn === 'boolean') {
+            this.checkpointRespawn = settings.checkpointRespawn;
           }
         }
 
@@ -595,8 +610,12 @@ export class DeathrunRoom extends Room<RoomState> {
       }
 
       if (player.isAlive && player.z < VOID_Z) {
-        if (player.hasCheckpoint) {
+        if (this.checkpointRespawn && player.hasCheckpoint) {
           this.respawnAtCheckpoint(player);
+          // Consume a life if finite lives are configured.
+          if (this.livesPerRunner > 0) {
+            player.score = Math.max(0, player.score - 1);
+          }
         } else {
           player.health = 0;
           player.isAlive = false;

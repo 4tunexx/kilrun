@@ -28,6 +28,7 @@ import { LobbyOverlay } from './modes/deathrun/lobby-overlay';
 import { CountdownOverlay } from './modes/deathrun/countdown-overlay';
 import { ResultsScreen } from './modes/deathrun/results-screen';
 import { MobilePlayGate } from './ui/mobile-play-gate';
+import { WeaponShop, type WeaponPreset } from './ui/weapon-shop';
 import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
 import { Crosshair } from './ui/crosshair';
@@ -667,7 +668,29 @@ export default function KilrunEngine({
               }
             />
           ))}
-        {room.phase === 'countdown' && <CountdownOverlay countdownMs={room.countdownMs} />}
+        {room.phase === 'countdown' && (
+          <>
+            <CountdownOverlay
+              countdownMs={room.countdownMs}
+              mode={mode}
+            />
+            {(mode === 'competitive' || mode === 'horde') && room.countdownMs > 5000 && (
+              <WeaponShop
+                buySecondsLeft={Math.max(0, Math.ceil((room.countdownMs - 4000) / 1000))}
+                currentWeaponKind={localPlayer?.weaponKind}
+                onBuy={(preset: WeaponPreset) => {
+                  connectionRef.current?.sendBuyWeapon({
+                    kind: preset.kind,
+                    damage: preset.damage,
+                    range: preset.range,
+                    cooldownMs: preset.cooldownMs,
+                    coneRadians: preset.coneRadians,
+                  });
+                }}
+              />
+            )}
+          </>
+        )}
         {room.phase === 'results' && localPlayer && (
           mode === 'horde' ? (
             <HordeResultsScreen room={room} player={localPlayer} onContinue={onExit} />

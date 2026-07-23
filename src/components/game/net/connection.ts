@@ -285,6 +285,20 @@ export class GameConnection {
     this.room?.send('forceStart', {});
   }
 
+  /**
+   * Request a weapon swap during the buy phase (competitive countdown or horde intermission).
+   * Server validates and applies the new loadout for the current round/wave.
+   */
+  public sendBuyWeapon(weaponPreset: {
+    kind: 'hitscan' | 'melee';
+    damage: number;
+    range: number;
+    cooldownMs: number;
+    coneRadians: number;
+  }): void {
+    this.room?.send('buyWeapon', weaponPreset);
+  }
+
   /** Colyseus room id after a successful connect (for party queue sync). */
   public get roomId(): string | undefined {
     return this.room?.roomId;

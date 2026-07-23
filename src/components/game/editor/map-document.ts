@@ -712,25 +712,46 @@ export interface DeathrunModeSettings {
   /** Max runners that can spawn (place that many Runner Spawn entities). */
   maxRunners: number;
   trapperEnabled: boolean;
+  /** Lives each runner gets before elimination (0 = infinite). */
+  livesPerRunner: number;
+  /** Seconds between trap activations (trapper cooldown). */
+  trapCooldownSec: number;
+  /** Respawn runners at last checkpoint when they die (true = checkpoint respawn). */
+  checkpointRespawn: boolean;
 }
 
 /** Horde match timing / wave flow (Settings tab). */
 export interface HordeModeSettings {
   warmupSec: number;
   waveTimeSec: number;
-  /** Seconds between waves. */
+  /** Seconds between waves (intermission / buy phase). */
   intermissionSec: number;
   maxPlayers: number;
   startingWave: number;
+  /** Total wave count (0 = endless until all die). */
+  totalWaves: number;
+  /** Seconds of the intermission that act as a weapon-buy window (≤ intermissionSec). */
+  waveBuyTimeSec: number;
+  /** Respawn downed players when a wave clears. */
+  respawnOnWaveClear: boolean;
+  /** Difficulty scale per wave (higher = faster difficulty ramp). */
+  difficultyScale: number;
 }
 
 /** Competitive match timing / rounds (Settings tab). */
 export interface CompetitiveModeSettings {
   warmupSec: number;
+  /** Buy phase duration at round start (weapon shop window). */
   buyTimeSec: number;
   roundTimeSec: number;
   roundCount: number;
   overtimeSec: number;
+  /** Max players per team (determines how many team spawns to place). */
+  maxPlayersPerTeam: number;
+  /** Allow friendly fire between teammates. */
+  friendlyFire: boolean;
+  /** Players respawn mid-round (false = elimination mode). */
+  respawnInRound: boolean;
 }
 
 export interface MapModeSettings {
@@ -744,14 +765,21 @@ export const DEFAULT_DEATHRUN_SETTINGS: DeathrunModeSettings = {
   roundTimeSec: 180,
   maxRunners: 8,
   trapperEnabled: true,
+  livesPerRunner: 3,
+  trapCooldownSec: 5,
+  checkpointRespawn: true,
 };
 
 export const DEFAULT_HORDE_SETTINGS: HordeModeSettings = {
   warmupSec: 8,
   waveTimeSec: 90,
-  intermissionSec: 12,
+  intermissionSec: 15,
   maxPlayers: 4,
   startingWave: 1,
+  totalWaves: 10,
+  waveBuyTimeSec: 10,
+  respawnOnWaveClear: true,
+  difficultyScale: 1.0,
 };
 
 export const DEFAULT_COMPETITIVE_SETTINGS: CompetitiveModeSettings = {
@@ -760,6 +788,9 @@ export const DEFAULT_COMPETITIVE_SETTINGS: CompetitiveModeSettings = {
   roundTimeSec: 120,
   roundCount: 6,
   overtimeSec: 60,
+  maxPlayersPerTeam: 3,
+  friendlyFire: false,
+  respawnInRound: false,
 };
 
 export function ensureDeathrunSettings(doc: MapDocument): DeathrunModeSettings {
