@@ -72,6 +72,12 @@ export interface NicknameConfig {
   effect: NicknameEffect;
   color: string;
   intensity: number;
+  /** Fill opacity (0 = invisible fill / outline-only, 1 = solid). Default 1. */
+  opacity: number;
+  /** Text-stroke width in px (0 = no outline). Default 0. */
+  outlineWidth: number;
+  /** Text-stroke color. Default matches `color`. */
+  outlineColor: string;
 }
 
 export const DEFAULT_FRAME_CONFIG: FrameConfig = {
@@ -87,6 +93,9 @@ export const DEFAULT_NICKNAME_CONFIG: NicknameConfig = {
   effect: 'glow',
   color: '#ef4444',
   intensity: 0.7,
+  opacity: 1,
+  outlineWidth: 0,
+  outlineColor: '#ef4444',
 };
 
 export const FRAME_STYLES: { value: FrameStyle; label: string }[] = [
@@ -143,16 +152,29 @@ export function normalizeNicknameConfig(raw: unknown): NicknameConfig {
   const effect = NICKNAME_EFFECTS.some((e) => e.value === c.effect)
     ? (c.effect as NicknameEffect)
     : 'glow';
+  const color =
+    typeof c.color === 'string' && HEX_RE.test(c.color)
+      ? c.color
+      : DEFAULT_NICKNAME_CONFIG.color;
   return {
     effect,
-    color:
-      typeof c.color === 'string' && HEX_RE.test(c.color)
-        ? c.color
-        : DEFAULT_NICKNAME_CONFIG.color,
+    color,
     intensity:
       typeof c.intensity === 'number' && Number.isFinite(c.intensity)
         ? clamp(c.intensity, 0.2, 1)
         : 0.7,
+    opacity:
+      typeof c.opacity === 'number' && Number.isFinite(c.opacity)
+        ? clamp(c.opacity, 0, 1)
+        : 1,
+    outlineWidth:
+      typeof c.outlineWidth === 'number' && Number.isFinite(c.outlineWidth)
+        ? clamp(c.outlineWidth, 0, 4)
+        : 0,
+    outlineColor:
+      typeof c.outlineColor === 'string' && HEX_RE.test(c.outlineColor)
+        ? c.outlineColor
+        : color,
   };
 }
 
@@ -236,25 +258,55 @@ export function nicknameEffectClass(config: NicknameConfig | null | undefined): 
   }
 }
 
+/** Expand short/full hex + alpha into an rgba() string. */
+function hexToRgba(hex: string, alpha: number): string {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`;
+}
+
 export function nicknameEffectStyle(
   config: NicknameConfig | null | undefined
 ): CSSProperties | undefined {
   if (!config) return undefined;
   const n = normalizeNicknameConfig(config);
-  if (n.effect === 'rainbow' || n.effect === 'none') return undefined;
+
+  const strokePart: CSSProperties =
+    n.outlineWidth > 0
+      ? ({
+          WebkitTextStroke: `${n.outlineWidth}px ${n.outlineColor}`,
+          paintOrder: 'stroke fill',
+        } as CSSProperties)
+      : {};
+
+  if (n.effect === 'rainbow' || n.effect === 'none') {
+    if (n.outlineWidth > 0) return strokePart;
+    if (n.effect === 'none' && n.opacity < 1) {
+      return { color: hexToRgba(n.color, n.opacity) };
+    }
+    return undefined;
+  }
+
   const alpha = Math.round(n.intensity * 255)
     .toString(16)
     .padStart(2, '0');
+  const fillColor = n.opacity < 1 ? hexToRgba(n.color, n.opacity) : n.color;
+  const textShadow =
+    n.effect === 'glow' || n.effect === 'neon'
+      ? `0 0 ${6 + n.intensity * 10}px ${n.color}${alpha}`
+      : n.effect === 'fire'
+        ? `0 0 8px #f97316, 0 0 16px ${n.color}`
+        : n.effect === 'ice'
+          ? `0 0 8px #67e8f9`
+          : undefined;
+
   return {
-    color: n.color,
-    textShadow:
-      n.effect === 'glow' || n.effect === 'neon'
-        ? `0 0 ${6 + n.intensity * 10}px ${n.color}${alpha}`
-        : n.effect === 'fire'
-          ? `0 0 8px #f97316, 0 0 16px ${n.color}`
-          : n.effect === 'ice'
-            ? `0 0 8px #67e8f9`
-            : undefined,
+    color: fillColor,
+    textShadow,
+    ...strokePart,
   };
 }
 

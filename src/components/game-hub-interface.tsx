@@ -872,15 +872,32 @@ export default function GameHubInterface({
         </div>
 
         <div className="relative z-10 flex h-screen">
+          {/* Mobile backdrop — tap to dismiss any open sidebar */}
+          {isMobile && (isLeftMenuOpen || isMenuOpen) && (
+            <div
+              className="fixed inset-0 z-[25] bg-black/60"
+              onClick={() => { setIsMenuOpen(false); setIsLeftMenuOpen(false); }}
+            />
+          )}
+
+          {/* Left navigation rail */}
           <div
             className={`relative h-full transition-all duration-300 ease-in-out ${
-              isLeftMenuOpen ? 'w-20 sm:w-24' : 'w-0'
+              isMobile ? 'w-0 shrink-0' : isLeftMenuOpen ? 'w-20 sm:w-24' : 'w-0'
             }`}
           >
             <div
-              className={`w-20 sm:w-24 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 h-full overflow-hidden transition-opacity duration-300 ${
-                isLeftMenuOpen ? 'opacity-100' : 'opacity-0'
-              }`}
+              className={
+                isMobile
+                  ? `fixed left-0 top-0 z-[30] h-full w-20 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 overflow-hidden transition-all duration-300 ${
+                      isLeftMenuOpen
+                        ? 'translate-x-0 opacity-100'
+                        : '-translate-x-full opacity-0 pointer-events-none'
+                    }`
+                  : `w-20 sm:w-24 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 h-full overflow-hidden transition-opacity duration-300 ${
+                      isLeftMenuOpen ? 'opacity-100' : 'opacity-0'
+                    }`
+              }
             >
               <div
                 className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center mb-4 sm:mb-6 cursor-pointer transition shrink-0 hover:scale-110 active:scale-95 duration-300 overflow-hidden bg-transparent shadow-none hover:bg-white/5"
@@ -1052,8 +1069,12 @@ export default function GameHubInterface({
             <button
               aria-label={isLeftMenuOpen ? 'Collapse navigation' : 'Expand navigation'}
               onClick={() => setIsLeftMenuOpen(!isLeftMenuOpen)}
-              className={`absolute -right-5 top-1/2 -translate-y-1/2 w-10 h-10 bg-primary hover:bg-primary/90 backdrop-blur-md border border-slate-700/30 rounded-lg flex items-center justify-center transition shadow-lg z-20 hover:scale-110 ${
+              className={`w-10 h-10 bg-primary hover:bg-primary/90 backdrop-blur-md border border-slate-700/30 rounded-lg flex items-center justify-center transition shadow-lg hover:scale-110 ${
                 !isLeftMenuOpen ? 'animate-slow-pulse-horizontal' : ''
+              } ${
+                isMobile
+                  ? `fixed top-1/2 -translate-y-1/2 z-[45] ${isLeftMenuOpen ? 'left-[4.5rem]' : 'left-1'}`
+                  : 'absolute -right-5 top-1/2 -translate-y-1/2 z-20'
               }`}
             >
               {isLeftMenuOpen ? (
@@ -1117,12 +1138,17 @@ export default function GameHubInterface({
             </SheetContent>
           </Sheet>
 
+          {/* Right profile rail */}
           <div className="relative">
             <button
               aria-label={isMenuOpen ? 'Collapse profile menu' : 'Expand profile menu'}
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className={`absolute -left-5 top-1/2 -translate-y-1/2 w-10 h-10 bg-primary hover:bg-primary/90 backdrop-blur-md border border-slate-700/30 rounded-lg flex items-center justify-center transition shadow-lg z-20 hover:scale-110 ${
+              className={`w-10 h-10 bg-primary hover:bg-primary/90 backdrop-blur-md border border-slate-700/30 rounded-lg flex items-center justify-center transition shadow-lg hover:scale-110 ${
                 !isMenuOpen ? 'animate-slow-pulse-horizontal rotate-180' : ''
+              } ${
+                isMobile
+                  ? `fixed top-1/2 -translate-y-1/2 z-[45] ${isMenuOpen ? 'right-72' : 'right-1'}`
+                  : 'absolute -left-5 top-1/2 -translate-y-1/2 z-20'
               }`}
             >
               {isMenuOpen ? (
@@ -1132,11 +1158,17 @@ export default function GameHubInterface({
               )}
             </button>
             <div
-              className={`bg-slate-900/60 backdrop-blur-md border-l border-slate-700/30 transition-all duration-300 ease-in-out overflow-hidden h-full ${
-                isMenuOpen ? 'w-72 sm:w-80' : 'w-0'
-              }`}
+              className={
+                isMobile
+                  ? `fixed right-0 top-0 z-[30] h-full bg-slate-900/60 backdrop-blur-md border-l border-slate-700/30 overflow-hidden transition-all duration-300 ${
+                      isMenuOpen ? 'w-72 translate-x-0 opacity-100' : 'w-72 translate-x-full opacity-0 pointer-events-none'
+                    }`
+                  : `bg-slate-900/60 backdrop-blur-md border-l border-slate-700/30 transition-all duration-300 ease-in-out overflow-hidden h-full ${
+                      isMenuOpen ? 'w-72 sm:w-80' : 'w-0'
+                    }`
+              }
             >
-              <ScrollArea className="h-full w-72 sm:w-80">
+              <ScrollArea className={`h-full ${isMobile ? 'w-72' : 'w-72 sm:w-80'}`}>
                 <div
                   className={`p-4 sm:p-6 ${
                     isMenuOpen ? 'opacity-100' : 'opacity-0'

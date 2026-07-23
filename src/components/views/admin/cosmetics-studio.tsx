@@ -697,17 +697,23 @@ function NicknamePanel({ onCreated }: { onCreated?: () => void }) {
           </Select>
         </div>
         <div className="space-y-1">
-          <Label>Accent color</Label>
+          <Label>Accent / glow color</Label>
           <input
             type="color"
             value={nick.color}
-            onChange={(e) => setNick((n) => ({ ...n, color: e.target.value }))}
+            onChange={(e) =>
+              setNick((n) => ({
+                ...n,
+                color: e.target.value,
+                outlineColor: n.outlineColor === n.color ? e.target.value : n.outlineColor,
+              }))
+            }
             className="h-10 w-14 rounded border border-slate-700 cursor-pointer"
           />
         </div>
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
-            <Label>Intensity</Label>
+            <Label>Glow intensity</Label>
             <span className="text-slate-400">{nick.intensity.toFixed(2)}</span>
           </div>
           <Slider
@@ -718,15 +724,80 @@ function NicknamePanel({ onCreated }: { onCreated?: () => void }) {
             onValueChange={([intensity]) => setNick((n) => ({ ...n, intensity }))}
           />
         </div>
-      </div>
-      <div className="space-y-4">
-        <div className="flex items-center justify-center rounded-lg border border-slate-700/50 bg-slate-950/50 p-8 min-h-[120px]">
-          <NicknameEffectText
-            name="KilrunPlayer"
-            effect={nick}
-            className="text-3xl font-black"
-          />
+
+        <div className="space-y-2 rounded-lg border border-slate-700/50 p-3">
+          <p className="text-sm font-medium">Fill &amp; transparency</p>
+          <div className="space-y-2 pt-1">
+            <div className="flex justify-between text-sm">
+              <Label>Fill opacity</Label>
+              <span className="text-slate-400 tabular-nums">
+                {nick.opacity === 0 ? 'outline only' : nick.opacity.toFixed(2)}
+              </span>
+            </div>
+            <Slider
+              min={0}
+              max={1}
+              step={0.05}
+              value={[nick.opacity]}
+              onValueChange={([opacity]) => setNick((n) => ({ ...n, opacity }))}
+            />
+            <p className="text-[11px] text-slate-500">
+              0 = transparent fill (outline + glow only) · 1 = solid fill
+            </p>
+          </div>
         </div>
+
+        <div className="space-y-2 rounded-lg border border-slate-700/50 p-3">
+          <p className="text-sm font-medium">Outline / text stroke</p>
+          <div className="space-y-2 pt-1">
+            <div className="flex justify-between text-sm">
+              <Label>Outline width</Label>
+              <span className="text-slate-400 tabular-nums">
+                {nick.outlineWidth === 0 ? 'off' : `${nick.outlineWidth}px`}
+              </span>
+            </div>
+            <Slider
+              min={0}
+              max={4}
+              step={0.5}
+              value={[nick.outlineWidth]}
+              onValueChange={([outlineWidth]) => setNick((n) => ({ ...n, outlineWidth }))}
+            />
+          </div>
+          {nick.outlineWidth > 0 && (
+            <div className="space-y-1 pt-1">
+              <Label>Outline color</Label>
+              <input
+                type="color"
+                value={nick.outlineColor}
+                onChange={(e) => setNick((n) => ({ ...n, outlineColor: e.target.value }))}
+                className="h-10 w-14 rounded border border-slate-700 cursor-pointer"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="rounded-lg border border-slate-700/50 overflow-hidden min-h-[120px]">
+          <div className="flex items-center justify-center bg-slate-950/70 p-8">
+            <NicknameEffectText
+              name="KilrunPlayer"
+              effect={nick}
+              className="text-3xl font-black"
+            />
+          </div>
+          <div className="flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-700 p-4">
+            <NicknameEffectText
+              name="KilrunPlayer"
+              effect={nick}
+              className="text-xl font-black"
+            />
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-500">
+          Previewed on dark and on lighter backgrounds.
+        </p>
         <ShopMetaFields
           itemName={itemName}
           setItemName={setItemName}
