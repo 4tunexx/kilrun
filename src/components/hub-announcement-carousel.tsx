@@ -1,17 +1,42 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import {
+  Flame,
+  Coins,
+  Trophy,
+  UserPlus,
+  Gem,
+  Crown,
+  Award,
+  Target,
+  Newspaper,
+  type LucideIcon,
+} from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { UserHoverCard } from '@/components/user-hover-card';
 import { getAnnouncementCarouselItems } from '@/lib/announcement-carousel-actions';
 import type { AnnouncementItem } from '@/lib/announcement-carousel-actions';
-import type { AnnouncementCarouselConfig } from '@/lib/announcement-carousel-config';
+import type { AnnouncementCarouselConfig, AnnouncementType } from '@/lib/announcement-carousel-config';
+
+const TYPE_ICONS: Record<AnnouncementType, LucideIcon> = {
+  firesale: Flame,
+  user_earn_vp: Coins,
+  user_won_match: Trophy,
+  user_registered: UserPlus,
+  user_is_premium: Gem,
+  user_got_vip: Crown,
+  user_got_badge: Award,
+  user_earn_achievement: Target,
+  news: Newspaper,
+};
 
 type CarouselData = Awaited<ReturnType<typeof getAnnouncementCarouselItems>>;
 
 /**
- * Hub-wide announcement ticker rendered between the page banner and content area.
- * It fetches data client-side on mount and refreshes every 2 minutes.
+ * Hub-wide announcement ticker rendered at the very top of every hub page,
+ * above the page banner. Fetches data client-side on mount and refreshes
+ * every 2 minutes.
  *
  * The ticker is a pure-CSS marquee (CSS animation) to avoid layout jank.
  * On hover / pointer-down the animation is paused.
@@ -121,14 +146,17 @@ function CarouselChip({
   thickness: number;
 }) {
   const avatarSize = Math.max(20, Math.min(thickness - 12, 28));
+  const Icon = TYPE_ICONS[item.type] ?? Newspaper;
+  const iconSize = Math.max(10, Math.min(thickness - 22, 14));
 
   return (
     <div className="flex items-center gap-2 px-5 shrink-0 whitespace-nowrap">
       {/* Separator */}
       <span className="text-slate-600 text-xs mr-1">•</span>
 
-      {/* Event type label */}
-      <span className="text-xs font-semibold text-slate-300 tracking-wide">
+      {/* Event type label with lucide icon */}
+      <span className="flex items-center gap-1 text-xs font-semibold text-slate-300 tracking-wide">
+        <Icon style={{ width: iconSize, height: iconSize }} className="shrink-0" />
         {item.label}
       </span>
 
