@@ -300,6 +300,8 @@ model SiteSettings {
   premiumConfigJson  String  @default("{}")
   /// JSON: Competitive rank tiers (name, minKp, imageUrl) — see rank-config.ts.
   rankConfigJson     String  @default("{}")
+  /// JSON: Hub announcement carousel config (enabled, types, speed, direction, thickness).
+  announcementCarouselJson String @default("{}")
 }
 
 model GlobalChatMessage {

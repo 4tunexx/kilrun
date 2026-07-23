@@ -136,8 +136,8 @@ export function ShowcaseEditor() {
       toast({ title: `Showcasing ${option.title}` });
       setPickerSlot(null);
       reload();
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Could not update showcase', variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : 'Could not update showcase', variant: 'destructive' });
     } finally {
       setBusySlot(null);
     }
@@ -161,8 +161,8 @@ export function ShowcaseEditor() {
       const res = await setShowcaseLayout(partial);
       setDraftLayout(res.layout);
       setData((prev) => (prev ? { ...prev, layout: res.layout } : prev));
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Could not save layout', variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : 'Could not save layout', variant: 'destructive' });
       setDraftLayout(data.layout);
     } finally {
       setLayoutBusy(false);

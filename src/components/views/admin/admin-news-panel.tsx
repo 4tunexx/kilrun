@@ -102,8 +102,8 @@ export function AdminNewsPanel() {
         toast({ title: published ? 'News published' : 'Draft saved' });
       }
       await reload();
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Save failed', variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : 'Save failed', variant: 'destructive' });
     } finally {
       setBusy(null);
     }
@@ -117,8 +117,8 @@ export function AdminNewsPanel() {
       if (form.id === id) setForm(EMPTY);
       toast({ title: 'News deleted' });
       await reload();
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Delete failed', variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : 'Delete failed', variant: 'destructive' });
     } finally {
       setBusy(null);
     }

@@ -8,7 +8,7 @@ import { getGuides } from '@/lib/social-actions';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function GuidesView() {
-  const [guides, setGuides] = useState<any[]>([]);
+  const [guides, setGuides] = useState<Awaited<ReturnType<typeof getGuides>>>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 

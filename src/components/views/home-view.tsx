@@ -21,7 +21,6 @@ import { Progress } from '@/components/ui/progress';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import {
   getActiveMissions,
@@ -83,8 +82,8 @@ export default function HomeView({
   const [news, setNews] = useState<NewsArticle[]>([]);
   const [readingNewsId, setReadingNewsId] = useState<string | null>(null);
   const [readingNews, setReadingNews] = useState<NewsArticle | null>(null);
-  const [forumTopics, setForumTopics] = useState<any[]>([]);
-  const [chat, setChat] = useState<any[]>([]);
+  const [forumTopics, setForumTopics] = useState<Awaited<ReturnType<typeof getForumPosts>>>([]);
+  const [chat, setChat] = useState<Awaited<ReturnType<typeof getGlobalChat>>>([]);
   const [chatEnabled, setChatEnabled] = useState(true);
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [chatInput, setChatInput] = useState('');
@@ -203,9 +202,9 @@ export default function HomeView({
       await sendGlobalChat(chatInput);
       setChatInput('');
       await refreshChat();
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
-        title: e?.message ?? 'Could not send',
+        title: e instanceof Error ? e.message : 'Could not send',
         variant: 'destructive',
       });
     } finally {

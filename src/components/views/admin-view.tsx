@@ -53,6 +53,7 @@ import { AdminSiteLayoutPanel } from '@/components/views/admin/admin-site-layout
 import { AdminNewsPanel } from '@/components/views/admin/admin-news-panel';
 import { AdminPremiumPanel } from '@/components/views/admin/admin-premium-panel';
 import { AdminRanksPanel } from '@/components/views/admin/admin-ranks-panel';
+import { AdminAnnouncementCarouselPanel } from '@/components/views/admin/admin-announcement-carousel-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -155,13 +156,13 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
   const isAdmin = viewerRole === 'admin';
   const visibleTabs = isAdmin ? ADMIN_TABS : MODERATOR_TABS;
 
-  const [users, setUsers] = useState<any[]>([]);
-  const [tickets, setTickets] = useState<any[]>([]);
-  const [items, setItems] = useState<any[]>([]);
-  const [missions, setMissions] = useState<any[]>([]);
-  const [achievements, setAchievements] = useState<any[]>([]);
-  const [badges, setBadges] = useState<any[]>([]);
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [users, setUsers] = useState<Awaited<ReturnType<typeof adminListUsers>>>([]);
+  const [tickets, setTickets] = useState<Awaited<ReturnType<typeof adminListTickets>>>([]);
+  const [items, setItems] = useState<Awaited<ReturnType<typeof getStoreItems>>>([]);
+  const [missions, setMissions] = useState<Awaited<ReturnType<typeof adminListMissionTemplates>>>([]);
+  const [achievements, setAchievements] = useState<Awaited<ReturnType<typeof adminListAchievements>>>([]);
+  const [badges, setBadges] = useState<Awaited<ReturnType<typeof adminListBadges>>>([]);
+  const [auditLogs, setAuditLogs] = useState<Awaited<ReturnType<typeof adminListAuditLogs>>>([]);
   const [ticketFilter, setTicketFilter] = useState('all');
   const [awardQuery, setAwardQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -172,8 +173,8 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
     setBusyKey(key);
     try {
       await action();
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Something went wrong', variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : 'Something went wrong', variant: 'destructive' });
     } finally {
       setBusyKey(null);
     }
@@ -2313,6 +2314,8 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
 
         {isAdmin && (
           <TabsContent value="content" className="mt-4 space-y-6">
+            <AdminAnnouncementCarouselPanel />
+
             <AdminNewsPanel />
 
             <Card className="bg-slate-800/40 border-slate-700/30 max-w-xl">

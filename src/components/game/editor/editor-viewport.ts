@@ -307,7 +307,7 @@ export function createEditorViewport(
   let bucketPainting = false;
   let lastPaintCellKey: string | null = null;
   /** UV defaults applied with the texture paint brush. */
-  let paintUv = {
+  const paintUv = {
     repeat: [2, 2] as [number, number],
     offset: [0, 0] as [number, number],
     rotation: 0,
@@ -474,8 +474,8 @@ export function createEditorViewport(
 
   const transform = new TransformControls(camera, renderer.domElement);
   transform.setMode('translate');
-  let lastPrimaryPos = new THREE.Vector3();
-  let lastPrimaryScale = new THREE.Vector3(1, 1, 1);
+  const lastPrimaryPos = new THREE.Vector3();
+  const lastPrimaryScale = new THREE.Vector3(1, 1, 1);
 
   /** Invisible pivot so multi-select / groups move·rotate·scale as one unit. */
   const groupProxy = new THREE.Object3D();

@@ -102,8 +102,8 @@ export default function PublicProfileView({
       await sendFriendRequest(profile.id);
       toast({ title: 'Friend request sent' });
       reload();
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Could not send request', variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : 'Could not send request', variant: 'destructive' });
     } finally {
       setBusyAction(null);
     }
@@ -115,8 +115,8 @@ export default function PublicProfileView({
       await removeFriend(profile.id);
       toast({ title: 'Friend removed' });
       reload();
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Could not remove friend', variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : 'Could not remove friend', variant: 'destructive' });
     } finally {
       setBusyAction(null);
     }
@@ -129,8 +129,8 @@ export default function PublicProfileView({
       await respondFriendRequest(profile.incomingFriendshipId, accept);
       toast({ title: accept ? 'Friend request accepted' : 'Friend request declined' });
       reload();
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Could not update request', variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : 'Could not update request', variant: 'destructive' });
     } finally {
       setBusyAction(null);
     }
@@ -157,8 +157,8 @@ export default function PublicProfileView({
         title: result.myVote === 1 ? 'Gave +REP — locked in' : 'Gave −REP — locked in',
         description: 'Your vote is permanent and cannot be changed.',
       });
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Could not vote', variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : 'Could not vote', variant: 'destructive' });
     } finally {
       setBusyAction(null);
     }

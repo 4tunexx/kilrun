@@ -21,7 +21,7 @@ function extractPartyCode(body: string): string | null {
 }
 
 export default function NotificationsView() {
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<Awaited<ReturnType<typeof getNotifications>>>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const { toast } = useToast();

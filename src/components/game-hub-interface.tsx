@@ -65,6 +65,7 @@ import { getRoleTextColorClass } from '@/lib/role-colors';
 import { PageBanner, PAGE_META } from '@/components/page-banner';
 import { HubHeaderToolbar } from '@/components/hub-header-toolbar';
 import { HubFooter } from '@/components/hub-footer';
+import { HubAnnouncementCarousel } from '@/components/hub-announcement-carousel';
 import { resolveHubBackground, resolveMarkLogo } from '@/lib/branding';
 import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
 import {
@@ -161,6 +162,7 @@ const HUB_PAGE_ICONS: Record<HubPageId, LucideIcon> = {
   messages: Mail,
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const pageComponents: { [key: string]: React.ComponentType<any> } = {
   home: HomeView,
   store: StoreView,
@@ -690,7 +692,7 @@ export default function GameHubInterface({
 
     const PageComponent = pageComponents[currentPage];
     if (PageComponent) {
-      let props: any = {};
+      let props: Record<string, unknown> = {};
       if (currentPage === 'play') {
         props.onPlay = handlePlay;
         props.onPartyFollow = handlePartyFollow;
@@ -806,7 +808,7 @@ export default function GameHubInterface({
     page,
     glow = false,
   }: {
-    icon: any;
+    icon: LucideIcon;
     label: string;
     page: string;
     glow?: boolean;
@@ -1089,6 +1091,7 @@ export default function GameHubInterface({
                 }
               />
             )}
+            {currentPage !== 'lobby' && <HubAnnouncementCarousel />}
             <ScrollArea className="relative z-0 flex-1 min-w-0">
               {renderContent()}
             </ScrollArea>

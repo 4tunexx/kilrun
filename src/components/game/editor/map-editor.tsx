@@ -347,6 +347,7 @@ export function MapEditor({
     setCustomTextures(listCustomTextures());
     setPrefabs(listPrefabs());
     setActivePlayId(getActivePlayMapIdForMode(getMapGameMode(doc)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const gameMode = getMapGameMode(doc);

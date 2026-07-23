@@ -830,7 +830,7 @@ export function mapDocPushPayloads(doc: MapDocument): SimPushPayloadBlueprint[] 
   const out: SimPushPayloadBlueprint[] = [];
   for (const block of blocks) {
     const pb = ensurePushBlock(block);
-    let rail =
+    const rail =
       (pb.railEntityId && rails.find((r) => r.id === pb.railEntityId)) ||
       rails.find((r) => {
         const dx = r.position[0] - block.position[0];
