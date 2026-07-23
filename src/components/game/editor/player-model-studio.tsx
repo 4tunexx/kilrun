@@ -47,6 +47,7 @@ import {
   listMeshes,
   removeExtraBone,
 } from './player-mesh-edits';
+import { uploadModelGlb } from '@/lib/model-asset-upload';
 
 type StudioTab = 'model' | 'mesh' | 'bones' | 'record' | 'anims';
 
@@ -92,6 +93,8 @@ export function PlayerModelStudio({
   const [clipName, setClipName] = useState('custom_move');
   const [boneScale, setBoneScale] = useState<[number, number, number]>([1, 1, 1]);
   const [meshColor, setMeshColor] = useState('#c4a574');
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const anim = ensureAnimation(entity);
   const clips = anim.availableClips;
@@ -410,9 +413,11 @@ export function PlayerModelStudio({
                   size="sm"
                   variant="secondary"
                   className="flex-1 min-h-10"
+                  disabled={uploading}
                   onClick={() => fileRef.current?.click()}
                 >
-                  <Upload className="w-3.5 h-3.5 mr-1" /> Upload GLB
+                  <Upload className="w-3.5 h-3.5 mr-1" />
+                  {uploading ? 'Uploading…' : 'Upload GLB'}
                 </Button>
                 <Button
                   size="sm"
@@ -446,19 +451,52 @@ export function PlayerModelStudio({
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
+                  e.target.value = '';
+                  setUploadError(null);
+                  setUploading(true);
                   const reader = new FileReader();
                   reader.onload = () => {
-                    onChange({
-                      customModelUrl: String(reader.result),
-                      model: undefined,
-                      name: entity.name || f.name.replace(/\.(glb|gltf)$/i, ''),
-                      playerAnims: {},
-                    });
+                    const dataUrl = String(reader.result);
+                    // Upload to server so the URL is accessible from any device
+                    // (avoids embedding a giant base64 blob that breaks cloud-sync).
+                    uploadModelGlb(dataUrl)
+                      .then((url) => {
+                        onChange({
+                          customModelUrl: url,
+                          model: undefined,
+                          name: entity.name || f.name.replace(/\.(glb|gltf)$/i, ''),
+                          playerAnims: {},
+                        });
+                      })
+                      .catch((err) => {
+                        const msg =
+                          err instanceof Error ? err.message : 'Model upload failed';
+                        setUploadError(msg);
+                        // Fall back to data URL so the model still works locally,
+                        // but the user is warned it won't sync to other devices.
+                        onChange({
+                          customModelUrl: dataUrl,
+                          model: undefined,
+                          name: entity.name || f.name.replace(/\.(glb|gltf)$/i, ''),
+                          playerAnims: {},
+                        });
+                      })
+                      .finally(() => setUploading(false));
                   };
                   reader.readAsDataURL(f);
-                  e.target.value = '';
                 }}
               />
+              {uploading && (
+                <p className="text-[11px] text-sky-300 mt-1">
+                  Uploading model to server… map will sync across devices once done.
+                </p>
+              )}
+              {uploadError && (
+                <p className="text-[11px] text-amber-300 mt-1">
+                  Server upload failed — model saved locally only (won&apos;t sync to mobile).{' '}
+                  <span className="text-white/50">{uploadError}</span>
+                </p>
+              )}
             </div>
 
             <label className="block text-xs text-white/60">
