@@ -245,7 +245,8 @@ export default function KilrunEngine({
       revivePads,
       pushPayloads,
       worldBounds,
-      modeSettings: doc.modeSettings,
+      modeSettings: doc.modeSettings as Record<string, unknown> | undefined,
+      combatSettings: doc.combatSettings as Record<string, unknown> | undefined,
     });
   }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode]);
 

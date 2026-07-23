@@ -61,6 +61,8 @@ import {
   Square,
   Link2,
   Unlink2,
+  Sword,
+  Swords,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -77,6 +79,7 @@ import type {
 import {
   HAMMER_SOLID_MODEL,
   ensureAnimation,
+  ensureCombatSettings,
   ensureCompetitiveSettings,
   ensureDeathrunSettings,
   ensureEnvironment,
@@ -143,6 +146,8 @@ import { MapPlayPreview } from './map-play-preview';
 import { PlayerModelStudio } from './player-model-studio';
 import { ModelSkinEditor } from './model-skin-editor';
 import { TpsViewStudio } from './tps-view-studio';
+import { WeaponEditor } from './weapon-editor';
+import { CombatEditor } from './combat-editor';
 import { ensureMapPlayerEntity } from './player-avatar';
 import type { TpsViewSettings } from '../tps/tps-view-settings';
 import { sanitizeTpsView } from '../tps/tps-view-settings';
@@ -271,6 +276,8 @@ export function MapEditor({
   const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
   const [modelEditorOpen, setModelEditorOpen] = useState(false);
   const [tpsViewOpen, setTpsViewOpen] = useState(false);
+  const [weaponEditorOpen, setWeaponEditorOpen] = useState(false);
+  const [combatEditorOpen, setCombatEditorOpen] = useState(false);
   const [showAllCollisionGizmos, setShowAllCollisionGizmos] = useState(false);
   const lastLockedToastAt = useRef(0);
   const cameraBeforePlayRef = useRef<EditorCameraState | null>(null);
@@ -1058,6 +1065,54 @@ export function MapEditor({
     setToolsOpen(false);
   };
 
+  const openWeaponEditor = () => {
+    setPlayerStudioOpen(false);
+    setModelEditorOpen(false);
+    setTpsViewOpen(false);
+    setCombatEditorOpen(false);
+    setWeaponEditorOpen(true);
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(false);
+    setToolsOpen(false);
+  };
+
+  const openCombatEditor = () => {
+    setPlayerStudioOpen(false);
+    setModelEditorOpen(false);
+    setTpsViewOpen(false);
+    setWeaponEditorOpen(false);
+    setCombatEditorOpen(true);
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(false);
+    setToolsOpen(false);
+  };
+
+  const saveWeaponDef = (def: Partial<import('./map-document').MapWeaponDef>) => {
+    scheduleHistory();
+    setDirty(true);
+    setDoc((d) => {
+      const next = { ...d, weaponDef: { ...d.weaponDef, ...def } };
+      docRef.current = next;
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+    toast({ title: 'Weapon saved', description: 'Weapon definition saved to map.' });
+  };
+
+  const saveCombatSettings = (settings: Partial<import('./map-document').CombatSettings>) => {
+    scheduleHistory();
+    setDirty(true);
+    setDoc((d) => {
+      const next = { ...d, combatSettings: { ...d.combatSettings, ...settings } };
+      docRef.current = next;
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+    toast({ title: 'Combat settings saved', description: 'Physics and combat applied to map.' });
+  };
+
   const applySkinsToPlayer = (attachments: SkinAttachment[]) => {
     const player = findPlayerEntity(docRef.current);
     if (!player) return;
@@ -1482,6 +1537,26 @@ export function MapEditor({
         >
           <Shirt className="w-4 h-4 mr-1" />
           {isMobile ? 'Skins' : 'Model Editor'}
+        </Button>
+        <Button
+          size="sm"
+          variant={weaponEditorOpen ? 'default' : 'secondary'}
+          className={`shrink-0 ${weaponEditorOpen ? 'bg-rose-600 hover:bg-rose-500 text-white' : ''}`}
+          onClick={() => (weaponEditorOpen ? setWeaponEditorOpen(false) : openWeaponEditor())}
+          title="Weapon Editor — model, position, combat stats, recoil, sway"
+        >
+          <Sword className="w-4 h-4 mr-1" />
+          {isMobile ? 'Weapon' : 'Weapon Editor'}
+        </Button>
+        <Button
+          size="sm"
+          variant={combatEditorOpen ? 'default' : 'secondary'}
+          className={`shrink-0 ${combatEditorOpen ? 'bg-sky-700 hover:bg-sky-600 text-white' : ''}`}
+          onClick={() => (combatEditorOpen ? setCombatEditorOpen(false) : openCombatEditor())}
+          title="Combat Editor — physics, movement, jump, slide, wall-jump, recoil"
+        >
+          <Swords className="w-4 h-4 mr-1" />
+          {isMobile ? 'Combat' : 'Combat Editor'}
         </Button>
         <Button
           size="sm"
@@ -3260,6 +3335,20 @@ export function MapEditor({
               <Shirt className="w-4 h-4 text-amber-300" />
             </ToolBtn>
             <ToolBtn
+              active={weaponEditorOpen}
+              onClick={() => (weaponEditorOpen ? setWeaponEditorOpen(false) : openWeaponEditor())}
+              title="Weapon Editor — model, position, combat stats, recoil, sway"
+            >
+              <Sword className="w-4 h-4 text-rose-300" />
+            </ToolBtn>
+            <ToolBtn
+              active={combatEditorOpen}
+              onClick={() => (combatEditorOpen ? setCombatEditorOpen(false) : openCombatEditor())}
+              title="Combat Editor — physics, movement, jump, slide, wall-jump"
+            >
+              <Swords className="w-4 h-4 text-sky-300" />
+            </ToolBtn>
+            <ToolBtn
               onClick={() => armPlaceEntity('light')}
               title="Light bulb"
             >
@@ -3309,7 +3398,7 @@ export function MapEditor({
           </div>
           )}
 
-          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && (
+          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && !weaponEditorOpen && !combatEditorOpen && (
             <button
               type="button"
               onClick={() => setPropsOpen(true)}
@@ -3319,7 +3408,7 @@ export function MapEditor({
             </button>
           )}
 
-          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && (
+          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && !weaponEditorOpen && !combatEditorOpen && (
             <div
               className={`absolute z-[80] bg-black/80 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm overflow-y-auto ${
                 isMobile
@@ -5267,6 +5356,22 @@ export function MapEditor({
                   toast({ title: msg, variant: 'destructive' });
                 }
               }}
+            />
+          )}
+          {weaponEditorOpen && (
+            <WeaponEditor
+              isMobile={isMobile}
+              mapDoc={docRef.current}
+              onClose={() => setWeaponEditorOpen(false)}
+              onSaveToMap={saveWeaponDef}
+            />
+          )}
+          {combatEditorOpen && (
+            <CombatEditor
+              isMobile={isMobile}
+              mapDoc={docRef.current}
+              onClose={() => setCombatEditorOpen(false)}
+              onSaveToMap={saveCombatSettings}
             />
           )}
         </div>

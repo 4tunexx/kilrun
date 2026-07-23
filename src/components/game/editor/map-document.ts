@@ -818,6 +818,193 @@ export function ensureInteract(ent: EditorEntity): EntityInteract {
   return { ...defaultInteract(), ...ent.interact };
 }
 
+// ─── Combat / Physics Settings ───────────────────────────────────────────────
+
+/** Per-map combat and physics overrides. All fields optional; defaults fill gaps. */
+export interface CombatSettings {
+  // ── Movement ──────────────────────────────────────────────────────────────
+  /** Base walk speed (units/sec). Default 5. */
+  walkSpeed: number;
+  /** Sprint multiplier applied to walkSpeed. Default 1.35. */
+  sprintMult: number;
+  /** Crouch speed multiplier. Default 0.55. */
+  crouchMult: number;
+
+  // ── Jump ──────────────────────────────────────────────────────────────────
+  /** First jump vertical velocity. Default 10. */
+  jumpVelocity: number;
+  /** Double-jump velocity. Default 8. */
+  doubleJumpVelocity: number;
+  /** Enable double jump. Default true. */
+  doubleJumpEnabled: boolean;
+  /** Coyote time (ms) — can still jump after walking off edge. Default 167. */
+  coyoteMs: number;
+  /** Jump input buffer (ms) — queued jump before landing. Default 200. */
+  jumpBufferMs: number;
+  /** Jump-cut multiplier when jump is released early. Default 0.5. */
+  jumpCutMult: number;
+
+  // ── Slide ─────────────────────────────────────────────────────────────────
+  /** Enable slide mechanic (crouch while sprinting). Default false. */
+  slideEnabled: boolean;
+  /** Slide speed multiplier (over walkSpeed). Default 2.2. */
+  slideMult: number;
+  /** Slide duration (ms). Default 600. */
+  slideDurationMs: number;
+  /** Slide cooldown (ms). Default 1000. */
+  slideCooldownMs: number;
+
+  // ── Wall-jump ──────────────────────────────────────────────────────────────
+  /** Enable wall-jump (grab wall + jump). Default false. */
+  wallJumpEnabled: boolean;
+  /** Horizontal velocity away from wall on wall-jump. Default 5. */
+  wallJumpHorizVel: number;
+  /** Vertical velocity on wall-jump. Default 9. */
+  wallJumpVertVel: number;
+  /** Wall slide gravity multiplier (slow fall on wall). Default 0.35. */
+  wallSlideGravMult: number;
+
+  // ── Gravity ───────────────────────────────────────────────────────────────
+  /** Downward gravity acceleration (units/s²). Default 20. */
+  gravity: number;
+  /** Max fall speed. Default 40. */
+  maxFallSpeed: number;
+  /** Gravity multiplier at jump apex (lower = floatier). Default 1.0. */
+  apexGravMult: number;
+
+  // ── Visual Recoil ─────────────────────────────────────────────────────────
+  /** Camera pitch kick on fire (degrees). Default 2. */
+  recoilKickDeg: number;
+  /** Camera recoil recovery speed (deg/s). Default 140. */
+  recoilRecoverySpeed: number;
+  /** Weapon model kick (local Z push-back on fire, units). Default 0.06. */
+  weaponKickZ: number;
+
+  // ── Weapon Sway ───────────────────────────────────────────────────────────
+  /** Enable idle weapon sway. Default true. */
+  swayEnabled: boolean;
+  /** Idle sway amplitude (degrees). Default 1.2. */
+  swayAmplitudeDeg: number;
+  /** Idle sway speed (Hz). Default 0.8. */
+  swaySpeedHz: number;
+  /** Movement sway multiplier (extra sway while moving). Default 2.5. */
+  swayMoveMult: number;
+
+  // ── Camera Shake ──────────────────────────────────────────────────────────
+  /** Camera shake amplitude on fire. Default 0.015. */
+  shakeOnFire: number;
+  /** Camera shake on taking damage. Default 0.04. */
+  shakeOnHit: number;
+  /** Camera shake on hard landing. Default 0.025. */
+  shakeOnLand: number;
+
+  // ── Deathrun arms-only / power-ups ────────────────────────────────────────
+  /** Show arms only (no full body) in first-person arms mode. Default false. */
+  armsOnlyMode: boolean;
+  /** Power-ups available in deathrun shop (comma-separated ids). Default ''. */
+  powerUpPool: string;
+}
+
+export const DEFAULT_COMBAT_SETTINGS: CombatSettings = {
+  walkSpeed: 5,
+  sprintMult: 1.35,
+  crouchMult: 0.55,
+  jumpVelocity: 10,
+  doubleJumpVelocity: 8,
+  doubleJumpEnabled: true,
+  coyoteMs: 167,
+  jumpBufferMs: 200,
+  jumpCutMult: 0.5,
+  slideEnabled: false,
+  slideMult: 2.2,
+  slideDurationMs: 600,
+  slideCooldownMs: 1000,
+  wallJumpEnabled: false,
+  wallJumpHorizVel: 5,
+  wallJumpVertVel: 9,
+  wallSlideGravMult: 0.35,
+  gravity: 20,
+  maxFallSpeed: 40,
+  apexGravMult: 1.0,
+  recoilKickDeg: 2,
+  recoilRecoverySpeed: 140,
+  weaponKickZ: 0.06,
+  swayEnabled: true,
+  swayAmplitudeDeg: 1.2,
+  swaySpeedHz: 0.8,
+  swayMoveMult: 2.5,
+  shakeOnFire: 0.015,
+  shakeOnHit: 0.04,
+  shakeOnLand: 0.025,
+  armsOnlyMode: false,
+  powerUpPool: '',
+};
+
+export function ensureCombatSettings(doc: MapDocument): CombatSettings {
+  return { ...DEFAULT_COMBAT_SETTINGS, ...doc.combatSettings };
+}
+
+// ─── Extended weapon definition (for Weapon Editor) ──────────────────────────
+
+/** Extended weapon definition stored on the map for the Weapon Editor. */
+export interface MapWeaponDef {
+  /** Display name for the weapon. */
+  name: string;
+  /** Catalog model id or undefined for custom. */
+  model?: string;
+  /** Custom uploaded GLB data URL. */
+  customModelUrl?: string;
+  /** Combat stats. */
+  kind: 'melee' | 'hitscan' | 'cosmetic';
+  damage: number;
+  range: number;
+  cooldownMs: number;
+  coneRadians: number;
+  attackStyle: 'attack' | 'punch';
+  muzzleOffset: [number, number, number];
+  /** Spread pattern (only for hitscan). */
+  bulletsPerShot: number;
+  /** Shop price in game currency (0 = free). */
+  shopPrice: number;
+  /** Active/hand position on player (character-local). */
+  holdPosition: [number, number, number];
+  holdRotation: [number, number, number];
+  holdScale: [number, number, number];
+  /** Back-carry position when holstered. */
+  backPosition: [number, number, number];
+  backRotation: [number, number, number];
+  backScale: [number, number, number];
+  /** Recoil overrides (uses combatSettings defaults if absent). */
+  recoilKickDeg?: number;
+  weaponKickZ?: number;
+  /** Idle anim clip name on weapon mesh (if custom GLB has clips). */
+  idleClip?: string;
+  /** Fire/attack anim clip name. */
+  fireClip?: string;
+  /** Reload anim clip name. */
+  reloadClip?: string;
+}
+
+export const DEFAULT_WEAPON_DEF: MapWeaponDef = {
+  name: 'Weapon',
+  model: 'weapon-sword',
+  kind: 'melee',
+  damage: 20,
+  range: 2.4,
+  cooldownMs: 500,
+  coneRadians: 0.5,
+  attackStyle: 'attack',
+  muzzleOffset: [0, 0.35, 0],
+  bulletsPerShot: 1,
+  shopPrice: 0,
+  holdPosition: [0.42, 0.92, 0.18],
+  holdRotation: [0, 0, -25],
+  holdScale: [1, 1, 1],
+  backPosition: [0, 1.0, -0.18],
+  backRotation: [45, 0, 0],
+  backScale: [1, 1, 1],
+};
+
 export interface MapDocument {
   version: 1;
   name: string;
@@ -834,6 +1021,10 @@ export interface MapDocument {
   tpsView?: MapTpsView;
   /** Per-mode match settings (warmup, round/wave times, spawn caps). */
   modeSettings?: MapModeSettings;
+  /** Global combat & physics overrides (movement, jump, slide, recoil, sway). */
+  combatSettings?: Partial<CombatSettings>;
+  /** Custom weapon definition authored in the Weapon Editor. */
+  weaponDef?: Partial<MapWeaponDef>;
   meta?: { createdAt?: string; updatedAt?: string };
 }
 

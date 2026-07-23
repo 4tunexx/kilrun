@@ -29,6 +29,7 @@ import {
   createSimScratch,
   DEFAULT_WORLD_BOUNDS,
   defaultInput,
+  type MovementPhysicsOpts,
   type PlayerInput,
   type PlayerSimScratch,
   type WorldBounds,
@@ -154,6 +155,7 @@ export class DeathrunRoom extends Room<RoomState> {
   private livesPerRunner = 3;
   private trapCooldownSec = 5;
   private checkpointRespawn = true;
+  private combatPhysOpts: MovementPhysicsOpts = {};
 
   onCreate() {
     this.setState(new RoomState());
@@ -200,17 +202,8 @@ export class DeathrunRoom extends Room<RoomState> {
           playerSpawns?: SpawnPoint[];
           trapperSpawn?: SpawnPoint;
           worldBounds?: WorldBounds;
-          modeSettings?: {
-            deathrun?: {
-              warmupSec?: number;
-              roundTimeSec?: number;
-              maxRunners?: number;
-              trapperEnabled?: boolean;
-              livesPerRunner?: number;
-              trapCooldownSec?: number;
-              checkpointRespawn?: boolean;
-            };
-          };
+          modeSettings?: Record<string, unknown>;
+          combatSettings?: Record<string, unknown>;
         }
       ) => {
         if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
@@ -237,8 +230,8 @@ export class DeathrunRoom extends Room<RoomState> {
         this.obstacleTimers = this.state.obstacles.map(() => 0);
         this.buttonArmRemaining.clear();
 
-        const settings = data.modeSettings?.deathrun;
-        if (settings) {
+        const settings = (data.modeSettings?.deathrun ?? data.modeSettings) as Record<string, unknown> | undefined;
+        if (settings && typeof settings === 'object') {
           if (typeof settings.warmupSec === 'number') {
             this.lobbyCountdownMs = Math.max(0, settings.warmupSec) * 1000;
           }
@@ -261,6 +254,25 @@ export class DeathrunRoom extends Room<RoomState> {
           if (typeof settings.checkpointRespawn === 'boolean') {
             this.checkpointRespawn = settings.checkpointRespawn;
           }
+        }
+
+        // Apply combat/physics overrides from map combatSettings.
+        const cs = data?.combatSettings as Record<string, unknown> | undefined;
+        if (cs && typeof cs === 'object') {
+          this.combatPhysOpts = {
+            gravity: typeof cs.gravity === 'number' ? cs.gravity : undefined,
+            jumpVelocity: typeof cs.jumpVelocity === 'number' ? cs.jumpVelocity : undefined,
+            doubleJumpVelocity: typeof cs.doubleJumpVelocity === 'number' ? cs.doubleJumpVelocity : undefined,
+            doubleJumpEnabled: typeof cs.doubleJumpEnabled === 'boolean' ? cs.doubleJumpEnabled : undefined,
+            jumpCutMult: typeof cs.jumpCutMult === 'number' ? cs.jumpCutMult : undefined,
+            coyoteMs: typeof cs.coyoteMs === 'number' ? cs.coyoteMs : undefined,
+            jumpBufferMs: typeof cs.jumpBufferMs === 'number' ? cs.jumpBufferMs : undefined,
+            walkSpeed: typeof cs.walkSpeed === 'number' ? cs.walkSpeed : undefined,
+            sprintMult: typeof cs.sprintMult === 'number' ? cs.sprintMult : undefined,
+            crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
+            maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
+            apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+          };
         }
 
         this.customFinishes = Array.isArray(data?.finishes) ? data.finishes : [];
@@ -559,7 +571,8 @@ export class DeathrunRoom extends Room<RoomState> {
         dtSeconds,
         this.state.platforms,
         scratch,
-        this.worldBounds
+        this.worldBounds,
+        this.combatPhysOpts
       );
 
       if (player.role === 'runner' && player.isAlive && !player.hasFinished) {

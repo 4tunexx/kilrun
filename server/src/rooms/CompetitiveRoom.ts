@@ -24,6 +24,7 @@ import {
   createSimScratch,
   DEFAULT_WORLD_BOUNDS,
   defaultInput,
+  type MovementPhysicsOpts,
   type PlayerInput,
   type PlayerSimScratch,
   type WorldBounds,
@@ -147,6 +148,7 @@ export class CompetitiveRoom extends Room<RoomState> {
   private maxPlayersPerTeam = 3;
   private friendlyFire = false;
   private respawnInRound = false;
+  private combatPhysOpts: MovementPhysicsOpts = {};
 
   onCreate(options: JoinOptions = {}) {
     this.setState(new RoomState());
@@ -315,6 +317,25 @@ export class CompetitiveRoom extends Room<RoomState> {
 
       if (data.worldBounds) {
         this.worldBounds = { ...(data.worldBounds as WorldBounds) };
+      }
+
+      // Apply combat/physics overrides.
+      const cs = data?.combatSettings as Record<string, unknown> | undefined;
+      if (cs && typeof cs === 'object') {
+        this.combatPhysOpts = {
+          gravity: typeof cs.gravity === 'number' ? cs.gravity : undefined,
+          jumpVelocity: typeof cs.jumpVelocity === 'number' ? cs.jumpVelocity : undefined,
+          doubleJumpVelocity: typeof cs.doubleJumpVelocity === 'number' ? cs.doubleJumpVelocity : undefined,
+          doubleJumpEnabled: typeof cs.doubleJumpEnabled === 'boolean' ? cs.doubleJumpEnabled : undefined,
+          jumpCutMult: typeof cs.jumpCutMult === 'number' ? cs.jumpCutMult : undefined,
+          coyoteMs: typeof cs.coyoteMs === 'number' ? cs.coyoteMs : undefined,
+          jumpBufferMs: typeof cs.jumpBufferMs === 'number' ? cs.jumpBufferMs : undefined,
+          walkSpeed: typeof cs.walkSpeed === 'number' ? cs.walkSpeed : undefined,
+          sprintMult: typeof cs.sprintMult === 'number' ? cs.sprintMult : undefined,
+          crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
+          maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
+          apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+        };
       }
 
       this.assignTeamsAndSpawn();
@@ -732,7 +753,7 @@ export class CompetitiveRoom extends Room<RoomState> {
         this.simScratch.set(sessionId, scratch);
       }
 
-      applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds);
+      applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
 
       for (const obstacle of this.state.obstacles) {
         if (!isPlayerHitByObstacle(player, obstacle)) continue;
