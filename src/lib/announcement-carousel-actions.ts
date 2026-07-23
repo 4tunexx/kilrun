@@ -21,6 +21,7 @@ export type AnnouncementItem = {
     avatarUrl: string;
     role: string;
     isVip: boolean;
+    equippedNicknameConfig: unknown | null;
   } | null;
   /** Short text describing the event. */
   detail: string;
@@ -63,6 +64,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
     avatarUrl: true,
     role: true,
     isVip: true,
+    equippedNicknameConfig: true,
   };
 
   const now = new Date();

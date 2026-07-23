@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { UserHoverCard } from '@/components/user-hover-card';
-import { getRoleTextColorClass } from '@/lib/role-colors';
 import { getAnnouncementCarouselItems } from '@/lib/announcement-carousel-actions';
 import type { AnnouncementItem } from '@/lib/announcement-carousel-actions';
 import type { AnnouncementCarouselConfig } from '@/lib/announcement-carousel-config';
@@ -146,11 +145,19 @@ function CarouselChip({
             </AvatarFallback>
           </Avatar>
 
+          {/*
+           * UserHoverCard applies getRoleTextColorClass internally (line 131 in
+           * user-hover-card.tsx) when no nickname effect is equipped, and renders
+           * NicknameEffectText when one is. We pass both role/isVip and the
+           * equipped nickname config so the ticker honours the same cosmetics as
+           * the rest of the hub.
+           */}
           <UserHoverCard
             userId={item.user.id}
             role={item.user.role}
             isVip={item.user.isVip}
-            className={`text-xs font-bold hover:underline underline-offset-2 decoration-primary/60 cursor-pointer ${getRoleTextColorClass(item.user.role, item.user.isVip)}`}
+            nicknameEffect={item.user.equippedNicknameConfig}
+            className="text-xs font-bold"
           >
             {item.user.username}
           </UserHoverCard>
