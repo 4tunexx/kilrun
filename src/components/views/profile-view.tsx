@@ -151,8 +151,8 @@ export default function ProfileView({ userId }: { userId: string }) {
       await equipInventoryItem(item.id);
       toast({ title: `Equipped ${item.itemName}` });
       reloadCosmetics();
-    } catch (e: any) {
-      toast({ title: e?.message ?? 'Could not equip', variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: e instanceof Error ? e.message : 'Could not equip', variant: 'destructive' });
     } finally {
       setCosmeticBusyId(null);
     }

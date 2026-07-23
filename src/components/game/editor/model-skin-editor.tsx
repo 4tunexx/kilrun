@@ -354,7 +354,7 @@ export function ModelSkinEditor({
     });
   };
 
-  const usePrimitive = (prim: SkinPrimitive) => {
+  const applyPrimitive = (prim: SkinPrimitive) => {
     const meta = SKIN_ATTACH_SLOTS.find((x) => x.id === slot)!;
     patchActive({
       primitive: prim,
@@ -919,7 +919,7 @@ export function ModelSkinEditor({
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => usePrimitive(p.id)}
+                    onClick={() => applyPrimitive(p.id)}
                     className={`px-2 py-1 rounded text-[10px] border ${
                       activeAtt.primitive === p.id && !activeAtt.model && !activeAtt.customModelUrl
                         ? 'bg-emerald-500/25 border-emerald-400/50 text-emerald-100'

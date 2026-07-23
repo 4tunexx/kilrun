@@ -35,7 +35,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function DiscussionsView() {
-  const [posts, setPosts] = useState<any[]>([]);
+  const [posts, setPosts] = useState<Awaited<ReturnType<typeof getForumPosts>>>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -226,7 +226,7 @@ function ThreadReplies({
   postId: string;
   onPosted: () => Promise<void>;
 }) {
-  const [replies, setReplies] = useState<any[]>([]);
+  const [replies, setReplies] = useState<Awaited<ReturnType<typeof getForumReplies>>>([]);
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);

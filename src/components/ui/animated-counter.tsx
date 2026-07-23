@@ -32,13 +32,14 @@ const AnimatedCounter = ({
       { threshold: 0.1 }
     );
 
-    if (ref.current) {
-      observer.observe(ref.current);
+    const el = ref.current;
+    if (el) {
+      observer.observe(el);
     }
 
     return () => {
-      if (ref.current) {
-        observer.unobserve(ref.current);
+      if (el) {
+        observer.unobserve(el);
       }
     };
   }, []);
@@ -46,7 +47,7 @@ const AnimatedCounter = ({
   useEffect(() => {
     if (!isInView) return;
 
-    let start = 0;
+    const start = 0;
     const final = end;
     let startTime: number | null = null;
 

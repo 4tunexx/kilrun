@@ -595,6 +595,9 @@ export default function KilrunEngine({
     });
     if (n === 0 && localPlayer?.isAlive) return 1;
     return n;
+    // playerCount and room.phase are not used directly in this callback but are
+    // included as deps to force recomputation when Colyseus state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localPlayer, playerCount, room.phase, playersRef, mode]);
 
   const resume = () => {

@@ -65,9 +65,15 @@ export function TextureAtlasPicker({
     dragging: boolean;
   } | null>(null);
 
+  const repeatX = repeat?.[0];
+  const repeatY = repeat?.[1];
+  const offsetX = offset?.[0];
+  const offsetY = offset?.[1];
+
   useEffect(() => {
     setRegion(uvToRegion(repeat, offset));
-  }, [imageUrl, repeat?.[0], repeat?.[1], offset?.[0], offset?.[1]]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageUrl, repeatX, repeatY, offsetX, offsetY]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;

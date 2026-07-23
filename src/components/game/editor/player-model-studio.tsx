@@ -23,7 +23,6 @@ import { Button } from '@/components/ui/button';
 import type {
   EditorEntity,
   PlayerAnimSlot,
-  PlayerAuthoredClip,
   PlayerExtraBone,
   PlayerMeshEdits,
 } from './map-document';

@@ -9,8 +9,8 @@ import { getPlayerAchievements, getPlayerBadges } from '@/lib/progression-action
 import { cn } from '@/lib/utils';
 
 export default function BadgesView({ userId }: { userId: string }) {
-  const [achievements, setAchievements] = useState<any[]>([]);
-  const [badges, setBadges] = useState<any[]>([]);
+  const [achievements, setAchievements] = useState<Awaited<ReturnType<typeof getPlayerAchievements>>>([]);
+  const [badges, setBadges] = useState<Awaited<ReturnType<typeof getPlayerBadges>>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -119,7 +119,7 @@ export default function BadgesView({ userId }: { userId: string }) {
   );
 }
 
-function AchievementRow({ ach }: { ach: any }) {
+function AchievementRow({ ach }: { ach: Awaited<ReturnType<typeof getPlayerAchievements>>[number] }) {
   return (
     <Card
       className={cn(

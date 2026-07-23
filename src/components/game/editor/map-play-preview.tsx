@@ -311,7 +311,7 @@ export function MapPlayPreview({
     let wasGrounded = true;
     let landUntil = 0;
     let meleeUntil = 0;
-    let avatarEntity = getMapPlayerAvatar(playDoc) ?? null;
+    const avatarEntity = getMapPlayerAvatar(playDoc) ?? null;
     let avatarBindings = avatarEntity?.playerAnims;
     let worldReady = false;
 

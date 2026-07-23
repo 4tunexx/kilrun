@@ -162,6 +162,7 @@ const HUB_PAGE_ICONS: Record<HubPageId, LucideIcon> = {
   messages: Mail,
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const pageComponents: { [key: string]: React.ComponentType<any> } = {
   home: HomeView,
   store: StoreView,
@@ -691,7 +692,7 @@ export default function GameHubInterface({
 
     const PageComponent = pageComponents[currentPage];
     if (PageComponent) {
-      let props: any = {};
+      let props: Record<string, unknown> = {};
       if (currentPage === 'play') {
         props.onPlay = handlePlay;
         props.onPartyFollow = handlePartyFollow;
@@ -807,7 +808,7 @@ export default function GameHubInterface({
     page,
     glow = false,
   }: {
-    icon: any;
+    icon: LucideIcon;
     label: string;
     page: string;
     glow?: boolean;
