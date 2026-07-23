@@ -196,7 +196,7 @@ export default function StoreView({ userId }: { userId?: string }) {
                     )}
                   >
                     <CardContent className="p-0 w-full">
-                      <div className="relative aspect-square w-full overflow-hidden rounded-t-lg bg-slate-900/80">
+                      <div className="relative aspect-square w-full overflow-hidden rounded-t-lg bg-slate-800/30">
                         <StoreItemPreview item={item} />
                         {onFire && (
                           <>

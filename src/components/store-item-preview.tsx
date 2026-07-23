@@ -40,7 +40,7 @@ export function StoreItemPreview({
     return (
       <div
         className={cn(
-          'absolute inset-0 flex items-center justify-center bg-slate-950',
+          'absolute inset-0 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm',
           className
         )}
       >
@@ -48,7 +48,7 @@ export function StoreItemPreview({
           className={cn('rounded-full', frameAnimationClass(frame))}
           style={frameWrapperStyle(frame)}
         >
-          <div className="h-16 w-16 rounded-full bg-slate-800 border-2 border-slate-900" />
+          <div className="h-16 w-16 rounded-full bg-slate-800/80 border-2 border-slate-900/60" />
         </div>
       </div>
     );
@@ -58,7 +58,7 @@ export function StoreItemPreview({
     return (
       <div
         className={cn(
-          'absolute inset-0 flex items-center justify-center bg-slate-950 px-3',
+          'absolute inset-0 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm px-3',
           className
         )}
       >
@@ -93,11 +93,11 @@ export function StoreItemPreview({
   return (
     <div
       className={cn(
-        'absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950',
+        'absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800/50 to-slate-900/60 backdrop-blur-sm',
         className
       )}
     >
-      <span className="text-4xl font-black uppercase tracking-wider text-slate-600">
+      <span className="text-4xl font-black uppercase tracking-wider text-slate-500">
         {(item.itemCategory || '?').slice(0, 1)}
       </span>
     </div>
