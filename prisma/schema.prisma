@@ -81,6 +81,11 @@ model User {
   /// Optional display status line shown on public profile.
   statusMessage String @default("")
 
+  /// When true, the public profile page hides details from other players.
+  profilePrivate Boolean @default(false)
+  /// When false, other players cannot leave comments on the public profile.
+  profileCommentsEnabled Boolean @default(true)
+
   /// Profile "showcase" slots + layout for the mini hover-card. Stored as
   /// either a legacy JSON array of { slot, itemType, refId }, or
   /// { entries: [...], layout: { position, align } }.
@@ -104,6 +109,8 @@ model User {
   inventoryItems     InventoryItem[]
   reputationGiven    ReputationVote[] @relation("ReputationVotesGiven")
   reputationReceived ReputationVote[] @relation("ReputationVotesReceived")
+  profileCommentsReceived ProfileComment[] @relation("ProfileCommentsReceived")
+  profileCommentsAuthored ProfileComment[] @relation("ProfileCommentsAuthored")
 }
 
 model MatchStat {
@@ -370,6 +377,21 @@ model ForumReply {
   author User      @relation(fields: [authorId], references: [id])
 
   @@index([postId])
+}
+
+/// Comments left on a player's public profile page.
+model ProfileComment {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  profileUserId String   @db.ObjectId
+  authorId      String   @db.ObjectId
+  body          String
+  createdAt     DateTime @default(now())
+
+  profileUser User @relation("ProfileCommentsReceived", fields: [profileUserId], references: [id])
+  author      User @relation("ProfileCommentsAuthored", fields: [authorId], references: [id])
+
+  @@index([profileUserId, createdAt])
+  @@index([authorId])
 }
 
 model SupportTicket {

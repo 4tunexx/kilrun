@@ -64,6 +64,8 @@ export async function updateProfileSettings(input: {
   statusMessage?: string;
   notifyPush?: boolean;
   notifyEmail?: boolean;
+  profilePrivate?: boolean;
+  profileCommentsEnabled?: boolean;
 }) {
   const user = await requireSessionUser();
   const data: {
@@ -72,6 +74,8 @@ export async function updateProfileSettings(input: {
     statusMessage?: string;
     notifyPush?: boolean;
     notifyEmail?: boolean;
+    profilePrivate?: boolean;
+    profileCommentsEnabled?: boolean;
   } = {};
 
   if (typeof input.bio === 'string') {
@@ -86,6 +90,10 @@ export async function updateProfileSettings(input: {
   }
   if (typeof input.notifyPush === 'boolean') data.notifyPush = input.notifyPush;
   if (typeof input.notifyEmail === 'boolean') data.notifyEmail = input.notifyEmail;
+  if (typeof input.profilePrivate === 'boolean') data.profilePrivate = input.profilePrivate;
+  if (typeof input.profileCommentsEnabled === 'boolean') {
+    data.profileCommentsEnabled = input.profileCommentsEnabled;
+  }
 
   return prisma.user.update({
     where: { id: user.id },

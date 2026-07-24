@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import type { EditorEntity } from './map-document';
-import { isInvisibleMarkerKind } from './map-document';
+import { entityWorldSize, isInvisibleMarkerKind, type EditorEntity } from './map-document';
 
 /** Shift mesh so local AABB feet sit on y=0 and XZ is centered on the pivot. */
 export function plantLocalFeet(obj: THREE.Object3D) {
@@ -35,6 +34,35 @@ export type TextureApplyOpts = {
   offset?: [number, number] | null;
   rotation?: number | null;
 };
+
+/**
+ * Convert world-space texture scale (units per tile) into UV repeat for a
+ * mesh of the given world size. Same scale → same visual density on any size.
+ */
+export function worldScaleToUvRepeat(
+  worldSize: [number, number, number],
+  worldUnitsPerTile: number
+): [number, number] {
+  const u = Math.max(0.05, worldUnitsPerTile);
+  // Horizontal faces dominate floors/solids — use X × Z (Three: width × depth).
+  const rx = Math.max(0.01, Math.abs(worldSize[0]) / u);
+  const ry = Math.max(0.01, Math.abs(worldSize[2]) / u);
+  return [rx, ry];
+}
+
+/** Resolve UV repeat for an entity: world-scale when set, else stored UV repeat. */
+export function resolveEntityTextureRepeat(ent: {
+  textureRepeat?: [number, number];
+  textureWorldScale?: number;
+  collisionSize?: [number, number, number];
+  scale: [number, number, number];
+}): [number, number] | undefined {
+  if (typeof ent.textureWorldScale === 'number' && ent.textureWorldScale > 0) {
+    const size = entityWorldSize(ent.collisionSize, ent.scale);
+    return worldScaleToUvRepeat(size, ent.textureWorldScale);
+  }
+  return ent.textureRepeat;
+}
 
 /** Apply texture URL to all standard materials under a root. */
 export function applyTextureToObject(

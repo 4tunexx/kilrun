@@ -16,10 +16,14 @@ function freshStick(): StickState {
   return { active: false, start: { x: 0, y: 0 }, current: { x: 0, y: 0 }, id: null };
 }
 
+const LEFT_SHOOT_TAP_MAX_DISTANCE = 28;
+const LEFT_SHOOT_TAP_MAX_MS = 280;
+
 /**
  * Mobile control scheme (standard platformer / twin-stick):
  * left half = movement, right half = aim / look.
- * Double-tap the right half to fire. Joysticks only exist while a finger
+ * Double-tap the right half to fire. While aiming (right hold), a quick
+ * left-side tap also fires / melee hits. Joysticks only exist while a finger
  * is down — they spawn under the touch and vanish on release.
  */
 export class DualJoystick {
@@ -35,6 +39,10 @@ export class DualJoystick {
   private attackPulse = false;
   private lastAimTapAt = 0;
   private lastAimTapPos: Vector2 = { x: 0, y: 0 };
+  /** Left-finger press while ADS — fires on short tap release. */
+  private leftAimTap:
+    | { id: number; start: Vector2; startedAt: number; aiming: boolean }
+    | null = null;
 
   private readonly onTouchStart: (e: TouchEvent) => void;
   private readonly onTouchMove: (e: TouchEvent) => void;
@@ -62,6 +70,18 @@ export class DualJoystick {
       const isLeftHalf = localX < width / 2;
 
       if (isLeftHalf && !this.moveStick.active) {
+        const aiming = this.aimStick.active;
+        // While ADS: left tap = shoot/hit; drag still drives move stick.
+        if (aiming) {
+          this.shootPulse = true;
+          this.attackPulse = true;
+        }
+        this.leftAimTap = {
+          id: touch.identifier,
+          start: { ...pos },
+          startedAt: performance.now(),
+          aiming,
+        };
         this.moveStick = { active: true, start: { ...pos }, current: { ...pos }, id: touch.identifier };
       } else if (!isLeftHalf && !this.aimStick.active) {
         this.aimStick = { active: true, start: { ...pos }, current: { ...pos }, id: touch.identifier };
@@ -94,6 +114,24 @@ export class DualJoystick {
   private handleEnd(e: TouchEvent) {
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
+      if (this.leftAimTap && touch.identifier === this.leftAimTap.id) {
+        const dist = Math.hypot(
+          touch.clientX - this.leftAimTap.start.x,
+          touch.clientY - this.leftAimTap.start.y
+        );
+        const elapsed = performance.now() - this.leftAimTap.startedAt;
+        // Confirm short left tap while still aiming (or was aiming at press).
+        if (
+          this.leftAimTap.aiming &&
+          (this.aimStick.active || this.leftAimTap.aiming) &&
+          dist <= LEFT_SHOOT_TAP_MAX_DISTANCE &&
+          elapsed <= LEFT_SHOOT_TAP_MAX_MS
+        ) {
+          this.shootPulse = true;
+          this.attackPulse = true;
+        }
+        this.leftAimTap = null;
+      }
       if (touch.identifier === this.aimStick.id) {
         this.aimStick = freshStick();
       } else if (touch.identifier === this.moveStick.id) {

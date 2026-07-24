@@ -3,13 +3,13 @@ import type { EditorEntity, MapDocument } from '../editor/map-document';
 import { HAMMER_SOLID_MODEL, isHammerSolidEntity, isInvisibleMarkerKind } from '../editor/map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from '../editor/model-scan';
 import { AnimationDirector } from '../editor/animation-director';
-import { applyTextureToObject, plantLocalFeet } from '../editor/editor-mesh';
+import { applyTextureToObject, plantLocalFeet, resolveEntityTextureRepeat } from '../editor/editor-mesh';
 import { applyEntityOpacity, makeAuthoredLight, makeGameplayFallback } from '../editor/map-scene-visuals';
 import { makeHammerSolidObject, type HammerPrimitive } from '../editor/hammer-shapes';
 
 function applyEntTexture(obj: THREE.Object3D, ent: EditorEntity, doc: MapDocument) {
   applyTextureToObject(obj, ent.textureUrl || doc.environment?.defaultTextureUrl, {
-    repeat: ent.textureRepeat,
+    repeat: resolveEntityTextureRepeat(ent),
     offset: ent.textureOffset,
     rotation: ent.textureRotation,
   });
