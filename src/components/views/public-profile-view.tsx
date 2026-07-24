@@ -31,7 +31,14 @@ import {
   sendFriendRequest,
   voteReputation,
 } from '@/lib/social-actions';
-import { getPublicProfile, type PublicProfile } from '@/lib/public-profile-actions';
+import {
+  getPublicProfile,
+  getProfileComments,
+  createProfileComment,
+  deleteProfileComment,
+  type PublicProfile,
+  type ProfileCommentRow,
+} from '@/lib/public-profile-actions';
 import { normalizeBannerConfig } from '@/lib/banner';
 import {
   ProfileHeroBanner,
@@ -40,6 +47,7 @@ import { getRoleTextColorClass } from '@/lib/role-colors';
 import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 import { flagUrl, getCountryName } from '@/lib/countries';
+import { Textarea } from '@/components/ui/textarea';
 
 const PANEL = 'bg-slate-900/60 backdrop-blur-md border border-slate-700/30';
 
@@ -55,12 +63,22 @@ export default function PublicProfileView({
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [comments, setComments] = useState<ProfileCommentRow[]>([]);
+  const [commentBody, setCommentBody] = useState('');
+  const [commentBusy, setCommentBusy] = useState(false);
   const { toast } = useToast();
 
   const reload = () => {
     setLoading(true);
     getPublicProfile(userId)
-      .then(setProfile)
+      .then((p) => {
+        setProfile(p);
+        if (p && !p.isPrivate) {
+          void getProfileComments(userId).then(setComments).catch(() => setComments([]));
+        } else {
+          setComments([]);
+        }
+      })
       .finally(() => setLoading(false));
   };
 
@@ -88,6 +106,27 @@ export default function PublicProfileView({
             </Button>
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (profile.isPrivate) {
+    return (
+      <div className="px-4 sm:px-8 py-6 space-y-4">
+        {onBack && (
+          <Button variant="ghost" size="sm" onClick={onBack} className="text-slate-400 -ml-2">
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back
+          </Button>
+        )}
+        <Card className={`${PANEL} overflow-hidden`}>
+          <CardContent className="py-16 flex flex-col items-center text-center gap-3">
+            <Lock className="h-10 w-10 text-slate-500" />
+            <h2 className="text-xl font-bold text-white">{profile.username}</h2>
+            <p className="text-slate-400 max-w-sm">
+              This player&apos;s profile is private. Details are hidden.
+            </p>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -161,6 +200,41 @@ export default function PublicProfileView({
       toast({ title: e instanceof Error ? e.message : 'Could not vote', variant: 'destructive' });
     } finally {
       setBusyAction(null);
+    }
+  };
+
+  const submitComment = async () => {
+    const text = commentBody.trim();
+    if (!text) return;
+    setCommentBusy(true);
+    try {
+      const row = await createProfileComment(profile.id, text);
+      setComments((prev) => [row, ...prev]);
+      setCommentBody('');
+      toast({ title: 'Comment posted' });
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Could not post comment',
+        variant: 'destructive',
+      });
+    } finally {
+      setCommentBusy(false);
+    }
+  };
+
+  const removeComment = async (id: string) => {
+    setCommentBusy(true);
+    try {
+      await deleteProfileComment(id);
+      setComments((prev) => prev.filter((c) => c.id !== id));
+      toast({ title: 'Comment removed' });
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Could not delete comment',
+        variant: 'destructive',
+      });
+    } finally {
+      setCommentBusy(false);
     }
   };
 
@@ -528,6 +602,102 @@ export default function PublicProfileView({
           </Card>
         </div>
       </div>
+
+      <Card className={PANEL}>
+        <CardContent className="pt-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-primary" />
+            <h3 className="font-bold text-white">Comments</h3>
+            <span className="text-xs text-slate-500">({comments.length})</span>
+          </div>
+
+          {!profile.commentsEnabled ? (
+            <p className="text-sm text-slate-400">Comments are turned off on this profile.</p>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Textarea
+                  value={commentBody}
+                  onChange={(e) => setCommentBody(e.target.value.slice(0, 500))}
+                  placeholder="Leave a comment…"
+                  className="bg-slate-900/50 border-slate-700 min-h-[80px]"
+                  maxLength={500}
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-slate-500">{commentBody.length}/500</span>
+                  <Button
+                    size="sm"
+                    disabled={commentBusy || !commentBody.trim()}
+                    onClick={() => void submitComment()}
+                  >
+                    {commentBusy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      'Post comment'
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {comments.length === 0 ? (
+                <p className="text-sm text-slate-500">No comments yet.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {comments.map((c) => (
+                    <li
+                      key={c.id}
+                      className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2 min-w-0">
+                          <AvatarWithFrame
+                            src={c.author.avatarUrl}
+                            alt={c.author.username}
+                            fallback={c.author.username.charAt(0)}
+                            frameConfig={c.author.equippedFrameConfig}
+                            sizeClass="h-8 w-8"
+                          />
+                          <div className="min-w-0">
+                            <p
+                              className={`text-sm font-semibold truncate ${getRoleTextColorClass(
+                                c.author.role,
+                                c.author.isVip
+                              )}`}
+                            >
+                              <NicknameEffectText
+                                name={c.author.username}
+                                effect={c.author.equippedNicknameConfig}
+                              />
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {formatDistanceToNow(new Date(c.createdAt))} ago
+                            </p>
+                            <p className="text-sm text-slate-200 mt-1 whitespace-pre-wrap break-words">
+                              {c.body}
+                            </p>
+                          </div>
+                        </div>
+                        {c.canDelete && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="shrink-0 text-slate-500 hover:text-rose-400"
+                            disabled={commentBusy}
+                            onClick={() => void removeComment(c.id)}
+                            aria-label="Delete comment"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

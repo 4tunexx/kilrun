@@ -40,6 +40,8 @@ import {
   makeBoundsWireBox,
   makeSelectionOutline,
   plantLocalFeet,
+  resolveEntityTextureRepeat,
+  worldScaleToUvRepeat,
 } from './editor-mesh';
 import { applyEntityOpacity, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
 import {
@@ -242,6 +244,7 @@ export interface EditorViewportApi {
   /** Snap perspective camera to top / front / side / perspective. */
   setCameraPreset: (preset: 'perspective' | 'top' | 'front' | 'side') => void;
   setPaintUv: (uv: {
+    worldScale?: number;
     repeat?: [number, number];
     offset?: [number, number];
     rotation?: number;
@@ -308,8 +311,10 @@ export function createEditorViewport(
   /** Paint Bucket only: hold LMB and drag to paint continuously. */
   let bucketPainting = false;
   let lastPaintCellKey: string | null = null;
-  /** UV defaults applied with the texture paint brush. */
+  /** UV / world-scale defaults applied with the texture paint brush. */
   const paintUv = {
+    /** World units per texture tile — same density on any object size. */
+    worldScale: 1,
     repeat: [2, 2] as [number, number],
     offset: [0, 0] as [number, number],
     rotation: 0,
@@ -979,7 +984,7 @@ export function createEditorViewport(
   function applyEntityTexture(root: THREE.Object3D, ent: EditorEntity) {
     const url = ent.textureUrl || doc.environment?.defaultTextureUrl;
     applyTextureToObject(root, url, {
-      repeat: ent.textureRepeat,
+      repeat: resolveEntityTextureRepeat(ent),
       offset: ent.textureOffset,
       rotation: ent.textureRotation,
     });
@@ -1583,7 +1588,10 @@ export function createEditorViewport(
             ? 'solid'
             : undefined,
       collisionSize: isHammer ? hammerSize : foot ?? undefined,
-      textureRepeat: isHammer ? [2, 2] : undefined,
+      textureWorldScale: isHammer ? 1 : undefined,
+      textureRepeat: isHammer
+        ? worldScaleToUvRepeat(entityWorldSize(hammerSize, [1, 1, 1]), 1)
+        : undefined,
       animation: defaultAnimation(),
       playerAnims: kind === 'player' ? {} : undefined,
       hazard: kind === 'hazard' ? defaultHazard() : undefined,
@@ -2003,17 +2011,20 @@ export function createEditorViewport(
           const tex = paintTextureUrl;
           doc = {
             ...doc,
-            entities: doc.entities.map((e) =>
-              e.id === id
-                ? {
-                    ...e,
-                    textureUrl: tex ?? e.textureUrl,
-                    textureRepeat: paintUv.repeat,
-                    textureOffset: paintUv.offset,
-                    textureRotation: paintUv.rotation,
-                  }
-                : e
-            ),
+            entities: doc.entities.map((e) => {
+              if (e.id !== id) return e;
+              const worldScale = paintUv.worldScale > 0 ? paintUv.worldScale : 1;
+              const size = entityWorldSize(e.collisionSize, e.scale);
+              const repeat = worldScaleToUvRepeat(size, worldScale);
+              return {
+                ...e,
+                textureUrl: tex ?? e.textureUrl,
+                textureWorldScale: worldScale,
+                textureRepeat: repeat,
+                textureOffset: paintUv.offset,
+                textureRotation: paintUv.rotation,
+              };
+            }),
           };
           const ent = doc.entities.find((e) => e.id === id);
           const root = roots.get(id);
@@ -3060,10 +3071,14 @@ export function createEditorViewport(
       orbit.update();
     },
     setPaintUv: (uv: {
+      worldScale?: number;
       repeat?: [number, number];
       offset?: [number, number];
       rotation?: number;
     }) => {
+      if (typeof uv.worldScale === 'number' && uv.worldScale > 0) {
+        paintUv.worldScale = uv.worldScale;
+      }
       if (uv.repeat) paintUv.repeat = uv.repeat;
       if (uv.offset) paintUv.offset = uv.offset;
       if (typeof uv.rotation === 'number') paintUv.rotation = uv.rotation;

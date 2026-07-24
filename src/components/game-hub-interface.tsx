@@ -334,6 +334,23 @@ export default function GameHubInterface({
     }
   }, [isMobile]);
 
+  /** Opening one rail closes the other so mobile never shows two panels at once. */
+  const toggleLeftMenu = () => {
+    setIsLeftMenuOpen((open) => {
+      const next = !open;
+      if (next) setIsMenuOpen(false);
+      return next;
+    });
+  };
+
+  const toggleRightMenu = () => {
+    setIsMenuOpen((open) => {
+      const next = !open;
+      if (next) setIsLeftMenuOpen(false);
+      return next;
+    });
+  };
+
   useEffect(() => {
     setPulsarOn(isPulsarActive());
   }, []);
@@ -860,7 +877,7 @@ export default function GameHubInterface({
   return (
     <ProfileNavigationProvider value={{ openProfile: handleViewProfile }}>
     <TooltipProvider>
-      <div className="min-h-screen text-white relative overflow-hidden">
+      <div className="min-h-[100dvh] text-white relative overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
         <div className="fixed inset-0 z-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -871,11 +888,11 @@ export default function GameHubInterface({
           <div className="absolute inset-0 bg-gradient-to-br from-slate-900/80 via-slate-800/70 to-slate-900/85" />
         </div>
 
-        <div className="relative z-10 flex h-screen">
+        <div className="relative z-10 flex h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))]">
           {/* Mobile backdrop — tap to dismiss any open sidebar */}
           {isMobile && (isLeftMenuOpen || isMenuOpen) && (
             <div
-              className="fixed inset-0 z-[25] bg-black/60"
+              className="fixed inset-0 z-[40] bg-black/60"
               onClick={() => { setIsMenuOpen(false); setIsLeftMenuOpen(false); }}
             />
           )}
@@ -889,7 +906,7 @@ export default function GameHubInterface({
             <div
               className={
                 isMobile
-                  ? `fixed left-0 top-0 z-[30] h-full w-20 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 overflow-hidden transition-all duration-300 ${
+                  ? `fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-[50] w-20 bg-slate-900/95 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 overflow-hidden transition-all duration-300 ${
                       isLeftMenuOpen
                         ? 'translate-x-0 opacity-100'
                         : '-translate-x-full opacity-0 pointer-events-none'
@@ -1068,12 +1085,12 @@ export default function GameHubInterface({
 
             <button
               aria-label={isLeftMenuOpen ? 'Collapse navigation' : 'Expand navigation'}
-              onClick={() => setIsLeftMenuOpen(!isLeftMenuOpen)}
+              onClick={toggleLeftMenu}
               className={`w-10 h-10 bg-primary hover:bg-primary/90 backdrop-blur-md border border-slate-700/30 rounded-lg flex items-center justify-center transition shadow-lg hover:scale-110 ${
                 !isLeftMenuOpen ? 'animate-slow-pulse-horizontal' : ''
               } ${
                 isMobile
-                  ? `fixed top-1/2 -translate-y-1/2 z-[45] ${isLeftMenuOpen ? 'left-[4.5rem]' : 'left-1'}`
+                  ? `fixed top-1/2 -translate-y-1/2 z-[55] ${isLeftMenuOpen ? 'left-[4.5rem]' : 'left-1'}`
                   : 'absolute -right-5 top-1/2 -translate-y-1/2 z-20'
               }`}
             >
@@ -1142,12 +1159,12 @@ export default function GameHubInterface({
           <div className="relative">
             <button
               aria-label={isMenuOpen ? 'Collapse profile menu' : 'Expand profile menu'}
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              onClick={toggleRightMenu}
               className={`w-10 h-10 bg-primary hover:bg-primary/90 backdrop-blur-md border border-slate-700/30 rounded-lg flex items-center justify-center transition shadow-lg hover:scale-110 ${
                 !isMenuOpen ? 'animate-slow-pulse-horizontal rotate-180' : ''
               } ${
                 isMobile
-                  ? `fixed top-1/2 -translate-y-1/2 z-[45] ${isMenuOpen ? 'right-72' : 'right-1'}`
+                  ? `fixed top-1/2 -translate-y-1/2 z-[55] ${isMenuOpen ? 'right-72' : 'right-1'}`
                   : 'absolute -left-5 top-1/2 -translate-y-1/2 z-20'
               }`}
             >
@@ -1160,7 +1177,7 @@ export default function GameHubInterface({
             <div
               className={
                 isMobile
-                  ? `fixed right-0 top-0 z-[30] h-full bg-slate-900/60 backdrop-blur-md border-l border-slate-700/30 overflow-hidden transition-all duration-300 ${
+                  ? `fixed right-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-[50] bg-slate-900/95 backdrop-blur-md border-l border-slate-700/30 overflow-hidden transition-all duration-300 ${
                       isMenuOpen ? 'w-72 translate-x-0 opacity-100' : 'w-72 translate-x-full opacity-0 pointer-events-none'
                     }`
                   : `bg-slate-900/60 backdrop-blur-md border-l border-slate-700/30 transition-all duration-300 ease-in-out overflow-hidden h-full ${

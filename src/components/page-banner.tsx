@@ -15,10 +15,10 @@ export function PageBanner({
   toolbar?: ReactNode;
 }) {
   return (
-    <div className={`${PANEL} shrink-0 relative z-[200] overflow-visible`}>
-      <div className="px-4 sm:px-8 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 overflow-visible">
+    <div className={`${PANEL} shrink-0 relative z-20 overflow-visible`}>
+      <div className="px-4 sm:px-8 py-3 sm:py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 sm:gap-4 overflow-visible">
         <div className="min-w-0">
-          <h1 className="text-2xl sm:text-4xl font-black tracking-tight truncate">
+          <h1 className="text-xl sm:text-4xl font-black tracking-tight truncate">
             {title}
           </h1>
           {subtitle ? (
@@ -28,7 +28,7 @@ export function PageBanner({
           ) : null}
         </div>
         {toolbar ? (
-          <div className="shrink-0 w-full lg:w-auto relative z-[210] overflow-visible">
+          <div className="shrink-0 w-full lg:w-auto relative z-30 overflow-visible">
             {toolbar}
           </div>
         ) : null}

@@ -86,6 +86,8 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [countryCode, setCountryCode] = useState('');
   const [notifyPush, setNotifyPush] = useState(true);
   const [notifyEmail, setNotifyEmail] = useState(true);
+  const [profilePrivate, setProfilePrivate] = useState(false);
+  const [profileCommentsEnabled, setProfileCommentsEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [showEmailForm, setShowEmailForm] = useState(false);
@@ -118,6 +120,10 @@ export default function ProfileView({ userId }: { userId: string }) {
       setCountryCode(u?.countryCode ?? '');
       setNotifyPush(u?.notifyPush ?? true);
       setNotifyEmail(u?.notifyEmail ?? true);
+      setProfilePrivate(!!(u as { profilePrivate?: boolean } | null)?.profilePrivate);
+      setProfileCommentsEnabled(
+        (u as { profileCommentsEnabled?: boolean } | null)?.profileCommentsEnabled !== false
+      );
       setSummary(s);
       setHistory(h);
       setInventory(inv);
@@ -176,9 +182,15 @@ export default function ProfileView({ userId }: { userId: string }) {
         bio,
         countryCode,
         statusMessage,
+        profilePrivate,
+        profileCommentsEnabled,
       });
       setUser(updated);
       setStatusMessage(updated.statusMessage ?? '');
+      setProfilePrivate(!!(updated as { profilePrivate?: boolean }).profilePrivate);
+      setProfileCommentsEnabled(
+        (updated as { profileCommentsEnabled?: boolean }).profileCommentsEnabled !== false
+      );
       toast({ title: 'Profile saved' });
     } catch {
       toast({ title: 'Save failed', variant: 'destructive' });
@@ -427,6 +439,33 @@ export default function ProfileView({ userId }: { userId: string }) {
                 <p className="text-xs text-slate-500">
                   Your flag appears on your public profile next to your name.
                 </p>
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-700/40 bg-slate-900/40 px-3 py-3">
+                <div className="min-w-0">
+                  <Label htmlFor="profilePrivate">Private public profile</Label>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Hide your details on your public page. Others only see that the profile is private.
+                  </p>
+                </div>
+                <Switch
+                  id="profilePrivate"
+                  checked={profilePrivate}
+                  onCheckedChange={setProfilePrivate}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-700/40 bg-slate-900/40 px-3 py-3">
+                <div className="min-w-0">
+                  <Label htmlFor="profileCommentsEnabled">Allow profile comments</Label>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Let other players leave comments on your public profile.
+                  </p>
+                </div>
+                <Switch
+                  id="profileCommentsEnabled"
+                  checked={profileCommentsEnabled}
+                  onCheckedChange={setProfileCommentsEnabled}
+                  disabled={profilePrivate}
+                />
               </div>
               <Button disabled={saving} onClick={savePublicProfile}>
                 <Save className="mr-2 h-4 w-4" />

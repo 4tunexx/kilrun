@@ -8,10 +8,12 @@ import { getMyReputationVote } from '@/lib/social-actions';
 import { normalizeBannerConfig, type BannerConfig } from '@/lib/banner';
 import {
   parseShowcaseStorage,
+  DEFAULT_SHOWCASE_LAYOUT,
   type ShowcaseDisplayItem,
   type ShowcaseLayout,
 } from '@/lib/showcase';
 import { resolveShowcaseEntries } from '@/lib/showcase-actions';
+import { PUBLIC_USER_CARD_SELECT } from '@/lib/cosmetics';
 
 async function getViewer() {
   const session = await auth();
@@ -70,7 +72,31 @@ export type PublicProfile = {
     avgScore: number;
     winRate: number;
   };
+  /** True when the owner hid their public page from other players. */
+  isPrivate: boolean;
+  /** Whether visitors may leave comments (owner setting). */
+  commentsEnabled: boolean;
 };
+
+export type ProfileCommentRow = {
+  id: string;
+  body: string;
+  createdAt: Date;
+  author: {
+    id: string;
+    username: string;
+    avatarUrl: string;
+    role: string;
+    isVip: boolean;
+    equippedFrameConfig: unknown | null;
+    equippedNicknameConfig: unknown | null;
+  };
+  canDelete: boolean;
+};
+
+function isStaffRole(role: string | null | undefined) {
+  return role === 'admin' || role === 'moderator';
+}
 
 /** Full public profile aggregate: identity, rank, stats, achievements, and social context. */
 export async function getPublicProfile(userId: string): Promise<PublicProfile | null> {
@@ -79,6 +105,58 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     prisma.user.findUnique({ where: { id: userId } }),
   ]);
   if (!target || target.isBanned) return null;
+
+  const isSelf = !!viewer && viewer.id === target.id;
+  const viewerIsStaff = isStaffRole(viewer?.role);
+  const profilePrivate = !!(target as { profilePrivate?: boolean }).profilePrivate;
+  const commentsEnabled =
+    (target as { profileCommentsEnabled?: boolean }).profileCommentsEnabled !== false;
+
+  // Private profiles: only self / staff see full details.
+  if (profilePrivate && !isSelf && !viewerIsStaff) {
+    return {
+      id: target.id,
+      username: target.username,
+      avatarUrl: target.avatarUrl,
+      bio: '',
+      statusMessage: '',
+      countryCode: '',
+      role: target.role,
+      isVip: target.isVip,
+      isPremium: false,
+      currentRank: 'Unranked',
+      peakRank: 'Unranked',
+      peakRankImage: null,
+      rankImage: null,
+      rankColor: null,
+      kp: 0,
+      peakKp: 0,
+      level: 1,
+      xpProgress: 0,
+      xpIntoLevel: 0,
+      xpForNextLevel: 1,
+      levelProgressPercent: 0,
+      reputation: 0,
+      createdAt: target.createdAt,
+      equippedBannerConfig: null,
+      equippedBannerImageUrl: null,
+      equippedBannerItemName: null,
+      equippedFrameConfig: null,
+      equippedNicknameConfig: null,
+      showcase: [],
+      showcaseLayout: DEFAULT_SHOWCASE_LAYOUT,
+      leaderboardPosition: 0,
+      totalPlayers: 0,
+      friendStatus: 'none',
+      incomingFriendshipId: null,
+      myReputationVote: 0,
+      achievements: [],
+      badges: [],
+      stats: { totalRuns: 0, bestScore: 0, bestDistance: 0, avgScore: 0, winRate: 0 },
+      isPrivate: true,
+      commentsEnabled: false,
+    };
+  }
 
   const progress = getLevelProgress(target.xpProgress);
 
@@ -218,13 +296,52 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     achievements,
     badges,
     stats: { totalRuns, bestScore, bestDistance, avgScore, winRate },
+    isPrivate: profilePrivate,
+    commentsEnabled,
   };
 }
 
 /** Lightweight payload for the hover-card mini profile (fast, minimal joins). */
 export async function getPublicProfileSummary(userId: string) {
-  const target = await prisma.user.findUnique({ where: { id: userId } });
+  const [viewer, target] = await Promise.all([
+    getViewer(),
+    prisma.user.findUnique({ where: { id: userId } }),
+  ]);
   if (!target || target.isBanned) return null;
+
+  const isSelf = !!viewer && viewer.id === target.id;
+  const viewerIsStaff = isStaffRole(viewer?.role);
+  const profilePrivate = !!(target as { profilePrivate?: boolean }).profilePrivate;
+  if (profilePrivate && !isSelf && !viewerIsStaff) {
+    return {
+      id: target.id,
+      username: target.username,
+      avatarUrl: target.avatarUrl,
+      statusMessage: '',
+      role: target.role,
+      isVip: false,
+      isPremium: false,
+      currentRank: 'Unranked',
+      peakRank: 'Unranked',
+      rankImage: null,
+      rankColor: null,
+      kp: 0,
+      peakKp: 0,
+      level: 1,
+      xpIntoLevel: 0,
+      xpForNextLevel: 1,
+      levelProgressPercent: 0,
+      reputation: 0,
+      equippedBannerConfig: null,
+      equippedBannerImageUrl: null,
+      equippedFrameConfig: null,
+      equippedNicknameConfig: null,
+      showcase: [],
+      showcaseLayout: DEFAULT_SHOWCASE_LAYOUT,
+      isPrivate: true,
+    };
+  }
+
   const progress = getLevelProgress(target.xpProgress);
   const stored = parseShowcaseStorage(target.showcaseItems);
   const [showcase, repVotes] = await Promise.all([
@@ -288,5 +405,97 @@ export async function getPublicProfileSummary(userId: string) {
     equippedNicknameConfig: target.equippedNicknameConfig ?? null,
     showcase,
     showcaseLayout: stored.layout,
+    isPrivate: false,
   };
+}
+
+export async function getProfileComments(profileUserId: string): Promise<ProfileCommentRow[]> {
+  const [viewer, target] = await Promise.all([
+    getViewer(),
+    prisma.user.findUnique({ where: { id: profileUserId } }),
+  ]);
+  if (!target || target.isBanned) return [];
+  const profilePrivate = !!(target as { profilePrivate?: boolean }).profilePrivate;
+  const isSelf = !!viewer && viewer.id === target.id;
+  if (profilePrivate && !isSelf && !isStaffRole(viewer?.role)) return [];
+
+  const comments = await prisma.profileComment.findMany({
+    where: { profileUserId },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+    include: { author: { select: PUBLIC_USER_CARD_SELECT } },
+  });
+
+  return comments.map((c) => ({
+    id: c.id,
+    body: c.body,
+    createdAt: c.createdAt,
+    author: c.author,
+    canDelete:
+      !!viewer &&
+      (viewer.id === c.authorId || viewer.id === profileUserId || isStaffRole(viewer.role)),
+  }));
+}
+
+export async function createProfileComment(profileUserId: string, body: string) {
+  const viewer = await getViewer();
+  if (!viewer) throw new Error('Not authenticated');
+  if (viewer.isMuted) throw new Error('You are muted and cannot comment right now');
+
+  const target = await prisma.user.findUnique({ where: { id: profileUserId } });
+  if (!target || target.isBanned) throw new Error('Player not found');
+  if ((target as { profilePrivate?: boolean }).profilePrivate && viewer.id !== target.id) {
+    throw new Error('This profile is private');
+  }
+  if ((target as { profileCommentsEnabled?: boolean }).profileCommentsEnabled === false) {
+    throw new Error('Comments are disabled on this profile');
+  }
+
+  const text = body.trim().slice(0, 500);
+  if (!text) throw new Error('Comment cannot be empty');
+
+  const comment = await prisma.profileComment.create({
+    data: {
+      profileUserId,
+      authorId: viewer.id,
+      body: text,
+    },
+    include: { author: { select: PUBLIC_USER_CARD_SELECT } },
+  });
+
+  if (target.id !== viewer.id) {
+    await prisma.notification.create({
+      data: {
+        userId: target.id,
+        title: 'New profile comment',
+        body: `${viewer.username} commented on your profile.`,
+        type: 'profile',
+      },
+    });
+  }
+
+  return {
+    id: comment.id,
+    body: comment.body,
+    createdAt: comment.createdAt,
+    author: comment.author,
+    canDelete: true,
+  } satisfies ProfileCommentRow;
+}
+
+export async function deleteProfileComment(commentId: string) {
+  const viewer = await getViewer();
+  if (!viewer) throw new Error('Not authenticated');
+
+  const comment = await prisma.profileComment.findUnique({ where: { id: commentId } });
+  if (!comment) throw new Error('Comment not found');
+
+  const allowed =
+    viewer.id === comment.authorId ||
+    viewer.id === comment.profileUserId ||
+    isStaffRole(viewer.role);
+  if (!allowed) throw new Error('Forbidden');
+
+  await prisma.profileComment.delete({ where: { id: commentId } });
+  return { ok: true };
 }

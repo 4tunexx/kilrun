@@ -11,7 +11,7 @@ export const ModeStatusHud: React.FC<{ mode: KilrunMode; room: NetRoomState }> =
 }) => {
   if (mode === 'horde') {
     return (
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[120] pointer-events-none">
+      <div className="absolute top-[max(1rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[120] pointer-events-none">
         <div className="rounded-xl border border-rose-500/40 bg-black/70 px-4 py-2 text-center backdrop-blur">
           <p className="text-[10px] uppercase tracking-widest text-rose-300/80 font-bold">
             Horde
@@ -28,7 +28,7 @@ export const ModeStatusHud: React.FC<{ mode: KilrunMode; room: NetRoomState }> =
   }
   if (mode === 'competitive') {
     return (
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[120] pointer-events-none">
+      <div className="absolute top-[max(1rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[120] pointer-events-none">
         <div className="rounded-xl border border-sky-500/40 bg-black/70 px-4 py-2 text-center backdrop-blur">
           <p className="text-[10px] uppercase tracking-widest text-sky-300/80 font-bold">
             Round {room.roundIndex ?? 0} / 6

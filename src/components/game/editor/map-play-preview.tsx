@@ -18,6 +18,7 @@ import { AnimationDirector } from './animation-director';
 import {
   applyTextureToObject,
   plantLocalFeet,
+  resolveEntityTextureRepeat,
   shouldHideEntityInPlay,
 } from './editor-mesh';
 import {
@@ -425,7 +426,7 @@ export function MapPlayPreview({
             planted,
             ent.textureUrl || playDoc.environment?.defaultTextureUrl,
             {
-              repeat: ent.textureRepeat,
+              repeat: resolveEntityTextureRepeat(ent),
               offset: ent.textureOffset,
               rotation: ent.textureRotation,
             }

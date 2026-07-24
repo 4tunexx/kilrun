@@ -62,6 +62,7 @@ import {
   mapDocToSimTeleports,
   mapDocToWorldBounds,
   mapDocPushPayloads,
+  prepareDocForPlayTest,
 } from './editor/prefab-storage';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
@@ -199,10 +200,15 @@ export default function KilrunEngine({
     if (!connectionRef.current?.sessionId) return;
 
     const resolveDoc = (): MapDocument | null => {
-      if (cloudDocRef.current) return cloudDocRef.current;
-      const mapId = getActivePlayMapIdForMode(mode);
-      if (!mapId) return null;
-      return loadMapPlayable(mapId);
+      const raw = cloudDocRef.current
+        ? cloudDocRef.current
+        : (() => {
+            const mapId = getActivePlayMapIdForMode(mode);
+            if (!mapId) return null;
+            return loadMapPlayable(mapId);
+          })();
+      if (!raw) return null;
+      return prepareDocForPlayTest(raw).doc;
     };
 
     const doc = resolveDoc();
@@ -281,6 +287,7 @@ export default function KilrunEngine({
   }, [editorOpen]);
 
   useEffect(() => {
+    if (!cloudReady) return;
     const hostElement = hostRef.current;
     if (!hostElement) return;
 
@@ -289,7 +296,9 @@ export default function KilrunEngine({
     const world = createThreeWorld(hostElement);
     const activeId = getActivePlayMapIdForMode(mode);
     const localDoc = activeId ? loadMapPlayable(activeId) : null;
-    const playDoc = cloudDocRef.current ?? localDoc;
+    const rawDoc = cloudDocRef.current ?? localDoc;
+    // Same spawn / play prep as Deathrun editor Play Test so live movement matches.
+    const playDoc = rawDoc ? prepareDocForPlayTest(rawDoc).doc : null;
     const hasCustomMap = Boolean(playDoc);
     const map = new ThreeMap(world.scene, {
       hardcodedDecor: !hasCustomMap,
@@ -581,8 +590,9 @@ export default function KilrunEngine({
       joystickRef.current = null;
       inputManager.joystick.destroy();
     };
+    // Wait for Active cloud map so live play uses the same document as editor Play Test.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [cloudReady, mode, isMobile]);
 
   const runnersLeft = useMemo(() => {
     let n = 0;

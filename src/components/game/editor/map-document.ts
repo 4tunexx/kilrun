@@ -595,10 +595,16 @@ export interface EditorEntity {
   locked?: boolean;
   textureUrl?: string;
   /**
-   * UV tiling for entity texture (default [1,1]). Use with Hammer++ solids /
-   * floors so textures are not stretched.
+   * UV tiling for entity texture (default [1,1]). Prefer `textureWorldScale`
+   * for size-independent alignment — this field stores the resolved UV repeat.
    */
   textureRepeat?: [number, number];
+  /**
+   * World units covered by one full texture tile. When set, UV repeat is
+   * derived from entity world size so the same scale looks identical on any
+   * block size (Hammer++ / Source-style).
+   */
+  textureWorldScale?: number;
   /** UV offset in texture units (default [0,0]). */
   textureOffset?: [number, number];
   /** UV rotation in radians (default 0). */

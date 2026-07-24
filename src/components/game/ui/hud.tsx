@@ -199,7 +199,7 @@ export const HUD: React.FC<{
         }
       `}</style>
 
-      <div className="absolute top-0 left-0 right-0 h-[92px] flex items-start justify-center pt-2">
+      <div className="absolute top-0 left-0 right-0 h-[92px] flex items-start justify-center pt-[max(0.5rem,env(safe-area-inset-top))]">
         <div className="mt-2.5 w-[110px] h-10 flex items-center justify-center">
           <span className="text-white text-[18px] font-black uppercase tracking-wide">
             {isTrapper ? 'TRAPPER' : 'RUNNER'}

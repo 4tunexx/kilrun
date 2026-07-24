@@ -114,6 +114,7 @@ import {
   expandIdsWithGroups,
   patchCollideMaterial,
   resolveCollideMaterial,
+  entityWorldSize,
 } from './map-document';
 import {
   defaultSizeForHammer,
@@ -122,6 +123,7 @@ import {
   saveStickyHammerShape,
 } from './hammer-shapes';
 import { TextureAtlasPicker } from './texture-atlas-picker';
+import { worldScaleToUvRepeat } from './editor-mesh';
 import { KILRUN_MODE_INFO } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
 import {
@@ -229,6 +231,18 @@ export function MapEditor({
   /** Armed click-to-place kind (spawn flag, light, etc.) — cleared by Select / Escape / place-once. */
   const [pendingPlaceKind, setPendingPlaceKind] = useState<EditorEntity['kind'] | null>(null);
   const [viewLayout, setViewLayout] = useState<EditorViewLayout>('single');
+  /** World units per texture tile — remembered across paints (and sessions). */
+  const [paintWorldScale, setPaintWorldScale] = useState(() => {
+    if (typeof window === 'undefined') return 1;
+    try {
+      const raw = window.localStorage.getItem('kilrun.paintWorldScale');
+      const n = raw ? Number(raw) : NaN;
+      if (Number.isFinite(n) && n > 0) return n;
+    } catch {
+      /* ignore */
+    }
+    return 1;
+  });
   const [paintRepeat, setPaintRepeat] = useState<[number, number]>([2, 2]);
   const [mode, setMode] = useState<TransformMode>('translate');
   const [gridSnap, setGridSnap] = useState(true);
@@ -271,8 +285,18 @@ export function MapEditor({
   const [sidebarOpen, setSidebarOpen] = useState(!mobileFirst);
   /** Mobile/desktop properties inspector visibility when something is selected. */
   const [propsOpen, setPropsOpen] = useState(!mobileFirst);
-  /** Bottom transform/place toolbar. */
-  const [toolsOpen, setToolsOpen] = useState(true);
+  /** Bottom transform/place toolbar — persisted so Settings can toggle visibility. */
+  const [toolsOpen, setToolsOpen] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const raw = window.localStorage.getItem('kilrun.editorToolsVisible');
+      if (raw === '0') return false;
+      if (raw === '1') return true;
+    } catch {
+      /* ignore */
+    }
+    return true;
+  });
   const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
   const [modelEditorOpen, setModelEditorOpen] = useState(false);
   const [tpsViewOpen, setTpsViewOpen] = useState(false);
@@ -703,8 +727,21 @@ export function MapEditor({
     apiRef.current?.setPaintTexture(paintTextureUrl);
   }, [paintTextureUrl]);
   useEffect(() => {
-    apiRef.current?.setPaintUv({ repeat: paintRepeat });
-  }, [paintRepeat]);
+    apiRef.current?.setPaintUv({ worldScale: paintWorldScale, repeat: paintRepeat });
+    try {
+      window.localStorage.setItem('kilrun.paintWorldScale', String(paintWorldScale));
+    } catch {
+      /* ignore */
+    }
+  }, [paintWorldScale, paintRepeat]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('kilrun.editorToolsVisible', toolsOpen ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [toolsOpen]);
   useEffect(() => {
     apiRef.current?.setViewLayout(viewLayout);
   }, [viewLayout]);
@@ -2408,6 +2445,7 @@ export function MapEditor({
                   onChange={(uv) => {
                     setPaintRepeat(uv.repeat);
                     apiRef.current?.setPaintUv({
+                      worldScale: paintWorldScale,
                       repeat: uv.repeat,
                       offset: uv.offset,
                     });
@@ -2420,27 +2458,33 @@ export function MapEditor({
                           undefined,
                         textureRepeat: uv.repeat,
                         textureOffset: uv.offset,
+                        textureWorldScale: undefined,
                       });
                     }
                   }}
                 />
               )}
               <label className="block text-[10px] text-white/55">
-                Paint UV tile ({paintRepeat[0].toFixed(1)} × {paintRepeat[1].toFixed(1)})
+                Texture scale — world units / tile ({paintWorldScale.toFixed(2)})
                 <input
                   type="range"
                   min={0.25}
                   max={16}
                   step={0.25}
                   className="w-full"
-                  value={paintRepeat[0]}
+                  value={paintWorldScale}
                   onChange={(e) => {
                     const n = Number(e.target.value);
+                    setPaintWorldScale(n);
                     setPaintRepeat([n, n]);
-                    apiRef.current?.setPaintUv({ repeat: [n, n] });
+                    apiRef.current?.setPaintUv({ worldScale: n, repeat: [n, n] });
                   }}
                 />
               </label>
+              <p className="text-[9px] text-white/40 leading-snug">
+                Same scale tiles identically on every object size. Last scale is remembered for the
+                next paint.
+              </p>
               <input
                 ref={texFileRef}
                 type="file"
@@ -2525,6 +2569,29 @@ export function MapEditor({
 
           {tab === 'settings' && (
             <div className="flex-1 overflow-y-auto p-3 space-y-4">
+              <div>
+                <p className="text-xs font-bold text-cyan-300 tracking-wide uppercase">
+                  Editor UI
+                </p>
+                <p className="text-[10px] text-white/45 mt-1 leading-snug">
+                  Toggle on-canvas tools that sit over the viewport.
+                </p>
+                <label className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-xs text-white/80">
+                  <span>
+                    Show tool bar
+                    <span className="block text-[10px] text-white/45 mt-0.5">
+                      Select / move / paint / place tools overlay
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="accent-cyan-400 h-4 w-4"
+                    checked={toolsOpen}
+                    onChange={(e) => setToolsOpen(e.target.checked)}
+                  />
+                </label>
+              </div>
+
               <div>
                 <p className="text-xs font-bold text-cyan-300 tracking-wide uppercase">
                   {modeInfo.shortTitle} settings
@@ -5211,37 +5278,32 @@ export function MapEditor({
                   />
                 )}
                 <label className="block text-[10px] text-white/55">
-                  Texture tile X ({(selected.textureRepeat?.[0] ?? 1).toFixed(2)})
+                  Texture scale — world units / tile (
+                  {(selected.textureWorldScale ?? paintWorldScale).toFixed(2)})
                   <input
                     type="range"
                     min={0.25}
                     max={16}
                     step={0.25}
                     className="w-full"
-                    value={selected.textureRepeat?.[0] ?? 1}
+                    value={selected.textureWorldScale ?? paintWorldScale}
                     onChange={(e) => {
-                      const x = Number(e.target.value);
-                      const y = selected.textureRepeat?.[1] ?? x;
-                      patchSelected({ textureRepeat: [x, y] });
+                      const n = Number(e.target.value);
+                      const size = entityWorldSize(selected.collisionSize, selected.scale);
+                      const repeat = worldScaleToUvRepeat(size, n);
+                      setPaintWorldScale(n);
+                      setPaintRepeat(repeat);
+                      patchSelected({
+                        textureWorldScale: n,
+                        textureRepeat: repeat,
+                      });
                     }}
                   />
                 </label>
-                <label className="block text-[10px] text-white/55">
-                  Texture tile Y ({(selected.textureRepeat?.[1] ?? 1).toFixed(2)})
-                  <input
-                    type="range"
-                    min={0.25}
-                    max={16}
-                    step={0.25}
-                    className="w-full"
-                    value={selected.textureRepeat?.[1] ?? 1}
-                    onChange={(e) => {
-                      const y = Number(e.target.value);
-                      const x = selected.textureRepeat?.[0] ?? y;
-                      patchSelected({ textureRepeat: [x, y] });
-                    }}
-                  />
-                </label>
+                <p className="text-[9px] text-white/40 leading-snug">
+                  Shared world scale — looks the same on any block size. Also sets the paint brush
+                  default.
+                </p>
                 <label className="block text-[10px] text-white/55">
                   Texture rotate ({(((selected.textureRotation ?? 0) * 180) / Math.PI).toFixed(0)}°)
                   <input
