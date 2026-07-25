@@ -69,6 +69,28 @@ export const COLLISION_SKIN = 0.02;
 /** Below this height the runner falls into the void and is eliminated. */
 export const VOID_Z = -4;
 
+/**
+ * Wall parkour — Mirror's Edge / Celeste style, layered on top of the
+ * Foundry base feel: slide down walls slower than free-fall, jump off them
+ * with an outward + upward kick, chainable wall-to-wall.
+ *
+ * Off by default (map creator opts in via Combat Editor → Wall-jump) — see
+ * CombatSettings.wallJumpEnabled in map-document.ts, which already shipped
+ * this UI + these exact default numbers before the sim itself existed.
+ */
+export const WALL_JUMP_ENABLED_DEFAULT = false;
+export const WALL_JUMP_HORIZ_VEL = 5;
+export const WALL_JUMP_VERT_VEL = 9;
+/** Multiplies gravity (not an absolute cap) while pressed against a wall and falling. */
+export const WALL_SLIDE_GRAV_MULT = 0.35;
+/** Briefly ignore wish-input horizontal override so the outward kick isn't
+ * instantly cancelled by still holding into the wall. */
+export const WALL_JUMP_LOCKOUT_MS = 180;
+/** Need to have left contact with the SAME wall normal before it counts
+ * again — stops standing still humping one wall for infinite height.
+ * Switching to a different wall (or jumping away and back) is unaffected. */
+export const WALL_JUMP_SAME_WALL_COOLDOWN_MS = 300;
+
 export const MAX_ENERGY = 100;
 export const ENERGY_DRAIN_RATE = 28;
 export const ENERGY_REGEN_RATE = 18;

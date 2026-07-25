@@ -349,21 +349,17 @@ export function CombatEditor({
             <>
               <InfoBox>
                 Wall jump and wall slide: players can grab onto tall solid walls (height ≥ 2u)
-                and either slide slowly down or jump off for traversal in vertical maps.
+                and either slide slowly down or jump off for traversal in vertical maps. One
+                switch enables both — slide is just what happens on a wall before you jump off it.
               </InfoBox>
               <Section title="Wall Jump" accent="rose" icon={<Shield className="w-3.5 h-3.5" />}>
-                <Toggle label="Enable wall jump" hint="Grab wall and jump off" value={settings.wallJumpEnabled} accentTrue="rose" onChange={(v) => patch({ wallJumpEnabled: v })} />
+                <Toggle label="Enable wall jump &amp; slide" hint="Grab wall, slide down it, jump off" value={settings.wallJumpEnabled} accentTrue="rose" onChange={(v) => patch({ wallJumpEnabled: v })} />
                 {settings.wallJumpEnabled && (
                   <>
                     <Slider label="Horiz velocity" hint="Horizontal push away from wall" value={settings.wallJumpHorizVel} min={1} max={12} step={0.25} unit="u/s" defaultValue={D.wallJumpHorizVel} onChange={(v) => patch({ wallJumpHorizVel: v })} />
                     <Slider label="Vert velocity" hint="Vertical boost on wall-jump" value={settings.wallJumpVertVel} min={3} max={16} step={0.25} unit="u/s" defaultValue={D.wallJumpVertVel} onChange={(v) => patch({ wallJumpVertVel: v })} />
+                    <Slider label="Wall-slide gravity" hint="Fraction of normal gravity while sliding on a wall" value={settings.wallSlideGravMult} min={0.05} max={1} step={0.05} defaultValue={D.wallSlideGravMult} onChange={(v) => patch({ wallSlideGravMult: v })} />
                   </>
-                )}
-              </Section>
-              <Section title="Wall Slide" accent="rose">
-                <Toggle label="Wall slide (slow fall on wall)" hint="Touch wall while airborne to slide" value={settings.wallJumpEnabled} accentTrue="rose" onChange={(v) => patch({ wallJumpEnabled: v })} />
-                {settings.wallJumpEnabled && (
-                  <Slider label="Wall-slide gravity" hint="Fraction of normal gravity while on wall" value={settings.wallSlideGravMult} min={0.05} max={1} step={0.05} defaultValue={D.wallSlideGravMult} onChange={(v) => patch({ wallSlideGravMult: v })} />
                 )}
               </Section>
               <PhysicsNote text="Wall-jump requires at least 2 units tall solid blocks. Works in all 3 modes. Players can chain wall-jumps between parallel walls to climb." />

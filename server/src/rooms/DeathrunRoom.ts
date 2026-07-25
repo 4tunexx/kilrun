@@ -294,6 +294,10 @@ export class DeathrunRoom extends Room<RoomState> {
             crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
             maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
             apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+            wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
+            wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
+            wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
+            wallSlideGravMult: typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
           };
         }
 
