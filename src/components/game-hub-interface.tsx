@@ -334,11 +334,13 @@ export default function GameHubInterface({
     }
   }, [isMobile]);
 
-  /** Opening one rail closes the other so mobile never shows two panels at once. */
+  /** On mobile, opening one rail closes the other (no room for both). On
+   * desktop/large screens they're independent — pulling one out shouldn't
+   * collapse the other. */
   const toggleLeftMenu = () => {
     setIsLeftMenuOpen((open) => {
       const next = !open;
-      if (next) setIsMenuOpen(false);
+      if (next && isMobile) setIsMenuOpen(false);
       return next;
     });
   };
@@ -346,7 +348,7 @@ export default function GameHubInterface({
   const toggleRightMenu = () => {
     setIsMenuOpen((open) => {
       const next = !open;
-      if (next) setIsLeftMenuOpen(false);
+      if (next && isMobile) setIsLeftMenuOpen(false);
       return next;
     });
   };
