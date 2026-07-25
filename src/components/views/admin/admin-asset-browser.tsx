@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Box, Loader2, Package } from 'lucide-react';
+import { Box, Loader2, Package, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -17,9 +17,9 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import {
   adminBulkUpdateAssets,
+  adminDeleteAsset,
   adminListAssets,
-  adminPublishAssetToShop,
-  adminRemoveAssetFromShop,
+  adminUploadAsset,
 } from '@/lib/asset-admin-actions';
 import { loadAnimatedPrefab } from '@/components/game/editor/model-scan';
 import {
@@ -276,6 +276,15 @@ function AssetThumb({ asset }: { asset: GridAsset }) {
   );
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 export function AdminAssetBrowser() {
   const { toast } = useToast();
   const [items, setItems] = useState<GridAsset[]>([]);
@@ -287,6 +296,8 @@ export function AdminAssetBrowser() {
   const [selected, setSelected] = useState<GridAsset | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -348,6 +359,36 @@ export function AdminAssetBrowser() {
     void refresh();
   }, [refresh]);
 
+  const onUploadFile = async (file: File | null) => {
+    if (!file) return;
+    if (!/\.(glb|gltf|fbx)$/i.test(file.name)) {
+      toast({ title: 'Pick a GLB / GLTF / FBX model file', variant: 'destructive' });
+      return;
+    }
+    if (file.size > 45_000_000) {
+      toast({ title: 'Model too large (max ~45 MB)', variant: 'destructive' });
+      return;
+    }
+    setUploading(true);
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const res = await adminUploadAsset({ fileName: file.name, modelDataUrl: dataUrl });
+      toast({
+        title: 'Skin uploaded',
+        description: `${res.assetId} added (inactive). Click it, then Activate.`,
+      });
+      await refresh();
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Upload failed',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploading(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+    }
+  };
+
   const toggleId = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -397,6 +438,27 @@ export function AdminAssetBrowser() {
         </div>
         <Button onClick={() => void refresh()} disabled={loading}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Refresh'}
+        </Button>
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept=".glb,.gltf,.fbx"
+          className="hidden"
+          onChange={(e) => void onUploadFile(e.target.files?.[0] ?? null)}
+        />
+        <Button
+          variant="secondary"
+          disabled={uploading || source !== 'db'}
+          onClick={() => uploadInputRef.current?.click()}
+          title={source !== 'db' ? 'Needs DB (run seed with DATABASE_URL)' : 'Upload GLB / FBX skin'}
+        >
+          {uploading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <>
+              <Upload className="h-4 w-4 mr-1.5" /> Upload skin
+            </>
+          )}
         </Button>
       </div>
 
@@ -518,18 +580,25 @@ export function AdminAssetBrowser() {
                 <div className="break-all opacity-70">{selected.modelPath}</div>
               </div>
               {source === 'db' && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {selected.shopVisible ? (
+                <div className="space-y-2 pt-1">
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
-                      variant="secondary"
+                      variant={selected.enabled ? 'secondary' : 'default'}
                       disabled={busy}
                       onClick={() =>
                         void (async () => {
                           setBusy(true);
                           try {
-                            await adminRemoveAssetFromShop(selected.assetId);
-                            toast({ title: 'Removed from shop' });
+                            await adminBulkUpdateAssets([selected.assetId], {
+                              enabled: !selected.enabled,
+                            });
+                            toast({
+                              title: selected.enabled ? 'Asset deactivated' : 'Asset activated',
+                              description: selected.enabled
+                                ? 'Hidden from editors and Cosmetics Studio.'
+                                : 'Now available in Cosmetics Studio → Skins for shop listing.',
+                            });
                             await refresh();
                           } catch (e) {
                             toast({
@@ -542,18 +611,21 @@ export function AdminAssetBrowser() {
                         })()
                       }
                     >
-                      Unlist shop
+                      {selected.enabled ? 'Deactivate' : 'Activate'}
                     </Button>
-                  ) : (
                     <Button
                       size="sm"
+                      variant="ghost"
+                      className="text-red-400"
                       disabled={busy}
                       onClick={() =>
                         void (async () => {
+                          if (!confirm(`Delete asset “${selected.displayName}” from the registry?`)) return;
                           setBusy(true);
                           try {
-                            await adminPublishAssetToShop(selected.assetId);
-                            toast({ title: 'Published to shop' });
+                            await adminDeleteAsset(selected.assetId);
+                            toast({ title: 'Asset deleted' });
+                            setSelected(null);
                             await refresh();
                           } catch (e) {
                             toast({
@@ -566,9 +638,14 @@ export function AdminAssetBrowser() {
                         })()
                       }
                     >
-                      Add to shop
+                      <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
                     </Button>
-                  )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-snug">
+                    Shop listing (price, event / mission unlock, dashboard promo) moved to{' '}
+                    <span className="text-slate-300">Shop → Cosmetics Studio → Skins</span>. Only
+                    activated assets show up there.
+                  </p>
                 </div>
               )}
             </>

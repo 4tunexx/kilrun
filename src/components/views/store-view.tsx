@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Coins, Flame, Loader2 } from 'lucide-react';
+import { Coins, Flame, Loader2, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -195,6 +195,18 @@ export default function StoreView({
               {displayed.map((item) => {
                 const onFire = isFireSaleActive(item);
                 const effective = getEffectiveVpPrice(item);
+                const earned = Boolean(item.unlockType && item.unlockType !== 'purchase');
+                const earnedLabel = earned
+                  ? {
+                      event: 'Event reward',
+                      mission: 'Mission reward',
+                      achievement: 'Achievement reward',
+                      badge: 'Badge reward',
+                    }[item.unlockType as string] ?? 'Reward'
+                  : null;
+                const eventLive =
+                  item.eventEndsAt &&
+                  new Date(item.eventEndsAt).getTime() > Date.now();
                 return (
                   <Card
                     key={item.id}
@@ -225,6 +237,17 @@ export default function StoreView({
                             )}
                           </>
                         )}
+                        {earned && (
+                          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md bg-gradient-to-r from-amber-600 to-yellow-600 px-2 py-1 text-[11px] font-black uppercase tracking-wide text-white shadow-lg">
+                            <Trophy className="h-3.5 w-3.5" />
+                            {earnedLabel}
+                          </div>
+                        )}
+                        {!onFire && eventLive && item.eventEndsAt && (
+                          <div className="absolute bottom-0 inset-x-0 z-10 bg-black/70 backdrop-blur-sm px-2 py-1.5 text-center text-xs">
+                            Ends in <FireSaleCountdown endsAt={item.eventEndsAt} />
+                          </div>
+                        )}
                       </div>
                       <div className="p-4 w-full">
                         <p className="text-xs text-slate-400 uppercase">
@@ -232,38 +255,51 @@ export default function StoreView({
                           {item.cosmeticSlot ? ` · ${item.cosmeticSlot}` : ''}
                         </p>
                         <h3 className="font-bold text-lg truncate">{item.itemName}</h3>
-                        <div className="flex items-center justify-between mt-2 gap-2">
-                          <div>
-                            {onFire ? (
-                              <div className="flex items-baseline gap-2">
-                                <p className="font-bold text-orange-400 flex items-center gap-1">
+                        {earned ? (
+                          <div className="mt-2 space-y-1">
+                            <p className="text-xs font-semibold text-amber-300 flex items-center gap-1">
+                              <Trophy className="h-3.5 w-3.5" />
+                              {earnedLabel}
+                              {item.unlockRef ? ` · ${item.unlockRef}` : ''}
+                            </p>
+                            <p className="text-[11px] text-slate-500">
+                              Can&apos;t be purchased — earn it in game.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between mt-2 gap-2">
+                            <div>
+                              {onFire ? (
+                                <div className="flex items-baseline gap-2">
+                                  <p className="font-bold text-orange-400 flex items-center gap-1">
+                                    <Coins className="h-3.5 w-3.5" />
+                                    {effective} VP
+                                  </p>
+                                  <p className="text-xs text-slate-500 line-through">
+                                    {item.vpPrice} VP
+                                  </p>
+                                </div>
+                              ) : (
+                                <p className="font-bold text-yellow-400 flex items-center gap-1">
                                   <Coins className="h-3.5 w-3.5" />
-                                  {effective} VP
-                                </p>
-                                <p className="text-xs text-slate-500 line-through">
                                   {item.vpPrice} VP
                                 </p>
-                              </div>
-                            ) : (
-                              <p className="font-bold text-yellow-400 flex items-center gap-1">
-                                <Coins className="h-3.5 w-3.5" />
-                                {item.vpPrice} VP
-                              </p>
-                            )}
+                              )}
+                            </div>
+                            <Button
+                              size="sm"
+                              disabled={buyingId === item.id}
+                              className={onFire ? 'bg-orange-600 hover:bg-orange-500' : ''}
+                              onClick={() => void buy(item)}
+                            >
+                              {buyingId === item.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                'Buy'
+                              )}
+                            </Button>
                           </div>
-                          <Button
-                            size="sm"
-                            disabled={buyingId === item.id}
-                            className={onFire ? 'bg-orange-600 hover:bg-orange-500' : ''}
-                            onClick={() => void buy(item)}
-                          >
-                            {buyingId === item.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              'Buy'
-                            )}
-                          </Button>
-                        </div>
+                        )}
                       </div>
                     </CardContent>
                   </Card>

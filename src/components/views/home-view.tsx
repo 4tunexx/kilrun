@@ -17,6 +17,7 @@ import {
   Target,
 } from 'lucide-react';
 import AnimatedCounter from '@/components/ui/animated-counter';
+import { HomePromoBanner } from '@/components/home-promo-banner';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -308,6 +309,9 @@ export default function HomeView({
       </div>
 
       <div className="px-4 sm:px-8 py-6 space-y-6 flex-1">
+        {/* Promoted shop items (event skins etc.) with custom banner + countdown */}
+        <HomePromoBanner onNavigate={onNavigate} />
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card className={PANEL}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

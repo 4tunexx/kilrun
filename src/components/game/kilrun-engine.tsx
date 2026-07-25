@@ -347,6 +347,10 @@ export default function KilrunEngine({
     let interactPulse = false;
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
+    // Smoothed local player position for the camera — follows the interpolated
+    // mesh, NOT the raw (20 Hz) server snapshot, so the world doesn't stutter.
+    const smoothCamTarget = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
+    let hasSmoothCamTarget = false;
 
     const spawnCharacter = (sessionId: string, username: string) => {
       if (characters.has(sessionId)) return;
@@ -497,6 +501,10 @@ export default function KilrunEngine({
           const pl = tpsRef.current.player;
           const cam = tpsRef.current.camera;
           view.root.scale.setScalar(pl.scale);
+          // Capture the smoothed ground position for the camera BEFORE the
+          // visual Y offset so camera height matches the old behavior.
+          smoothCamTarget.copy(view.root.position);
+          hasSmoothCamTarget = true;
           view.root.position.y += pl.offsetY;
           if (pl.hideWhenClose && cam.boomDistance < pl.hideDistance) {
             view.root.visible = false;
@@ -537,7 +545,8 @@ export default function KilrunEngine({
               followSharpness: cam.followSharpness + 8,
             }
           : cam;
-        updateFollowCamera(world.camera, targetPos, cameraYaw, cameraPitch, dt, aimCam);
+        const camFollow = hasSmoothCamTarget ? smoothCamTarget : targetPos;
+        updateFollowCamera(world.camera, camFollow, cameraYaw, cameraPitch, dt, aimCam);
       }
 
       if (!frozen) {

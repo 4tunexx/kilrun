@@ -154,6 +154,8 @@ export class CompetitiveRoom extends Room<RoomState> {
 
   onCreate(options: JoinOptions = {}) {
     this.setState(new RoomState());
+    // Match state stream to the sim tick (30 Hz) for smooth movement.
+    this.setPatchRate(TICK_DT_MS);
     const named = String((this as unknown as { roomName?: string }).roomName ?? '');
     this.state.modeTag =
       named === 'competitive_ranked' ? 'competitive_ranked' : 'competitive';

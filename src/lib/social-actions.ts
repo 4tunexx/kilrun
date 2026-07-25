@@ -1205,6 +1205,22 @@ export async function purchaseStoreItem(itemId: string) {
   const item = await prisma.storeItem.findUnique({ where: { id: itemId } });
   if (!item || !item.isAvailable) throw new Error('Item unavailable');
 
+  // Earned items (event / mission / achievement / badge rewards) are not buyable.
+  if (item.unlockType && item.unlockType !== 'purchase') {
+    const label =
+      item.unlockType === 'event'
+        ? 'an event reward'
+        : item.unlockType === 'mission'
+          ? 'a mission reward'
+          : item.unlockType === 'achievement'
+            ? 'an achievement reward'
+            : 'a badge reward';
+    return {
+      ok: false as const,
+      error: `This item is ${label}${item.unlockRef ? ` — ${item.unlockRef}` : ''}. It can't be purchased.`,
+    };
+  }
+
   // Skins / cosmetics are one-copy — don't let players buy duplicates.
   if (item.cosmeticSlot || item.bannerConfig || item.cosmeticConfig) {
     const owned = await prisma.inventoryItem.findFirst({
@@ -2235,6 +2251,86 @@ export async function adminDeleteStoreItem(id: string) {
   await requireStaff();
   await prisma.storeItem.delete({ where: { id } });
   return { ok: true };
+}
+
+/** Admin: full catalog including unavailable/hidden items. */
+export async function adminGetAllStoreItems() {
+  await requireStaff();
+  const items = await prisma.storeItem.findMany({
+    orderBy: [{ createdAt: 'desc' }],
+  });
+  const { resolveShopImageUrl } = await import('@/lib/shop-images');
+  return items.map((item) => ({
+    ...item,
+    imageUrl: resolveShopImageUrl(item.imageUrl),
+  }));
+}
+
+/** Inline quick-edit from the admin shop list (partial update). */
+export async function adminQuickUpdateStoreItem(
+  id: string,
+  patch: {
+    itemName?: string;
+    itemCategory?: string;
+    vpPrice?: number;
+    isAvailable?: boolean;
+    unlockType?: string | null;
+    unlockRef?: string | null;
+    eventEndsAt?: string | null;
+    promoted?: boolean;
+    promoBanner?: Record<string, unknown> | null;
+  }
+) {
+  await requireStaff();
+  const data: Prisma.StoreItemUpdateInput = {};
+  if (patch.itemName !== undefined) data.itemName = patch.itemName.trim();
+  if (patch.itemCategory !== undefined) data.itemCategory = patch.itemCategory;
+  if (patch.vpPrice !== undefined) data.vpPrice = Math.max(0, Math.round(patch.vpPrice));
+  if (patch.isAvailable !== undefined) data.isAvailable = patch.isAvailable;
+  if (patch.unlockType !== undefined) {
+    data.unlockType =
+      patch.unlockType && patch.unlockType !== 'purchase' ? patch.unlockType : null;
+  }
+  if (patch.unlockRef !== undefined) data.unlockRef = patch.unlockRef?.trim() || null;
+  if (patch.eventEndsAt !== undefined) {
+    data.eventEndsAt = patch.eventEndsAt ? new Date(patch.eventEndsAt) : null;
+  }
+  if (patch.promoted !== undefined) data.promoted = patch.promoted;
+  if (patch.promoBanner !== undefined) {
+    data.promoBanner = patch.promoBanner
+      ? (patch.promoBanner as Prisma.InputJsonValue)
+      : null;
+  }
+  const item = await prisma.storeItem.update({ where: { id }, data });
+  return { ok: true as const, item: { id: item.id } };
+}
+
+/** Home dashboard: promoted shop items (active event windows first). */
+export async function getPromotedStoreItems() {
+  try {
+    const now = new Date();
+    const items = await prisma.storeItem.findMany({
+      where: { promoted: true, isAvailable: true },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+    });
+    const { resolveShopImageUrl } = await import('@/lib/shop-images');
+    return items
+      .filter((i) => !i.eventEndsAt || new Date(i.eventEndsAt).getTime() > now.getTime())
+      .map((i) => ({
+        id: i.id,
+        itemName: i.itemName,
+        itemCategory: i.itemCategory,
+        vpPrice: i.vpPrice,
+        imageUrl: resolveShopImageUrl(i.imageUrl),
+        unlockType: i.unlockType,
+        unlockRef: i.unlockRef,
+        eventEndsAt: i.eventEndsAt,
+        promoBanner: i.promoBanner as Record<string, unknown> | null,
+      }));
+  } catch {
+    return [];
+  }
 }
 
 export async function adminCreateGuide(input: {

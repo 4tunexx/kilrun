@@ -161,6 +161,9 @@ export class DeathrunRoom extends Room<RoomState> {
 
   onCreate() {
     this.setState(new RoomState());
+    // Stream state at the sim rate (30 Hz) instead of Colyseus' 20 Hz default
+    // so clients get a steady position feed and movement doesn't stutter.
+    this.setPatchRate(TICK_DT_MS);
     this.state.modeTag = 'deathrun';
     // Soft lobby pad only — NEVER seed DEATHRUN_TRACK hazards here.
     // Those used to linger whenever loadCustomMap failed (non-host, late join, etc.)

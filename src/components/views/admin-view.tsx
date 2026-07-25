@@ -42,7 +42,6 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
-import { Checkbox } from '@/components/ui/checkbox';
 import { ImageUploadField } from '@/components/ui/image-upload-field';
 import { RequirementTypeSelect } from '@/components/views/admin/requirement-type-select';
 import { CosmeticsStudio } from '@/components/views/admin/cosmetics-studio';
@@ -55,6 +54,7 @@ import { AdminPremiumPanel } from '@/components/views/admin/admin-premium-panel'
 import { AdminRanksPanel } from '@/components/views/admin/admin-ranks-panel';
 import { AdminAnnouncementCarouselPanel } from '@/components/views/admin/admin-announcement-carousel-panel';
 import { AdminAssetBrowser } from '@/components/views/admin/admin-asset-browser';
+import { AdminShopItemsPanel } from '@/components/views/admin/admin-shop-items-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -66,7 +66,7 @@ import {
   adminBroadcastAnnouncement,
   adminClearFireSale,
   adminCreateGuide,
-  adminDeleteStoreItem,
+  adminGetAllStoreItems,
   adminListTickets,
   adminListUsers,
   adminSetBanned,
@@ -77,7 +77,6 @@ import {
   adminUpsertStoreItem,
 } from '@/lib/social-actions';
 import { AdminUserDetailSheet } from '@/components/views/admin/admin-user-detail-sheet';
-import { getStoreItems } from '@/lib/actions';
 import { broadcastSiteSettings } from '@/lib/site-branding-events';
 import {
   getSiteSettings,
@@ -97,15 +96,8 @@ import { adminListAuditLogs } from '@/lib/audit';
 import { syncClerkBrandingToKilrun } from '@/lib/clerk-branding';
 import { normalizeLandingSlides, type LandingHeroSlide } from '@/lib/cosmetics';
 import { ACCOUNT_ROLES } from '@/lib/roles';
-import { normalizeBannerConfig, skuFromName } from '@/lib/banner';
-import { BannerFill } from '@/components/banner-fill';
-import { StoreItemPreview } from '@/components/store-item-preview';
+import { skuFromName } from '@/lib/banner';
 import { getRoleTextColorClass } from '@/lib/role-colors';
-import {
-  formatFireSaleCountdown,
-  getEffectiveVpPrice,
-  isFireSaleActive,
-} from '@/lib/shop-catalog';
 import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -174,7 +166,7 @@ export default function AdminView({
 
   const [users, setUsers] = useState<Awaited<ReturnType<typeof adminListUsers>>>([]);
   const [tickets, setTickets] = useState<Awaited<ReturnType<typeof adminListTickets>>>([]);
-  const [items, setItems] = useState<Awaited<ReturnType<typeof getStoreItems>>>([]);
+  const [items, setItems] = useState<Awaited<ReturnType<typeof adminGetAllStoreItems>>>([]);
   const [missions, setMissions] = useState<Awaited<ReturnType<typeof adminListMissionTemplates>>>([]);
   const [achievements, setAchievements] = useState<Awaited<ReturnType<typeof adminListAchievements>>>([]);
   const [badges, setBadges] = useState<Awaited<ReturnType<typeof adminListBadges>>>([]);
@@ -293,7 +285,7 @@ export default function AdminView({
       const [u, t, store, settings, m, a, b, logs] = await Promise.all([
         adminListUsers(200),
         adminListTickets(ticketStatus),
-        getStoreItems(),
+        adminGetAllStoreItems(),
         getSiteSettings(),
         adminListMissionTemplates(),
         adminListAchievements(),
@@ -2200,112 +2192,17 @@ export default function AdminView({
               </CardContent>
             </Card>
 
-            <div className="space-y-2">
-              {items.map((item) => {
-                const banner = item.bannerConfig
-                  ? normalizeBannerConfig(item.bannerConfig)
-                  : null;
-                const onFire = isFireSaleActive(item);
-                const salePrice = getEffectiveVpPrice(item);
-                const checked = fireSaleSelected.includes(item.id);
-                return (
-                  <Card
-                    key={item.id}
-                    className={cn(
-                      'bg-slate-800/40 border-slate-700/30',
-                      onFire &&
-                        'border-orange-500/60 shadow-[0_0_0_1px_rgba(249,115,22,0.25)]'
-                    )}
-                  >
-                    <CardContent className="py-3 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <Checkbox
-                          checked={checked}
-                          onCheckedChange={(v) => {
-                            setFireSaleSelected((prev) =>
-                              v
-                                ? [...prev, item.id]
-                                : prev.filter((id) => id !== item.id)
-                            );
-                          }}
-                          aria-label={`Select ${item.itemName}`}
-                        />
-                        {banner ? (
-                          <BannerFill
-                            banner={banner}
-                            className="w-12 h-8 rounded shrink-0"
-                          />
-                        ) : (
-                          <div className="relative w-12 h-12 rounded shrink-0 overflow-hidden bg-slate-900">
-                            <StoreItemPreview item={item} viewer={viewer} />
-                          </div>
-                        )}
-                        <div className="min-w-0">
-                          <p className="font-semibold truncate flex items-center gap-1.5 flex-wrap">
-                            {item.itemName}
-                            {item.cosmeticSlot && (
-                              <Badge
-                                variant="outline"
-                                className="capitalize text-[10px]"
-                              >
-                                {item.cosmeticSlot}
-                              </Badge>
-                            )}
-                            {onFire && (
-                              <Badge className="bg-orange-600 text-[10px] gap-1">
-                                <Flame className="h-3 w-3" />
-                                −{item.fireSalePercent}%
-                              </Badge>
-                            )}
-                          </p>
-                          <p className="text-xs text-slate-400 truncate">
-                            {item.itemSku} ·{' '}
-                            {onFire ? (
-                              <>
-                                <span className="text-orange-400 font-semibold">
-                                  {salePrice} VP
-                                </span>{' '}
-                                <span className="line-through">{item.vpPrice}</span>
-                              </>
-                            ) : (
-                              <>{item.vpPrice} VP</>
-                            )}{' '}
-                            · {item.itemCategory}
-                            {onFire && item.fireSaleEndsAt ? (
-                              <>
-                                {' '}
-                                · ends in{' '}
-                                {formatFireSaleCountdown(item.fireSaleEndsAt)}
-                              </>
-                            ) : null}
-                          </p>
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        disabled={busyKey === `delete-item-${item.id}`}
-                        onClick={() =>
-                          runAction(`delete-item-${item.id}`, async () => {
-                            await adminDeleteStoreItem(item.id);
-                            setFireSaleSelected((prev) =>
-                              prev.filter((id) => id !== item.id)
-                            );
-                            toast({ title: `Deleted ${item.itemName}` });
-                            await reload();
-                          })
-                        }
-                      >
-                        {busyKey === `delete-item-${item.id}` && (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
-                        )}
-                        Delete
-                      </Button>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
+            <AdminShopItemsPanel
+              items={items}
+              viewer={viewer}
+              fireSaleSelected={fireSaleSelected}
+              onToggleFireSale={(id, checked) =>
+                setFireSaleSelected((prev) =>
+                  checked ? [...prev, id] : prev.filter((x) => x !== id)
+                )
+              }
+              onChanged={reload}
+            />
           </TabsContent>
         )}
 

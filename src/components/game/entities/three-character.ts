@@ -270,9 +270,12 @@ export class ThreeCharacter {
     const lookYaw =
       typeof aimYaw === 'number' && Number.isFinite(aimYaw) ? aimYaw : this.facing;
 
-    let wantYaw = this.facing;
+    // Match Map Editor Play Test:
+    // - mouse only orbits the camera while idle
+    // - body faces camera only while aiming (RMB / look-stick)
+    // - otherwise body faces walk direction (or keeps last yaw when standing still)
+    let wantYaw = this.isLocal ? this.root.rotation.y : this.facing;
     if (aimHeld) {
-      // Aim focus: body locked to camera — walk L/R/F/B without turning
       wantYaw = lookYaw;
     } else if (moveWish && Math.hypot(moveWish.fwd, moveWish.strafe) > 0.12) {
       wantYaw = computeLocomotionFacingYaw(
@@ -281,8 +284,6 @@ export class ThreeCharacter {
         moveWish.strafe,
         this.root.rotation.y
       );
-    } else if (this.isLocal && typeof lookYaw === 'number') {
-      if (this.speed < 0.35) wantYaw = lookYaw;
     }
 
     this.root.rotation.y = stepBodyYaw(

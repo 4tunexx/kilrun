@@ -51,6 +51,7 @@ import {
   type SkinPrimitive,
 } from '@/lib/player-skins';
 import { captureSkinPartThumbnail } from '@/components/game/editor/skin-attachments';
+import { PackSkinListingPanel } from '@/components/views/admin/pack-skin-listing-panel';
 import { useToast } from '@/hooks/use-toast';
 
 function ShopMetaFields({
@@ -1023,7 +1024,23 @@ export function CosmeticsStudio({
             <NicknamePanel onCreated={onCreated} viewerUsername={viewerUsername} />
           </TabsContent>
           <TabsContent value="skins">
-            <SkinPanel onCreated={onCreated} />
+            <Tabs defaultValue="pack">
+              <TabsList className="mb-4 bg-slate-900/60">
+                <TabsTrigger value="pack">Character skins</TabsTrigger>
+                <TabsTrigger value="primitive">Primitive (legacy)</TabsTrigger>
+              </TabsList>
+              <TabsContent value="pack">
+                <p className="text-xs text-slate-400 mb-3">
+                  List <span className="text-slate-200">activated</span> skins from the Assets tab:
+                  set a VP price or mark them as event / mission / achievement / badge rewards,
+                  add a countdown, and promote them on the main dashboard.
+                </p>
+                <PackSkinListingPanel onCreated={onCreated} />
+              </TabsContent>
+              <TabsContent value="primitive">
+                <SkinPanel onCreated={onCreated} />
+              </TabsContent>
+            </Tabs>
           </TabsContent>
         </Tabs>
       </CardContent>

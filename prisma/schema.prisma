@@ -169,6 +169,19 @@ model StoreItem {
   fireSalePercent Int @default(0)
   /// When the fire sale ends (UTC). Ignored if percent is 0.
   fireSaleEndsAt  DateTime?
+
+  /// How players obtain it: null/'purchase' = buy with VP;
+  /// 'event' | 'mission' | 'achievement' | 'badge' = earned, not buyable.
+  unlockType String?
+  /// For earned unlocks — which event/mission/achievement/badge grants it (shown to players).
+  unlockRef String?
+  /// Optional event window end (live countdown on shop card + dashboard promo).
+  eventEndsAt DateTime?
+  /// Feature on the home dashboard with a custom promo banner.
+  promoted Boolean?
+  /// Dashboard promo banner: { headline?, colors?, angle? } (BannerConfig-compatible).
+  promoBanner Json?
+
   createdAt DateTime @default(now())
 }
 

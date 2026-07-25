@@ -181,6 +181,8 @@ export class HordeRoom extends Room<RoomState> {
 
   onCreate() {
     this.setState(new RoomState());
+    // Match state stream to the sim tick (30 Hz) for smooth movement.
+    this.setPatchRate(TICK_DT_MS);
     this.state.modeTag = 'horde';
     // Small default arena until MAIN map loads
     this.state.platforms.push(

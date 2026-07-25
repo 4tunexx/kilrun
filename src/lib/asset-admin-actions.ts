@@ -3,7 +3,9 @@
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
+import { Prisma } from '@/generated/prisma';
 import type { AssetCategory, AssetRarity } from '@/lib/asset-registry';
+import { classifyAssetFilename } from '@/lib/asset-registry';
 
 async function requireAdmin() {
   const session = await auth();
@@ -147,13 +149,37 @@ export async function adminBulkUpdateAssets(
   return { updated: result.count };
 }
 
-export async function adminPublishAssetToShop(assetId: string, priceOverride?: number) {
+export interface AssetShopListingOptions {
+  price?: number;
+  itemName?: string;
+  /** null/'purchase' = buyable; event | mission | achievement | badge = earned. */
+  unlockType?: string | null;
+  /** Which event/mission/achievement/badge grants it (player-facing). */
+  unlockRef?: string | null;
+  /** Event countdown end (ISO string). */
+  eventEndsAt?: string | null;
+  /** Feature on the home dashboard. */
+  promoted?: boolean;
+  /** Dashboard promo banner: { headline?, colors?, angle? }. */
+  promoBanner?: Record<string, unknown> | null;
+}
+
+export async function adminPublishAssetToShop(
+  assetId: string,
+  priceOverride?: number,
+  options: AssetShopListingOptions = {}
+) {
   await requireAdmin();
   const asset = await prisma.asset.findUnique({ where: { assetId } });
   if (!asset) throw new Error('Asset not found');
 
   const sku = `asset_${asset.assetId}`;
-  const vpPrice = typeof priceOverride === 'number' ? priceOverride : asset.price;
+  const vpPrice =
+    typeof options.price === 'number'
+      ? options.price
+      : typeof priceOverride === 'number'
+        ? priceOverride
+        : asset.price;
   const skinSlot = asset.equipSlot.replace(/^skin_/, '') || 'addon';
   const cosmeticConfig = {
     kind: 'player_skin',
@@ -179,10 +205,23 @@ export async function adminPublishAssetToShop(assetId: string, priceOverride?: n
     thumbnail: asset.thumbnailUrl ?? asset.previewUrl,
   };
 
+  const itemName = options.itemName?.trim() || asset.displayName;
+  const unlockType =
+    options.unlockType && options.unlockType !== 'purchase' ? options.unlockType : null;
+  const listingMeta = {
+    unlockType,
+    unlockRef: unlockType ? options.unlockRef?.trim() || null : null,
+    eventEndsAt: options.eventEndsAt ? new Date(options.eventEndsAt) : null,
+    promoted: options.promoted ?? false,
+    promoBanner: options.promoBanner
+      ? (options.promoBanner as Prisma.InputJsonValue)
+      : null,
+  };
+
   await prisma.storeItem.upsert({
     where: { itemSku: sku },
     create: {
-      itemName: asset.displayName,
+      itemName,
       itemCategory: asset.category === 'fullbody' ? 'Skins' : 'Cosmetics',
       itemSku: sku,
       vpPrice,
@@ -190,14 +229,16 @@ export async function adminPublishAssetToShop(assetId: string, priceOverride?: n
       isAvailable: true,
       cosmeticSlot: asset.equipSlot,
       cosmeticConfig,
+      ...listingMeta,
     },
     update: {
-      itemName: asset.displayName,
+      itemName,
       vpPrice,
       imageUrl: asset.thumbnailUrl ?? asset.previewUrl ?? undefined,
       isAvailable: true,
       cosmeticSlot: asset.equipSlot,
       cosmeticConfig,
+      ...listingMeta,
     },
   });
 
@@ -221,6 +262,67 @@ export async function adminRemoveAssetFromShop(assetId: string) {
     data: { shopVisible: false },
   });
   return { ok: true };
+}
+
+/**
+ * Upload a new skin asset (GLB/FBX as data URL) into the registry.
+ * The asset starts disabled — activate it in the Assets tab, then list it
+ * via Shop → Cosmetics Studio → Skins.
+ */
+export async function adminUploadAsset(input: {
+  fileName: string;
+  modelDataUrl: string;
+  thumbnailDataUrl?: string | null;
+  displayName?: string;
+  category?: string;
+  equipSlot?: string;
+  rarity?: string;
+  price?: number;
+}) {
+  await requireAdmin();
+
+  const { uploadModelGlb } = await import('@/lib/model-asset-upload');
+  const modelPath = await uploadModelGlb(input.modelDataUrl);
+
+  let thumbnailUrl: string | null = null;
+  if (input.thumbnailDataUrl?.startsWith('data:image/')) {
+    try {
+      const { persistSiteImage } = await import('@/lib/site-asset-upload');
+      thumbnailUrl = await persistSiteImage(input.thumbnailDataUrl, 'misc');
+    } catch {
+      thumbnailUrl = null;
+    }
+  }
+
+  const classified = classifyAssetFilename(input.fileName);
+  const category = input.category || classified?.category || 'addon';
+  const equipSlot = input.equipSlot || classified?.equipSlot || 'skin_addon';
+  const base = input.fileName.replace(/\.[^.]+$/, '');
+  const assetId = `upload_${base.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${Date.now().toString(36)}`;
+  const displayName = input.displayName?.trim() || base.replace(/[_-]+/g, ' ');
+
+  const row = await prisma.asset.create({
+    data: {
+      assetId,
+      name: base,
+      displayName,
+      category,
+      rarity: input.rarity ?? 'common',
+      price: input.price ?? 0,
+      currency: 'vp',
+      modelPath,
+      texturePath: '',
+      thumbnailUrl,
+      enabled: false,
+      hidden: false,
+      featured: false,
+      shopVisible: false,
+      equipSlot,
+      tags: ['uploaded'],
+      sortOrder: 999,
+    },
+  });
+  return { ok: true as const, assetId: row.assetId };
 }
 
 /** Public/editor: list enabled assets (falls back empty if table missing). */
