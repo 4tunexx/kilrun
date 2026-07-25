@@ -680,19 +680,31 @@ export class DeathrunRoom extends Room<RoomState> {
     const range = trapper.weaponRange > 0 ? trapper.weaponRange : 14;
     const damage = trapper.weaponDamage > 0 ? trapper.weaponDamage : 25;
     const cone = trapper.weaponConeRadians > 0 ? trapper.weaponConeRadians : 0.18;
+    // Pick the CLOSEST target inside the cone, not just the first one found
+    // in Map iteration order — otherwise a farther runner could "steal" a
+    // hit that should've landed on someone standing closer to the trapper.
+    let closest: PlayerState | null = null;
+    let closestDistSq = Infinity;
     for (const target of this.state.players.values()) {
       if (target.role !== 'runner' || !target.isAlive || target.hasFinished) continue;
       if (
-        isHitByShot(trapper.x, trapper.y, trapper.aimAngle, target.x, target.y, range, cone, {
+        !isHitByShot(trapper.x, trapper.y, trapper.aimAngle, target.x, target.y, range, cone, {
           shooterZ: trapper.z,
           aimPitch: trapper.aimPitch,
           targetZ: target.z,
         })
       ) {
-        this.damagePlayer(target, damage);
-        break;
+        continue;
+      }
+      const dx = target.x - trapper.x;
+      const dy = target.y - trapper.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < closestDistSq) {
+        closestDistSq = distSq;
+        closest = target;
       }
     }
+    if (closest) this.damagePlayer(closest, damage);
   }
 
   private respawnAtCheckpoint(player: PlayerState) {

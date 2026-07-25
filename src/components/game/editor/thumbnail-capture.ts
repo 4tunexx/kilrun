@@ -56,40 +56,30 @@ async function waitForTextures(root: THREE.Object3D, timeoutMs = 4000): Promise<
 }
 
 /**
- * Renders a single, clean PNG icon straight from a skin's real GLB/FBX model
- * — same geometry/materials the "3D Preview" panel shows — on a fully
- * transparent background, framed and lit like a shop/inventory icon.
- *
- * This replaces the old approach of using a raw shared texture atlas (e.g.
- * `Body_003.png`) as the thumbnail, which looked flat/wrong compared to the
- * actual model.
- *
- * Must run in the browser (needs WebGL); safe to call from a client
- * component such as the admin Asset Browser.
+ * Reusable capture session — creates ONE WebGL context/scene and reuses it
+ * for many models in a row (swap the model, re-render, dispose only that
+ * model's geometry/materials). Creating a fresh WebGLRenderer per item is
+ * the single biggest cost when batch-regenerating hundreds of thumbnails,
+ * so batch callers should use this instead of calling
+ * `captureModelThumbnail` in a loop.
  */
-export async function captureModelThumbnail(
-  modelPath: string,
-  options: ThumbnailCaptureOptions = {}
-): Promise<string> {
-  const size = options.size ?? 512;
-  const padding = options.padding ?? 0.14;
+export interface ThumbnailCaptureSession {
+  capture(modelPath: string, options?: ThumbnailCaptureOptions): Promise<string>;
+  dispose(): void;
+}
 
+export function createThumbnailCaptureSession(): ThumbnailCaptureSession {
   const scene = new THREE.Scene();
-  // Intentionally no scene.background — renderer alpha shows through.
-
   const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 100);
-
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     alpha: true,
     preserveDrawingBuffer: true,
   });
   renderer.setPixelRatio(1);
-  renderer.setSize(size, size, false);
   renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-  // Soft studio 3-point lighting so parts read clearly as flat icons.
   const key = new THREE.DirectionalLight(0xffffff, 2.2);
   key.position.set(2.3, 3.1, 2.6);
   const fill = new THREE.DirectionalLight(0xffffff, 0.85);
@@ -99,58 +89,102 @@ export async function captureModelThumbnail(
   const hemi = new THREE.HemisphereLight(0xffffff, 0x394150, 0.95);
   scene.add(key, fill, rim, hemi);
 
-  try {
-    const { root } = await loadAnimatedPrefab(modelPath);
-    scene.add(root);
-    // Draw the bind pose (no mixer.update) so weapons/parts don't render
-    // mid-swing from whatever the first animation frame happens to be.
-
-    // Ensure diffuse/base-color maps read as sRGB regardless of loader
-    // defaults (FBX in particular doesn't always set this itself).
+  function disposeModel(root: THREE.Object3D) {
+    scene.remove(root);
     root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
-      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-      if (!mat) return;
-      for (const m of Array.isArray(mat) ? mat : [mat]) {
-        const std = m as THREE.MeshStandardMaterial;
-        if (std.map) std.map.colorSpace = THREE.SRGBColorSpace;
-        if (std.emissiveMap) std.emissiveMap.colorSpace = THREE.SRGBColorSpace;
-      }
+      if (mesh.geometry) mesh.geometry.dispose();
+      const mat = mesh.material;
+      if (mat) (Array.isArray(mat) ? mat : [mat]).forEach((m) => m.dispose());
     });
+  }
 
-    await waitForTextures(root);
+  async function capture(modelPath: string, options: ThumbnailCaptureOptions = {}): Promise<string> {
+    const size = options.size ?? 512;
+    const padding = options.padding ?? 0.14;
+    renderer.setSize(size, size, false);
 
-    const box = new THREE.Box3().setFromObject(root);
-    const sizeVec = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    const radius = Math.max(sizeVec.length() * 0.5, 0.05);
+    const { root } = await loadAnimatedPrefab(modelPath);
+    scene.add(root);
+    try {
+      root.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+        if (!mat) return;
+        for (const m of Array.isArray(mat) ? mat : [mat]) {
+          const std = m as THREE.MeshStandardMaterial;
+          if (std.map) std.map.colorSpace = THREE.SRGBColorSpace;
+          if (std.emissiveMap) std.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+        }
+      });
 
-    camera.aspect = 1;
-    camera.updateProjectionMatrix();
+      // Cheap after the first hit on any given URL/atlas — loadAnimatedPrefab
+      // and the underlying texture cache mean repeat/shared textures (e.g.
+      // the shared pack atlas) resolve instantly on later calls.
+      await waitForTextures(root);
 
-    // 3/4 angle, matching the framing used by the live 3D preview panel.
-    const dir = new THREE.Vector3(0.85, 0.62, 1).normalize();
-    const fitDistance = radius / Math.sin((camera.fov * Math.PI) / 360);
-    const distance = fitDistance * (1 + padding);
-    camera.position.copy(center).add(dir.multiplyScalar(distance));
-    camera.lookAt(center);
+      const box = new THREE.Box3().setFromObject(root);
+      const sizeVec = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const radius = Math.max(sizeVec.length() * 0.5, 0.05);
 
-    // A couple of warm-up frames — first render after textures resolve is
-    // sometimes still the upload frame on slower GPUs/software renderers.
-    renderer.render(scene, camera);
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    renderer.render(scene, camera);
+      camera.aspect = 1;
+      camera.updateProjectionMatrix();
+      const dir = new THREE.Vector3(0.85, 0.62, 1).normalize();
+      const fitDistance = radius / Math.sin((camera.fov * Math.PI) / 360);
+      const distance = fitDistance * (1 + padding);
+      camera.position.copy(center).add(dir.multiplyScalar(distance));
+      camera.lookAt(center);
 
-    return renderer.domElement.toDataURL('image/png');
+      renderer.render(scene, camera);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      renderer.render(scene, camera);
+      return renderer.domElement.toDataURL('image/png');
+    } finally {
+      disposeModel(root);
+    }
+  }
+
+  return {
+    capture,
+    dispose() {
+      renderer.dispose();
+      // dispose() alone frees three.js-side memory but does NOT return the
+      // underlying WebGL context to the browser — without this, batches of
+      // thumbnail captures leak real GPU contexts. Past the browser's cap
+      // (~16), it evicts the OLDEST live context to make room, which can be
+      // an unrelated tab's game renderer — exactly what caused the
+      // black/bodyless player after running thumbnail regeneration.
+      renderer.forceContextLoss();
+    },
+  };
+}
+
+/**
+ * Renders a single, clean PNG icon straight from a skin's real GLB/FBX model
+ * — same geometry/materials the "3D Preview" panel shows — on a fully
+ * transparent background, framed and lit like a shop/inventory icon.
+ *
+ * This replaces the old approach of using a raw shared texture atlas (e.g.
+ * `Body_003.png`) as the thumbnail, which looked flat/wrong compared to the
+ * actual model.
+ *
+ * For a single one-off capture. Batch callers (regenerating many skins in a
+ * row) should use `createThumbnailCaptureSession` instead — it reuses one
+ * WebGL context across every item rather than paying GPU context setup cost
+ * per model, which is the main thing that makes large batches slow.
+ *
+ * Must run in the browser (needs WebGL); safe to call from a client
+ * component such as the admin Asset Browser.
+ */
+export async function captureModelThumbnail(
+  modelPath: string,
+  options: ThumbnailCaptureOptions = {}
+): Promise<string> {
+  const session = createThumbnailCaptureSession();
+  try {
+    return await session.capture(modelPath, options);
   } finally {
-    scene.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if ((mesh as THREE.Mesh).geometry) mesh.geometry.dispose();
-      const mat = (mesh as THREE.Mesh).material;
-      if (mat) {
-        (Array.isArray(mat) ? mat : [mat]).forEach((m) => m.dispose());
-      }
-    });
-    renderer.dispose();
+    session.dispose();
   }
 }
