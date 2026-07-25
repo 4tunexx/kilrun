@@ -15,7 +15,11 @@ export function compactSkinsForMatch(attachments: SkinAttachment[]): SkinAttachm
   return attachments.slice(0, 16).map((att) => {
     const next: SkinAttachment = { ...att };
     if (next.customModelUrl?.startsWith('data:')) delete next.customModelUrl;
-    if (next.textureUrl?.startsWith('data:')) delete next.textureUrl;
+    if (next.textureUrl?.startsWith('data:')) {
+  // Data URLs can't be sent over the network; fall back to shared pack atlas
+  // so live matches render textured skins instead of black.
+  next.textureUrl = '/game/skins/Textures.png';
+}
     if (next.sculpt && next.sculpt.positions.length > 24_000) delete next.sculpt;
     if (next.bonded?.length) {
       next.bonded = next.bonded.slice(0, 12).map((b) => {
