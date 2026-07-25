@@ -23,7 +23,7 @@ import {
   adminUploadAsset,
 } from '@/lib/asset-admin-actions';
 import { loadAnimatedPrefab } from '@/components/game/editor/model-scan';
-import { captureModelThumbnail } from '@/components/game/editor/thumbnail-capture';
+import { captureModelThumbnail, createThumbnailCaptureSession } from '@/components/game/editor/thumbnail-capture';
 import {
   EDITOR_CHARACTER_CATEGORIES,
   loadCharacterAssetManifest,
@@ -417,23 +417,55 @@ export function AdminAssetBrowser() {
     }
   };
 
-  /** Bulk-replace thumbnails for a specific list of assets, one at a time. */
+  /** Bulk-replace thumbnails for a specific list of assets, fast: one shared
+   * WebGL context for the whole batch (instead of one per item), and up to
+   * 4 uploads in flight at once instead of waiting on each round-trip. */
   const regenerateThumbnailsFor = async (targets: GridAsset[]) => {
     const withModel = targets.filter((a) => a.modelPath);
     if (withModel.length === 0) return;
     setRegenAll({ done: 0, total: withModel.length });
+
+    const session = createThumbnailCaptureSession();
+    const UPLOAD_CONCURRENCY = 4;
+    let inFlight = 0;
+    let done = 0;
     let failed = 0;
-    for (let i = 0; i < withModel.length; i++) {
-      const asset = withModel[i];
+    const pending: Promise<void>[] = [];
+
+    const upload = async (asset: GridAsset, dataUrl: string) => {
+      inFlight++;
       try {
-        const dataUrl = await captureModelThumbnail(asset.modelPath);
         await adminSetAssetThumbnail(asset.assetId, dataUrl);
       } catch (e) {
         failed++;
-        console.warn('[thumbnail regen]', asset.assetId, e);
+        console.warn('[thumbnail regen upload]', asset.assetId, e);
+      } finally {
+        inFlight--;
+        done++;
+        setRegenAll({ done, total: withModel.length });
       }
-      setRegenAll({ done: i + 1, total: withModel.length });
+    };
+
+    for (const asset of withModel) {
+      let dataUrl: string | null = null;
+      try {
+        dataUrl = await session.capture(asset.modelPath);
+      } catch (e) {
+        failed++;
+        done++;
+        setRegenAll({ done, total: withModel.length });
+        console.warn('[thumbnail regen capture]', asset.assetId, e);
+      }
+      if (dataUrl) {
+        pending.push(upload(asset, dataUrl));
+      }
+      while (inFlight >= UPLOAD_CONCURRENCY) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
     }
+    await Promise.all(pending);
+    session.dispose();
+
     toast({
       title: 'Thumbnail regeneration finished',
       description: failed
@@ -466,6 +498,9 @@ export function AdminAssetBrowser() {
       return next;
     });
   };
+
+  const selectAllShown = () => setSelectedIds(new Set(items.map((a) => a.assetId)));
+  const clearSelection = () => setSelectedIds(new Set());
 
   const runBulk = async (changes: Parameters<typeof adminBulkUpdateAssets>[1]) => {
     if (!selectedIds.size || source !== 'db') return;
@@ -569,6 +604,12 @@ export function AdminAssetBrowser() {
 
       {source === 'db' && (
         <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={selectAllShown} disabled={!items.length}>
+            Select all ({items.length})
+          </Button>
+          <Button size="sm" variant="ghost" onClick={clearSelection} disabled={!selectedIds.size}>
+            Clear
+          </Button>
           <Button size="sm" variant="secondary" disabled={busy || !selectedIds.size} onClick={() => void runBulk({ enabled: true })}>
             Enable
           </Button>
