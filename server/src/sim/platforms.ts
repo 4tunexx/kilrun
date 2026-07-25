@@ -128,16 +128,32 @@ export function findSupportPlatform(
 /**
  * Push the player out of tall solid volumes (walls / thick props).
  * Thin pads (height ≤ 0.35) are top-only and skip side collision.
+ *
+ * Also reports the normal of the last wall pushed against (for wall-slide /
+ * wall-jump) — good enough for the narrow corridors this is aimed at; if a
+ * player is wedged between two walls in the same tick, whichever is
+ * processed last wins, same tradeoff most simple AABB pushers make.
  */
+export interface SolidCollisionResult {
+  x: number;
+  y: number;
+  touchingWall: boolean;
+  wallNormalX: number;
+  wallNormalY: number;
+}
+
 export function resolveSolidCollisions(
   pos: { x: number; y: number; z: number },
   platforms: Iterable<PlatformState>,
   radius = PLAYER_RADIUS,
   height = PLAYER_HEIGHT
-): { x: number; y: number } {
+): SolidCollisionResult {
   let { x, y } = pos;
   const playerBottom = pos.z;
   const playerTop = pos.z + height;
+  let touchingWall = false;
+  let wallNormalX = 0;
+  let wallNormalY = 0;
 
   for (const platform of platforms) {
     const boxH = platform.height > 0 ? platform.height : 0.2;
@@ -160,12 +176,19 @@ export function resolveSolidCollisions(
     // Push out along the shallowest axis
     const pushX = halfW - Math.abs(dx);
     const pushY = halfD - Math.abs(dy);
+    touchingWall = true;
     if (pushX < pushY) {
-      x = platform.x + Math.sign(dx || 1) * halfW;
+      const sign = Math.sign(dx || 1);
+      x = platform.x + sign * halfW;
+      wallNormalX = sign;
+      wallNormalY = 0;
     } else {
-      y = platform.y + Math.sign(dy || 1) * halfD;
+      const sign = Math.sign(dy || 1);
+      y = platform.y + sign * halfD;
+      wallNormalX = 0;
+      wallNormalY = sign;
     }
   }
 
-  return { x, y };
+  return { x, y, touchingWall, wallNormalX, wallNormalY };
 }

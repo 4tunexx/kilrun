@@ -24,6 +24,12 @@ import {
   SPRINT_MULTIPLIER,
   TRAPPER_MOVE_SPEED,
   VOID_Z,
+  WALL_JUMP_ENABLED_DEFAULT,
+  WALL_JUMP_HORIZ_VEL,
+  WALL_JUMP_LOCKOUT_MS,
+  WALL_JUMP_SAME_WALL_COOLDOWN_MS,
+  WALL_JUMP_VERT_VEL,
+  WALL_SLIDE_GRAV_MULT,
   WORLD_HEIGHT,
   WORLD_WIDTH,
 } from './constants.js';
@@ -73,6 +79,18 @@ export interface PlayerSimScratch {
   exhausted: boolean;
   /** Foundry jump_count: 0 ground, 1 after first/walk-off, 2 after double. */
   jumpCount: number;
+  /** Wall normal touched THIS tick's collision pass (0,0 if not touching). Read
+   * next tick when deciding whether a jump press should wall-jump. */
+  touchingWallX: number;
+  touchingWallY: number;
+  /** Counts down after a wall jump; while active, wish input doesn't override
+   * the outward kick velocity (so holding into the wall doesn't cancel it). */
+  wallJumpLockoutMs: number;
+  /** Stops chain-jumping the SAME wall in place for infinite height; a
+   * different wall (or same wall after this expires) is unaffected. */
+  wallJumpCooldownMs: number;
+  wallJumpCooldownNormalX: number;
+  wallJumpCooldownNormalY: number;
 }
 
 export function createSimScratch(): PlayerSimScratch {
@@ -84,6 +102,12 @@ export function createSimScratch(): PlayerSimScratch {
     wasJumpHeld: false,
     exhausted: false,
     jumpCount: 0,
+    touchingWallX: 0,
+    touchingWallY: 0,
+    wallJumpLockoutMs: 0,
+    wallJumpCooldownMs: 0,
+    wallJumpCooldownNormalX: 0,
+    wallJumpCooldownNormalY: 0,
   };
 }
 
@@ -115,6 +139,10 @@ export interface MovementPhysicsOpts {
   crouchMult?: number;
   maxFallSpeed?: number;
   apexGravMult?: number;
+  wallJumpEnabled?: boolean;
+  wallJumpHorizVel?: number;
+  wallJumpVertVel?: number;
+  wallSlideGravMult?: number;
 }
 
 /**
@@ -145,6 +173,10 @@ export function applyMovement(
   const effSprintMult = physOpts?.sprintMult ?? SPRINT_MULTIPLIER;
   const effCrouchMult = physOpts?.crouchMult ?? CROUCH_SPEED_MULTIPLIER;
   const effMaxFall = physOpts?.maxFallSpeed ?? MAX_FALL_SPEED;
+  const effWallJumpEnabled = physOpts?.wallJumpEnabled ?? WALL_JUMP_ENABLED_DEFAULT;
+  const effWallJumpHorizVel = physOpts?.wallJumpHorizVel ?? WALL_JUMP_HORIZ_VEL;
+  const effWallJumpVertVel = physOpts?.wallJumpVertVel ?? WALL_JUMP_VERT_VEL;
+  const effWallSlideGravMult = physOpts?.wallSlideGravMult ?? WALL_SLIDE_GRAV_MULT;
 
   player.cameraYaw = input.cameraYaw;
   player.aimAngle = input.aimAngle;
@@ -233,6 +265,9 @@ export function applyMovement(
   }
 
   // Foundry jump: buffer for ground/coyote; immediate double jump when jumpCount === 1.
+  // Wall-jump gets first say when airborne and touching a wall — takes
+  // priority over the double-jump slot but doesn't consume it (jumpCount
+  // resets to 1 after a wall jump, so a normal double jump is still available).
   const jumpEdge = input.jumpPressed && !scratch.wasJumpHeld;
   const jumpReleased = !input.jumpPressed && scratch.wasJumpHeld;
   if (jumpReleased && player.vz > 0 && scratch.jumpCount === 1) {
@@ -241,8 +276,28 @@ export function applyMovement(
   }
   scratch.wasJumpHeld = input.jumpPressed;
 
+  const wasTouchingWall = scratch.touchingWallX !== 0 || scratch.touchingWallY !== 0;
+  const onCooldownWall =
+    scratch.wallJumpCooldownMs > 0 &&
+    scratch.wallJumpCooldownNormalX === scratch.touchingWallX &&
+    scratch.wallJumpCooldownNormalY === scratch.touchingWallY;
+  const canWallJump = effWallJumpEnabled && !grounded && wasTouchingWall && !onCooldownWall;
+
   if (jumpEdge) {
-    if (scratch.jumpCount === 0 || scratch.jumpCount === 2) {
+    if (canWallJump) {
+      player.vz = effWallJumpVertVel;
+      scratch.velX = scratch.touchingWallX * effWallJumpHorizVel;
+      scratch.velY = scratch.touchingWallY * effWallJumpHorizVel;
+      scratch.wallJumpLockoutMs = WALL_JUMP_LOCKOUT_MS;
+      scratch.wallJumpCooldownMs = WALL_JUMP_SAME_WALL_COOLDOWN_MS;
+      scratch.wallJumpCooldownNormalX = scratch.touchingWallX;
+      scratch.wallJumpCooldownNormalY = scratch.touchingWallY;
+      player.isGrounded = false;
+      grounded = false;
+      scratch.coyoteMs = 0;
+      scratch.jumpBufferMs = 0;
+      scratch.jumpCount = 1;
+    } else if (scratch.jumpCount === 0 || scratch.jumpCount === 2) {
       scratch.jumpBufferMs = effJumpBufferMs;
     } else if (
       scratch.jumpCount === 1 &&
@@ -259,6 +314,8 @@ export function applyMovement(
   } else {
     scratch.jumpBufferMs = Math.max(0, scratch.jumpBufferMs - dtSeconds * 1000);
   }
+  scratch.wallJumpLockoutMs = Math.max(0, scratch.wallJumpLockoutMs - dtSeconds * 1000);
+  scratch.wallJumpCooldownMs = Math.max(0, scratch.wallJumpCooldownMs - dtSeconds * 1000);
 
   if (
     scratch.coyoteMs > 0 &&
@@ -296,7 +353,7 @@ export function applyMovement(
       scratch.velX *= (speed - drop) / speed;
       scratch.velY *= (speed - drop) / speed;
     }
-  } else {
+  } else if (scratch.wallJumpLockoutMs <= 0) {
     scratch.velX = wishX * maxSpeed;
     scratch.velY = wishY * maxSpeed;
   }
@@ -332,10 +389,18 @@ export function applyMovement(
   player.y = clamp(pushed.y, bounds.minY + PLAYER_RADIUS, bounds.maxY - PLAYER_RADIUS);
   if (Math.abs(player.x - beforePushX) > 1e-5) scratch.velX = 0;
   if (Math.abs(player.y - beforePushY) > 1e-5) scratch.velY = 0;
+  scratch.touchingWallX = pushed.touchingWall ? pushed.wallNormalX : 0;
+  scratch.touchingWallY = pushed.touchingWall ? pushed.wallNormalY : 0;
 
   // Vertical — constant Foundry gravity
   if (!player.isGrounded) {
-    player.vz = Math.max(-effMaxFall, player.vz - effGravity * dtSeconds);
+    const slidingOnWall =
+      effWallJumpEnabled &&
+      pushed.touchingWall &&
+      player.vz <= 0 &&
+      scratch.wallJumpLockoutMs <= 0;
+    const gravityThisTick = slidingOnWall ? effGravity * effWallSlideGravMult : effGravity;
+    player.vz = Math.max(-effMaxFall, player.vz - gravityThisTick * dtSeconds);
     player.z += player.vz * dtSeconds;
 
     const snap = player.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;

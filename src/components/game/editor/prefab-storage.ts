@@ -426,11 +426,124 @@ export function stairEntityToSimPads(stairs: EditorEntity, steps = 8): SimPlatfo
   return pads;
 }
 
+/**
+ * Rotate a local-space point by an entity's full [x,y,z] Euler rotation
+ * (degrees), matching three.js's default 'XYZ' order used when actually
+ * rendering entities (`obj.rotation.set(rx, ry, rz)`). Sequential X → Y → Z,
+ * each using the previous step's updated coordinates.
+ */
+function rotateLocalXYZ(
+  [x, y, z]: [number, number, number],
+  [rxDeg, ryDeg, rzDeg]: [number, number, number]
+): [number, number, number] {
+  const rx = (rxDeg * Math.PI) / 180;
+  const ry = (ryDeg * Math.PI) / 180;
+  const rz = (rzDeg * Math.PI) / 180;
+  const y1 = y * Math.cos(rx) - z * Math.sin(rx);
+  const z1 = y * Math.sin(rx) + z * Math.cos(rx);
+  const x2 = x * Math.cos(ry) + z1 * Math.sin(ry);
+  const z2 = -x * Math.sin(ry) + z1 * Math.cos(ry);
+  const x3 = x2 * Math.cos(rz) - y1 * Math.sin(rz);
+  const y3 = x2 * Math.sin(rz) + y1 * Math.cos(rz);
+  return [x3, y3, z2];
+}
+
+/**
+ * A block tilted on pitch/roll (not just yaw) reads as a ramp visually, but
+ * `entityToPad`'s single AABB only accounts for yaw — pitch/roll are
+ * silently dropped, so the collision box stays flat while the mesh looks
+ * sloped. That's "can't walk up ramps, have to jump onto the top."
+ */
+function isTiltedRampSolid(e: EditorEntity): boolean {
+  const wantsSolid =
+    isHammerSolidEntity(e) || resolveCollideMaterial(e) === 'solid' || e.solid === true;
+  if (!wantsSolid) return false;
+  const pitch = Math.abs(e.rotation?.[0] ?? 0);
+  const roll = Math.abs(e.rotation?.[2] ?? 0);
+  // A few degrees of tolerance so slightly-off-axis walls don't get
+  // needlessly subdivided; a real ramp is tilted well past that.
+  return pitch > 3 || roll > 3;
+}
+
+/**
+ * Subdivide a tilted solid into N thin flat pads that follow its slope, the
+ * same trick `stairEntityToSimPads` uses for named stair/ramp props — but
+ * driven by the entity's ACTUAL rotation instead of requiring a specific
+ * catalog model name, so any hand-tilted block works as a walkable ramp.
+ */
+export function rampEntityToSimPads(e: EditorEntity, steps = 12): SimPlatformBlueprint[] {
+  const n = Math.max(4, Math.min(24, Math.round(steps)));
+  const [ex, ey, ez] = e.position;
+  const foot =
+    e.collisionSize ??
+    modelFootprint(e.model) ??
+    ([
+      Math.max(1, Math.abs(e.scale[0]) * 2),
+      Math.max(0.2, Math.abs(e.scale[1]) * 2),
+      Math.max(1, Math.abs(e.scale[2]) * 2),
+    ] as [number, number, number]);
+  const halfX = Math.max(0.15, (foot[0] * Math.abs(e.scale[0])) / 2);
+  const halfY = Math.max(0.06, (foot[1] * Math.abs(e.scale[1])) / 2);
+  const halfZ = Math.max(0.15, (foot[2] * Math.abs(e.scale[2])) / 2);
+  const rotDeg: [number, number, number] = [
+    e.rotation?.[0] ?? 0,
+    e.rotation?.[1] ?? 0,
+    e.rotation?.[2] ?? 0,
+  ];
+  const mat = resolveCollideMaterial(e);
+  let kind: SimPlatformKind = 'solid';
+  if (mat === 'ice') kind = 'ice';
+  else if (mat === 'water') kind = 'water';
+  else if (mat === 'sand') kind = 'sand';
+
+  const stepDepth = (halfZ * 2) / n;
+  const pads: SimPlatformBlueprint[] = [];
+  for (let i = 0; i < n; i++) {
+    const localZ = -halfZ + (i + 0.5) * stepDepth;
+    // Bounding box (in world/sim space) of this thin step's top face, from
+    // its 4 local corners rotated by the entity's full 3D rotation — this
+    // stays correct for any yaw+pitch+roll combination, not just yaw.
+    let minThreeX = Infinity;
+    let maxThreeX = -Infinity;
+    let minThreeZ = Infinity;
+    let maxThreeZ = -Infinity;
+    let sumThreeY = 0;
+    for (const sx of [-halfX, halfX]) {
+      for (const sz of [localZ - stepDepth / 2, localZ + stepDepth / 2]) {
+        const [rx, ry, rz] = rotateLocalXYZ([sx, halfY, sz], rotDeg);
+        const worldThreeX = ex + rx;
+        const worldThreeY = ey + ry;
+        const worldThreeZ = ez + rz;
+        minThreeX = Math.min(minThreeX, worldThreeX);
+        maxThreeX = Math.max(maxThreeX, worldThreeX);
+        minThreeZ = Math.min(minThreeZ, worldThreeZ);
+        maxThreeZ = Math.max(maxThreeZ, worldThreeZ);
+        sumThreeY += worldThreeY;
+      }
+    }
+    const centerThreeY = sumThreeY / 4;
+    // Sim convention: x=three.z, y=three.x, z(height)=three.y (see threeToSim).
+    pads.push({
+      x: (minThreeZ + maxThreeZ) / 2,
+      y: (minThreeX + maxThreeX) / 2,
+      z: centerThreeY,
+      width: Math.max(0.4, maxThreeZ - minThreeZ),
+      depth: Math.max(0.4, maxThreeX - minThreeX),
+      kind,
+      height: Math.max(0.18, halfY * 2 * 0.85),
+    });
+  }
+  return pads;
+}
+
 function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
   if (resolveCollideMaterial(e) === 'walkthrough') return [];
   const model = e.model ?? '';
   if (model.includes('stair') || model.includes('ramp')) {
     return stairEntityToSimPads(e, 8);
+  }
+  if (isTiltedRampSolid(e)) {
+    return rampEntityToSimPads(e, 12);
   }
   return [entityToPad(e)];
 }

@@ -326,9 +326,7 @@ export function InventoryDrawer({
                     )}
                   </div>
                   <p className="text-xs text-slate-400 capitalize truncate">
-                    {item.cosmeticSlot
-                      ? `${item.itemCategory} · ${item.cosmeticSlot}`
-                      : item.itemCategory}
+                    {item.itemCategory}
                   </p>
                   <div className="flex flex-wrap gap-1">
                     {item.cosmeticSlot &&

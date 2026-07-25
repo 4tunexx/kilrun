@@ -24,6 +24,70 @@ function baseDoc(entities: MapDocument['entities']): MapDocument {
 }
 
 describe('mapDocToSimPlatforms', () => {
+  it('exports a hand-tilted hammer solid as a walkable stepped ramp, not one flat pad', () => {
+    const doc = baseDoc([
+      {
+        id: 'ramp1',
+        name: 'Tilted Ramp',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        // 4 wide (X), thin (Y), 8 long (Z) — a plank, tilted on pitch to
+        // form a ramp climbing along its length. No name hint ("stair"/
+        // "ramp") in the model string — this must be detected purely from
+        // rotation, since that's how a level designer actually builds one
+        // from a generic box primitive.
+        collisionSize: [4, 0.4, 8],
+        layerId: 'l1',
+        position: [0, 2, 0],
+        rotation: [25, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    // Should be subdivided into several steps, not a single AABB.
+    expect(pads.length).toBeGreaterThan(4);
+    for (const pad of pads) {
+      expect(pad.kind).toBe('solid');
+      expect(pad.height ?? 0).toBeGreaterThan(0);
+    }
+    // Steps should monotonically climb (or descend) along the ramp's run —
+    // i.e. genuinely sloped, not all sitting at the same flat height like
+    // the old single-AABB behavior would produce.
+    const heights = pads.map((p) => p.z);
+    const isMonotonic =
+      heights.every((h, i) => i === 0 || h >= heights[i - 1] - 1e-6) ||
+      heights.every((h, i) => i === 0 || h <= heights[i - 1] + 1e-6);
+    expect(isMonotonic).toBe(true);
+    const spread = Math.max(...heights) - Math.min(...heights);
+    // 8-long plank tilted 25° should climb roughly 8*sin(25°) ≈ 3.4 units —
+    // just sanity-checking it's a real slope, not a rounding artifact.
+    expect(spread).toBeGreaterThan(2);
+  });
+
+  it('leaves a slightly-off-axis flat solid alone (tolerance, not over-subdividing walls)', () => {
+    const doc = baseDoc([
+      {
+        id: 'wall1',
+        name: 'Almost Flat Wall',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        collisionSize: [2, 2, 0.3],
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [1.5, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads.length).toBe(1);
+  });
+
   it('exports floors and solid props with height', () => {
     const doc = baseDoc([
       {

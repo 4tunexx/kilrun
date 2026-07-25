@@ -44,6 +44,12 @@ export interface SimScratch {
   wasJumpHeld: boolean;
   exhausted: boolean;
   jumpCount: number;
+  touchingWallX: number;
+  touchingWallY: number;
+  wallJumpLockoutMs: number;
+  wallJumpCooldownMs: number;
+  wallJumpCooldownNormalX: number;
+  wallJumpCooldownNormalY: number;
 }
 
 export interface SimInput {
@@ -81,6 +87,12 @@ const LAND_SNAP_SLOW = 0.4;
 const LEDGE_ASSIST = 0.55;
 const MELEE_MOVE_MULT = 0.5;
 const BASE_CROUCH_MULT = 0.55;
+/** Mirror server/src/sim/constants.ts wall-jump defaults exactly. */
+const WALL_JUMP_HORIZ_VEL = 5;
+const WALL_JUMP_VERT_VEL = 9;
+const WALL_SLIDE_GRAV_MULT = 0.35;
+const WALL_JUMP_LOCKOUT_MS = 180;
+const WALL_JUMP_SAME_WALL_COOLDOWN_MS = 300;
 
 /** Optional per-map physics overrides from CombatSettings (passed via stepPlatformer opts). */
 export interface SimPhysicsOpts {
@@ -115,6 +127,12 @@ export function createSimScratch(): SimScratch {
     wasJumpHeld: false,
     exhausted: false,
     jumpCount: 0,
+    touchingWallX: 0,
+    touchingWallY: 0,
+    wallJumpLockoutMs: 0,
+    wallJumpCooldownMs: 0,
+    wallJumpCooldownNormalX: 0,
+    wallJumpCooldownNormalY: 0,
   };
 }
 
@@ -167,6 +185,9 @@ function resolveSolids(body: SimBody, pads: SimPad[]) {
   let { x, y } = body;
   const playerBottom = body.z;
   const playerTop = body.z + PLAYER_HEIGHT;
+  let touchingWall = false;
+  let wallNormalX = 0;
+  let wallNormalY = 0;
   for (const pad of pads) {
     const boxH = pad.height ?? 0.2;
     if (boxH <= 0.35) continue;
@@ -180,10 +201,20 @@ function resolveSolids(body: SimBody, pads: SimPad[]) {
     if (Math.abs(dx) >= halfW || Math.abs(dy) >= halfD) continue;
     const pushX = halfW - Math.abs(dx);
     const pushY = halfD - Math.abs(dy);
-    if (pushX < pushY) x = pad.x + Math.sign(dx || 1) * halfW;
-    else y = pad.y + Math.sign(dy || 1) * halfD;
+    touchingWall = true;
+    if (pushX < pushY) {
+      const sign = Math.sign(dx || 1);
+      x = pad.x + sign * halfW;
+      wallNormalX = sign;
+      wallNormalY = 0;
+    } else {
+      const sign = Math.sign(dy || 1);
+      y = pad.y + sign * halfD;
+      wallNormalX = 0;
+      wallNormalY = sign;
+    }
   }
-  return { x, y };
+  return { x, y, touchingWall, wallNormalX, wallNormalY };
 }
 
 function clamp(v: number, a: number, b: number) {
@@ -277,8 +308,32 @@ export function stepPlatformer(
   }
   scratch.wasJumpHeld = input.jumpPressed;
 
+  const wallJumpEnabled = physOpts?.wallJumpEnabled ?? false;
+  const wallJumpHorizVel = physOpts?.wallJumpHorizVel ?? WALL_JUMP_HORIZ_VEL;
+  const wallJumpVertVel = physOpts?.wallJumpVertVel ?? WALL_JUMP_VERT_VEL;
+  const wallSlideGravMult = physOpts?.wallSlideGravMult ?? WALL_SLIDE_GRAV_MULT;
+  const wasTouchingWall = scratch.touchingWallX !== 0 || scratch.touchingWallY !== 0;
+  const onCooldownWall =
+    scratch.wallJumpCooldownMs > 0 &&
+    scratch.wallJumpCooldownNormalX === scratch.touchingWallX &&
+    scratch.wallJumpCooldownNormalY === scratch.touchingWallY;
+  const canWallJump = wallJumpEnabled && !grounded && wasTouchingWall && !onCooldownWall;
+
   if (jumpEdge) {
-    if (scratch.jumpCount === 0 || scratch.jumpCount === 2) {
+    if (canWallJump) {
+      body.vz = wallJumpVertVel;
+      scratch.velX = scratch.touchingWallX * wallJumpHorizVel;
+      scratch.velY = scratch.touchingWallY * wallJumpHorizVel;
+      scratch.wallJumpLockoutMs = WALL_JUMP_LOCKOUT_MS;
+      scratch.wallJumpCooldownMs = WALL_JUMP_SAME_WALL_COOLDOWN_MS;
+      scratch.wallJumpCooldownNormalX = scratch.touchingWallX;
+      scratch.wallJumpCooldownNormalY = scratch.touchingWallY;
+      body.isGrounded = false;
+      grounded = false;
+      scratch.coyoteMs = 0;
+      scratch.jumpBufferMs = 0;
+      scratch.jumpCount = 1;
+    } else if (scratch.jumpCount === 0 || scratch.jumpCount === 2) {
       scratch.jumpBufferMs = JUMP_BUFFER_MS;
     } else if (scratch.jumpCount === 1 && body.energy >= JUMP_ENERGY * 0.2) {
       body.vz = DOUBLE_JUMP_VELOCITY;
@@ -291,6 +346,8 @@ export function stepPlatformer(
   } else {
     scratch.jumpBufferMs = Math.max(0, scratch.jumpBufferMs - dt * 1000);
   }
+  scratch.wallJumpLockoutMs = Math.max(0, scratch.wallJumpLockoutMs - dt * 1000);
+  scratch.wallJumpCooldownMs = Math.max(0, scratch.wallJumpCooldownMs - dt * 1000);
 
   if (
     scratch.coyoteMs > 0 &&
@@ -326,7 +383,7 @@ export function stepPlatformer(
       scratch.velX *= (speed - drop) / speed;
       scratch.velY *= (speed - drop) / speed;
     }
-  } else {
+  } else if (scratch.wallJumpLockoutMs <= 0) {
     scratch.velX = wishX * maxSpeed;
     scratch.velY = wishY * maxSpeed;
   }
@@ -351,9 +408,14 @@ export function stepPlatformer(
   body.y = clamp(pushed.y, bounds.minY + PLAYER_RADIUS, bounds.maxY - PLAYER_RADIUS);
   if (Math.abs(body.x - beforePushX) > 1e-5) scratch.velX = 0;
   if (Math.abs(body.y - beforePushY) > 1e-5) scratch.velY = 0;
+  scratch.touchingWallX = pushed.touchingWall ? pushed.wallNormalX : 0;
+  scratch.touchingWallY = pushed.touchingWall ? pushed.wallNormalY : 0;
 
   if (!body.isGrounded) {
-    body.vz = Math.max(-MAX_FALL, body.vz - GRAVITY * dt);
+    const slidingOnWall =
+      wallJumpEnabled && pushed.touchingWall && body.vz <= 0 && scratch.wallJumpLockoutMs <= 0;
+    const gravityThisTick = slidingOnWall ? GRAVITY * wallSlideGravMult : GRAVITY;
+    body.vz = Math.max(-MAX_FALL, body.vz - gravityThisTick * dt);
     body.z += body.vz * dt;
 
     const snap = body.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
