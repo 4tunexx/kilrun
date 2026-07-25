@@ -796,13 +796,19 @@ export class CompetitiveRoom extends Room<RoomState> {
     const range = shooter.weaponRange > 0 ? shooter.weaponRange : 14;
     const damage = shooter.weaponDamage > 0 ? shooter.weaponDamage : 25;
     const cone = shooter.weaponConeRadians > 0 ? shooter.weaponConeRadians : 0.18;
+    // Pick the CLOSEST valid target in the cone (matches HordeRoom's
+    // resolveSurvivorShot convention) — plain Map iteration order previously
+    // decided the winner when two enemies overlapped in the reticle, which
+    // in PvP with several players is common, not an edge case.
+    let closest: PlayerState | null = null;
+    let closestDistSq = Infinity;
     for (const target of this.state.players.values()) {
       if (!target.isAlive) continue;
       // Skip teammates unless friendly fire is enabled.
       if (target.role === shooter.role && !this.friendlyFire) continue;
       if (target.sessionId === shooter.sessionId) continue;
       if (
-        isHitByShot(
+        !isHitByShot(
           shooter.x,
           shooter.y,
           shooter.aimAngle,
@@ -817,10 +823,17 @@ export class CompetitiveRoom extends Room<RoomState> {
           }
         )
       ) {
-        this.damagePlayer(target, damage, shooter);
-        break;
+        continue;
+      }
+      const dx = target.x - shooter.x;
+      const dy = target.y - shooter.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < closestDistSq) {
+        closestDistSq = distSq;
+        closest = target;
       }
     }
+    if (closest) this.damagePlayer(closest, damage, shooter);
   }
 
   private damagePlayer(player: PlayerState, amount: number, shooter?: PlayerState) {
