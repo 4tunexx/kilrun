@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Box, Loader2, Package, Trash2, Upload } from 'lucide-react';
+import { Box, ImagePlus, Loader2, Package, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -19,9 +19,11 @@ import {
   adminBulkUpdateAssets,
   adminDeleteAsset,
   adminListAssets,
+  adminSetAssetThumbnail,
   adminUploadAsset,
 } from '@/lib/asset-admin-actions';
 import { loadAnimatedPrefab } from '@/components/game/editor/model-scan';
+import { captureModelThumbnail } from '@/components/game/editor/thumbnail-capture';
 import {
   EDITOR_CHARACTER_CATEGORIES,
   loadCharacterAssetManifest,
@@ -94,15 +96,14 @@ function toGridFromManifest(entry: AssetRegistryEntry): GridAsset {
 }
 
 function thumbSrc(asset: GridAsset): string | null {
-  // Prefer correct pack mapping for Body_Color_Variant (fixes wrong Blue sheet on Brown/etc.)
+  // A real thumbnail (ideally a rendered 3D icon — see "Regenerate 3D
+  // thumbnail") always wins. Only fall back to the raw shared texture atlas
+  // (Body_XXX.png) for pack body-color variants that never got one.
+  const explicit = asset.thumbnailUrl?.trim();
+  if (explicit) return explicit;
   const fromName = packBodyThumbnailPath(asset.assetId) || packBodyThumbnailPath(asset.displayName);
   if (fromName) return fromName;
-  return (
-    asset.thumbnailUrl?.trim() ||
-    asset.previewUrl?.trim() ||
-    asset.texturePath?.trim() ||
-    null
-  );
+  return asset.previewUrl?.trim() || asset.texturePath?.trim() || null;
 }
 
 const CATEGORY_TINT: Record<string, string> = {
@@ -297,6 +298,8 @@ export function AdminAssetBrowser() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenAll, setRegenAll] = useState<{ done: number; total: number } | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -389,6 +392,59 @@ export function AdminAssetBrowser() {
     }
   };
 
+  /** Render a fresh transparent-bg PNG from the asset's real 3D model and save it. */
+  const regenerateThumbnail = async (asset: GridAsset) => {
+    setRegenerating(true);
+    try {
+      const dataUrl = await captureModelThumbnail(asset.modelPath);
+      const res = await adminSetAssetThumbnail(asset.assetId, dataUrl);
+      setItems((prev) =>
+        prev.map((a) =>
+          a.assetId === asset.assetId ? { ...a, thumbnailUrl: res.thumbnailUrl } : a
+        )
+      );
+      setSelected((prev) =>
+        prev && prev.assetId === asset.assetId ? { ...prev, thumbnailUrl: res.thumbnailUrl } : prev
+      );
+      toast({ title: `Thumbnail updated — ${asset.displayName}` });
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Failed to render thumbnail',
+        variant: 'destructive',
+      });
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  /** Bulk-replace every listed skin's thumbnail with a live 3D render, one at a time. */
+  const regenerateAllThumbnails = async () => {
+    if (source !== 'db' || items.length === 0) return;
+    const targets = items.filter((a) => a.modelPath);
+    setRegenAll({ done: 0, total: targets.length });
+    let failed = 0;
+    for (let i = 0; i < targets.length; i++) {
+      const asset = targets[i];
+      try {
+        const dataUrl = await captureModelThumbnail(asset.modelPath);
+        await adminSetAssetThumbnail(asset.assetId, dataUrl);
+      } catch (e) {
+        failed++;
+        console.warn('[thumbnail regen]', asset.assetId, e);
+      }
+      setRegenAll({ done: i + 1, total: targets.length });
+    }
+    toast({
+      title: 'Thumbnail regeneration finished',
+      description: failed
+        ? `${targets.length - failed}/${targets.length} updated, ${failed} failed (bad/missing model).`
+        : `${targets.length} skin thumbnails replaced with 3D renders.`,
+      variant: failed ? 'destructive' : undefined,
+    });
+    setRegenAll(null);
+    await refresh();
+  };
+
   const toggleId = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -460,6 +516,23 @@ export function AdminAssetBrowser() {
             </>
           )}
         </Button>
+        <Button
+          variant="secondary"
+          disabled={!!regenAll || source !== 'db' || items.length === 0}
+          onClick={() => void regenerateAllThumbnails()}
+          title="Re-render every listed skin's shop/admin thumbnail from its real 3D model, transparent background"
+        >
+          {regenAll ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              Rendering {regenAll.done}/{regenAll.total}…
+            </>
+          ) : (
+            <>
+              <ImagePlus className="h-4 w-4 mr-1.5" /> Regenerate all thumbnails (3D)
+            </>
+          )}
+        </Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -472,6 +545,11 @@ export function AdminAssetBrowser() {
         {source === 'manifest' && (
           <span className="text-amber-300/90">
             Publish / enable needs DB — run seed script with DATABASE_URL.
+          </span>
+        )}
+        {regenAll && (
+          <span className="text-cyan-300/90">
+            Rendering transparent 3D icons — don&apos;t close this tab…
           </span>
         )}
       </div>
@@ -612,6 +690,20 @@ export function AdminAssetBrowser() {
                       }
                     >
                       {selected.enabled ? 'Deactivate' : 'Activate'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={regenerating || !!regenAll}
+                      onClick={() => void regenerateThumbnail(selected)}
+                      title="Re-render this thumbnail from the actual 3D model, transparent background"
+                    >
+                      {regenerating ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <ImagePlus className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      Regenerate 3D thumbnail
                     </Button>
                     <Button
                       size="sm"
