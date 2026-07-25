@@ -417,14 +417,14 @@ export function AdminAssetBrowser() {
     }
   };
 
-  /** Bulk-replace every listed skin's thumbnail with a live 3D render, one at a time. */
-  const regenerateAllThumbnails = async () => {
-    if (source !== 'db' || items.length === 0) return;
-    const targets = items.filter((a) => a.modelPath);
-    setRegenAll({ done: 0, total: targets.length });
+  /** Bulk-replace thumbnails for a specific list of assets, one at a time. */
+  const regenerateThumbnailsFor = async (targets: GridAsset[]) => {
+    const withModel = targets.filter((a) => a.modelPath);
+    if (withModel.length === 0) return;
+    setRegenAll({ done: 0, total: withModel.length });
     let failed = 0;
-    for (let i = 0; i < targets.length; i++) {
-      const asset = targets[i];
+    for (let i = 0; i < withModel.length; i++) {
+      const asset = withModel[i];
       try {
         const dataUrl = await captureModelThumbnail(asset.modelPath);
         await adminSetAssetThumbnail(asset.assetId, dataUrl);
@@ -432,17 +432,30 @@ export function AdminAssetBrowser() {
         failed++;
         console.warn('[thumbnail regen]', asset.assetId, e);
       }
-      setRegenAll({ done: i + 1, total: targets.length });
+      setRegenAll({ done: i + 1, total: withModel.length });
     }
     toast({
       title: 'Thumbnail regeneration finished',
       description: failed
-        ? `${targets.length - failed}/${targets.length} updated, ${failed} failed (bad/missing model).`
-        : `${targets.length} skin thumbnails replaced with 3D renders.`,
+        ? `${withModel.length - failed}/${withModel.length} updated, ${failed} failed (bad/missing model).`
+        : `${withModel.length} skin thumbnail${withModel.length === 1 ? '' : 's'} replaced with 3D renders.`,
       variant: failed ? 'destructive' : undefined,
     });
     setRegenAll(null);
     await refresh();
+  };
+
+  /** Bulk-replace every listed skin's thumbnail with a live 3D render. */
+  const regenerateAllThumbnails = async () => {
+    if (source !== 'db' || items.length === 0) return;
+    await regenerateThumbnailsFor(items);
+  };
+
+  /** Bulk-replace only the checked skins' thumbnails. */
+  const regenerateSelectedThumbnails = async () => {
+    if (source !== 'db' || selectedIds.size === 0) return;
+    const targets = items.filter((a) => selectedIds.has(a.assetId));
+    await regenerateThumbnailsFor(targets);
   };
 
   const toggleId = (id: string) => {
@@ -564,6 +577,24 @@ export function AdminAssetBrowser() {
           </Button>
           <Button size="sm" variant="secondary" disabled={busy || !selectedIds.size} onClick={() => void runBulk({ featured: true })}>
             Feature
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!!regenAll || !selectedIds.size}
+            onClick={() => void regenerateSelectedThumbnails()}
+            title="Re-render only the checked skins' thumbnails from their 3D models"
+          >
+            {regenAll ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                Rendering {regenAll.done}/{regenAll.total}…
+              </>
+            ) : (
+              <>
+                <ImagePlus className="h-3.5 w-3.5 mr-1" /> Regenerate thumbnails ({selectedIds.size} selected)
+              </>
+            )}
           </Button>
         </div>
       )}
