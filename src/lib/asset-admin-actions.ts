@@ -325,6 +325,45 @@ export async function adminUploadAsset(input: {
   return { ok: true as const, assetId: row.assetId };
 }
 
+/**
+ * Replace an asset's thumbnail with a freshly rendered PNG (transparent
+ * background) captured client-side from its actual 3D model — see
+ * `captureModelThumbnail` in `thumbnail-capture.ts`. Used to fix low-quality
+ * thumbnails (e.g. raw shared texture atlases) in the shop and admin panel.
+ *
+ * Also syncs the image on any already-published shop listing for this asset
+ * so the shop card updates immediately, not just the admin browser.
+ */
+export async function adminSetAssetThumbnail(assetId: string, thumbnailDataUrl: string) {
+  await requireAdmin();
+  if (!thumbnailDataUrl.startsWith('data:image/')) {
+    throw new Error('Invalid thumbnail image');
+  }
+
+  const { persistSiteImage } = await import('@/lib/site-asset-upload');
+  const thumbnailUrl = await persistSiteImage(thumbnailDataUrl, 'misc');
+
+  const asset = await prisma.asset.update({
+    where: { assetId },
+    data: { thumbnailUrl, previewUrl: thumbnailUrl },
+  });
+
+  const sku = `asset_${assetId}`;
+  const existing = await prisma.storeItem.findUnique({ where: { itemSku: sku } });
+  if (existing) {
+    const cfg = (existing.cosmeticConfig as Record<string, unknown> | null) ?? {};
+    await prisma.storeItem.update({
+      where: { itemSku: sku },
+      data: {
+        imageUrl: thumbnailUrl,
+        cosmeticConfig: { ...cfg, thumbnail: thumbnailUrl } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  return { ok: true as const, assetId: asset.assetId, thumbnailUrl };
+}
+
 /** Public/editor: list enabled assets (falls back empty if table missing). */
 export async function listPublicAssets(category?: string) {
   try {

@@ -52,10 +52,12 @@ const UNLOCK_TYPES = [
 type UnlockTypeId = (typeof UNLOCK_TYPES)[number]['id'];
 
 function assetThumb(a: ListableAsset): string | null {
+  // A real thumbnail (ideally a rendered 3D icon) always wins over the raw
+  // shared texture atlas fallback used for pack body-color variants.
   return (
+    a.thumbnailUrl?.trim() ||
     packBodyThumbnailPath(a.assetId) ||
     packBodyThumbnailPath(a.displayName) ||
-    a.thumbnailUrl?.trim() ||
     a.previewUrl?.trim() ||
     a.texturePath?.trim() ||
     null
