@@ -8,6 +8,53 @@ export interface ThumbnailCaptureOptions {
   padding?: number;
 }
 
+type MapKey = 'map' | 'normalMap' | 'roughnessMap' | 'metalnessMap' | 'emissiveMap' | 'aoMap' | 'alphaMap';
+const MAP_KEYS: MapKey[] = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap'];
+
+function collectTextures(root: THREE.Object3D): THREE.Texture[] {
+  const found = new Set<THREE.Texture>();
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) {
+      const std = m as THREE.MeshStandardMaterial;
+      for (const key of MAP_KEYS) {
+        const tex = std[key];
+        if (tex) found.add(tex);
+      }
+    }
+  });
+  return Array.from(found);
+}
+
+function isTextureReady(tex: THREE.Texture): boolean {
+  const img = tex.image as HTMLImageElement | ImageBitmap | { width?: number; height?: number } | undefined;
+  if (!img) return false;
+  if (typeof HTMLImageElement !== 'undefined' && img instanceof HTMLImageElement) {
+    return img.complete && img.naturalWidth > 0;
+  }
+  if (typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap) return true;
+  return Boolean(img.width && img.height);
+}
+
+/**
+ * FBX/GLTF loaders resolve as soon as parsing finishes, but the actual
+ * texture *images* they kicked off can still be decoding in the background.
+ * A single render right after load can land before that finishes and comes
+ * out flat black — this waits (up to a timeout) until every texture on the
+ * model has real pixel data before we let the caller render.
+ */
+async function waitForTextures(root: THREE.Object3D, timeoutMs = 4000): Promise<void> {
+  const textures = collectTextures(root);
+  if (textures.length === 0) return;
+  const start = performance.now();
+  while (performance.now() - start < timeoutMs) {
+    if (textures.every(isTextureReady)) return;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+}
+
 /**
  * Renders a single, clean PNG icon straight from a skin's real GLB/FBX model
  * — same geometry/materials the "3D Preview" panel shows — on a fully
@@ -58,6 +105,21 @@ export async function captureModelThumbnail(
     // Draw the bind pose (no mixer.update) so weapons/parts don't render
     // mid-swing from whatever the first animation frame happens to be.
 
+    // Ensure diffuse/base-color maps read as sRGB regardless of loader
+    // defaults (FBX in particular doesn't always set this itself).
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) {
+        const std = m as THREE.MeshStandardMaterial;
+        if (std.map) std.map.colorSpace = THREE.SRGBColorSpace;
+        if (std.emissiveMap) std.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+      }
+    });
+
+    await waitForTextures(root);
+
     const box = new THREE.Box3().setFromObject(root);
     const sizeVec = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -73,7 +135,12 @@ export async function captureModelThumbnail(
     camera.position.copy(center).add(dir.multiplyScalar(distance));
     camera.lookAt(center);
 
+    // A couple of warm-up frames — first render after textures resolve is
+    // sometimes still the upload frame on slower GPUs/software renderers.
     renderer.render(scene, camera);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    renderer.render(scene, camera);
+
     return renderer.domElement.toDataURL('image/png');
   } finally {
     scene.traverse((obj) => {
