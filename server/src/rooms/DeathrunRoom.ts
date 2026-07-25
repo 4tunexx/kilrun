@@ -1,8 +1,6 @@
 import { Client, Room } from 'colyseus';
 import { PlayerState, RoomState } from '../schema/RoomState.js';
-import { createDeathrunObstacles } from '../sim/deathrun-map.js';
 import {
-  createDeathrunPlatforms,
   createFromBlueprints,
   createObstaclesFromBlueprints,
   type ObstacleBlueprint,
@@ -158,12 +156,29 @@ export class DeathrunRoom extends Room<RoomState> {
   private checkpointRespawn = true;
   private combatPhysOpts: MovementPhysicsOpts = {};
 
+  /** True after a client successfully pushed the Active/MAIN map. */
+  private customMapLoaded = false;
+
   onCreate() {
     this.setState(new RoomState());
     this.state.modeTag = 'deathrun';
-    this.state.platforms.push(...createDeathrunPlatforms());
-    this.state.obstacles.push(...createDeathrunObstacles());
-    this.obstacleTimers = this.state.obstacles.map(() => 0);
+    // Soft lobby pad only — NEVER seed DEATHRUN_TRACK hazards here.
+    // Those used to linger whenever loadCustomMap failed (non-host, late join, etc.)
+    // and showed up as "hardcoded" saws/lasers on top of the Active custom map.
+    this.state.platforms.push(
+      ...createFromBlueprints([
+        {
+          x: SPAWN_X,
+          y: 0,
+          z: 0,
+          width: 10,
+          depth: 10,
+          kind: 'solid',
+          height: 0.25,
+        },
+      ])
+    );
+    this.obstacleTimers = [];
     this.state.courseStartX = SPAWN_X;
     this.state.courseFinishX = FINISH_X;
 
@@ -208,12 +223,14 @@ export class DeathrunRoom extends Room<RoomState> {
         }
       ) => {
         if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
-        const allowed =
+        // First push: any client may apply the cloud Active map (all clients fetch the same doc).
+        // After that: only host/admin can replace (anti-grief).
+        const isStaffOrHost =
           this.adminSessions.has(client.sessionId) ||
           client.sessionId === this.hostSessionId;
-        if (!allowed) {
+        if (this.customMapLoaded && !isStaffOrHost) {
           console.warn(
-            `[DeathrunRoom] loadCustomMap rejected for ${client.sessionId} (not host/admin)`
+            `[DeathrunRoom] loadCustomMap rejected for ${client.sessionId} (map already loaded; not host/admin)`
           );
           return;
         }
@@ -230,6 +247,7 @@ export class DeathrunRoom extends Room<RoomState> {
         }
         this.obstacleTimers = this.state.obstacles.map(() => 0);
         this.buttonArmRemaining.clear();
+        this.customMapLoaded = true;
 
         const settings = (data.modeSettings?.deathrun ?? data.modeSettings) as Record<string, unknown> | undefined;
         if (settings && typeof settings === 'object') {

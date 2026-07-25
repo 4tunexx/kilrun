@@ -152,6 +152,7 @@ export class HordeRoom extends Room<RoomState> {
   private resultsElapsedMs = 0;
   private worldBounds: WorldBounds = { ...DEFAULT_WORLD_BOUNDS };
   private hostSessionId: string | null = null;
+  private customMapLoaded = false;
   private adminSessions = new Set<string>();
 
   private playerSpawns: SpawnPoint[] = [];
@@ -248,12 +249,13 @@ export class HordeRoom extends Room<RoomState> {
 
     this.onMessage('loadCustomMap', (client, data: Record<string, unknown>) => {
       if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
-      const allowed =
+      const isStaffOrHost =
         this.adminSessions.has(client.sessionId) || client.sessionId === this.hostSessionId;
-      if (!allowed) return;
+      if (this.customMapLoaded && !isStaffOrHost) return;
 
       const platforms = data?.platforms as PlatformBlueprint[] | undefined;
       if (!Array.isArray(platforms) || platforms.length === 0) return;
+      this.customMapLoaded = true;
 
       const settings = (data?.modeSettings as { horde?: HordeModeSettings } | undefined)
         ?.horde;

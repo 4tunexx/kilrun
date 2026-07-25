@@ -379,34 +379,46 @@ export default function KilrunEngine({
         characters.delete(sessionId);
       },
       onObstacleAdd: (obstacle, index) => {
+        // Custom map overlay owns visuals; net obstacles are sim-only (avoids
+        // prototype saws/lasers drawing on top of the Active map).
+        if (hasCustomMap) return;
         void map.upsertObstacle(index, obstacle);
       },
       onObstacleChange: (obstacle, index) => {
+        if (hasCustomMap) return;
         void map.upsertObstacle(index, obstacle);
       },
       onObstacleRemove: (index) => {
+        if (hasCustomMap) return;
         map.removeObstacle(index);
       },
       onPlatformAdd: (platform, index) => {
+        if (hasCustomMap) return;
         void map.upsertPlatform(index, platform);
       },
       onPlatformChange: (platform, index) => {
+        if (hasCustomMap) return;
         void map.upsertPlatform(index, platform);
       },
       onPlatformRemove: (index) => {
+        if (hasCustomMap) return;
         map.removePlatform(index);
       },
     };
 
     playersRef.current.forEach((p, id) => spawnCharacter(id, p.username));
-    platformsRef.current.forEach((p, i) => void map.upsertPlatform(i, p as NetPlatformState));
-    obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o as NetObstacleState));
+    if (!hasCustomMap) {
+      platformsRef.current.forEach((p, i) => void map.upsertPlatform(i, p as NetPlatformState));
+      obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o as NetObstacleState));
+    }
 
     const syncTimer = window.setInterval(() => {
-      map.prunePlatforms(platformsRef.current.keys());
-      map.pruneObstacles(obstaclesRef.current.keys());
-      platformsRef.current.forEach((p, i) => void map.upsertPlatform(i, p));
-      obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o));
+      if (!hasCustomMap) {
+        map.prunePlatforms(platformsRef.current.keys());
+        map.pruneObstacles(obstaclesRef.current.keys());
+        platformsRef.current.forEach((p, i) => void map.upsertPlatform(i, p));
+        obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o));
+      }
       const live = new Set(playersRef.current.keys());
       characters.forEach((view, id) => {
         if (!live.has(id)) {
