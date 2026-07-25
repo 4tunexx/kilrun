@@ -26,6 +26,11 @@
 # misc
 .DS_Store
 *.pem
+.cursor-tmp/
+
+# Characters_7 Unity source dump (FBX / PNG / .anim). Runtime uses
+# public/game/skins/ only. Keep model_skins/ locally to re-run seed/convert.
+/model_skins/
 
 # debug
 npm-debug.log*

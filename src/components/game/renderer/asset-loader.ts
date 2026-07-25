@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { loadPackPlayerPrefab } from './pack-player';
 
 export const PLATFORM_BASE = '/game/platforms';
 export const CHARACTER_BASE = '/game/character';
@@ -80,22 +81,15 @@ export async function loadPlatformPrefab(name: string): Promise<THREE.Group> {
   return cloneGltfScene(gltf);
 }
 
+/**
+ * Default player: Characters_7 Body_Blue_001 + Basic_Character animation clips.
+ * (Old Kenney mannequin is no longer used for players.)
+ */
 export async function loadCharacterPrefab(): Promise<{
   scene: THREE.Object3D;
   animations: THREE.AnimationClip[];
 }> {
-  const [body, movement, general] = await Promise.all([
-    loadGltf(`${CHARACTER_BASE}/Mannequin_Medium.glb`),
-    loadGltf(`${CHARACTER_BASE}/anims/Rig_Medium_MovementBasic.glb`).catch(() => null),
-    loadGltf(`${CHARACTER_BASE}/anims/Rig_Medium_General.glb`).catch(() => null),
-  ]);
-  // SkeletonUtils.clone — plain Object3D.clone breaks skins → permanent T-pose
-  const scene = cloneSkinnedScene(body.scene);
-  const animations = [
-    ...(body.animations ?? []),
-    ...(movement?.animations ?? []),
-    ...(general?.animations ?? []),
-  ];
+  const { scene, animations } = await loadPackPlayerPrefab();
   return { scene, animations };
 }
 

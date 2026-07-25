@@ -769,6 +769,8 @@ export default function GameHubInterface({
         props.userId = user.id;
       } else if (currentPage === 'admin') {
         props.viewerRole = user.role;
+        props.viewerUsername = user.username;
+        props.viewerAvatarUrl = user.avatarUrl;
       } else if (currentPage === 'public-profile') {
         if (!viewingProfileUserId) {
           return (
@@ -786,6 +788,10 @@ export default function GameHubInterface({
 
       if (VIEWS_NEEDING_USER_ID.has(currentPage)) {
         props.userId = user.id;
+      }
+      if (currentPage === 'store') {
+        props.username = user.username;
+        props.avatarUrl = user.avatarUrl;
       }
 
       if (currentPage === 'lobby' && !lobbyMode) {
@@ -1057,6 +1063,8 @@ export default function GameHubInterface({
               <InventoryDrawer
                 open={isInventoryOpen}
                 onOpenChange={setIsInventoryOpen}
+                username={user.username}
+                avatarUrl={user.avatarUrl}
                 onEquipChange={() => {
                   getCurrentUserProfile()
                     .then((u) => {

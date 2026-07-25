@@ -20,6 +20,16 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   deleteInventoryItem,
   equipInventoryItem,
   getMyInventory,
@@ -46,6 +56,12 @@ type InventoryRow = Awaited<ReturnType<typeof getMyInventory>>[number];
 type SortMode = 'newest' | 'oldest' | 'name' | 'value';
 type InvTabId = Exclude<ShopTabId, 'fire' | 'all'> | 'all' | 'equipped';
 
+type PendingClash = {
+  itemId: string;
+  itemName: string;
+  reasons: string[];
+};
+
 const INV_TABS: { id: InvTabId; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'equipped', label: 'Equipped' },
@@ -59,33 +75,53 @@ const INV_TABS: { id: InvTabId; label: string }[] = [
   { id: 'other', label: 'Other' },
 ];
 
-function InventoryPreview({ item }: { item: InventoryRow }) {
+function InventoryPreview({
+  item,
+  viewerName,
+  viewerAvatar,
+}: {
+  item: InventoryRow;
+  viewerName?: string;
+  viewerAvatar?: string;
+}) {
   if (item.bannerConfig) {
     const banner = normalizeBannerConfig(item.bannerConfig);
     return <BannerFill banner={banner} className="h-16 w-full" />;
   }
   if (item.cosmeticSlot === 'frame' && item.cosmeticConfig) {
     const frame = normalizeFrameConfig(item.cosmeticConfig);
+    const name = viewerName?.trim() || 'You';
     return (
       <div className="h-16 w-full flex items-center justify-center bg-slate-950">
         <div
           className={cn('rounded-full', frameAnimationClass(frame))}
           style={frameWrapperStyle(frame)}
         >
-          <div className="h-10 w-10 rounded-full bg-slate-800 border-2 border-slate-900" />
+          <div className="relative h-10 w-10 overflow-hidden rounded-full border-2 border-slate-900 bg-slate-800">
+            {viewerAvatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={viewerAvatar} alt={name} className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-sm font-black text-slate-300">
+                {name.charAt(0).toUpperCase()}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
   }
   if (item.cosmeticSlot === 'nickname' && item.cosmeticConfig) {
     const nick = normalizeNicknameConfig(item.cosmeticConfig);
+    const name = viewerName?.trim() || 'You';
     return (
       <div className="h-16 w-full flex items-center justify-center bg-slate-950 px-2">
         <span
           className={cn('text-sm font-black truncate', nicknameEffectClass(nick))}
           style={nicknameEffectStyle(nick)}
+          title={name}
         >
-          You
+          {name}
         </span>
       </div>
     );
@@ -108,17 +144,22 @@ export function InventoryDrawer({
   open,
   onOpenChange,
   onEquipChange,
+  username,
+  avatarUrl,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Fires after equip/unequip/resell/delete so parents can refresh derived UI (e.g. rail banner). */
   onEquipChange?: () => void;
+  username?: string;
+  avatarUrl?: string;
 }) {
   const [items, setItems] = useState<InventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<SortMode>('newest');
   const [tab, setTab] = useState<InvTabId>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pendingClash, setPendingClash] = useState<PendingClash | null>(null);
   const { toast } = useToast();
 
   const reload = () => {
@@ -179,7 +220,33 @@ export function InventoryDrawer({
     }
   };
 
+  const tryEquip = async (item: InventoryRow, confirmClear = false) => {
+    setBusyId(item.id);
+    try {
+      const result = await equipInventoryItem(item.id, {
+        confirmClearClashes: confirmClear,
+      });
+      if ('needsConfirm' in result && result.needsConfirm) {
+        setPendingClash({
+          itemId: item.id,
+          itemName: item.itemName,
+          reasons: result.reasons,
+        });
+        return;
+      }
+      toast({ title: `Equipped ${item.itemName}` });
+      reload();
+      onEquipChange?.();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Something went wrong';
+      toast({ title: message, variant: 'destructive' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
@@ -246,7 +313,11 @@ export function InventoryDrawer({
                   item.isEquipped ? 'ring-2 ring-primary' : ''
                 }`}
               >
-                <InventoryPreview item={item} />
+                <InventoryPreview
+                  item={item}
+                  viewerName={username}
+                  viewerAvatar={avatarUrl}
+                />
                 <CardContent className="p-3 space-y-2">
                   <div className="flex items-center justify-between gap-1">
                     <p className="font-semibold text-sm truncate">{item.itemName}</p>
@@ -284,11 +355,7 @@ export function InventoryDrawer({
                           size="sm"
                           className="h-7 text-xs flex-1"
                           disabled={busyId === item.id}
-                          onClick={() =>
-                            withBusy(item.id, () =>
-                              equipInventoryItem(item.id).then(() => {})
-                            )
-                          }
+                          onClick={() => void tryEquip(item, false)}
                         >
                           {busyId === item.id ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
@@ -344,5 +411,48 @@ export function InventoryDrawer({
         )}
       </SheetContent>
     </Sheet>
+
+    <AlertDialog
+      open={Boolean(pendingClash)}
+      onOpenChange={(open) => {
+        if (!open) setPendingClash(null);
+      }}
+    >
+      <AlertDialogContent className="bg-slate-900 border-slate-700 text-white">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove clashing skins?</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2 text-slate-300 text-sm">
+              <p>
+                To equip <span className="font-semibold text-white">{pendingClash?.itemName}</span>,
+                these need to come off first:
+              </p>
+              <ul className="list-disc pl-5 space-y-1">
+                {(pendingClash?.reasons ?? []).map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="bg-slate-800 border-slate-600 text-white">
+            Cancel
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              const pending = pendingClash;
+              setPendingClash(null);
+              if (!pending) return;
+              const row = items.find((i) => i.id === pending.itemId);
+              if (row) void tryEquip(row, true);
+            }}
+          >
+            Unequip &amp; Equip
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

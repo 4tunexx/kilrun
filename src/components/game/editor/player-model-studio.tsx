@@ -5,7 +5,6 @@ import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import {
   PersonStanding,
-  Upload,
   X,
   Play,
   Wand2,
@@ -31,11 +30,13 @@ import {
   ensureAnimation,
   suggestPlayerBindings,
 } from './map-document';
-import { PROTOTYPE_MODELS } from './prototype-catalog';
+import { CharacterAssetPicker } from './character-asset-picker';
 import {
   applyClipsToPlayerEntity,
   loadPlayerAvatar,
+  migratePlayerEntityToPackBlue,
 } from './player-avatar';
+import { DEFAULT_PACK_PLAYER_URL } from '../renderer/pack-player';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import {
   applyExtraBones,
@@ -46,7 +47,6 @@ import {
   listMeshes,
   removeExtraBone,
 } from './player-mesh-edits';
-import { uploadModelGlb } from '@/lib/model-asset-upload';
 
 type StudioTab = 'model' | 'mesh' | 'bones' | 'record' | 'anims';
 
@@ -76,7 +76,6 @@ export function PlayerModelStudio({
 }) {
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<StudioPreview | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clipCount, setClipCount] = useState(0);
@@ -92,8 +91,6 @@ export function PlayerModelStudio({
   const [clipName, setClipName] = useState('custom_move');
   const [boneScale, setBoneScale] = useState<[number, number, number]>([1, 1, 1]);
   const [meshColor, setMeshColor] = useState('#c4a574');
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const anim = ensureAnimation(entity);
   const clips = anim.availableClips;
@@ -108,6 +105,13 @@ export function PlayerModelStudio({
     setBoneNames(bones);
     setMeshNames(meshes);
   };
+
+  // One-time: strip legacy mannequin / uploads → pack Blue 001
+  useEffect(() => {
+    const patch = migratePlayerEntityToPackBlue(entity);
+    if (patch) onChange(patch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entity.id]);
 
   // Load / reload 3D preview when model source changes
   useEffect(() => {
@@ -371,132 +375,86 @@ export function PlayerModelStudio({
             </label>
 
             <div className="space-y-1.5">
-              <p className="text-[10px] tracking-widest text-white/50 uppercase">Model</p>
-              <label className="block text-xs text-white/60">
-                Catalog / mannequin
-                <select
-                  className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-2 text-sm"
-                  value={entity.customModelUrl ? '__custom__' : entity.model ?? ''}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === '__custom__') return;
-                    if (v === '') {
-                      onChange({ model: undefined, customModelUrl: undefined });
-                    } else {
-                      onChange({ model: v, customModelUrl: undefined });
-                    }
-                  }}
+              <p className="text-[10px] tracking-widest text-white/50 uppercase">Player body</p>
+              <div className="rounded-lg border border-sky-500/30 bg-sky-950/30 px-3 py-2 space-y-1">
+                <p className="text-sm font-semibold text-sky-200">Blue 001 (Characters pack)</p>
+                <p className="text-[10px] text-white/50 leading-snug">
+                  Only pack player mesh. Animations from Basic_Character. Solo = Blue tint;
+                  other players get unique colors automatically.
+                </p>
+                <Button
+                  size="sm"
+                  className="w-full mt-1"
+                  variant={
+                    entity.customModelUrl === DEFAULT_PACK_PLAYER_URL || !entity.customModelUrl
+                      ? 'default'
+                      : 'secondary'
+                  }
+                  onClick={() =>
+                    onChange({
+                      model: undefined,
+                      customModelUrl: DEFAULT_PACK_PLAYER_URL,
+                      playerAnims: {},
+                    })
+                  }
                 >
-                  <option value="">Default mannequin (full anim pack)</option>
-                  {entity.customModelUrl && <option value="__custom__">Custom upload</option>}
-                  {PROTOTYPE_MODELS.filter(
-                    (m) =>
-                      m.includes('figurine') || m.includes('character') || m.includes('person')
-                  ).map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                  <optgroup label="All props">
-                    {PROTOTYPE_MODELS.slice(0, 80).map((m) => (
-                      <option key={`all-${m}`} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-              </label>
+                  Use Blue 001 + full anims
+                </Button>
+              </div>
+
+              <CharacterAssetPicker
+                categories={['body']}
+                valueUrl={
+                  entity.customModelUrl?.startsWith('/game/skins/bodies/')
+                    ? entity.customModelUrl
+                    : DEFAULT_PACK_PLAYER_URL
+                }
+                onPick={(_entry, modelUrl) => {
+                  onChange({
+                    model: undefined,
+                    customModelUrl: modelUrl,
+                    playerAnims: {},
+                  });
+                }}
+                label="Pack bodies only"
+              />
 
               <div className="flex gap-2">
                 <Button
                   size="sm"
                   variant="secondary"
                   className="flex-1 min-h-10"
-                  disabled={uploading}
-                  onClick={() => fileRef.current?.click()}
-                >
-                  <Upload className="w-3.5 h-3.5 mr-1" />
-                  {uploading ? 'Uploading…' : 'Upload GLB'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="min-h-10 px-3"
                   title="Reload preview"
                   onClick={() => {
                     previewRef.current?.dispose();
                     previewRef.current = null;
                     const host = canvasHostRef.current;
                     if (host) {
-                      void loadPlayerAvatar(entity).then((loaded) => {
+                      void loadPlayerAvatar({
+                        ...entity,
+                        customModelUrl: entity.customModelUrl || DEFAULT_PACK_PLAYER_URL,
+                        model: undefined,
+                      }).then((loaded) => {
                         previewRef.current = new StudioPreview(host);
                         previewRef.current.setAvatar(loaded.scene, loaded.animations);
                         setClipCount(loaded.clipNames.length);
+                        const patch = applyClipsToPlayerEntity(entity, loaded.clipNames, true);
+                        onChange(patch);
                         refreshLists();
-                        const idle = bindings.idle ?? loaded.clipNames[0];
+                        const idle =
+                          (patch.playerAnims ?? bindings).idle ?? loaded.clipNames[0];
                         if (idle) previewRef.current.playClip(idle, true);
                       });
                     }
                   }}
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
+                  <RefreshCw className="w-3.5 h-3.5 mr-1" />
+                  Reload anims
                 </Button>
               </div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".glb,.gltf,model/gltf-binary"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  e.target.value = '';
-                  setUploadError(null);
-                  setUploading(true);
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    const dataUrl = String(reader.result);
-                    // Upload to server so the URL is accessible from any device
-                    // (avoids embedding a giant base64 blob that breaks cloud-sync).
-                    uploadModelGlb(dataUrl)
-                      .then((url) => {
-                        onChange({
-                          customModelUrl: url,
-                          model: undefined,
-                          name: entity.name || f.name.replace(/\.(glb|gltf)$/i, ''),
-                          playerAnims: {},
-                        });
-                      })
-                      .catch((err) => {
-                        const msg =
-                          err instanceof Error ? err.message : 'Model upload failed';
-                        setUploadError(msg);
-                        // Fall back to data URL so the model still works locally,
-                        // but the user is warned it won't sync to other devices.
-                        onChange({
-                          customModelUrl: dataUrl,
-                          model: undefined,
-                          name: entity.name || f.name.replace(/\.(glb|gltf)$/i, ''),
-                          playerAnims: {},
-                        });
-                      })
-                      .finally(() => setUploading(false));
-                  };
-                  reader.readAsDataURL(f);
-                }}
-              />
-              {uploading && (
-                <p className="text-[11px] text-sky-300 mt-1">
-                  Uploading model to server… map will sync across devices once done.
-                </p>
-              )}
-              {uploadError && (
-                <p className="text-[11px] text-amber-300 mt-1">
-                  Server upload failed — model saved locally only (won&apos;t sync to mobile).{' '}
-                  <span className="text-white/50">{uploadError}</span>
-                </p>
-              )}
             </div>
+
+            {/* Player base = pack Blue 001 only (no GLB upload / prototype props) */}
 
             <label className="block text-xs text-white/60">
               Scale ({entity.scale[1].toFixed(2)})

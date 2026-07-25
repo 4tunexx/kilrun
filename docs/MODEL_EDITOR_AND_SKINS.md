@@ -1,8 +1,24 @@
 # Model Editor, Skins & Weapons
 
-**Updated:** 2026-07-20  
+**Updated:** 2026-07-25  
 **Audience:** staff / contributors shipping cosmetics and combat visuals  
-**Related:** [`MAP_EDITOR_AND_PHYSICS_AUDIT.md`](./MAP_EDITOR_AND_PHYSICS_AUDIT.md), [`../server/README.md`](../server/README.md)
+**Related:** [`ANIMATIONS_MIXAMO_AND_COMBAT.md`](./ANIMATIONS_MIXAMO_AND_COMBAT.md) (Mixamo, pack anims, attack clips), [`MAP_EDITOR_AND_PHYSICS_AUDIT.md`](./MAP_EDITOR_AND_PHYSICS_AUDIT.md), [`../server/README.md`](../server/README.md)
+
+---
+
+## Pack character (Characters_7)
+
+Default player is **Body_Blue_001** from `public/game/skins/` (not the old Kenney mannequin).
+
+| Asset | Path |
+|---|---|
+| Meshes / textures | `public/game/skins/**` |
+| Pack animations | `public/game/skins/anim/pack-anims.json` |
+| Optional Unity source | local `model_skins/` (gitignored) — reseed with `npm run db:seed-assets` |
+
+Full-body skins **replace** the base mesh (you will not see Blue 001 underneath). Body colors (Brown, …) replace the mesh but still allow layered hair/hat/hoodie. Equip clash rules live in `src/lib/skin-equip-rules.ts`.
+
+For Mixamo / extra attack clips / weapon swing binding, see **[`ANIMATIONS_MIXAMO_AND_COMBAT.md`](./ANIMATIONS_MIXAMO_AND_COMBAT.md)**.
 
 ---
 

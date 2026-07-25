@@ -365,6 +365,9 @@ export default function KilrunEngine({
         // Local: purchased/equipped. Remotes: synced loadout from join.
         equippedSkins: isLocal ? equippedSkinsRef.current : remoteSkins,
       });
+      if (typeof netPlayer?.bodyColorIndex === 'number') {
+        view.setBodyColor(netPlayer.bodyColorIndex);
+      }
       characters.set(sessionId, view);
       world.scene.add(view.root);
     };
@@ -467,6 +470,9 @@ export default function KilrunEngine({
       characters.forEach((view, sessionId) => {
         const player = playersRef.current.get(sessionId);
         if (!player) return;
+        if (typeof player.bodyColorIndex === 'number') {
+          view.setBodyColor(player.bodyColorIndex);
+        }
         const isLocal = sessionId === localSessionId;
         view.update(
           player,

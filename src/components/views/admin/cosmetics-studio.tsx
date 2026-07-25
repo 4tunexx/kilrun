@@ -497,9 +497,13 @@ function BannerPanel({ onCreated }: { onCreated?: () => void }) {
 function FramePanel({
   onCreated,
   markLogoUrl,
+  viewerAvatarUrl,
+  viewerUsername,
 }: {
   onCreated?: () => void;
   markLogoUrl?: string;
+  viewerAvatarUrl?: string;
+  viewerUsername?: string;
 }) {
   const [frame, setFrame] = useState<FrameConfig>({ ...DEFAULT_FRAME_CONFIG });
   const [itemName, setItemName] = useState('');
@@ -610,13 +614,20 @@ function FramePanel({
       <div className="space-y-4">
         <div className="flex items-center justify-center rounded-lg border border-slate-700/50 bg-slate-950/50 p-8">
           <AvatarWithFrame
-            src={markLogoUrl?.trim() || '/api/site-favicon'}
-            alt="Preview"
-            fallback="K"
+            src={
+              viewerAvatarUrl?.trim() ||
+              markLogoUrl?.trim() ||
+              '/api/site-favicon'
+            }
+            alt={viewerUsername?.trim() || 'Preview'}
+            fallback={(viewerUsername?.trim() || 'K').charAt(0).toUpperCase()}
             frameConfig={frame}
             sizeClass="h-28 w-28"
           />
         </div>
+        <p className="text-[11px] text-slate-500 text-center">
+          Preview uses {viewerUsername?.trim() || 'your'} profile picture
+        </p>
         <ShopMetaFields
           itemName={itemName}
           setItemName={setItemName}
@@ -639,7 +650,14 @@ function FramePanel({
   );
 }
 
-function NicknamePanel({ onCreated }: { onCreated?: () => void }) {
+function NicknamePanel({
+  onCreated,
+  viewerUsername,
+}: {
+  onCreated?: () => void;
+  viewerUsername?: string;
+}) {
+  const previewName = viewerUsername?.trim() || 'You';
   const [nick, setNick] = useState<NicknameConfig>({ ...DEFAULT_NICKNAME_CONFIG });
   const [itemName, setItemName] = useState('');
   const [itemSku, setItemSku] = useState('');
@@ -782,21 +800,21 @@ function NicknamePanel({ onCreated }: { onCreated?: () => void }) {
         <div className="rounded-lg border border-slate-700/50 overflow-hidden min-h-[120px]">
           <div className="flex items-center justify-center bg-slate-950/70 p-8">
             <NicknameEffectText
-              name="KilrunPlayer"
+              name={previewName}
               effect={nick}
               className="text-3xl font-black"
             />
           </div>
           <div className="flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-700 p-4">
             <NicknameEffectText
-              name="KilrunPlayer"
+              name={previewName}
               effect={nick}
               className="text-xl font-black"
             />
           </div>
         </div>
         <p className="text-[11px] text-slate-500">
-          Previewed on dark and on lighter backgrounds.
+          Previewed with your real nickname on dark and lighter backgrounds.
         </p>
         <ShopMetaFields
           itemName={itemName}
@@ -965,10 +983,15 @@ function SkinPanel({ onCreated }: { onCreated?: () => void }) {
 export function CosmeticsStudio({
   onCreated,
   markLogoUrl,
+  viewerUsername,
+  viewerAvatarUrl,
 }: {
   onCreated?: () => void;
   /** Admin mark logo for frame preview (falls back to site favicon API). */
   markLogoUrl?: string;
+  /** Real admin identity — nickname / frame previews use this. */
+  viewerUsername?: string;
+  viewerAvatarUrl?: string;
 }) {
   return (
     <Card className="bg-slate-800/40 border-slate-700/30">
@@ -989,10 +1012,15 @@ export function CosmeticsStudio({
             <BannerPanel onCreated={onCreated} />
           </TabsContent>
           <TabsContent value="frame">
-            <FramePanel onCreated={onCreated} markLogoUrl={markLogoUrl} />
+            <FramePanel
+              onCreated={onCreated}
+              markLogoUrl={markLogoUrl}
+              viewerAvatarUrl={viewerAvatarUrl}
+              viewerUsername={viewerUsername}
+            />
           </TabsContent>
           <TabsContent value="nickname">
-            <NicknamePanel onCreated={onCreated} />
+            <NicknamePanel onCreated={onCreated} viewerUsername={viewerUsername} />
           </TabsContent>
           <TabsContent value="skins">
             <SkinPanel onCreated={onCreated} />

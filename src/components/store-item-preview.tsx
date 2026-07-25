@@ -23,12 +23,32 @@ export type StoreItemPreviewData = {
   cosmeticConfig?: unknown;
 };
 
+export type StoreItemViewer = {
+  /** Real display name of whoever is looking at the shop / inventory. */
+  username?: string | null;
+  /** Their existing profile picture URL. */
+  avatarUrl?: string | null;
+};
+
+function previewName(viewer?: StoreItemViewer | null, fallback = 'Player') {
+  const n = viewer?.username?.trim();
+  return n || fallback;
+}
+
+function previewAvatar(viewer?: StoreItemViewer | null) {
+  const url = viewer?.avatarUrl?.trim();
+  return url || undefined;
+}
+
 /** Shared catalog preview — banners/frames/nicknames use live cosmetic config. */
 export function StoreItemPreview({
   item,
+  viewer,
   className,
 }: {
   item: StoreItemPreviewData;
+  /** When set, nickname effects & frames preview as this user (unique per person). */
+  viewer?: StoreItemViewer | null;
   className?: string;
 }) {
   if (item.bannerConfig) {
@@ -37,6 +57,8 @@ export function StoreItemPreview({
   }
   if (item.cosmeticSlot === 'frame' && item.cosmeticConfig) {
     const frame = normalizeFrameConfig(item.cosmeticConfig);
+    const name = previewName(viewer);
+    const avatar = previewAvatar(viewer);
     return (
       <div
         className={cn(
@@ -48,13 +70,23 @@ export function StoreItemPreview({
           className={cn('rounded-full', frameAnimationClass(frame))}
           style={frameWrapperStyle(frame)}
         >
-          <div className="h-16 w-16 rounded-full bg-slate-800/80 border-2 border-slate-900/60" />
+          <div className="relative h-16 w-16 overflow-hidden rounded-full border-2 border-slate-900/60 bg-slate-800">
+            {avatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatar} alt={name} className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-lg font-black text-slate-300">
+                {name.charAt(0).toUpperCase()}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
   }
   if (item.cosmeticSlot === 'nickname' && item.cosmeticConfig) {
     const nick = normalizeNicknameConfig(item.cosmeticConfig);
+    const name = previewName(viewer);
     return (
       <div
         className={cn(
@@ -63,10 +95,11 @@ export function StoreItemPreview({
         )}
       >
         <span
-          className={cn('text-xl font-black truncate', nicknameEffectClass(nick))}
+          className={cn('text-xl font-black truncate max-w-full', nicknameEffectClass(nick))}
           style={nicknameEffectStyle(nick)}
+          title={name}
         >
-          Player
+          {name}
         </span>
       </div>
     );

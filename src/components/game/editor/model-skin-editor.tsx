@@ -32,6 +32,7 @@ import {
 import { Button } from '@/components/ui/button';
 import type { EditorEntity } from './map-document';
 import { PROTOTYPE_MODELS } from './prototype-catalog';
+import { CharacterAssetPicker } from './character-asset-picker';
 import { loadPlayerAvatar } from './player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import {
@@ -164,8 +165,9 @@ export function ModelSkinEditor({
 
   useEffect(() => {
     // Sync source mode tabs from active attachment
-    if (activeAtt.customModelUrl) setSourceMode('upload');
-    else if (activeAtt.model) setSourceMode('catalog');
+    if (activeAtt.customModelUrl) {
+      setSourceMode(activeAtt.customModelUrl.startsWith('/game/skins/') ? 'catalog' : 'upload');
+    } else if (activeAtt.model) setSourceMode('catalog');
     else setSourceMode('sculpt');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slot, activeAtt.model, activeAtt.customModelUrl, activeAtt.primitive]);
@@ -1157,24 +1159,42 @@ export function ModelSkinEditor({
           )}
 
           {sourceMode === 'catalog' && (
-            <select
-              className="w-full rounded-lg bg-black/40 border border-white/10 px-2 py-1.5 text-xs"
-              value={activeAtt.model || ''}
-              onChange={(e) =>
-                patchActive({
-                  model: e.target.value || undefined,
-                  customModelUrl: undefined,
-                  primitive: undefined,
-                })
-              }
-            >
-              <option value="">— pick prototype mesh —</option>
-              {PROTOTYPE_MODELS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
+            <div className="space-y-2">
+              <CharacterAssetPicker
+                valueUrl={
+                  activeAtt.customModelUrl?.startsWith('/game/skins/')
+                    ? activeAtt.customModelUrl
+                    : null
+                }
+                onPick={(entry, modelUrl) =>
+                  patchActive({
+                    model: undefined,
+                    customModelUrl: modelUrl,
+                    textureUrl: entry.texturePath || undefined,
+                    primitive: undefined,
+                  })
+                }
+                label="Character pack"
+              />
+              <select
+                className="w-full rounded-lg bg-black/40 border border-white/10 px-2 py-1.5 text-xs"
+                value={activeAtt.model || ''}
+                onChange={(e) =>
+                  patchActive({
+                    model: e.target.value || undefined,
+                    customModelUrl: undefined,
+                    primitive: undefined,
+                  })
+                }
+              >
+                <option value="">— or pick prototype mesh —</option>
+                {PROTOTYPE_MODELS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
 
           {sourceMode === 'upload' && (

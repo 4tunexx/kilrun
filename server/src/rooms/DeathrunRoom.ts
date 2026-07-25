@@ -36,6 +36,7 @@ import {
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import { assignDeathrunColors, BODY_COLOR_NONE } from '../lib/body-colors.js';
 import {
   authenticateJoin,
   claimsFromAuth,
@@ -336,6 +337,7 @@ export class DeathrunRoom extends Room<RoomState> {
     this.applySpawnPosition(player, this.state.players.size);
     player.energy = MAX_ENERGY;
     player.role = 'runner';
+    player.bodyColorIndex = BODY_COLOR_NONE;
 
     this.state.players.set(client.sessionId, player);
     this.latestInputs.set(client.sessionId, defaultInput());
@@ -460,9 +462,11 @@ export class DeathrunRoom extends Room<RoomState> {
     this.state.rewardsReady = false;
 
     if (!this.trapperEnabled || sessionIds.length === 1) {
+      const colors = assignDeathrunColors(sessionIds, null);
       sessionIds.forEach((sessionId, i) => {
         const player = this.state.players.get(sessionId)!;
         player.role = 'runner';
+        player.bodyColorIndex = colors.get(sessionId) ?? BODY_COLOR_NONE;
         this.resetPlayerOnSpawn(player, i);
         this.resetMatchTelemetry(player);
         this.simScratch.set(sessionId, createSimScratch());
@@ -472,11 +476,13 @@ export class DeathrunRoom extends Room<RoomState> {
       const trapperIndex = Math.floor(Math.random() * sessionIds.length);
       const trapperSessionId = sessionIds[trapperIndex];
       this.state.trapperSessionId = trapperSessionId;
+      const colors = assignDeathrunColors(sessionIds, trapperSessionId);
 
       let runnerLaneIndex = 0;
       sessionIds.forEach((sessionId, i) => {
         const player = this.state.players.get(sessionId)!;
         player.role = sessionId === trapperSessionId ? 'trapper' : 'runner';
+        player.bodyColorIndex = colors.get(sessionId) ?? BODY_COLOR_NONE;
         this.resetPlayerOnSpawn(
           player,
           player.role === 'runner' ? runnerLaneIndex++ : i

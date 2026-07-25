@@ -1205,6 +1205,15 @@ export async function purchaseStoreItem(itemId: string) {
   const item = await prisma.storeItem.findUnique({ where: { id: itemId } });
   if (!item || !item.isAvailable) throw new Error('Item unavailable');
 
+  // Skins / cosmetics are one-copy — don't let players buy duplicates.
+  if (item.cosmeticSlot || item.bannerConfig || item.cosmeticConfig) {
+    const owned = await prisma.inventoryItem.findFirst({
+      where: { userId: user.id, itemSku: item.itemSku },
+      select: { id: true },
+    });
+    if (owned) return { ok: false as const, error: 'You already own this item' };
+  }
+
   const { getEffectiveVpPrice } = await import('@/lib/shop-catalog');
   const price = getEffectiveVpPrice(item);
 
@@ -1349,12 +1358,153 @@ export async function getMyEquippedSkinAttachments(): Promise<SkinAttachment[]> 
   return flattenEquippedSkinsMap(map);
 }
 
-/** Equips a cosmetic (banner / frame / nickname), unequipping any other item in that slot. */
-export async function equipInventoryItem(inventoryItemId: string) {
+/** Equips a cosmetic (banner / frame / nickname / skin), unequipping clashes when confirmed. */
+export async function equipInventoryItem(
+  inventoryItemId: string,
+  opts?: { confirmClearClashes?: boolean }
+) {
   const user = await requireSessionUser();
   const item = await prisma.inventoryItem.findUnique({ where: { id: inventoryItemId } });
   if (!item || item.userId !== user.id) throw new Error('Item not found');
   if (!item.cosmeticSlot) throw new Error('This item cannot be equipped');
+
+  if (isSkinCosmeticSlot(item.cosmeticSlot)) {
+    const {
+      previewSkinEquipClash,
+      allSkinSlotsExcept,
+      resolveSkinEquipKind,
+      cosmeticSlotForKind,
+    } = await import('@/lib/skin-equip-rules');
+
+    const owned = await prisma.inventoryItem.findMany({
+      where: { userId: user.id, isEquipped: true },
+      select: {
+        id: true,
+        itemName: true,
+        itemSku: true,
+        cosmeticSlot: true,
+        cosmeticConfig: true,
+        isEquipped: true,
+      },
+    });
+    const clash = previewSkinEquipClash(
+      {
+        id: item.id,
+        itemName: item.itemName,
+        itemSku: item.itemSku,
+        cosmeticSlot: item.cosmeticSlot,
+        cosmeticConfig: item.cosmeticConfig,
+      },
+      owned
+    );
+
+    const kind = resolveSkinEquipKind({
+      itemName: item.itemName,
+      itemSku: item.itemSku,
+      cosmeticSlot: item.cosmeticSlot,
+      cosmeticConfig: item.cosmeticConfig,
+    });
+    const targetSlot = (kind ? cosmeticSlotForKind(kind) : null) || item.cosmeticSlot;
+
+    // Real conflicts (helmet vs glasses, fullbody vs layers, hat vs hair…) need confirm.
+    const needsConfirm =
+      clash.reasons.length > 0 ||
+      clash.slotsToClear.length > 0 ||
+      (clash.fullBodyExclusive &&
+        owned.some(
+          (o) =>
+            o.id !== item.id &&
+            o.cosmeticSlot &&
+            isSkinCosmeticSlot(o.cosmeticSlot)
+        ));
+
+    if (needsConfirm && !opts?.confirmClearClashes) {
+      return {
+        ok: false as const,
+        needsConfirm: true as const,
+        slotsToClear:
+          clash.fullBodyExclusive || kind === 'fullbody'
+            ? allSkinSlotsExcept(targetSlot)
+            : clash.slotsToClear,
+        itemIdsToUnequip: clash.itemIdsToUnequip,
+        reasons: clash.reasons.length
+          ? clash.reasons
+          : ['Conflicting skins must be unequipped first'],
+      };
+    }
+
+    const wipeAllOtherSkins = Boolean(
+      needsConfirm && (clash.fullBodyExclusive || kind === 'fullbody')
+    );
+    const slotsToWipe = new Set<string>([
+      ...clash.silentSlotsToClear,
+      ...(needsConfirm
+        ? wipeAllOtherSkins
+          ? allSkinSlotsExcept(targetSlot)
+          : clash.slotsToClear
+        : []),
+      targetSlot,
+    ]);
+    if (item.cosmeticSlot) slotsToWipe.add(item.cosmeticSlot);
+
+    if (wipeAllOtherSkins) {
+      // Full-body is exclusive — clear every other equipped skin_* row.
+      await prisma.inventoryItem.updateMany({
+        where: {
+          userId: user.id,
+          isEquipped: true,
+          id: { not: item.id },
+          cosmeticSlot: { startsWith: 'skin_' },
+        },
+        data: { isEquipped: false },
+      });
+    } else if (slotsToWipe.size) {
+      await prisma.inventoryItem.updateMany({
+        where: {
+          userId: user.id,
+          isEquipped: true,
+          OR: [
+            { cosmeticSlot: { in: Array.from(slotsToWipe) } },
+            ...(clash.itemIdsToUnequip.length
+              ? [{ id: { in: clash.itemIdsToUnequip } }]
+              : []),
+          ],
+        },
+        data: { isEquipped: false },
+      });
+    }
+
+    await prisma.inventoryItem.update({
+      where: { id: item.id },
+      data: { isEquipped: true, cosmeticSlot: targetSlot },
+    });
+
+    const prev = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { equippedSkins: true },
+    });
+    const map =
+      prev?.equippedSkins && typeof prev.equippedSkins === 'object'
+        ? { ...(prev.equippedSkins as Record<string, unknown>) }
+        : {};
+    if (wipeAllOtherSkins) {
+      for (const key of Object.keys(map)) {
+        if (isSkinCosmeticSlot(key) && key !== targetSlot) delete map[key];
+      }
+    } else {
+      for (const s of slotsToWipe) delete map[s];
+    }
+    map[targetSlot] = item.cosmeticConfig ?? { itemName: item.itemName };
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        equippedSkins: map as Prisma.InputJsonValue,
+        cosmeticEquipCount: { increment: 1 },
+      },
+    });
+    await processWebsiteAction(user.id, 'cosmetics_equipped');
+    return { ok: true as const };
+  }
 
   await prisma.inventoryItem.updateMany({
     where: { userId: user.id, cosmeticSlot: item.cosmeticSlot, isEquipped: true },
@@ -1390,23 +1540,6 @@ export async function equipInventoryItem(inventoryItemId: string) {
       data: {
         equippedNicknameItemName: item.itemName,
         equippedNicknameConfig: item.cosmeticConfig ?? undefined,
-        cosmeticEquipCount: { increment: 1 },
-      },
-    });
-  } else if (item.cosmeticSlot && isSkinCosmeticSlot(item.cosmeticSlot)) {
-    const prev = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: { equippedSkins: true },
-    });
-    const map =
-      prev?.equippedSkins && typeof prev.equippedSkins === 'object'
-        ? { ...(prev.equippedSkins as Record<string, unknown>) }
-        : {};
-    map[item.cosmeticSlot] = item.cosmeticConfig ?? { itemName: item.itemName };
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        equippedSkins: map as Prisma.InputJsonValue,
         cosmeticEquipCount: { increment: 1 },
       },
     });

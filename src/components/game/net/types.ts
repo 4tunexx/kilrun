@@ -31,6 +31,11 @@ export interface NetPlayerState {
   kp?: number;
   /** Compact SkinAttachment[] JSON for remote cosmetics. */
   equippedSkinsJson?: string;
+  /**
+   * Gameplay body color (Body_001–008). -1 = no override.
+   * Keep in sync with server PlayerState.bodyColorIndex.
+   */
+  bodyColorIndex?: number;
   /** Current weapon kind (updated by buy phase). */
   weaponKind?: string;
   weaponDamage?: number;

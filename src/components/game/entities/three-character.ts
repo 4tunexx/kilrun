@@ -9,7 +9,10 @@ import {
   stepBodyYaw,
 } from '../tps/locomotion-facing';
 import { applySkinAttachments, tickSkinAttachments } from '../editor/skin-attachments';
+import { resolveModelSrc } from '../editor/model-scan';
 import type { SkinAttachment } from '@/lib/player-skins';
+import { BODY_COLOR_NONE } from '@/lib/body-colors';
+import { applyTeamTint } from '@/lib/premium-skin-config';
 
 function pickClip(clips: THREE.AnimationClip[], patterns: string[]): THREE.AnimationClip | null {
   const lower = clips.map((c) => ({ clip: c, name: c.name.toLowerCase() }));
@@ -78,10 +81,17 @@ export class ThreeCharacter {
   private avatarScene: THREE.Object3D | null = null;
   private skinTime = 0;
   private isLocal = false;
+  private bodyColorIndex = BODY_COLOR_NONE;
+  private hasPremiumFullBody = false;
 
   constructor(_username: string, isLocal: boolean, avatar?: CharacterAvatarOptions) {
     this.isLocal = isLocal;
     this.avatarOpts = avatar ?? {};
+    this.hasPremiumFullBody = Boolean(
+      avatar?.equippedSkins?.some(
+        (s) => s.slot === 'fullbody' || (s as { equipSlot?: string }).equipSlot === 'fullbody'
+      )
+    );
     this.root.visible = false;
     void this.load();
   }
@@ -89,7 +99,20 @@ export class ThreeCharacter {
   private async load() {
     try {
       const entity = this.avatarOpts.avatarEntity ?? null;
-      const { scene, animations, clipNames, isDefaultMannequin } = await loadPlayerAvatar(entity);
+      const allSkins: SkinAttachment[] = [...(this.avatarOpts.equippedSkins ?? [])];
+      const fullBody = allSkins.find((skin) => skin.slot === 'fullbody');
+      const bodySkin = !fullBody
+        ? allSkins.find((skin) => skin.slot === 'body')
+        : undefined;
+      const baseOverride =
+        (fullBody
+          ? resolveModelSrc(fullBody.model, fullBody.customModelUrl)
+          : null) ||
+        (bodySkin ? resolveModelSrc(bodySkin.model, bodySkin.customModelUrl) : null);
+      // Full-body = exclusive animated avatar (no layered clothes).
+      // Body mesh (Brown/Blue…) replaces Blue 001 but still allows hair/hat/hoodie.
+      const { scene, animations, clipNames, isDefaultMannequin } =
+        await loadPlayerAvatar(entity, baseOverride);
       if (this.disposed) return;
 
       while (this.root.children.length) {
@@ -100,12 +123,19 @@ export class ThreeCharacter {
       pruneExtraMeshes(fitted);
       this.root.add(fitted);
       this.avatarScene = scene;
-      this.loaded = true;
-      this.root.visible = true;
-
-      const skins: SkinAttachment[] = [...(this.avatarOpts.equippedSkins ?? [])];
+      const skins = fullBody
+        ? []
+        : allSkins.filter((skin) => skin !== bodySkin);
       if (skins.length) {
-        void applySkinAttachments(scene, skins);
+        // Finish skeleton rebinding before AnimationMixer resolves DEF-* names.
+        await applySkinAttachments(scene, skins);
+        if (this.disposed) return;
+      }
+
+      if (this.bodyColorIndex !== BODY_COLOR_NONE) {
+        applyTeamTint(scene, this.bodyColorIndex, {
+          preferEmissive: this.hasPremiumFullBody,
+        });
       }
 
       this.mixer = new THREE.AnimationMixer(scene);
@@ -147,6 +177,8 @@ export class ThreeCharacter {
 
       this.actions.get('idle')?.reset().play();
       this.current = 'idle';
+      this.loaded = true;
+      this.root.visible = true;
     } catch (err) {
       if (this.disposed) return;
       console.warn('[ThreeCharacter] load failed — using simple mesh', err);
@@ -188,6 +220,17 @@ export class ThreeCharacter {
     if (!fallback) return;
     this.attackUntil = performance.now() + 480;
     this.play(fallback, false);
+  }
+
+  /** Apply gameplay body color (Deathrun / Horde / Competitive). Safe to call before/after load. */
+  public setBodyColor(index: number) {
+    const next = Number.isFinite(index) ? Math.trunc(index) : BODY_COLOR_NONE;
+    if (next === this.bodyColorIndex) return;
+    this.bodyColorIndex = next;
+    if (!this.avatarScene) return;
+    applyTeamTint(this.avatarScene, this.bodyColorIndex, {
+      preferEmissive: this.hasPremiumFullBody,
+    });
   }
 
   public update(

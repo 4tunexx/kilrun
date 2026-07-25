@@ -358,9 +358,29 @@ export function MapPlayPreview({
 
     const loadAll = async () => {
       try {
-        const loaded = await loadPlayerAvatar(avatarEntity);
+        const previewAttachments =
+          previewSkins && avatarEntity?.playerSkins?.length ? avatarEntity.playerSkins : [];
+        const fullBody = previewAttachments.find((skin) => skin.slot === 'fullbody');
+        const bodySkin = !fullBody
+          ? previewAttachments.find((skin) => skin.slot === 'body')
+          : undefined;
+        const baseOverride =
+          (fullBody
+            ? resolveModelSrc(fullBody.model, fullBody.customModelUrl)
+            : null) ||
+          (bodySkin ? resolveModelSrc(bodySkin.model, bodySkin.customModelUrl) : null);
+        const loaded = await loadPlayerAvatar(avatarEntity, baseOverride);
         if (disposed) return;
-        // Same plant + authored scale as the map editor (no forced 1.75m height).
+        // Full-body replaces the whole avatar (no layers). Body mesh keeps hair/hat/etc.
+        const layeredSkins = fullBody
+          ? []
+          : previewAttachments.filter((skin) => skin !== bodySkin);
+        if (layeredSkins.length) {
+          // Rebind clothes before the animation director resolves bone tracks.
+          await applySkinAttachments(loaded.scene, layeredSkins);
+          if (disposed) return;
+        }
+        // Same 1.75m planted fit used by player and skin studios.
         const root = fitAvatarLikeEditor(loaded.scene, avatarEntity, loaded.isDefaultMannequin);
         const [px, py, pz] = simToThree(body.x, body.y, body.z);
         root.position.set(px, py, pz);
@@ -389,9 +409,6 @@ export function MapPlayPreview({
               }),
               availableClips: loaded.clipNames,
             };
-          }
-          if (previewSkins && avatarEntity.playerSkins?.length) {
-            await applySkinAttachments(loaded.scene, avatarEntity.playerSkins);
           }
         }
       } catch (err) {

@@ -54,6 +54,7 @@ import { AdminNewsPanel } from '@/components/views/admin/admin-news-panel';
 import { AdminPremiumPanel } from '@/components/views/admin/admin-premium-panel';
 import { AdminRanksPanel } from '@/components/views/admin/admin-ranks-panel';
 import { AdminAnnouncementCarouselPanel } from '@/components/views/admin/admin-announcement-carousel-panel';
+import { AdminAssetBrowser } from '@/components/views/admin/admin-asset-browser';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -98,6 +99,7 @@ import { normalizeLandingSlides, type LandingHeroSlide } from '@/lib/cosmetics';
 import { ACCOUNT_ROLES } from '@/lib/roles';
 import { normalizeBannerConfig, skuFromName } from '@/lib/banner';
 import { BannerFill } from '@/components/banner-fill';
+import { StoreItemPreview } from '@/components/store-item-preview';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import {
   formatFireSaleCountdown,
@@ -127,6 +129,7 @@ const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   badges: { label: 'Badges', icon: <Medal className="h-3.5 w-3.5" /> },
   support: { label: 'Support', icon: <Ticket className="h-3.5 w-3.5" /> },
   shop: { label: 'Shop', icon: <ShoppingBag className="h-3.5 w-3.5" /> },
+  assets: { label: 'Assets', icon: <Database className="h-3.5 w-3.5" /> },
   premium: { label: 'Premium', icon: <Gem className="h-3.5 w-3.5 text-amber-300 fill-amber-400/30" /> },
   ranks: { label: 'Ranks', icon: <Trophy className="h-3.5 w-3.5" /> },
   maps: { label: 'Map Editor', icon: <MapIcon className="h-3.5 w-3.5" /> },
@@ -146,14 +149,27 @@ const ADMIN_TABS = [
   'badges',
   'support',
   'shop',
+  'assets',
   'premium',
   'ranks',
   'maps',
   'content',
 ] as const;
 
-export default function AdminView({ viewerRole }: { viewerRole?: string }) {
+export default function AdminView({
+  viewerRole,
+  viewerUsername,
+  viewerAvatarUrl,
+}: {
+  viewerRole?: string;
+  viewerUsername?: string;
+  viewerAvatarUrl?: string;
+}) {
   const isAdmin = viewerRole === 'admin';
+  const viewer = {
+    username: viewerUsername,
+    avatarUrl: viewerAvatarUrl,
+  };
   const visibleTabs = isAdmin ? ADMIN_TABS : MODERATOR_TABS;
 
   const [users, setUsers] = useState<Awaited<ReturnType<typeof adminListUsers>>>([]);
@@ -1927,6 +1943,8 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
             <CosmeticsStudio
               onCreated={reload}
               markLogoUrl={siteForm.logoUrl || undefined}
+              viewerUsername={viewerUsername}
+              viewerAvatarUrl={viewerAvatarUrl}
             />
 
             <Card className="bg-slate-800/40 border-slate-700/30">
@@ -2217,14 +2235,11 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                             banner={banner}
                             className="w-12 h-8 rounded shrink-0"
                           />
-                        ) : item.imageUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={item.imageUrl}
-                            alt=""
-                            className="w-8 h-8 rounded object-cover shrink-0"
-                          />
-                        ) : null}
+                        ) : (
+                          <div className="relative w-12 h-12 rounded shrink-0 overflow-hidden bg-slate-900">
+                            <StoreItemPreview item={item} viewer={viewer} />
+                          </div>
+                        )}
                         <div className="min-w-0">
                           <p className="font-semibold truncate flex items-center gap-1.5 flex-wrap">
                             {item.itemName}
@@ -2291,6 +2306,29 @@ export default function AdminView({ viewerRole }: { viewerRole?: string }) {
                 );
               })}
             </div>
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="assets" className="mt-4 space-y-4">
+            <Card className="bg-slate-800/40 border-slate-700/30">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Database className="h-4 w-4 text-cyan-300" />
+                  Character asset registry
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-slate-400 mb-4">
+                  Browse every model from the character pack. Enable, feature, preview in 3D,
+                  and publish to the shop without code changes. Runtime assets live in{' '}
+                  <code className="text-slate-300">public/game/skins/</code>. Optional:{' '}
+                  <code className="text-slate-300">npm run db:seed-assets</code> copies from a local{' '}
+                  <code className="text-slate-300">model_skins/</code> source pack (gitignored).
+                </p>
+                <AdminAssetBrowser />
+              </CardContent>
+            </Card>
           </TabsContent>
         )}
 

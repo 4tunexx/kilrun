@@ -126,6 +126,7 @@ import { TextureAtlasPicker } from './texture-atlas-picker';
 import { worldScaleToUvRepeat } from './editor-mesh';
 import { KILRUN_MODE_INFO } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
+import { CharacterAssetPicker } from './character-asset-picker';
 import {
   ensureStarterMap,
   exportJson,
@@ -3733,11 +3734,26 @@ export function MapEditor({
                       ))}
                     </select>
                   </label>
+                  <CharacterAssetPicker
+                    valueUrl={
+                      selected.customModelUrl?.startsWith('/game/skins/')
+                        ? selected.customModelUrl
+                        : null
+                    }
+                    onPick={(entry, modelUrl) =>
+                      patchSelected({
+                        model: undefined,
+                        customModelUrl: modelUrl,
+                        name: selected.name || entry.displayName,
+                      })
+                    }
+                    label="Character pack"
+                  />
                   <label className="block text-xs text-white/60">
                     Upload animated GLB
                     <input
                       type="file"
-                      accept=".glb,.gltf,model/gltf-binary"
+                      accept=".glb,.gltf,.fbx,model/gltf-binary"
                       className="mt-0.5 w-full text-[10px]"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
@@ -3747,7 +3763,7 @@ export function MapEditor({
                           patchSelected({
                             customModelUrl: String(reader.result),
                             model: undefined,
-                            name: selected.name || f.name.replace(/\.(glb|gltf)$/i, ''),
+                            name: selected.name || f.name.replace(/\.(glb|gltf|fbx)$/i, ''),
                           });
                         };
                         reader.readAsDataURL(f);

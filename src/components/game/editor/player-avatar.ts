@@ -1,5 +1,6 @@
 /**
  * Shared player avatar loading for Player Model studio, Play Test, and match.
+ * Default = pack Body_Blue_001 + Basic_Character animations (no Kenney mannequin).
  */
 import * as THREE from 'three';
 import type { EditorEntity, MapDocument, PlayerAnimBindings } from './map-document';
@@ -10,19 +11,26 @@ import {
   suggestPlayerBindings,
 } from './map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
-import { loadCharacterPrefab, normalizeCharacter } from '../renderer/asset-loader';
-import { plantLocalFeet } from './editor-mesh';
+import { normalizeCharacter } from '../renderer/asset-loader';
+import {
+  DEFAULT_PACK_PLAYER_URL,
+  isLegacyPlayerModel,
+  isPackPlayerUrl,
+  loadPackPlayerPrefab,
+} from '../renderer/pack-player';
 import {
   applyExtraBones,
   applyPlayerMeshEdits,
   authoredClipsToThree,
 } from './player-mesh-edits';
+import { BODY_COLOR_SOLO_DEFAULT } from '@/lib/body-colors';
+import { applyTeamTint } from '@/lib/premium-skin-config';
 
 export interface LoadedPlayerAvatar {
   scene: THREE.Object3D;
   animations: THREE.AnimationClip[];
   clipNames: string[];
-  /** True when using built-in mannequin + anim packs. */
+  /** True when using pack Blue-001 default (not a custom fullbody override). */
   isDefaultMannequin: boolean;
 }
 
@@ -33,9 +41,34 @@ export function getMapPlayerAvatar(doc: MapDocument | null | undefined): EditorE
 }
 
 /**
+ * Force player entity onto pack Blue-001 (clears legacy mannequin / data-URL / props).
+ */
+export function migratePlayerEntityToPackBlue(
+  entity: EditorEntity
+): Partial<EditorEntity> | null {
+  if (
+    entity.customModelUrl === DEFAULT_PACK_PLAYER_URL &&
+    !entity.model
+  ) {
+    return null;
+  }
+  if (
+    isPackPlayerUrl(entity.customModelUrl) &&
+    !isLegacyPlayerModel(entity.model, entity.customModelUrl)
+  ) {
+    return null;
+  }
+  return {
+    model: undefined,
+    customModelUrl: DEFAULT_PACK_PLAYER_URL,
+    playerAnims: {},
+    animation: defaultAnimation(),
+  };
+}
+
+/**
  * Ensure the map has a player avatar entity. Creates one on the Spawns layer
- * (or first layer) if missing. Does not place it in the viewport — caller
- * should sync the doc.
+ * (or first layer) if missing. Always points at pack Blue-001.
  */
 export function ensureMapPlayerEntity(doc: MapDocument): {
   doc: MapDocument;
@@ -43,7 +76,19 @@ export function ensureMapPlayerEntity(doc: MapDocument): {
   created: boolean;
 } {
   const existing = findPlayerEntity(doc);
-  if (existing) return { doc, entity: existing, created: false };
+  if (existing) {
+    const patch = migratePlayerEntityToPackBlue(existing);
+    if (!patch) return { doc, entity: existing, created: false };
+    const entity = { ...existing, ...patch };
+    return {
+      doc: {
+        ...doc,
+        entities: doc.entities.map((e) => (e.id === existing.id ? entity : e)),
+      },
+      entity,
+      created: false,
+    };
+  }
 
   const layerId =
     doc.layers.find((l) => /spawn/i.test(l.name))?.id ??
@@ -56,13 +101,13 @@ export function ensureMapPlayerEntity(doc: MapDocument): {
     name: 'Player Avatar',
     kind: 'player',
     layerId,
-    // Not placed on the map — platform settings only (Player Model / 3rd View).
     position: [0, -1000, 0],
     rotation: [0, 0, 0],
     scale: [1, 1, 1],
     visible: false,
     animation: defaultAnimation(),
     playerAnims: {},
+    customModelUrl: DEFAULT_PACK_PLAYER_URL,
   };
 
   return {
@@ -82,7 +127,6 @@ function finalizeAvatar(
   applyPlayerMeshEdits(scene, entity?.playerMeshEdits);
   const authored = authoredClipsToThree(entity?.playerAuthoredClips);
   const merged = [...animations, ...authored];
-  // Prefer authored clip when names collide.
   const byName = new Map<string, THREE.AnimationClip>();
   for (const c of merged) byName.set(c.name || '(unnamed)', c);
   const finalClips = Array.from(byName.values());
@@ -90,41 +134,63 @@ function finalizeAvatar(
   return { scene, animations: finalClips, clipNames, isDefaultMannequin };
 }
 
-/** Load skinned scene + clips for an avatar entity (or default mannequin). */
+/** Load skinned scene + clips for an avatar entity (pack Blue-001 by default). */
 export async function loadPlayerAvatar(
-  entity?: EditorEntity | null
+  entity?: EditorEntity | null,
+  modelOverrideUrl?: string | null
 ): Promise<LoadedPlayerAvatar> {
-  const src = resolveModelSrc(entity?.model, entity?.customModelUrl);
-  if (!src) {
-    const { scene, animations } = await loadCharacterPrefab();
+  const rawSrc = modelOverrideUrl || resolveModelSrc(entity?.model, entity?.customModelUrl);
+  const usePackDefault =
+    !rawSrc ||
+    (!modelOverrideUrl && isLegacyPlayerModel(entity?.model, entity?.customModelUrl)) ||
+    rawSrc === DEFAULT_PACK_PLAYER_URL ||
+    (isPackPlayerUrl(rawSrc) && /Body_Blue_001/i.test(rawSrc));
+
+  if (usePackDefault || !rawSrc) {
+    const modelUrl =
+      rawSrc && isPackPlayerUrl(rawSrc) && !isLegacyPlayerModel(entity?.model, entity?.customModelUrl)
+        ? rawSrc
+        : DEFAULT_PACK_PLAYER_URL;
+    const { scene, animations } = await loadPackPlayerPrefab({
+      modelUrl,
+      // Gameplay bodyColorIndex applied later in ThreeCharacter; editor uses blue tint
+      skipTint: false,
+    });
+    applyTeamTint(scene, BODY_COLOR_SOLO_DEFAULT, { preferEmissive: false });
     return finalizeAvatar(entity, scene, animations, true);
   }
-  const { root, clips } = await loadAnimatedPrefab(src);
+
+  // Any Characters_7 pack FBX (bodies OR fullbody skins) shares the same Rigify
+  // DEF- rig, so it can reuse the converted pack animation clips. Only body meshes
+  // get the blue gameplay tint; fullbody premium skins keep their own materials.
+  if (/\/game\/skins\//i.test(rawSrc) && /\.fbx(\?|$)/i.test(rawSrc)) {
+    const isBody = /\/bodies\//i.test(rawSrc);
+    const { scene, animations } = await loadPackPlayerPrefab({
+      modelUrl: rawSrc,
+      skipTint: !isBody,
+    });
+    return finalizeAvatar(entity, scene, animations, false);
+  }
+
+  const { root, clips } = await loadAnimatedPrefab(rawSrc);
   return finalizeAvatar(entity, root, clips, false);
 }
 
 /**
  * Match map-editor sizing: plant feet, then apply the entity's authored XYZ scale.
- * Do NOT force a target height — that made Play Test / match look bigger/smaller
- * than the same avatar next to platforms in the editor.
- *
- * Default mannequin (no authored model) is height-fit to ~1.6m so it matches the
- * editor's blue capsule placeholder, then multiplied by entity.scale.
  */
 export function fitAvatarLikeEditor(
   mesh: THREE.Object3D,
   entity: EditorEntity | null | undefined,
-  isDefaultMannequin: boolean
+  _isDefaultMannequin: boolean
 ): THREE.Group {
   const wrap = new THREE.Group();
   wrap.name = 'avatar-fit';
-  if (isDefaultMannequin && !entity?.model && !entity?.customModelUrl) {
-    normalizeCharacter(mesh, 1.6);
-    wrap.add(mesh);
-  } else {
-    plantLocalFeet(mesh);
-    wrap.add(mesh);
-  }
+  // Player studio and skin studio both author against 1.75m. Normalize every
+  // runtime avatar to that same planted height so pack bodies, full-body skins,
+  // and rebound clothes have identical proportions and offsets.
+  normalizeCharacter(mesh, 1.75);
+  wrap.add(mesh);
   const sx = entity?.scale?.[0] ?? 1;
   const sy = entity?.scale?.[1] ?? 1;
   const sz = entity?.scale?.[2] ?? 1;
@@ -136,7 +202,6 @@ export function fitAvatarLikeEditor(
   return wrap;
 }
 
-/** Authored avatar scale (before TPS framing multiplier). */
 export function avatarAuthoredScale(
   entity: EditorEntity | null | undefined
 ): [number, number, number] {
@@ -150,7 +215,6 @@ export function avatarAuthoredScale(
   ];
 }
 
-/** Merge scanned clips into entity.animation.availableClips + optional auto-bind. */
 export function applyClipsToPlayerEntity(
   entity: EditorEntity,
   clipNames: string[],

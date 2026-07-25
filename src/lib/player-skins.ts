@@ -3,7 +3,11 @@ import { DEFAULT_MELEE_COMBAT } from './weapons';
 
 export type SkinAttachSlot =
   | 'hat'
+  | 'hair'
   | 'face'
+  | 'glasses'
+  | 'eyebrow'
+  | 'mustache'
   | 'torso'
   | 'pants'
   | 'boots'
@@ -12,7 +16,16 @@ export type SkinAttachSlot =
   | 'back'
   | 'tail'
   | 'horn'
-  | 'addon';
+  | 'addon'
+  | 'body'
+  // Future / registry categories (metadata + equip; rendering wired incrementally)
+  | 'fullbody'
+  | 'trail'
+  | 'emote'
+  | 'pet'
+  | 'spray'
+  | 'deatheffect'
+  | 'victory';
 
 /** Built-in shapes you can sculpt without uploading a GLB. */
 export type SkinPrimitive =
@@ -174,9 +187,22 @@ export const SKIN_ATTACH_SLOTS: {
     defaultAttachMode: 'bone',
   },
   {
+    id: 'hair',
+    label: 'Hair',
+    hint: 'Hairstyles (clashes with hats)',
+    defaultOffset: [0, 1.58, 0],
+    boneHints: ['head', 'hat', 'skull'],
+    cosmeticSlot: 'skin_hair',
+    defaultPrimitive: 'sphere',
+    defaultShape: { radius: 0.28, radialSegments: 20 },
+    defaultScale: [1, 1, 1],
+    defaultFeel: 'cloth',
+    defaultAttachMode: 'bone',
+  },
+  {
     id: 'face',
     label: 'Face',
-    hint: 'Masks, glasses, visors',
+    hint: 'Legacy face slot',
     defaultOffset: [0, 1.42, 0.12],
     boneHints: ['head', 'face', 'jaw'],
     cosmeticSlot: 'skin_face',
@@ -185,6 +211,58 @@ export const SKIN_ATTACH_SLOTS: {
     defaultScale: [1.15, 1.15, 1.15],
     defaultFeel: 'solid',
     defaultAttachMode: 'bone',
+  },
+  {
+    id: 'glasses',
+    label: 'Glasses',
+    hint: 'Glasses / visors (clash with helmets)',
+    defaultOffset: [0, 1.42, 0.12],
+    boneHints: ['head', 'face', 'jaw'],
+    cosmeticSlot: 'skin_glasses',
+    defaultPrimitive: 'box',
+    defaultShape: { width: 0.42, height: 0.16, depth: 0.1 },
+    defaultScale: [1.1, 1.1, 1.1],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'bone',
+  },
+  {
+    id: 'eyebrow',
+    label: 'Eyebrows',
+    hint: 'Eyebrow styles',
+    defaultOffset: [0, 1.48, 0.14],
+    boneHints: ['head', 'face'],
+    cosmeticSlot: 'skin_eyebrow',
+    defaultPrimitive: 'box',
+    defaultShape: { width: 0.28, height: 0.04, depth: 0.04 },
+    defaultScale: [1, 1, 1],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'bone',
+  },
+  {
+    id: 'mustache',
+    label: 'Mustache',
+    hint: 'Facial hair',
+    defaultOffset: [0, 1.34, 0.14],
+    boneHints: ['head', 'face', 'jaw'],
+    cosmeticSlot: 'skin_mustache',
+    defaultPrimitive: 'box',
+    defaultShape: { width: 0.22, height: 0.06, depth: 0.06 },
+    defaultScale: [1, 1, 1],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'bone',
+  },
+  {
+    id: 'body',
+    label: 'Body',
+    hint: 'Body color / mesh (Brown, Blue…) — layers still allowed',
+    defaultOffset: [0, 0, 0],
+    boneHints: ['hips', 'pelvis', 'root'],
+    cosmeticSlot: 'skin_body',
+    defaultPrimitive: 'box',
+    defaultShape: { width: 0.5, height: 1.7, depth: 0.3 },
+    defaultScale: [1, 1, 1],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'body',
   },
   {
     id: 'torso',
@@ -307,6 +385,19 @@ export const SKIN_ATTACH_SLOTS: {
     defaultAttachMode: 'body',
     allowMultiple: true,
   },
+  {
+    id: 'fullbody',
+    label: 'Full body skin',
+    hint: 'Replaces the entire character model (premium)',
+    defaultOffset: [0, 0, 0],
+    boneHints: ['hips', 'pelvis', 'root'],
+    cosmeticSlot: 'skin_fullbody',
+    defaultPrimitive: 'box',
+    defaultShape: { width: 0.5, height: 1.7, depth: 0.3 },
+    defaultScale: [1, 1, 1],
+    defaultFeel: 'solid',
+    defaultAttachMode: 'body',
+  },
 ];
 
 export interface SkinSculptData {
@@ -408,7 +499,10 @@ export interface PlayerSkinPreset {
 }
 
 export function skinSlotMeta(slot: SkinAttachSlot) {
-  return SKIN_ATTACH_SLOTS.find((s) => s.id === slot)!;
+  const hit = SKIN_ATTACH_SLOTS.find((s) => s.id === slot);
+  if (hit) return hit;
+  // Future-only slots (trail, emote, …) — safe fallback for metadata helpers
+  return SKIN_ATTACH_SLOTS.find((s) => s.id === 'addon')!;
 }
 
 export function attachmentKey(att: Pick<SkinAttachment, 'id' | 'slot'>): string {

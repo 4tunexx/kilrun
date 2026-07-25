@@ -31,6 +31,7 @@ import {
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import { assignCompetitiveColor } from '../lib/body-colors.js';
 import {
   authenticateJoin,
   claimsFromAuth,
@@ -380,6 +381,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     const aCount = Array.from(this.state.players.values()).filter((p) => p.role === 'team_a').length;
     const bCount = Array.from(this.state.players.values()).filter((p) => p.role === 'team_b').length;
     player.role = aCount <= bCount ? 'team_a' : 'team_b';
+    player.bodyColorIndex = assignCompetitiveColor(player.role);
 
     this.applyTeamSpawn(player);
     this.state.players.set(client.sessionId, player);
@@ -408,6 +410,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       if (player.role !== 'team_a' && player.role !== 'team_b') {
         player.role = i % 2 === 0 ? 'team_a' : 'team_b';
       }
+      player.bodyColorIndex = assignCompetitiveColor(player.role);
       this.applyTeamSpawn(player);
       player.vz = 0;
     });

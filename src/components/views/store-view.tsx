@@ -53,7 +53,16 @@ function FireSaleCountdown({ endsAt }: { endsAt: Date | string }) {
   );
 }
 
-export default function StoreView({ userId }: { userId?: string }) {
+export default function StoreView({
+  userId,
+  username,
+  avatarUrl,
+}: {
+  userId?: string;
+  /** Live viewer identity for nickname / frame previews. */
+  username?: string;
+  avatarUrl?: string;
+}) {
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [buyingId, setBuyingId] = useState<string | null>(null);
@@ -197,7 +206,10 @@ export default function StoreView({ userId }: { userId?: string }) {
                   >
                     <CardContent className="p-0 w-full">
                       <div className="relative aspect-square w-full overflow-hidden rounded-t-lg bg-slate-800/30">
-                        <StoreItemPreview item={item} />
+                        <StoreItemPreview
+                          item={item}
+                          viewer={{ username, avatarUrl }}
+                        />
                         {onFire && (
                           <>
                             <div className="absolute inset-0 pointer-events-none ring-2 ring-inset ring-orange-400/80" />

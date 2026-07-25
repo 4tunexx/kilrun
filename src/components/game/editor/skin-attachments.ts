@@ -25,8 +25,10 @@ import { applySculptDataToGeometry } from './skin-sculpt';
 
 const ATTACH_ROOT_NAME = '__skin_attachments';
 const textureCache = new Map<string, THREE.Texture>();
+const attachmentGeneration = new WeakMap<THREE.Object3D, number>();
 
 export function clearSkinAttachments(avatarRoot: THREE.Object3D) {
+  attachmentGeneration.set(avatarRoot, (attachmentGeneration.get(avatarRoot) ?? 0) + 1);
   const existing = avatarRoot.getObjectByName(ATTACH_ROOT_NAME);
   if (existing) existing.removeFromParent();
   // Bone-mode holders parent onto bones (not under __skin_attachments) — remove those too
@@ -37,6 +39,12 @@ export function clearSkinAttachments(avatarRoot: THREE.Object3D) {
     }
   });
   for (const o of orphaned) o.removeFromParent();
+  // A full-body preview hides the base skinned body. Restore it when the
+  // attachment set changes or is cleared.
+  avatarRoot.traverse((o) => {
+    const mesh = o as THREE.SkinnedMesh;
+    if (mesh.isSkinnedMesh && !mesh.userData.reboundToPlayer) mesh.visible = true;
+  });
 }
 
 function findBone(root: THREE.Object3D, hints: string[]): THREE.Object3D | null {
@@ -249,7 +257,15 @@ export async function buildSkinPartMesh(att: SkinAttachment): Promise<THREE.Obje
       primary = await buildPrim('box', { width: 0.3, height: 0.3, depth: 0.3 }, att, `prim_${attachmentKey(att)}`);
     } else {
       const { root } = await loadAnimatedPrefab(src);
-      plantLocal(root);
+      let hasSkinnedMesh = false;
+      root.traverse((o) => {
+        if ((o as THREE.SkinnedMesh).isSkinnedMesh) hasSkinnedMesh = true;
+      });
+      // Characters_7 clothing/full-body FBXs are authored in the same space as
+      // Body_Blue_001. Planting them independently shifts the garment away from
+      // the body; rigid props still need thumbnail-style planting.
+      if (!hasSkinnedMesh) plantLocal(root);
+      root.userData.packSkinnedAsset = hasSkinnedMesh;
       const color = att.material?.color || att.color;
       const matOverrides = att.material;
       root.traverse((o) => {
@@ -337,6 +353,76 @@ function expandAttachments(attachments: SkinAttachment[]): SkinAttachment[] {
   return out;
 }
 
+function normalizedBoneName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Rebind an imported Characters_7 garment to the avatar's live skeleton.
+ * The garment's skin indices retain their original ordering; a new Skeleton
+ * supplies the matching animated avatar bones in that same ordering.
+ */
+function rebindSkinnedAsset(
+  avatarRoot: THREE.Object3D,
+  importedRoot: THREE.Object3D
+): boolean {
+  const targetBones = new Map<string, THREE.Bone>();
+  avatarRoot.traverse((o) => {
+    if ((o as THREE.Bone).isBone || o.type === 'Bone') {
+      targetBones.set(normalizedBoneName(o.name), o as THREE.Bone);
+    }
+  });
+
+  const meshes: THREE.SkinnedMesh[] = [];
+  importedRoot.traverse((o) => {
+    if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(o as THREE.SkinnedMesh);
+  });
+  if (!meshes.length || !targetBones.size) return false;
+
+  // Validate every mesh before changing any of them. Falling back to the old
+  // rigid attachment is safer than leaving a garment half rebound.
+  const mappings = meshes.map((mesh) =>
+    mesh.skeleton.bones.map((bone) => targetBones.get(normalizedBoneName(bone.name)) ?? null)
+  );
+  if (mappings.some((bones) => bones.some((bone) => !bone))) {
+    console.warn('[skin] incompatible skinned asset; not all bones match the player rig');
+    return false;
+  }
+
+  meshes.forEach((mesh, index) => {
+    const source = mesh.skeleton;
+    const skeleton = new THREE.Skeleton(
+      mappings[index] as THREE.Bone[],
+      source.boneInverses.map((inverse) => inverse.clone())
+    );
+    mesh.skeleton = skeleton;
+    mesh.normalizeSkinWeights();
+    mesh.frustumCulled = false;
+    mesh.userData.reboundToPlayer = true;
+  });
+
+  // Remove the garment's duplicate rig. Duplicate DEF-* names can steal
+  // AnimationMixer property bindings from the real player bones.
+  const hasMesh = (root: THREE.Object3D) => {
+    let found = false;
+    root.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) found = true;
+    });
+    return found;
+  };
+  const hasBone = (root: THREE.Object3D) => {
+    let found = false;
+    root.traverse((o) => {
+      if ((o as THREE.Bone).isBone || o.type === 'Bone') found = true;
+    });
+    return found;
+  };
+  for (const child of [...importedRoot.children]) {
+    if (hasBone(child) && !hasMesh(child)) child.removeFromParent();
+  }
+  return true;
+}
+
 /**
  * Place holder so `att.position` (character-local, feet y=0) matches
  * the Model Editor "On body" preview exactly in gameplay.
@@ -379,9 +465,13 @@ function placeHolder(
 async function attachOne(
   avatarRoot: THREE.Object3D,
   group: THREE.Group,
-  att: SkinAttachment
+  att: SkinAttachment,
+  isCurrent: () => boolean
 ) {
   const root = await buildSkinPartMesh(att);
+  if (!isCurrent()) return;
+  const followsPlayerSkeleton =
+    root.userData.packSkinnedAsset === true && rebindSkinnedAsset(avatarRoot, root);
   root.scale.set(...att.scale);
   root.rotation.set(
     THREE.MathUtils.degToRad(att.rotation[0]),
@@ -398,7 +488,14 @@ async function attachOne(
   holder.userData.baseRotZ = holder.rotation.z;
   holder.userData.baseRotX = holder.rotation.x;
   holder.add(root);
-  placeHolder(avatarRoot, group, att, holder);
+  if (followsPlayerSkeleton) {
+    // Skinned pack clothes are already authored around the character origin.
+    // Never parent their whole rig to one hand/head/foot bone.
+    holder.position.set(...att.position);
+    group.add(holder);
+  } else {
+    placeHolder(avatarRoot, group, att, holder);
+  }
 }
 
 export async function applySkinAttachments(
@@ -406,6 +503,8 @@ export async function applySkinAttachments(
   attachments: SkinAttachment[]
 ): Promise<void> {
   clearSkinAttachments(avatarRoot);
+  const generation = attachmentGeneration.get(avatarRoot) ?? 0;
+  const isCurrent = () => attachmentGeneration.get(avatarRoot) === generation;
   if (!attachments.length) return;
 
   const group = new THREE.Group();
@@ -413,9 +512,18 @@ export async function applySkinAttachments(
   avatarRoot.add(group);
 
   const expanded = expandAttachments(attachments);
+  if (expanded.some((att) => att.slot === 'fullbody')) {
+    // In editor previews the full-body mesh is rebound like clothing, so hide
+    // Body_Blue_001 instead of rendering two bodies on top of each other.
+    avatarRoot.traverse((o) => {
+      const mesh = o as THREE.SkinnedMesh;
+      if (mesh.isSkinnedMesh && !mesh.userData.reboundToPlayer) mesh.visible = false;
+    });
+  }
   for (const att of expanded) {
     try {
-      await attachOne(avatarRoot, group, att);
+      await attachOne(avatarRoot, group, att, isCurrent);
+      if (!isCurrent()) return;
     } catch (err) {
       console.warn('[applySkinAttachments]', att.slot, err);
     }

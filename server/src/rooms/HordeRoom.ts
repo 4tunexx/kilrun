@@ -32,6 +32,7 @@ import {
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import { nextHordeColor } from '../lib/body-colors.js';
 import {
   authenticateJoin,
   claimsFromAuth,
@@ -373,6 +374,8 @@ export class HordeRoom extends Room<RoomState> {
     applyLoadoutToPlayer(player, options);
     player.energy = MAX_ENERGY;
     this.applySpawnPosition(player, this.state.players.size);
+    const usedColors = Array.from(this.state.players.values()).map((p) => p.bodyColorIndex);
+    player.bodyColorIndex = nextHordeColor(usedColors);
 
     this.state.players.set(client.sessionId, player);
     this.latestInputs.set(client.sessionId, defaultInput());

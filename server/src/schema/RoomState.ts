@@ -40,6 +40,12 @@ export class PlayerState extends Schema {
   @type('number') kp = 1000;
   /** Compact JSON of equipped SkinAttachment[] for remote cosmetics. */
   @type('string') equippedSkinsJson = '[]';
+  /**
+   * Gameplay body color index (Body_001–008). -1 = no override.
+   * Deathrun trapper = 0 (Red); runners = unique 1–7; Horde unique;
+   * Competitive team_a = 0 (Red), team_b = 1 (Blue).
+   */
+  @type('number') bodyColorIndex = -1;
   /** Authoritative weapon combat from equipped loadout (clamped on join). */
   @type('string') weaponKind = 'hitscan';
   @type('number') weaponRange = 14;

@@ -479,12 +479,46 @@ model InventoryItem {
   /// Original VP price paid; resale refunds a fraction of this.
   vpValue      Int      @default(0)
   isEquipped   Boolean  @default(false)
+  /// Player-marked favorite for inventory filtering.
+  isFavorite   Boolean  @default(false)
   acquiredAt   DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([userId, cosmeticSlot])
+}
+
+/// Master registry of 3D cosmetic models (supplements StoreItem purchase catalog).
+model Asset {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// Stable key e.g. fullbody_alien_001
+  assetId      String   @unique
+  name         String
+  displayName  String
+  /// body | fullbody | hat | hair | glasses | glove | backpack | mustache | outerwear | pants | shoe | eyebrow | other
+  category     String
+  rarity       String   @default("common")
+  price        Int      @default(0)
+  currency     String   @default("vp")
+  modelPath    String
+  texturePath  String   @default("")
+  previewUrl   String?
+  thumbnailUrl String?
+  enabled      Boolean  @default(true)
+  hidden       Boolean  @default(false)
+  featured     Boolean  @default(false)
+  shopVisible  Boolean  @default(false)
+  /// skin_hat | skin_fullbody | skin_back | ...
+  equipSlot    String
+  tags         String[] @default([])
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([category])
+  @@index([shopVisible, enabled])
+  @@index([equipSlot])
 }
 
 /// Staff moderation / admin action trail.
