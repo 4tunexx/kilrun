@@ -252,7 +252,6 @@ export default function StoreView({
                       <div className="p-4 w-full">
                         <p className="text-xs text-slate-400 uppercase">
                           {item.itemCategory}
-                          {item.cosmeticSlot ? ` · ${item.cosmeticSlot}` : ''}
                         </p>
                         <h3 className="font-bold text-lg truncate">{item.itemName}</h3>
                         {earned ? (
