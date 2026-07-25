@@ -149,6 +149,13 @@ export function createThumbnailCaptureSession(): ThumbnailCaptureSession {
     capture,
     dispose() {
       renderer.dispose();
+      // dispose() alone frees three.js-side memory but does NOT return the
+      // underlying WebGL context to the browser — without this, batches of
+      // thumbnail captures leak real GPU contexts. Past the browser's cap
+      // (~16), it evicts the OLDEST live context to make room, which can be
+      // an unrelated tab's game renderer — exactly what caused the
+      // black/bodyless player after running thumbnail regeneration.
+      renderer.forceContextLoss();
     },
   };
 }
