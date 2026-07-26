@@ -249,6 +249,17 @@ export interface EditorViewportApi {
     offset?: [number, number];
     rotation?: number;
   }) => void;
+  /** Read back the last texture+UV copied via Paint Tool RMB, or null. */
+  getCopiedTexture: () => {
+    textureUrl: string | null;
+    worldScale: number;
+    repeat: [number, number];
+    offset: [number, number];
+    rotation: number;
+    sourceName?: string;
+  } | null;
+  /** Clear the copied paint state so LMB clicks revert to the brush default. */
+  clearCopiedTexture: () => void;
   destroy: () => void;
 }
 
@@ -269,6 +280,15 @@ export function createEditorViewport(
     onPendingPlaceChange?: (kind: EditorEntity['kind'] | null) => void;
     /** Fired when a double-tap/double-click lands on a locked entity (open its props panel). */
     onLockedEntityDoubleTap?: (id: string) => void;
+    /** Fired in Paint texture tool: RMB on any solid copies its texture+UV. */
+    onCopiedTexture?: (info: {
+      textureUrl: string | null;
+      worldScale: number;
+      repeat: [number, number];
+      offset: [number, number];
+      rotation: number;
+      sourceName?: string;
+    }) => void;
   }
 ): EditorViewportApi {
   let doc: MapDocument = structuredClone(initial);
@@ -319,6 +339,23 @@ export function createEditorViewport(
     offset: [0, 0] as [number, number],
     rotation: 0,
   };
+  /**
+   * Last texture+UV package COPIED via Paint Tool RMB-click on any solid.
+   * When set, LMB paint clicks use these EXACT values instead of re-deriving
+   * world-scale from the paint brush slider. That means the copied texture
+   * will tile exactly as many times, with the same offset + rotation as it
+   * did on the source wall, ensuring cross-wall alignment / seamlessness.
+   */
+  let copiedTexture:
+    | {
+        textureUrl: string | null;
+        worldScale: number;
+        repeat: [number, number];
+        offset: [number, number];
+        rotation: number;
+        sourceName?: string;
+      }
+    | null = null;
   /** Multi-viewport layout (shared scene). */
   let viewLayout: EditorViewLayout = 'single';
   const topCam = new THREE.OrthographicCamera(-24, 24, 24, -24, 0.1, 500);
@@ -394,6 +431,67 @@ export function createEditorViewport(
   floorMesh.receiveShadow = true;
   scene.add(floorMesh);
 
+  function makeVoidShadowTexture(): THREE.CanvasTexture {
+    const size = 512;
+    const cvs = document.createElement('canvas');
+    cvs.width = size;
+    cvs.height = size;
+    const ctx = cvs.getContext('2d')!;
+    const grd = ctx.createRadialGradient(
+      size / 2,
+      size / 2,
+      size * 0.02,
+      size / 2,
+      size / 2,
+      size * 0.5
+    );
+    grd.addColorStop(0, 'rgba(255,255,255,1)');
+    grd.addColorStop(0.25, 'rgba(255,255,255,0.75)');
+    grd.addColorStop(0.55, 'rgba(255,255,255,0.25)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(cvs);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+  const voidShadowTex = makeVoidShadowTexture();
+  const voidShadowMat = new THREE.MeshBasicMaterial({
+    color: 0x65ffa9,
+    transparent: true,
+    opacity: 0.88,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    map: voidShadowTex,
+  });
+  const voidShadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), voidShadowMat);
+  voidShadowMesh.rotation.x = -Math.PI / 2;
+  voidShadowMesh.position.y = -0.012;
+  voidShadowMesh.renderOrder = 1;
+  voidShadowMesh.visible = false;
+  scene.add(voidShadowMesh);
+
+  // Second slightly-smaller inner halo for a two-stage glow.
+  const voidShadowInnerMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.55,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    map: voidShadowTex,
+  });
+  const voidShadowInner = new THREE.Mesh(
+    new THREE.PlaneGeometry(120, 120),
+    voidShadowInnerMat
+  );
+  voidShadowInner.rotation.x = -Math.PI / 2;
+  voidShadowInner.position.y = -0.008;
+  voidShadowInner.renderOrder = 2;
+  voidShadowInner.visible = false;
+  scene.add(voidShadowInner);
+
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(200, 200),
     new THREE.MeshBasicMaterial({ visible: false })
@@ -410,7 +508,24 @@ export function createEditorViewport(
 
   function applyEnvironment(env: MapEnvironment) {
     const skyHex = env.sky === 'custom' ? env.skyColor : SKY_COLORS[env.sky] ?? env.skyColor;
-    const fogHex = env.fogColor || env.horizonColor || skyHex;
+    const isVoid = env.floor === 'void';
+
+    // Void maps: use VOID-SPECIFIC fog override (density & color) so the abyss
+    // looks like Minecraft-style glowing-green shadow fog instead of the regular
+    // map fog. Falls back to global fog settings when the void overrides are
+    // not explicitly set.
+    const effectiveFogColor =
+      isVoid && env.voidFogColor
+        ? env.voidFogColor
+        : env.fogColor || env.horizonColor || skyHex;
+    const effectiveFogDensity =
+      isVoid && env.voidFogDensity != null ? env.voidFogDensity : env.fogDensity ?? 0.022;
+    // Void maps also tint the sky towards the void color so the horizon doesn't
+    // look mismatched with the glowing abyss below.
+    const effectiveSky =
+      isVoid && env.voidColor && !env.skyTextureUrl
+        ? env.voidColor
+        : skyHex;
 
     if (skyTexture) {
       skyTexture.dispose();
@@ -429,19 +544,25 @@ export function createEditorViewport(
         },
         undefined,
         () => {
-          scene.background = new THREE.Color(skyHex);
+          scene.background = new THREE.Color(effectiveSky);
           scene.environment = null;
         }
       );
     } else {
-      scene.background = new THREE.Color(skyHex);
+      scene.background = new THREE.Color(effectiveSky);
       scene.environment = null;
     }
 
-    scene.fog = new THREE.FogExp2(fogHex, env.fogDensity ?? 0.02);
+    scene.fog = new THREE.FogExp2(effectiveFogColor, effectiveFogDensity);
     grid.visible = env.gridVisible ?? true;
-    const hasVoidTint = env.floor === 'void' && Boolean(env.voidColor);
-    floorMesh.visible = env.floor !== 'void' || hasVoidTint;
+
+    const legacyVoidTint = Boolean(env.voidColor);
+    const voidFloorColor = env.voidFloorColor ?? env.voidColor ?? '#050810';
+    const voidFloorOpacity = env.voidFloorOpacity ?? (legacyVoidTint ? 0.92 : 1);
+    const showVoidFloor =
+      isVoid &&
+      (env.voidFloorColor != null || env.voidColor != null || voidFloorOpacity > 0.01);
+    floorMesh.visible = !isVoid || showVoidFloor;
     const mat = floorMesh.material as THREE.MeshStandardMaterial;
     if (env.floor === 'water') {
       mat.color.set('#0e4a6e');
@@ -449,12 +570,19 @@ export function createEditorViewport(
       mat.opacity = 0.75;
       mat.metalness = 0.4;
       mat.roughness = 0.2;
-    } else if (hasVoidTint) {
-      mat.color.set(env.voidColor!);
-      mat.transparent = false;
-      mat.opacity = 1;
-      mat.metalness = 0.1;
-      mat.roughness = 0.9;
+    } else if (isVoid && showVoidFloor) {
+      mat.color.set(voidFloorColor);
+      mat.transparent = voidFloorOpacity < 0.999;
+      mat.opacity = Math.max(0, Math.min(1, voidFloorOpacity));
+      mat.metalness = 0.08;
+      mat.roughness = 0.95;
+    } else if (isVoid) {
+      // Pure void (no tint) — keep material benign so scene state stays sane.
+      mat.color.set('#000000');
+      mat.transparent = true;
+      mat.opacity = 0;
+      mat.metalness = 0;
+      mat.roughness = 1;
     } else {
       mat.color.set(env.floorColor || '#1a2740');
       mat.transparent = false;
@@ -462,6 +590,26 @@ export function createEditorViewport(
       mat.metalness = 0;
       mat.roughness = 1;
     }
+
+    // Void shadow / glowing fog halo (the "green fog falling down" look).
+    const shadowIntensity = isVoid ? Math.max(0, Math.min(2, env.voidShadowIntensity ?? 0)) : 0;
+    voidShadowMesh.visible = shadowIntensity > 0;
+    voidShadowInner.visible = shadowIntensity > 0;
+    if (shadowIntensity > 0) {
+      const shadowColor = env.voidShadowColor ?? env.voidFogColor ?? voidFloorColor ?? '#65ffa9';
+      voidShadowMat.color.set(shadowColor);
+      voidShadowMat.opacity = 0.9 * shadowIntensity;
+      // Inner halo uses a slightly brighter shade of the shadow color — makes
+      // the glow feel more volumetric right under the platforms.
+      const brighter = new THREE.Color(shadowColor).offsetHSL(0, 0, 0.06);
+      voidShadowInnerMat.color.copy(brighter);
+      voidShadowInnerMat.opacity = 0.55 * shadowIntensity;
+      // Expand shadow halo radius for bigger voids.
+      const scale = 0.85 + Math.min(1.6, effectiveFogDensity * 18);
+      voidShadowMesh.scale.setScalar(scale);
+      voidShadowInner.scale.setScalar(scale);
+    }
+
     ambientLight.intensity = env.ambientIntensity ?? 0.55;
     sun.intensity = env.sunIntensity ?? 1.15;
     if (env.sunColor) sun.color.set(env.sunColor);
@@ -469,7 +617,7 @@ export function createEditorViewport(
     if (env.horizonColor) hemiLight.groundColor.set(env.horizonColor);
 
     const tile = Math.max(1, env.floorTextureScale ?? 40);
-    if (env.defaultTextureUrl) {
+    if (!isVoid && env.defaultTextureUrl) {
       new THREE.TextureLoader().load(env.defaultTextureUrl, (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -1767,6 +1915,48 @@ export function createEditorViewport(
   }
 
   const onPointerDown = (ev: PointerEvent) => {
+    // Paint Tool: RMB = COPY texture + full UV package from whatever solid is
+    // under the cursor. This is exact: keeps source tile density, offset, and
+    // rotation so pasting onto a neighboring wall with the same worldScale
+    // produces continuous, seamless tiling without seams.
+    if (ev.button === 2 && editTool === 'paint' && !freeFly && !measureMode) {
+      if (!setPointerFromClient(ev.clientX, ev.clientY)) return;
+      raycaster.setFromCamera(pointer, camera);
+      const pickables = Array.from(roots.values()).filter((r) => r.visible);
+      const hits = raycaster.intersectObjects(pickables, true);
+      if (!hits.length) return;
+      let o: THREE.Object3D | null = hits[0].object;
+      while (o && !o.userData.entityId) o = o.parent;
+      const id = o?.userData.entityId as string | undefined;
+      if (!id) return;
+      const ent = doc.entities.find((e) => e.id === id);
+      if (!ent || isLockedEnt(ent)) return;
+      const worldScale = ent.textureWorldScale ?? paintUv.worldScale;
+      const repeat = resolveEntityTextureRepeat(ent) ?? [...paintUv.repeat] as [
+        number,
+        number,
+      ];
+      const offset = (ent.textureOffset ?? [...paintUv.offset]) as [number, number];
+      const rotation = ent.textureRotation ?? paintUv.rotation;
+      copiedTexture = {
+        textureUrl: ent.textureUrl || doc.environment?.defaultTextureUrl || null,
+        worldScale,
+        repeat: [...repeat] as [number, number],
+        offset: [...offset] as [number, number],
+        rotation,
+        sourceName: ent.name || ent.model || undefined,
+      };
+      // Also update the active paint texture URL so single LMB (non-copied)
+      // continues acting like a brush loaded with this texture.
+      paintTextureUrl = copiedTexture.textureUrl;
+      paintUv.worldScale = worldScale;
+      paintUv.repeat = [...repeat] as [number, number];
+      paintUv.offset = [...offset] as [number, number];
+      paintUv.rotation = rotation;
+      handlers.onCopiedTexture?.({ ...copiedTexture });
+      return;
+    }
+
     if (ev.button !== 0) return;
     downX = ev.clientX;
     downY = ev.clientY;
@@ -1820,7 +2010,13 @@ export function createEditorViewport(
       return;
     }
     // Texture paint: arm on down; apply on release under finger/cursor.
-    if (!freeFly && !measureMode && editTool === 'paint' && paintTextureUrl) {
+    // (Works with copied state OR with the explicitly-selected paint URL + UV sliders.)
+    if (
+      !freeFly &&
+      !measureMode &&
+      editTool === 'paint' &&
+      (paintTextureUrl || copiedTexture)
+    ) {
       orbit.enabled = false;
       try {
         renderer.domElement.setPointerCapture(ev.pointerId);
@@ -1999,7 +2195,13 @@ export function createEditorViewport(
     if ((transform as unknown as { dragging: boolean }).dragging) return;
 
     // Texture paint: apply texture to the mesh under the pointer on release (no properties menu).
-    if (editTool === 'paint' && paintTextureUrl) {
+    // Supports two modes:
+    //   * Copy-paste mode (copiedTexture != null): uses EXACT repeat/offset/rotation values
+    //     captured from the source, plus grid-snapped world-space UV offset so the
+    //     pasted brick pattern aligns seamlessly across neighboring walls/floors.
+    //     Texture URL taken from the copied package (can be null, meaning "global default").
+    //   * Fresh brush mode: uses current paintTextureUrl + paintUv worldScale + sliders.
+    if (editTool === 'paint' && (paintTextureUrl || copiedTexture)) {
       try {
         renderer.domElement.releasePointerCapture(ev.pointerId);
       } catch {
@@ -2015,21 +2217,67 @@ export function createEditorViewport(
         while (o && !o.userData.entityId) o = o.parent;
         const id = o?.userData.entityId as string | undefined;
         if (id) {
-          const tex = paintTextureUrl;
+          const usingCopied = copiedTexture != null;
+          const tex = copiedTexture?.textureUrl ?? paintTextureUrl ?? null;
+          const face = hits[0].face;
+          const hitPoint = hits[0].point;
+
           doc = {
             ...doc,
             entities: doc.entities.map((e) => {
               if (e.id !== id) return e;
-              const worldScale = paintUv.worldScale > 0 ? paintUv.worldScale : 1;
-              const size = entityWorldSize(e.collisionSize, e.scale);
-              const repeat = worldScaleToUvRepeat(size, worldScale);
+              let worldScale: number;
+              let repeat: [number, number];
+              let offset: [number, number];
+              let rotation: number;
+              if (usingCopied && copiedTexture) {
+                worldScale = copiedTexture.worldScale;
+                repeat = [...copiedTexture.repeat] as [number, number];
+                offset = [...copiedTexture.offset] as [number, number];
+                rotation = copiedTexture.rotation;
+
+                // For seamless copy-paste, snap the UV origin to a world grid
+                // aligned with the hit face's tangent plane. This makes the
+                // same brick on Wall A and Wall B land on the same grid so
+                // corners line up exactly when they meet.
+                if (face) {
+                  const normal = face.normal.clone();
+                  o?.localToWorld(normal);
+                  normal.normalize();
+                  const UP = new THREE.Vector3(0, 1, 0);
+                  const tangent = new THREE.Vector3();
+                  const bitangent = new THREE.Vector3();
+                  if (Math.abs(normal.dot(UP)) > 0.95) {
+                    tangent.set(1, 0, 0);
+                    bitangent.set(0, 0, 1);
+                  } else {
+                    tangent.crossVectors(UP, normal).normalize();
+                    bitangent.crossVectors(normal, tangent).normalize();
+                  }
+                  const ws = Math.max(0.001, worldScale);
+                  const u = hitPoint.dot(tangent) / ws;
+                  const v = hitPoint.dot(bitangent) / ws;
+                  // The first UV hit on the SOURCE face at copy-time was itself
+                  // at a world-grid boundary; by snapping the PASTE hit to the
+                  // same world grid we get seamless seams on adjacent surfaces.
+                  const snapU = u - Math.round(u);
+                  const snapV = v - Math.round(v);
+                  offset = [offset[0] + snapU, offset[1] + snapV] as [number, number];
+                }
+              } else {
+                worldScale = paintUv.worldScale > 0 ? paintUv.worldScale : 1;
+                const size = entityWorldSize(e.collisionSize, e.scale);
+                repeat = worldScaleToUvRepeat(size, worldScale);
+                offset = [...paintUv.offset] as [number, number];
+                rotation = paintUv.rotation;
+              }
               return {
                 ...e,
                 textureUrl: tex ?? e.textureUrl,
                 textureWorldScale: worldScale,
                 textureRepeat: repeat,
-                textureOffset: paintUv.offset,
-                textureRotation: paintUv.rotation,
+                textureOffset: offset,
+                textureRotation: rotation,
               };
             }),
           };
@@ -2246,6 +2494,11 @@ export function createEditorViewport(
 
   renderer.domElement.addEventListener('pointerdown', onPointerDown);
   renderer.domElement.addEventListener('pointerup', onPointerUp);
+  renderer.domElement.addEventListener('contextmenu', (ev) => {
+    // Prevent browser right-click menu in the viewport — Paint Tool uses RMB
+    // as "copy texture + UV from this solid".
+    if (editTool === 'paint') ev.preventDefault();
+  });
   window.addEventListener('mousemove', onMouseMove);
 
   let ctrlAloneCandidate = false;
@@ -3089,6 +3342,25 @@ export function createEditorViewport(
       if (uv.repeat) paintUv.repeat = uv.repeat;
       if (uv.offset) paintUv.offset = uv.offset;
       if (typeof uv.rotation === 'number') paintUv.rotation = uv.rotation;
+    },
+    /** Read back the last texture+UV copied via Paint Tool RMB, or null. */
+    getCopiedTexture: () =>
+      copiedTexture
+        ? {
+            textureUrl: copiedTexture.textureUrl,
+            worldScale: copiedTexture.worldScale,
+            repeat: [...copiedTexture.repeat] as [number, number],
+            offset: [...copiedTexture.offset] as [number, number],
+            rotation: copiedTexture.rotation,
+            sourceName: copiedTexture.sourceName,
+          }
+        : null,
+    /**
+     * Clear the copied paint state so subsequent LMB clicks fall back to the
+     * brush default paint UV settings again.
+     */
+    clearCopiedTexture: () => {
+      copiedTexture = null;
     },
     destroy: () => {
       cancelAnimationFrame(raf);

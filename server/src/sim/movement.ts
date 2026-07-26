@@ -264,11 +264,30 @@ export function applyMovement(
   let grounded = !!support && player.vz <= 0.2;
   player.isGrounded = grounded;
 
+  // GENTLE ground snap: when landing or walking onto an adjacent pad/ramp, never
+  // teleport vertically by more than ~step-climb per tick. The old code wrote
+  // `player.z = support.topZ` every grounded tick, which means walking up a
+  // smooth ramp caused 5–25 cm vertical teleports per server tick → client
+  // extrapolates those as hops/bounces instead of continuous slope climb.
   if (grounded && support) {
+    const snapMax = wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_STEP_CLIMB;
+    const delta = support.topZ - player.z;
+    if (delta > 0) {
+      // Climbing up onto a higher pad/ramp step. Only climb by up to step size
+      // this tick; leave the rest for next gravity pass if still overlapping.
+      player.z += Math.min(delta, snapMax);
+    } else if (delta < -LAND_STEP_CLIMB) {
+      // Stepping down a taller drop than pure gravity would eat this tick —
+      // stay glued to the slope by descending up to step-descend, but no more
+      // (otherwise you'd snap through the bottom of small ledges and feel
+      // weightless).
+      player.z += Math.max(delta, -LAND_STEP_DESCEND);
+    } else {
+      player.z = support.topZ;
+    }
+    player.vz = 0;
     scratch.coyoteMs = effCoyoteMs;
     scratch.jumpCount = 0;
-    player.z = support.topZ;
-    player.vz = 0;
   } else {
     if (scratch.jumpCount === 0 && scratch.coyoteMs <= 0) {
       scratch.jumpCount = 1;

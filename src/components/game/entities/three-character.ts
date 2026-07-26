@@ -100,35 +100,62 @@ export class ThreeCharacter {
     try {
       const entity = this.avatarOpts.avatarEntity ?? null;
       const allSkins: SkinAttachment[] = [...(this.avatarOpts.equippedSkins ?? [])];
-      const fullBody = allSkins.find((skin) => skin.slot === 'fullbody');
-      const bodySkin = !fullBody
-        ? allSkins.find((skin) => skin.slot === 'body')
-        : undefined;
-      const baseOverride =
-        (fullBody
-          ? resolveModelSrc(fullBody.model, fullBody.customModelUrl)
-          : null) ||
-        (bodySkin ? resolveModelSrc(bodySkin.model, bodySkin.customModelUrl) : null);
-      // Full-body = exclusive animated avatar (no layered clothes).
-      // Body mesh (Brown/Blue…) replaces Blue 001 but still allows hair/hat/hoodie.
+
+      // Decide which premium fullbody skin (if any) actually has a loadable source.
+      // We MUST guard against malformed / stripped skins where slot==='fullbody' but
+      // model/customModelUrl are empty (e.g. oversized data URLs were stripped by
+      // compactSkinsForMatch or the Colyseus join payload caps options). Setting
+      // hasPremiumFullBody=true for such a skin would make applyTeamTint flip the
+      // base body to emissive blending even though the premium model didn't load.
+      const loadableFullbody =
+        allSkins.find(
+          (skin) =>
+            (skin.slot === 'fullbody' ||
+              (skin as { equipSlot?: string }).equipSlot === 'fullbody') &&
+            Boolean(resolveModelSrc(skin.model, skin.customModelUrl))
+        ) ?? null;
+      this.hasPremiumFullBody = Boolean(loadableFullbody);
+
+      // Avatar base: always start with the pack default. applySkinAttachments
+      // below handles fullbody rebinding (hide base body once the premium mesh
+      // is attached and verified loaded). Using the same pipeline as the
+      // editor previews guarantees visibility parity instead of trying to
+      // inline fullbody as a baseOverride here, which previously left edge
+      // cases where malformed skins could hide the base body forever.
       const { scene, animations, clipNames, isDefaultMannequin } =
-        await loadPlayerAvatar(entity, baseOverride);
+        await loadPlayerAvatar(entity, null);
       if (this.disposed) return;
 
       while (this.root.children.length) {
         this.root.remove(this.root.children[0]);
       }
-      // Match map editor size — no forced 1.8m height normalize.
       const fitted = fitAvatarLikeEditor(scene, entity, isDefaultMannequin);
       pruneExtraMeshes(fitted);
+
+      // Hard visibility guarantee: no matter what the FBX/loader flags say,
+      // every skinned mesh on the base avatar starts visible.
+      // applySkinAttachments (called below) will selectively hide them again
+      // ONLY if a loadable fullbody replacement actually finished attaching.
+      fitted.traverse((o) => {
+        const mesh = o as THREE.SkinnedMesh;
+        if (mesh.isSkinnedMesh) mesh.visible = true;
+        else if ((o as THREE.Mesh).isMesh) {
+          // Keep collision/preview meshes hidden (they're not the drawable body).
+          const name = String(o.name || '').toLowerCase();
+          if (/collis|preview|hitbox|trigger/.test(name)) {
+            (o as THREE.Mesh).visible = false;
+          }
+        }
+      });
+
       this.root.add(fitted);
       this.avatarScene = scene;
-      const skins = fullBody
-        ? []
-        : allSkins.filter((skin) => skin !== bodySkin);
-      if (skins.length) {
-        // Finish skeleton rebinding before AnimationMixer resolves DEF-* names.
-        await applySkinAttachments(scene, skins);
+
+      // Full body skin already handled by applySkinAttachments (it has the
+      // rebind + visibility rollback). Body/team-tinted base skins also go
+      // through this path so their attachments layer on top.
+      if (allSkins.length > 0) {
+        await applySkinAttachments(scene, allSkins);
         if (this.disposed) return;
       }
 
@@ -301,29 +328,48 @@ export class ThreeCharacter {
     // Always show loaded mesh (die clip needs corpse visible)
     this.root.visible = this.loaded;
 
+    const wishFwd = moveWish?.fwd ?? 0;
+    const wishStrafe = moveWish?.strafe ?? 0;
+    const moving = Math.abs(wishFwd) + Math.abs(wishStrafe) > 0.05;
+
+    // Use EXACT state machine copied from animation-director.ts →
+    // updatePlayer() so Live matches behave 1:1 with Play Test.
     if (!player.isAlive) {
-      this.play('die', false);
+      const slot = this.actions.has('die') ? 'die' : 'idle';
+      this.play(slot, false);
     } else if (performance.now() < this.attackUntil) {
-      // keep current attack / punch
+      // attack / punch keeps playing until finished
     } else if (performance.now() < this.landUntil && this.actions.has('land')) {
       this.play('land', false);
     } else if (!player.isGrounded) {
-      this.play(player.vz > 0.5 ? 'jump' : 'fall', false);
+      // Play Test: airborne AND any horizontal input => jump, else fall.
+      // vz threshold is NOT used — otherwise the anim flips to fall at apex
+      // (vz ~0 → negative) before player has visually left the ground.
+      this.play(moving || wishFwd !== 0 ? 'jump' : 'fall', false);
     } else if (player.isCrouching) {
       this.play('crouch');
-    } else if (aimHeld && moveWish && this.speed > 0.8) {
-      // Aim-strafe: body faces camera — use directional clips when available
-      if (Math.abs(moveWish.strafe) > Math.abs(moveWish.fwd) + 0.15) {
-        this.play(moveWish.strafe < 0 ? 'strafe_left' : 'strafe_right');
-      } else if (moveWish.fwd < -0.35) {
-        this.play(this.actions.has('back') ? 'back' : 'walk');
+    } else if (moving) {
+      // Aim-hold: body faces camera, use directional strafe/back clips.
+      if (aimHeld) {
+        if (
+          Math.abs(wishStrafe) > Math.abs(wishFwd) + 0.15 &&
+          (wishStrafe < 0 ? this.actions.has('strafe_left') : this.actions.has('strafe_right'))
+        ) {
+          this.play(wishStrafe < 0 ? 'strafe_left' : 'strafe_right');
+        } else if (wishFwd < -0.5 && Math.abs(wishStrafe) < 0.35) {
+          this.play(this.actions.has('back') ? 'back' : player.isSprinting ? 'run' : 'walk');
+        } else {
+          this.play(player.isSprinting ? 'run' : 'walk');
+        }
       } else {
-        this.play(player.isSprinting || this.speed > 6 ? 'run' : 'walk');
+        // Play Test: yaw faces travel direction. Use dedicated back clip
+        // only for pure backpedal (S alone); otherwise walk/run based on sprint.
+        if (wishFwd < -0.5 && Math.abs(wishStrafe) < 0.35 && this.actions.has('back')) {
+          this.play('back');
+        } else {
+          this.play(player.isSprinting ? 'run' : 'walk');
+        }
       }
-    } else if (this.speed > 6 || player.isSprinting) {
-      this.play('run');
-    } else if (this.speed > 0.8) {
-      this.play('walk');
     } else {
       this.play('idle');
     }

@@ -705,11 +705,33 @@ export interface MapEnvironment {
    *  preset so users can preview the in-game floor style (e.g. void / solid)
    *  without the distracting editing grid on top. */
   gridVisible?: boolean;
-  /** Tint to use when the floor preset is 'void'. When set, the floor plane
-   *  renders as this solid colour so void maps still have visual context
+  /** Base tint to use when the floor preset is 'void'. When set, the floor
+   *  plane renders as this solid colour so void maps still have visual context
    *  in the editor / preview; leave unset to render void as truly invisible
    *  (pure sky / no floor plane). */
   voidColor?: string;
+  /** Controls the solid floor disc tint used in void preset. Alias for
+   *  `voidColor` but surfaced in the UI as "void floor color" so users can
+   *  set it independently of the sky-hue void tint above. */
+  voidFloorColor?: string;
+  /** 0–1 opacity of the solid void floor disc. 1 = opaque painted floor;
+   *  lower values let the sky / void fog show through and feel more "abyss". */
+  voidFloorOpacity?: number;
+  /** Override fog colour ONLY when floor === 'void' (the Minecraft-style
+   *  "green foggy shadow void" look). Falls back to global `fogColor` when
+   *  not set. */
+  voidFogColor?: string;
+  /** Override exponential fog density ONLY when floor === 'void'. Controls how
+   *  thick the "green glowing shadow" feels as you look down into the
+   *  abyss. */
+  voidFogDensity?: number;
+  /** 0–2 intensity of the radial glowing void shadow halo drawn under the
+   *  floor disc (the "green fog falling down" effect). */
+  voidShadowIntensity?: number;
+  /** Optional shadow halo tint for the void abyss — normally matches the void
+   *  fog color but can be set to a brighter / neon accent to make the glow
+   *  below the platforms more dramatic. */
+  voidShadowColor?: string;
 }
 
 /** Embedded 3rd-person view override (from 3rd View tool). Shape matches tps-view-settings. */
@@ -1060,6 +1082,12 @@ export const DEFAULT_ENVIRONMENT: MapEnvironment = {
   floorTextureScale: 40,
   gridVisible: true,
   voidColor: '#050810',
+  voidFloorColor: '#0a2412',
+  voidFloorOpacity: 0.9,
+  voidFogColor: '#26c05d',
+  voidFogDensity: 0.05,
+  voidShadowIntensity: 1.1,
+  voidShadowColor: '#65ffa9',
 };
 
 export function defaultAnimation(): EntityAnimation {

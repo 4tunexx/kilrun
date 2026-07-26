@@ -300,11 +300,22 @@ export function stepPlatformer(
   let grounded = !!support && body.vz <= 0.2;
   body.isGrounded = grounded;
 
+  // GENTLE ground snap (mirrors server movement.ts) — never teleport vertically by
+  // more than step-climb/descend per tick. Stops ramps/adjacent pads from feeling
+  // like bumpy hops when grounded topZ changes by small amounts per tick.
   if (grounded && support) {
+    const snapMax = wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_STEP_CLIMB;
+    const delta = support.topZ - body.z;
+    if (delta > 0) {
+      body.z += Math.min(delta, snapMax);
+    } else if (delta < -LAND_STEP_CLIMB) {
+      body.z += Math.max(delta, -LAND_STEP_DESCEND);
+    } else {
+      body.z = support.topZ;
+    }
+    body.vz = 0;
     scratch.coyoteMs = COYOTE_MS;
     scratch.jumpCount = 0;
-    body.z = support.topZ;
-    body.vz = 0;
   } else {
     if (scratch.jumpCount === 0 && scratch.coyoteMs <= 0) {
       scratch.jumpCount = 1;

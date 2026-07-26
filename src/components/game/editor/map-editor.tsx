@@ -2416,25 +2416,161 @@ export function MapEditor({
                 Toggle the grid overlay off to preview the in-game floor style (solid / void / water) without grid lines on top.
               </p>
               {env.floor === 'void' && (
-                <label className="block text-xs text-white/60 pt-1">
-                  Void floor tint
-                  <div className="flex items-center gap-2 mt-1">
+                <div className="mt-3 pt-3 border-t border-white/10 space-y-3">
+                  <p className="text-[10px] tracking-widest text-emerald-300/80 uppercase">
+                    Void atmosphere
+                  </p>
+
+                  <label className="block text-xs text-white/60">
+                    Void sky tint (base abyss color)
+                    <div className="flex items-center gap-2 mt-1">
+                      <input
+                        type="color"
+                        className="h-9 w-20 shrink-0 bg-transparent"
+                        value={env.voidColor || '#050810'}
+                        onChange={(e) => patchEnv({ voidColor: e.target.value })}
+                      />
+                      <div className="flex-1 text-[10px] text-white/50 font-mono">
+                        {env.voidColor || '#050810'}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-[10px] text-white/50 hover:text-white"
+                        onClick={() => patchEnv({ voidColor: undefined })}
+                      >
+                        Reset
+                      </Button>
+                    </div>
+                  </label>
+
+                  <label className="block text-xs text-white/60">
+                    Void floor disc (painted ground)
+                    <div className="flex items-center gap-2 mt-1">
+                      <input
+                        type="color"
+                        className="h-9 w-20 shrink-0 bg-transparent"
+                        value={env.voidFloorColor ?? env.voidColor ?? '#0a2412'}
+                        onChange={(e) => patchEnv({ voidFloorColor: e.target.value })}
+                      />
+                      <div className="flex-1 text-[10px] text-white/50 font-mono">
+                        {env.voidFloorColor ?? '(inherits sky)'}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-[10px] text-white/50 hover:text-white"
+                        onClick={() =>
+                          patchEnv({ voidFloorColor: undefined, voidFloorOpacity: undefined })
+                        }
+                      >
+                        Match sky
+                      </Button>
+                    </div>
+                  </label>
+
+                  <label className="block text-xs text-white/60">
+                    Floor opacity ({Math.round((env.voidFloorOpacity ?? 0.9) * 100)}%)
                     <input
-                      type="color"
-                      className="h-9 w-20 shrink-0 bg-transparent"
-                      value={env.voidColor || '#050810'}
-                      onChange={(e) => patchEnv({ voidColor: e.target.value })}
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      className="w-full"
+                      value={env.voidFloorOpacity ?? 0.9}
+                      onChange={(e) =>
+                        patchEnv({ voidFloorOpacity: Number(e.target.value) })
+                      }
                     />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2 text-[10px] text-white/50 hover:text-white"
-                      onClick={() => patchEnv({ voidColor: undefined })}
-                    >
-                      Clear (pure void)
-                    </Button>
+                    <p className="text-[10px] text-white/35 leading-snug mt-0.5">
+                      Lower to let the glowing void fog show through the floor disc (pure abyss feel).
+                    </p>
+                  </label>
+
+                  <div className="pt-2 border-t border-white/10 space-y-3">
+                    <p className="text-[10px] tracking-widest text-emerald-300/80 uppercase">
+                      Void fog &amp; abyss shadow
+                    </p>
+
+                    <label className="block text-xs text-white/60">
+                      Fog color (falling shadow tint)
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          type="color"
+                          className="h-9 w-20 shrink-0 bg-transparent"
+                          value={env.voidFogColor ?? '#26c05d'}
+                          onChange={(e) => patchEnv({ voidFogColor: e.target.value })}
+                        />
+                        <div className="flex-1 text-[10px] text-white/50 font-mono">
+                          {env.voidFogColor ?? '(global fog)'}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-[10px] text-white/50 hover:text-white"
+                          onClick={() =>
+                            patchEnv({ voidFogColor: undefined, voidFogDensity: undefined })
+                          }
+                        >
+                          Use global
+                        </Button>
+                      </div>
+                    </label>
+
+                    <label className="block text-xs text-white/60">
+                      Fog density · how far you can see down (
+                      {(env.voidFogDensity ?? 0.05).toFixed(3)})
+                      <input
+                        type="range"
+                        min={0}
+                        max={0.18}
+                        step={0.001}
+                        className="w-full"
+                        value={env.voidFogDensity ?? 0.05}
+                        onChange={(e) =>
+                          patchEnv({ voidFogDensity: Number(e.target.value) })
+                        }
+                      />
+                      <p className="text-[10px] text-white/35 leading-snug mt-0.5">
+                        Higher density = the abyss eats platforms sooner as they recede from the camera.
+                      </p>
+                    </label>
+
+                    <label className="block text-xs text-white/60">
+                      Glow shadow halo color
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          type="color"
+                          className="h-9 w-20 shrink-0 bg-transparent"
+                          value={env.voidShadowColor ?? env.voidFogColor ?? '#65ffa9'}
+                          onChange={(e) => patchEnv({ voidShadowColor: e.target.value })}
+                        />
+                        <div className="flex-1 text-[10px] text-white/50 font-mono">
+                          {env.voidShadowColor ?? '(matches fog)'}
+                        </div>
+                      </div>
+                    </label>
+
+                    <label className="block text-xs text-white/60">
+                      Shadow glow intensity (
+                      {Number((env.voidShadowIntensity ?? 1.1).toFixed(2))})
+                      <input
+                        type="range"
+                        min={0}
+                        max={2}
+                        step={0.01}
+                        className="w-full"
+                        value={env.voidShadowIntensity ?? 1.1}
+                        onChange={(e) =>
+                          patchEnv({ voidShadowIntensity: Number(e.target.value) })
+                        }
+                      />
+                      <p className="text-[10px] text-white/35 leading-snug mt-0.5">
+                        0 = no halo glow at all, 2 = neon-max abyss glow under every platform.
+                      </p>
+                    </label>
                   </div>
-                </label>
+                </div>
               )}
             </div>
           )}
