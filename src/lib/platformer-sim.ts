@@ -84,6 +84,8 @@ const ENERGY_EXHAUSTED_THRESHOLD = 50;
 const ENERGY_EXHAUSTED_SPEED_MULT = 0.72;
 const LAND_SNAP_FAST = 0.7;
 const LAND_SNAP_SLOW = 0.4;
+const LAND_STEP_CLIMB = 0.75;
+const LAND_STEP_DESCEND = 0.9;
 const LEDGE_ASSIST = 0.55;
 const MELEE_MOVE_MULT = 0.5;
 const BASE_CROUCH_MULT = 0.55;
@@ -266,13 +268,32 @@ export function stepPlatformer(
   }
   if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;
 
-  let support = findSupport(body.x, body.y, body.z, pads);
+  const wasGroundedLastTick = body.isGrounded;
+  let support = findSupport(
+    body.x,
+    body.y,
+    body.z,
+    pads,
+    wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_SNAP_SLOW
+  );
+  if (!support && wasGroundedLastTick && body.vz >= -0.5) {
+    support = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+  }
   if (!support) {
     const nudged = tryLedgeAssist(body.x, body.y, body.z, pads);
     if (nudged) {
       body.x = nudged.x;
       body.y = nudged.y;
-      support = findSupport(body.x, body.y, body.z, pads);
+      support = findSupport(
+        body.x,
+        body.y,
+        body.z,
+        pads,
+        wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_SNAP_SLOW
+      );
+      if (!support && wasGroundedLastTick && body.vz >= -0.5) {
+        support = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+      }
     }
   }
 
@@ -418,17 +439,24 @@ export function stepPlatformer(
     body.vz = Math.max(-MAX_FALL, body.vz - gravityThisTick * dt);
     body.z += body.vz * dt;
 
-    const snap = body.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
-    let land = findSupport(body.x, body.y, body.z, pads, snap);
+    const baseSnap = body.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
+    const softSnap = body.vz > -2 ? Math.max(baseSnap, LAND_STEP_CLIMB) : baseSnap;
+    let land = findSupport(body.x, body.y, body.z, pads, softSnap);
+    if (!land && body.vz >= -0.5) {
+      land = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+    }
     if (!land) {
       const nudged = tryLedgeAssist(body.x, body.y, body.z, pads);
       if (nudged) {
         body.x = nudged.x;
         body.y = nudged.y;
-        land = findSupport(body.x, body.y, body.z, pads, snap);
+        land = findSupport(body.x, body.y, body.z, pads, softSnap);
+        if (!land && body.vz >= -0.5) {
+          land = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+        }
       }
     }
-    if (land && body.vz <= 0 && body.z <= land.topZ + 0.08) {
+    if (land && body.vz <= 0 && body.z <= land.topZ + 0.15) {
       body.z = land.topZ;
       if (land.pad.kind === 'jumpPad') {
         body.vz = land.pad.boost && land.pad.boost > 0 ? land.pad.boost : JUMP_PAD_BOOST;

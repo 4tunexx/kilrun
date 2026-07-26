@@ -439,8 +439,9 @@ export function createEditorViewport(
     }
 
     scene.fog = new THREE.FogExp2(fogHex, env.fogDensity ?? 0.02);
-    grid.visible = env.floor === 'grid';
-    floorMesh.visible = env.floor !== 'void';
+    grid.visible = env.gridVisible ?? true;
+    const hasVoidTint = env.floor === 'void' && Boolean(env.voidColor);
+    floorMesh.visible = env.floor !== 'void' || hasVoidTint;
     const mat = floorMesh.material as THREE.MeshStandardMaterial;
     if (env.floor === 'water') {
       mat.color.set('#0e4a6e');
@@ -448,6 +449,12 @@ export function createEditorViewport(
       mat.opacity = 0.75;
       mat.metalness = 0.4;
       mat.roughness = 0.2;
+    } else if (hasVoidTint) {
+      mat.color.set(env.voidColor!);
+      mat.transparent = false;
+      mat.opacity = 1;
+      mat.metalness = 0.1;
+      mat.roughness = 0.9;
     } else {
       mat.color.set(env.floorColor || '#1a2740');
       mat.transparent = false;

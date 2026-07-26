@@ -19,6 +19,7 @@ import {
   adminBulkUpdateAssets,
   adminDeleteAsset,
   adminListAssets,
+  adminPatchAsset,
   adminSetAssetThumbnail,
   adminUploadAsset,
 } from '@/lib/asset-admin-actions';
@@ -300,7 +301,10 @@ export function AdminAssetBrowser() {
   const [uploading, setUploading] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [regenAll, setRegenAll] = useState<{ done: number; total: number } | null>(null);
+  const [pendingTextureUrl, setPendingTextureUrl] = useState<string | null>(null);
+  const [pendingMaterialTint, setPendingMaterialTint] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const textureUploadRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -361,6 +365,12 @@ export function AdminAssetBrowser() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    setPendingTextureUrl(null);
+    setPendingMaterialTint(null);
+    if (textureUploadRef.current) textureUploadRef.current.value = '';
+  }, [selected?.assetId]);
 
   const onUploadFile = async (file: File | null) => {
     if (!file) return;
@@ -729,6 +739,152 @@ export function AdminAssetBrowser() {
                 <div>Slot: {selected.equipSlot}</div>
                 <div className="break-all opacity-70">{selected.modelPath}</div>
               </div>
+
+              {source === 'db' && (
+                <div className="space-y-2 pt-2 mt-2 border-t border-border">
+                  <p className="text-[11px] tracking-widest text-white/50 uppercase font-medium">
+                    Skin Texture & Appearance
+                  </p>
+                  <div className="space-y-2">
+                    <input
+                      ref={textureUploadRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null;
+                        if (!f) return;
+                        if (f.size > 3_000_000) {
+                          toast({
+                            title: 'Texture too large',
+                            description: 'Keep under ~3 MB.',
+                            variant: 'destructive',
+                          });
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = () =>
+                          setPendingTextureUrl(
+                            typeof reader.result === 'string' ? reader.result : null
+                          );
+                        reader.readAsDataURL(f);
+                      }}
+                    />
+                    <div className="flex gap-2 flex-wrap items-center">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || regenerating}
+                        onClick={() => textureUploadRef.current?.click()}
+                      >
+                        <Upload className="h-3.5 w-3.5 mr-1" />
+                        {pendingTextureUrl ? 'Replace texture…' : 'Upload texture…'}
+                      </Button>
+                      {pendingTextureUrl && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() => {
+                              setPendingTextureUrl(null);
+                              if (textureUploadRef.current) textureUploadRef.current.value = '';
+                            }}
+                            className="h-8 px-2 text-xs text-red-400 hover:text-red-300"
+                          >
+                            Cancel
+                          </Button>
+                          <div className="flex items-center gap-2 text-[11px] text-white/60">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={pendingTextureUrl}
+                              alt="pending"
+                              className="h-10 w-10 rounded border border-white/10 object-cover bg-black/30"
+                            />
+                            New texture loaded
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <label className="block text-xs text-white/70">
+                      Material tint color
+                      <div className="flex gap-2 items-center mt-1">
+                        <input
+                          type="color"
+                          className="h-9 w-20 bg-transparent"
+                          value={pendingMaterialTint || '#ffffff'}
+                          onChange={(e) => setPendingMaterialTint(e.target.value)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy || !pendingMaterialTint}
+                          onClick={() => setPendingMaterialTint(null)}
+                          className="h-8 px-2 text-xs text-white/50"
+                        >
+                          Reset tint
+                        </Button>
+                      </div>
+                    </label>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="w-full"
+                      disabled={
+                        busy ||
+                        regenerating ||
+                        (!pendingTextureUrl && !pendingMaterialTint)
+                      }
+                      onClick={() =>
+                        void (async () => {
+                          if (!selected) return;
+                          setBusy(true);
+                          try {
+                            await adminPatchAsset(selected.assetId, {
+                              texturePath: pendingTextureUrl,
+                              materialTint: pendingMaterialTint,
+                            });
+                            // Now render a fresh thumbnail with the new texture applied
+                            const cap = await captureModelThumbnail(selected.modelPath, {
+                              tint: pendingMaterialTint || undefined,
+                              textureUrl: pendingTextureUrl || undefined,
+                              size: 512,
+                            });
+                            if (cap) {
+                              await adminSetAssetThumbnail(selected.assetId, cap);
+                            }
+                            toast({
+                              title: 'Skin updated',
+                              description:
+                                'Saved texture/material change, regenerated asset + shop listing thumbnails.',
+                            });
+                            setPendingTextureUrl(null);
+                            setPendingMaterialTint(null);
+                            if (textureUploadRef.current) textureUploadRef.current.value = '';
+                            await refresh();
+                          } catch (e: unknown) {
+                            toast({
+                              title:
+                                e instanceof Error ? e.message : 'Failed to update texture',
+                              variant: 'destructive',
+                            });
+                          } finally {
+                            setBusy(false);
+                          }
+                        })()
+                      }
+                    >
+                      {busy ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <ImagePlus className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      Apply texture & regenerate shop thumbnails
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {source === 'db' && (
                 <div className="space-y-2 pt-1">
                   <div className="flex flex-wrap gap-2">

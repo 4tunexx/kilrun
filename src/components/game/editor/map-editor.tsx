@@ -2400,6 +2400,42 @@ export function MapEditor({
                   onChange={(e) => patchEnv({ floorTextureScale: Number(e.target.value) })}
                 />
               </label>
+              <p className="text-[10px] tracking-widest text-white/50 uppercase pt-2">
+                Editor view
+              </p>
+              <label className="flex items-center justify-between gap-3 text-xs text-white/70 select-none cursor-pointer">
+                <span>Show editing grid</span>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primary"
+                  checked={env.gridVisible ?? true}
+                  onChange={(e) => patchEnv({ gridVisible: e.target.checked })}
+                />
+              </label>
+              <p className="text-[10px] text-white/35 leading-snug">
+                Toggle the grid overlay off to preview the in-game floor style (solid / void / water) without grid lines on top.
+              </p>
+              {env.floor === 'void' && (
+                <label className="block text-xs text-white/60 pt-1">
+                  Void floor tint
+                  <div className="flex items-center gap-2 mt-1">
+                    <input
+                      type="color"
+                      className="h-9 w-20 shrink-0 bg-transparent"
+                      value={env.voidColor || '#050810'}
+                      onChange={(e) => patchEnv({ voidColor: e.target.value })}
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-[10px] text-white/50 hover:text-white"
+                      onClick={() => patchEnv({ voidColor: undefined })}
+                    >
+                      Clear (pure void)
+                    </Button>
+                  </div>
+                </label>
+              )}
             </div>
           )}
 

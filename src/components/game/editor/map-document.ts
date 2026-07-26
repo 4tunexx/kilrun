@@ -701,6 +701,15 @@ export interface MapEnvironment {
   sunColor?: string;
   /** Optional ground texture repeat tiling. */
   floorTextureScale?: number;
+  /** Editor helper: show/hide the grid overlay plane. Independent of floor
+   *  preset so users can preview the in-game floor style (e.g. void / solid)
+   *  without the distracting editing grid on top. */
+  gridVisible?: boolean;
+  /** Tint to use when the floor preset is 'void'. When set, the floor plane
+   *  renders as this solid colour so void maps still have visual context
+   *  in the editor / preview; leave unset to render void as truly invisible
+   *  (pure sky / no floor plane). */
+  voidColor?: string;
 }
 
 /** Embedded 3rd-person view override (from 3rd View tool). Shape matches tps-view-settings. */
@@ -1049,6 +1058,8 @@ export const DEFAULT_ENVIRONMENT: MapEnvironment = {
   sunIntensity: 1.15,
   sunColor: '#fff4e0',
   floorTextureScale: 40,
+  gridVisible: true,
+  voidColor: '#050810',
 };
 
 export function defaultAnimation(): EntityAnimation {

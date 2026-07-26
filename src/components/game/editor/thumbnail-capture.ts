@@ -6,6 +6,26 @@ export interface ThumbnailCaptureOptions {
   size?: number;
   /** Extra empty margin around the model, 0–0.4. Default 0.14. */
   padding?: number;
+  /** Optional overall material tint (#rrggbb hex). Applied to every mesh's color. */
+  tint?: string;
+  /** Optional replacement diffuse texture URL (data URL or relative). Swaps every mesh.map. */
+  textureUrl?: string;
+}
+
+function loadTextureFromUrl(url: string): Promise<THREE.Texture> {
+  return new Promise((resolve, reject) => {
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    loader.load(
+      url,
+      (t) => {
+        t.colorSpace = THREE.SRGBColorSpace;
+        resolve(t);
+      },
+      undefined,
+      reject
+    );
+  });
 }
 
 type MapKey = 'map' | 'normalMap' | 'roughnessMap' | 'metalnessMap' | 'emissiveMap' | 'aoMap' | 'alphaMap';
@@ -107,6 +127,14 @@ export function createThumbnailCaptureSession(): ThumbnailCaptureSession {
     const { root } = await loadAnimatedPrefab(modelPath);
     scene.add(root);
     try {
+      let replacementMap: THREE.Texture | null = null;
+      if (options.textureUrl) {
+        try {
+          replacementMap = await loadTextureFromUrl(options.textureUrl);
+        } catch {
+          replacementMap = null;
+        }
+      }
       root.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
         const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
@@ -115,6 +143,17 @@ export function createThumbnailCaptureSession(): ThumbnailCaptureSession {
           const std = m as THREE.MeshStandardMaterial;
           if (std.map) std.map.colorSpace = THREE.SRGBColorSpace;
           if (std.emissiveMap) std.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+          if (options.tint && 'color' in std && std.color) {
+            try {
+              std.color = new THREE.Color(options.tint);
+            } catch {
+              /* ignore */
+            }
+          }
+          if (replacementMap && 'map' in std) {
+            std.map = replacementMap;
+            std.needsUpdate = true;
+          }
         }
       });
 

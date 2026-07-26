@@ -213,14 +213,28 @@ export function applyMovement(
   }
   if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;
 
+  const LAND_STEP_CLIMB = 0.75;
+  const LAND_STEP_DESCEND = 0.9;
+  const wasGroundedLastTick = player.isGrounded;
+
   let support = findSupportPlatform(
     player.x,
     player.y,
     player.z,
     platforms,
     PLAYER_RADIUS,
-    LAND_SNAP_SLOW
+    wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_SNAP_SLOW
   );
+  if (!support && wasGroundedLastTick && player.vz >= -0.5) {
+    support = findSupportPlatform(
+      player.x,
+      player.y,
+      player.z,
+      platforms,
+      PLAYER_RADIUS,
+      LAND_STEP_CLIMB
+    );
+  }
   if (!support) {
     const nudged = tryLedgeAssist(player.x, player.y, player.z, platforms);
     if (nudged) {
@@ -232,8 +246,18 @@ export function applyMovement(
         player.z,
         platforms,
         PLAYER_RADIUS,
-        LAND_SNAP_SLOW
+        wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_SNAP_SLOW
       );
+      if (!support && wasGroundedLastTick && player.vz >= -0.5) {
+        support = findSupportPlatform(
+          player.x,
+          player.y,
+          player.z,
+          platforms,
+          PLAYER_RADIUS,
+          LAND_STEP_CLIMB
+        );
+      }
     }
   }
 
@@ -403,15 +427,26 @@ export function applyMovement(
     player.vz = Math.max(-effMaxFall, player.vz - gravityThisTick * dtSeconds);
     player.z += player.vz * dtSeconds;
 
-    const snap = player.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
+    const baseSnap = player.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
+    const softSnap = player.vz > -2 ? Math.max(baseSnap, LAND_STEP_CLIMB) : baseSnap;
     let land = findSupportPlatform(
       player.x,
       player.y,
       player.z,
       platforms,
       PLAYER_RADIUS,
-      snap
+      softSnap
     );
+    if (!land && player.vz >= -0.5) {
+      land = findSupportPlatform(
+        player.x,
+        player.y,
+        player.z,
+        platforms,
+        PLAYER_RADIUS,
+        LAND_STEP_CLIMB
+      );
+    }
     if (!land) {
       const nudged = tryLedgeAssist(player.x, player.y, player.z, platforms);
       if (nudged) {
@@ -423,11 +458,21 @@ export function applyMovement(
           player.z,
           platforms,
           PLAYER_RADIUS,
-          snap
+          softSnap
         );
+        if (!land && player.vz >= -0.5) {
+          land = findSupportPlatform(
+            player.x,
+            player.y,
+            player.z,
+            platforms,
+            PLAYER_RADIUS,
+            LAND_STEP_CLIMB
+          );
+        }
       }
     }
-    if (land && player.vz <= 0 && player.z <= land.topZ + 0.08) {
+    if (land && player.vz <= 0 && player.z <= land.topZ + 0.15) {
       player.z = land.topZ;
       if (land.platform.kind === 'jumpPad') {
         player.vz = land.platform.boost > 0 ? land.platform.boost : JUMP_PAD_BOOST;
