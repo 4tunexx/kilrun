@@ -68,7 +68,7 @@ export function emptyModeStats(mode: ModeStatsKey): ModeStatsSummary {
 type ResultRow = {
   id: string;
   mode: string;
-  role: string;
+  role: string | null;
   outcome: string;
   xpEarned: number;
   vpEarned: number;
@@ -132,7 +132,7 @@ export function toHistoryRows(rows: ResultRow[], take = 20): MatchHistoryRow[] {
     return {
       id: r.id,
       mode: r.mode,
-      role: r.role,
+      role: r.role ?? 'player',
       outcome: r.outcome,
       xpEarned: r.xpEarned,
       vpEarned: r.vpEarned,
