@@ -52,6 +52,7 @@ export type ServerMatchPlayerInput = {
   score?: number;
   distance?: number;
   kills?: number;
+  deaths?: number;
   wavesCleared?: number;
   opponentAvgKp?: number;
   roundsWon?: number;
@@ -132,6 +133,8 @@ async function applyDeathrunPlayer(
   const reward = DEATHRUN_REWARDS[outcome] ?? DEATHRUN_REWARDS.loss;
   const score = clampNonNegInt(player.score, 1_000_000);
   const distance = clampNonNegInt(player.distance, 100_000);
+  const kills = clampNonNegInt(player.kills, 100);
+  const deaths = clampNonNegInt(player.deaths, 100);
   const role =
     player.role === 'trapper' || player.role === 'runner' ? player.role : 'runner';
 
@@ -143,7 +146,7 @@ async function applyDeathrunPlayer(
       outcome,
       xpEarned: reward.xp,
       vpEarned: reward.vp,
-      stats: { matchId, score, distance },
+      stats: { matchId, score, distance, kills, deaths },
     },
   });
 
@@ -169,6 +172,8 @@ async function applyDeathrunPlayer(
     role,
     score,
     distance,
+    kills,
+    deaths,
   });
 
   const { KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
@@ -199,6 +204,7 @@ async function applyHordePlayer(
   const reward = HORDE_REWARDS[outcome] ?? HORDE_REWARDS.loss;
   const wavesCleared = clampNonNegInt(player.wavesCleared, 50);
   const kills = clampNonNegInt(player.kills, 500);
+  const deaths = clampNonNegInt(player.deaths, 50);
   const bonusXp = Math.min(80, wavesCleared * 4);
   const xpEarned = reward.xp + bonusXp;
 
@@ -210,18 +216,11 @@ async function applyHordePlayer(
       outcome,
       xpEarned,
       vpEarned: reward.vp,
-      stats: { matchId, wavesCleared, kills },
+      stats: { matchId, wavesCleared, kills, deaths },
     },
   });
 
-  await prisma.matchStat.create({
-    data: {
-      userId: player.userId,
-      score: wavesCleared,
-      distance: 0,
-      livesRemaining: 0,
-    },
-  });
+  // MatchStat is Deathrun-only telemetry — Horde uses MatchResult.stats.
 
   await prisma.user.update({
     where: { id: player.userId },
@@ -237,6 +236,7 @@ async function applyHordePlayer(
     score: wavesCleared,
     wavesCleared,
     kills,
+    deaths,
   });
 
   const { KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
@@ -323,6 +323,7 @@ async function applyCompetitivePlayer(
   const team =
     player.role === 'team_b' || player.role === 'team_a' ? player.role : 'team_a';
   const kills = clampNonNegInt(player.kills, 100);
+  const deaths = clampNonNegInt(player.deaths, 100);
   const roundsWon = clampNonNegInt(player.roundsWon, 50);
   const roundsLost = clampNonNegInt(player.roundsLost, 50);
 
@@ -341,19 +342,13 @@ async function applyCompetitivePlayer(
         roundsWon,
         roundsLost,
         kills,
+        deaths,
         opponentAvgKp: player.opponentAvgKp ?? KP_DEFAULT,
       },
     },
   });
 
-  await prisma.matchStat.create({
-    data: {
-      userId: player.userId,
-      score: roundsWon,
-      distance: 0,
-      livesRemaining: 0,
-    },
-  });
+  // MatchStat is Deathrun-only telemetry — Competitive uses MatchResult.stats.
 
   await prisma.user.update({
     where: { id: player.userId },
@@ -379,6 +374,9 @@ async function applyCompetitivePlayer(
     mode: 'competitive',
     outcome,
     role: team,
+    kills,
+    deaths,
+    queue,
   });
 
   return {

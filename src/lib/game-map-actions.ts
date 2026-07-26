@@ -267,3 +267,37 @@ export async function deleteCloudMap(mapId: string): Promise<{ ok: true }> {
   await prisma.gameMap.delete({ where: { id: mapId } });
   return { ok: true };
 }
+
+/**
+ * Duplicate a cloud map into a new editable cloud row (co-edit precursor).
+ * Returns the new map id; client can hydrate locally via listCloudMapDocuments.
+ */
+export async function forkCloudMap(
+  mapId: string,
+  newName?: string
+): Promise<CloudMapListItem> {
+  const staff = await requireStaff();
+  const src = await prisma.gameMap.findUnique({ where: { id: mapId } });
+  if (!src) throw new Error('Map not found');
+  const localId = `fork_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+  const row = await prisma.gameMap.create({
+    data: {
+      name: (newName?.trim() || `${src.name} (fork)`).slice(0, 120),
+      mode: src.mode,
+      documentJson: src.documentJson,
+      thumbnailUrl: src.thumbnailUrl,
+      isActive: false,
+      createdById: staff.id,
+      localId,
+    },
+  });
+  return {
+    id: row.id,
+    localId: row.localId,
+    name: row.name,
+    mode: normalizeKilrunMode(row.mode),
+    thumbnailUrl: row.thumbnailUrl,
+    isActive: row.isActive,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}

@@ -22,6 +22,7 @@ const DEFAULT_ROOM_STATE: NetRoomState = {
   roundIndex: 0,
   scoreA: 0,
   scoreB: 0,
+  buyPhaseMs: 0,
 };
 
 export function useRoomState(

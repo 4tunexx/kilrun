@@ -52,8 +52,34 @@ export class PlayerState extends Schema {
   @type('number') weaponDamage = 25;
   @type('number') weaponCooldownMs = 350;
   @type('number') weaponConeRadians = 0.18;
+  /** auto | semi | bolt */
+  @type('string') weaponFireMode = 'semi';
+  /** Hitscan pellet count (shotgun). */
+  @type('number') weaponPellets = 1;
+  /** ADS FOV target for client zoom (0 = none). */
+  @type('number') weaponAdsZoomFov = 0;
+  @type('number') weaponAdsConeScale = 0.85;
+  @type('number') weaponHipfireConeScale = 1;
+  /** In-match shop credits (Horde / Competitive buy phase). */
+  @type('number') credits = 0;
+  /** Last purchased shop weapon id (for equipped highlight). */
+  @type('string') weaponId = '';
+  /** Equipped weapon skin id from map buy menu (looked up client-side for texture). */
+  @type('string') weaponSkinId = '';
+  /** Public weapon mesh URL for remote clients (catalog path; never a data: URL). */
+  @type('string') weaponModelUrl = '';
+  /** Mag capacity (0 = unlimited / melee). */
+  @type('number') weaponMagSize = 0;
+  @type('number') ammoInMag = 0;
+  @type('number') reserveAmmo = 0;
+  @type('number') weaponReloadMs = 0;
+  /** Timestamp ms when reload finishes (0 = not reloading). */
+  @type('number') reloadEndsAt = 0;
+  /** Temporary shield HP from power-up shop. */
+  @type('number') shieldHp = 0;
   /** Per-match telemetry / server-authored rewards. */
   @type('number') kills = 0;
+  @type('number') deaths = 0;
   @type('number') score = 0;
   @type('number') distance = 0;
   @type('number') xpEarned = 0;
@@ -100,6 +126,8 @@ export class PlatformState extends Schema {
   @type('number') motionAmpX = 0;
   @type('number') motionAmpY = 0;
   @type('number') motionAmpZ = 0;
+  /** Yaw rotation in radians (sim XY plane). Used for rotated pad colliders. */
+  @type('number') rotYaw = 0;
   /** Editor entity id for client mesh sync (custom maps). */
   @type('string') entityId = '';
 }
@@ -152,6 +180,11 @@ export class RoomState extends Schema {
   @type('number') scoreA = 0;
   /** Competitive: Team B rounds won. */
   @type('number') scoreB = 0;
+  /**
+   * Buy-phase remaining ms (Horde between-wave window + Competitive buy countdown).
+   * 0 = shop closed. Synced so clients can show WeaponShop without guessing.
+   */
+  @type('number') buyPhaseMs = 0;
   /** Unique id for this match — used for reward idempotency. */
   @type('string') matchId = '';
   /** True once server (or local display) awards are written onto players. */

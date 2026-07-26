@@ -432,7 +432,10 @@ export async function buildSkinPartMesh(att: SkinAttachment): Promise<THREE.Obje
     if (!src) {
       primary = await buildPrim('box', { width: 0.3, height: 0.3, depth: 0.3 }, att, `prim_${attachmentKey(att)}`);
     } else {
-      const { root } = await loadAnimatedPrefab(src);
+      const { root, clips } = await loadAnimatedPrefab(src);
+      if (clips.length) {
+        root.userData.gltfClips = clips;
+      }
       let hasSkinnedMesh = false;
       root.traverse((o) => {
         if ((o as THREE.SkinnedMesh).isSkinnedMesh) hasSkinnedMesh = true;
@@ -671,6 +674,13 @@ async function attachOne(
 
   const holder = new THREE.Group();
   holder.name = `skin_${attachmentKey(att)}`;
+  if (att.slot === 'weapon') {
+    holder.userData.isWeaponSkin = true;
+    // Bubble clips up so ThreeCharacter can drive a weapon mixer.
+    if (Array.isArray(root.userData.gltfClips)) {
+      holder.userData.gltfClips = root.userData.gltfClips;
+    }
+  }
   const feel = resolveFeel(att);
   holder.userData.skinFeel = feel;
   holder.userData.skinSway =

@@ -199,6 +199,8 @@ export interface SimPlatformBlueprint {
   conveyorDirY?: number;
   /** Optional editor entity id — client can move the mesh with the pad. */
   entityId?: string;
+  /** Yaw radians in sim XY — OBB colliders on the server. */
+  rotYaw?: number;
   /** Moving platform (sim space): home = rest pose, amp = B-home. */
   motionPeriodMs?: number;
   motionPhaseMs?: number;
@@ -351,12 +353,8 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const sizeX = Math.max(minXZ, rawX);
   const sizeY = Math.max(0.12, rawY);
   const sizeZ = Math.max(minXZ, rawZ);
-  // Yaw expands the axis-aligned pad so rotated floors/walls still block.
+  // True OBB yaw on the server — keep local extents (do not expand AABB).
   const yaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
-  const absC = Math.abs(Math.cos(yaw));
-  const absS = Math.abs(Math.sin(yaw));
-  const worldSizeX = sizeX * absC + sizeZ * absS;
-  const worldSizeZ = sizeX * absS + sizeZ * absC;
   const height =
     mat === 'water'
       ? Math.max(0.5, sizeY)
@@ -391,14 +389,15 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
     x: tz,
     y: tx,
     z: topZ,
-    width: worldSizeZ,
-    depth: worldSizeX,
+    width: sizeZ,
+    depth: sizeX,
     kind,
     boost: jump ? Math.max(4, e.jumpPad?.boost ?? 14) : undefined,
     height,
     conveyorSpeed: conveyor ? Math.max(0.5, e.surface?.conveyorSpeed ?? 4) : undefined,
     conveyorDirX: conveyor ? dirSimX : undefined,
     conveyorDirY: conveyor ? dirSimY : undefined,
+    rotYaw: yaw,
     entityId: e.id,
     ...(motion.enabled
       ? {
@@ -416,7 +415,7 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
  * Expand stairs/ramps into stepped solid pads so players can climb the mesh
  * instead of walking through a single thin top slab.
  */
-export function stairEntityToSimPads(stairs: EditorEntity, steps = 14): SimPlatformBlueprint[] {
+export function stairEntityToSimPads(stairs: EditorEntity, steps = 18): SimPlatformBlueprint[] {
   const n = Math.max(3, Math.min(28, Math.round(steps)));
   const [sx, sy, sz] = stairs.position;
   const yaw = ((stairs.rotation?.[1] ?? 0) * Math.PI) / 180;
@@ -459,6 +458,8 @@ export function stairEntityToSimPads(stairs: EditorEntity, steps = 14): SimPlatf
       depth: worldSizeX,
       kind,
       height: Math.min(0.35, Math.max(0.18, stepRise * 0.85)),
+      // Steps are already yaw-baked into AABB; leave rotYaw 0.
+      rotYaw: 0,
     });
   }
   return pads;
@@ -509,7 +510,7 @@ function isTiltedRampSolid(e: EditorEntity): boolean {
  * driven by the entity's ACTUAL rotation instead of requiring a specific
  * catalog model name, so any hand-tilted block works as a walkable ramp.
  */
-export function rampEntityToSimPads(e: EditorEntity, steps = 20): SimPlatformBlueprint[] {
+export function rampEntityToSimPads(e: EditorEntity, steps = 24): SimPlatformBlueprint[] {
   const n = Math.max(4, Math.min(36, Math.round(steps)));
   const [ex, ey, ez] = e.position;
   const foot =
@@ -581,7 +582,7 @@ function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
     return stairEntityToSimPads(e, 14);
   }
   if (isTiltedRampSolid(e)) {
-    return rampEntityToSimPads(e, 20);
+    return rampEntityToSimPads(e, 24);
   }
   return [entityToPad(e)];
 }

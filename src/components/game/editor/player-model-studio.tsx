@@ -67,12 +67,14 @@ export function PlayerModelStudio({
   onClose,
   onFocusInMap,
   isMobile,
+  embedded,
 }: {
   entity: EditorEntity;
   onChange: (patch: Partial<EditorEntity>) => void;
   onClose: () => void;
   onFocusInMap?: () => void;
   isMobile?: boolean;
+  embedded?: boolean;
 }) {
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<StudioPreview | null>(null);
@@ -285,9 +287,11 @@ export function PlayerModelStudio({
   return (
     <aside
       className={`flex flex-col bg-[#0e1520] border-white/10 text-white shadow-2xl z-[90] ${
-        isMobile
-          ? 'absolute inset-0 border-0'
-          : 'relative w-[min(100%,420px)] shrink-0 border-l'
+        embedded
+          ? 'h-full min-h-0 w-full border-0 shadow-none'
+          : isMobile
+            ? 'absolute inset-0 border-0'
+            : 'relative w-[min(100%,420px)] shrink-0 border-l'
       }`}
       aria-label="Player Model studio"
     >

@@ -36,8 +36,15 @@ import {
   type PlatformDelta,
   type PlatformMotionState,
 } from '../sim/moving-platforms.js';
-import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
+import { isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import {
+  effectiveWeaponCone,
+  isTargetHitByPellet,
+  pelletAimOffsets,
+  weaponPelletCount,
+  weaponPelletDamage,
+} from '../sim/weapon-combat.js';
 import { fetchTrustedLoadout } from '../trusted-loadout.js';
 import { nextHordeColor } from '../lib/body-colors.js';
 import {
@@ -188,6 +195,45 @@ export class HordeRoom extends Room<RoomState> {
   private combatPhysOpts: MovementPhysicsOpts = {};
   private platformMotion = new Map<string, PlatformMotionState>();
   private matchElapsedMs = 0;
+  /** Authoritative shop pool from map shopSettings (empty = legacy freeform buy). */
+  private shopItems: Array<{
+    id: string;
+    kind?: string;
+    damage?: number;
+    range?: number;
+    cooldownMs?: number;
+    coneRadians?: number;
+    shopPrice?: number;
+    textureUrl?: string;
+    modelUrl?: string;
+    fireMode?: string;
+    pellets?: number;
+    adsZoomFov?: number;
+    adsConeScale?: number;
+    hipfireConeScale?: number;
+    magSize?: number;
+    reserveAmmo?: number;
+    reloadMs?: number;
+    enabled?: boolean;
+    modes?: string[];
+  }> = [];
+  private shopPowerUps: Array<{
+    id: string;
+    shopPrice?: number;
+    effect?: string;
+    enabled?: boolean;
+    modes?: string[];
+  }> = [];
+  private shopSkins: Array<{
+    id: string;
+    shopPrice?: number;
+    textureUrl?: string;
+    enabled?: boolean;
+    modes?: string[];
+  }> = [];
+  private startingCredits = 500;
+  private creditsPerKill = 50;
+  private creditsPerWaveClear = 100;
 
   onCreate() {
     this.setState(new RoomState());
@@ -236,6 +282,7 @@ export class HordeRoom extends Room<RoomState> {
     });
 
     this.onMessage('buyWeapon', (client, preset: {
+      itemId?: string;
       kind?: string;
       damage?: number;
       range?: number;
@@ -250,13 +297,101 @@ export class HordeRoom extends Room<RoomState> {
       if (!canBuy) return;
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
-      const { sanitizeWeaponCombat } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
-      const sanitized = sanitizeWeaponCombat(preset);
-      player.weaponKind = sanitized.kind;
-      player.weaponDamage = sanitized.damage;
-      player.weaponRange = sanitized.range;
-      player.weaponCooldownMs = sanitized.cooldownMs;
-      player.weaponConeRadians = sanitized.coneRadians;
+
+      let combatRaw: Record<string, unknown> = { ...preset };
+      let price = 0;
+      let weaponId = typeof preset.itemId === 'string' ? preset.itemId : '';
+      let modelUrl = '';
+      if (this.shopItems.length > 0) {
+        const hit = weaponId
+          ? this.shopItems.find((it) => it.id === weaponId && it.enabled !== false)
+          : undefined;
+        if (!hit) return;
+        if (Array.isArray(hit.modes) && hit.modes.length && !hit.modes.includes('horde')) return;
+        price = Math.max(0, Number(hit.shopPrice) || 0);
+        if (price > 0 && player.credits < price) return;
+        combatRaw = {
+          kind: hit.kind,
+          damage: hit.damage,
+          range: hit.range,
+          cooldownMs: hit.cooldownMs,
+          coneRadians: hit.coneRadians,
+          fireMode: hit.fireMode,
+          pellets: hit.pellets,
+          adsZoomFov: hit.adsZoomFov,
+          adsConeScale: hit.adsConeScale,
+          hipfireConeScale: hit.hipfireConeScale,
+          magSize: hit.magSize,
+          reserveAmmo: hit.reserveAmmo,
+          reloadMs: hit.reloadMs,
+        };
+        weaponId = hit.id;
+        modelUrl = typeof hit.modelUrl === 'string' ? hit.modelUrl : '';
+      } else if (typeof (preset as { modelUrl?: string }).modelUrl === 'string') {
+        modelUrl = (preset as { modelUrl?: string }).modelUrl || '';
+      }
+
+      const {
+        sanitizeWeaponCombat,
+        applySanitizedWeaponToPlayer,
+      } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+      const sanitized = sanitizeWeaponCombat(combatRaw);
+      if (price > 0) player.credits = Math.max(0, player.credits - price);
+      applySanitizedWeaponToPlayer(player, sanitized, { weaponId, modelUrl });
+    });
+
+    this.onMessage('reload', (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || !player.isAlive) return;
+      const { tryStartReload } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+      tryStartReload(player, Date.now());
+    });
+
+    this.onMessage('buyPowerUp', (client, data: { powerUpId?: string }) => {
+      const canBuy =
+        this.state.phase === 'countdown' ||
+        (this.state.phase === 'playing' && this.betweenWavesMs > 0 && this.waveBuyTimeMs > 0 &&
+          this.betweenWavesMs <= this.waveBuyTimeMs);
+      if (!canBuy) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const id = typeof data?.powerUpId === 'string' ? data.powerUpId : '';
+      const hit = this.shopPowerUps.find((p) => p.id === id && p.enabled !== false);
+      if (!hit) return;
+      if (Array.isArray(hit.modes) && hit.modes.length && !hit.modes.includes('horde')) return;
+      const price = Math.max(0, Number(hit.shopPrice) || 0);
+      if (price > 0 && player.credits < price) return;
+      if (price > 0) player.credits = Math.max(0, player.credits - price);
+      const effect = String(hit.effect || hit.id);
+      if (effect === 'heal') {
+        player.health = Math.min(100, player.health + 50);
+      } else if (effect === 'shield') {
+        player.shieldHp = Math.min(100, (player.shieldHp || 0) + 50);
+      } else if (effect === 'energy') {
+        player.energy = 100;
+      } else if (effect === 'speed' || effect === 'super_jump') {
+        player.energy = 100;
+        player.shieldHp = Math.min(100, (player.shieldHp || 0) + 15);
+      }
+    });
+
+    this.onMessage('buyWeaponSkin', (client, data: { skinId?: string }) => {
+      const canBuy =
+        this.state.phase === 'countdown' ||
+        (this.state.phase === 'playing' && this.betweenWavesMs > 0 && this.waveBuyTimeMs > 0 &&
+          this.betweenWavesMs <= this.waveBuyTimeMs);
+      if (!canBuy) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const id = typeof data?.skinId === 'string' ? data.skinId : '';
+      const hit = this.shopSkins.find((s) => s.id === id && s.enabled !== false);
+      if (!hit) return;
+      if (Array.isArray(hit.modes) && hit.modes.length && !hit.modes.includes('horde')) return;
+      const price = Math.max(0, Number(hit.shopPrice) || 0);
+      if (player.weaponSkinId === hit.id) return;
+      if (price > 0 && player.credits < price) return;
+      if (price > 0) player.credits = Math.max(0, player.credits - price);
+      player.weaponSkinId = hit.id;
     });
 
     this.onMessage('loadCustomMap', (client, data: Record<string, unknown>) => {
@@ -306,6 +441,51 @@ export class HordeRoom extends Room<RoomState> {
         if (typeof settings.difficultyScale === 'number' && Number.isFinite(settings.difficultyScale)) {
           this.difficultyScale = Math.max(0.1, settings.difficultyScale);
         }
+      }
+
+      const shopRaw = data?.shopSettings as {
+        items?: unknown[];
+        powerUps?: unknown[];
+        skins?: unknown[];
+        startingCredits?: number;
+        creditsPerKill?: number;
+        creditsPerWaveClear?: number;
+      } | undefined;
+      if (shopRaw?.items && Array.isArray(shopRaw.items)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.shopItems = shopRaw.items.filter(
+          (it) =>
+            !!it && typeof it === 'object' && typeof (it as { id?: unknown }).id === 'string'
+        ) as any;
+      }
+      if (shopRaw?.powerUps && Array.isArray(shopRaw.powerUps)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.shopPowerUps = shopRaw.powerUps.filter(
+          (it) =>
+            !!it && typeof it === 'object' && typeof (it as { id?: unknown }).id === 'string'
+        ) as any;
+      }
+      if (shopRaw?.skins && Array.isArray(shopRaw.skins)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.shopSkins = shopRaw.skins.filter(
+          (it) =>
+            !!it && typeof it === 'object' && typeof (it as { id?: unknown }).id === 'string'
+        ) as any;
+      }
+      if (typeof shopRaw?.startingCredits === 'number' && Number.isFinite(shopRaw.startingCredits)) {
+        this.startingCredits = Math.max(0, shopRaw.startingCredits);
+      }
+      if (typeof shopRaw?.creditsPerKill === 'number' && Number.isFinite(shopRaw.creditsPerKill)) {
+        this.creditsPerKill = Math.max(0, shopRaw.creditsPerKill);
+      }
+      if (
+        typeof shopRaw?.creditsPerWaveClear === 'number' &&
+        Number.isFinite(shopRaw.creditsPerWaveClear)
+      ) {
+        this.creditsPerWaveClear = Math.max(0, shopRaw.creditsPerWaveClear);
+      }
+      for (const p of this.state.players.values()) {
+        p.credits = this.startingCredits;
       }
 
       while (this.state.platforms.length > 0) this.state.platforms.pop();
@@ -460,6 +640,7 @@ export class HordeRoom extends Room<RoomState> {
     this.applySpawnPosition(player, this.state.players.size);
     const usedColors = Array.from(this.state.players.values()).map((p) => p.bodyColorIndex);
     player.bodyColorIndex = nextHordeColor(usedColors);
+    player.credits = this.startingCredits;
 
     this.state.players.set(client.sessionId, player);
     this.latestInputs.set(client.sessionId, defaultInput());
@@ -529,12 +710,14 @@ export class HordeRoom extends Room<RoomState> {
         break;
       case 'countdown':
         this.state.countdownMs -= dtMs;
+        this.state.buyPhaseMs = Math.max(0, this.state.countdownMs);
         if (this.state.countdownMs <= 0) this.startMatch();
         break;
       case 'playing':
         this.tickPlaying(dtMs);
         break;
       case 'results':
+        this.state.buyPhaseMs = 0;
         this.resultsElapsedMs += dtMs;
         if (this.resultsElapsedMs >= RESULTS_DISPLAY_MS) {
           this.state.phase = 'lobby';
@@ -544,7 +727,7 @@ export class HordeRoom extends Room<RoomState> {
           this.state.rewardsReady = false;
           this.clearMonsters();
           for (const player of this.state.players.values()) {
-            player.kills = 0;
+            player.kills = 0; player.deaths = 0;
             player.score = 0;
             player.distance = 0;
             player.xpEarned = 0;
@@ -571,7 +754,7 @@ export class HordeRoom extends Room<RoomState> {
       player.energy = MAX_ENERGY;
       player.isAlive = true;
       player.hasFinished = false;
-      player.kills = 0;
+      player.kills = 0; player.deaths = 0;
       player.score = 0;
       player.distance = 0;
       player.xpEarned = 0;
@@ -592,6 +775,7 @@ export class HordeRoom extends Room<RoomState> {
   private beginWave(wave: number) {
     this.state.wave = wave;
     this.betweenWavesMs = 0;
+    this.state.buyPhaseMs = 0;
     this.waveElapsedMs = 0;
     this.clearMonsters();
     this.waveSpawnQueue = [];
@@ -746,7 +930,18 @@ export class HordeRoom extends Room<RoomState> {
         this.endMatch('survivor');
         return;
       }
+      if (this.betweenWavesMs <= 0 && this.creditsPerWaveClear > 0) {
+        for (const p of this.state.players.values()) {
+          if (p.isAlive) p.credits = (p.credits || 0) + this.creditsPerWaveClear;
+        }
+      }
       this.betweenWavesMs += dtMs;
+      // Buy window = first waveBuyTimeMs of intermission
+      if (this.waveBuyTimeMs > 0 && this.betweenWavesMs <= this.waveBuyTimeMs) {
+        this.state.buyPhaseMs = Math.max(0, this.waveBuyTimeMs - this.betweenWavesMs);
+      } else {
+        this.state.buyPhaseMs = 0;
+      }
       if (this.betweenWavesMs >= this.waveClearPauseMs) {
         this.beginWave(this.state.wave + 1);
       }
@@ -836,6 +1031,11 @@ export class HordeRoom extends Room<RoomState> {
 
       applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
 
+      {
+        const { finishReloadIfDue } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+        finishReloadIfDue(player, now);
+      }
+
       for (const obstacle of this.state.obstacles) {
         if (!isPlayerHitByObstacle(player, obstacle)) continue;
         const hitKey = `${sessionId}:${obstacle.id}`;
@@ -858,8 +1058,15 @@ export class HordeRoom extends Room<RoomState> {
         const lastShot = this.lastShotAt.get(sessionId) ?? 0;
         const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
         if (now - lastShot >= cooldown) {
-          this.lastShotAt.set(sessionId, now);
-          this.resolveSurvivorShot(player, sessionId);
+          const {
+            tryConsumeShotAmmo,
+          } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+          if (!tryConsumeShotAmmo(player, now)) {
+            // Empty / reloading — no shot.
+          } else {
+            this.lastShotAt.set(sessionId, now);
+            this.resolveSurvivorShot(player, sessionId, !!input.aimHeld);
+          }
         }
       }
     });
@@ -898,35 +1105,49 @@ export class HordeRoom extends Room<RoomState> {
     return player.z >= pad.z - 0.5 && player.z <= pad.z + Math.max(pad.height, 1.2);
   }
 
-  private resolveSurvivorShot(shooter: PlayerState, shooterSessionId: string) {
+  private resolveSurvivorShot(
+    shooter: PlayerState,
+    shooterSessionId: string,
+    aimHeld = false
+  ) {
     if (shooter.weaponKind === 'cosmetic') return;
     const range = shooter.weaponRange > 0 ? shooter.weaponRange : 14;
-    const damage = shooter.weaponDamage > 0 ? shooter.weaponDamage : 25;
-    const cone = shooter.weaponConeRadians > 0 ? shooter.weaponConeRadians : 0.18;
-    let best: MonsterSim | null = null;
-    let bestDist = range;
-    for (const mon of this.monsters) {
-      if (
-        !isHitByShot(shooter.x, shooter.y, shooter.aimAngle, mon.x, mon.y, range, cone, {
-          shooterZ: shooter.z,
-          aimPitch: shooter.aimPitch,
-          targetZ: mon.z,
-          targetHeight: 1.4,
-          targetRadius: mon.radius,
-        })
-      ) {
-        continue;
+    const damage = weaponPelletDamage(shooter);
+    const cone = effectiveWeaponCone(shooter, aimHeld);
+    const pellets = weaponPelletCount(shooter);
+    const offsets = pelletAimOffsets(pellets, cone);
+
+    // Accumulate damage per monster across pellets.
+    const dmgById = new Map<string, { mon: MonsterSim; dmg: number }>();
+    for (const off of offsets) {
+      let best: MonsterSim | null = null;
+      let bestDist = range;
+      for (const mon of this.monsters) {
+        if (
+          !isTargetHitByPellet(shooter, mon, range, cone, off.yaw, off.pitch, {
+            targetHeight: 1.4,
+            targetRadius: mon.radius,
+          })
+        ) {
+          continue;
+        }
+        const d = Math.hypot(mon.x - shooter.x, mon.y - shooter.y);
+        if (d < bestDist) {
+          bestDist = d;
+          best = mon;
+        }
       }
-      const d = Math.hypot(mon.x - shooter.x, mon.y - shooter.y);
-      if (d < bestDist) {
-        bestDist = d;
-        best = mon;
-      }
+      if (!best) continue;
+      const prev = dmgById.get(best.id);
+      if (prev) prev.dmg += damage;
+      else dmgById.set(best.id, { mon: best, dmg: damage });
     }
-    if (!best) return;
-    best.hp -= damage;
-    if (best.hp <= 0) {
-      this.killMonster(best.id, shooterSessionId);
+
+    for (const { mon, dmg } of dmgById.values()) {
+      mon.hp -= dmg;
+      if (mon.hp <= 0) {
+        this.killMonster(mon.id, shooterSessionId);
+      }
     }
   }
 
@@ -942,13 +1163,25 @@ export class HordeRoom extends Room<RoomState> {
       if (shooter) {
         shooter.kills += 1;
         shooter.score = shooter.kills;
+        shooter.credits = (shooter.credits || 0) + this.creditsPerKill;
       }
     }
   }
 
   private damagePlayer(player: PlayerState, amount: number) {
-    player.health = Math.max(0, player.health - amount);
-    if (player.health <= 0) player.isAlive = false;
+    let dmg = amount;
+    if (player.shieldHp > 0) {
+      const absorbed = Math.min(player.shieldHp, dmg);
+      player.shieldHp -= absorbed;
+      dmg -= absorbed;
+    }
+    if (dmg <= 0) return;
+    const wasAlive = player.isAlive && player.health > 0;
+    player.health = Math.max(0, player.health - dmg);
+    if (player.health <= 0) {
+      player.isAlive = false;
+      if (wasAlive) player.deaths = (player.deaths || 0) + 1;
+    }
   }
 
   private endMatch(winnerRole: 'survivor' | 'horde') {
@@ -971,6 +1204,7 @@ export class HordeRoom extends Room<RoomState> {
       role: p.role,
       isAlive: p.isAlive,
       kills: p.kills,
+      deaths: p.deaths,
       score: p.score,
       wavesCleared,
     }));

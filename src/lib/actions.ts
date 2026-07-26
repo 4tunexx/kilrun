@@ -356,6 +356,67 @@ export async function getStatsSummary(userId: string): Promise<StatsSummary> {
   return { totalRuns, bestScore, bestDistance, avgScore, avgDistance, lastPlayedAt };
 }
 
+/** Per-mode combat / match stats from MatchResult (Deathrun · Horde · Competitive · Ranked). */
+export async function getModeStatsBundle(userId: string) {
+  await requireSelfOrStaffUserId(userId);
+  const {
+    aggregateModeStats,
+    toHistoryRows,
+    emptyModeStats,
+  } = await import('@/lib/mode-stats');
+
+  const rows = await prisma.matchResult.findMany({
+    where: { userId },
+    orderBy: { playedAt: 'desc' },
+    take: 500,
+    select: {
+      id: true,
+      mode: true,
+      role: true,
+      outcome: true,
+      xpEarned: true,
+      vpEarned: true,
+      kpDelta: true,
+      playedAt: true,
+      stats: true,
+    },
+  });
+
+  return {
+    deathrun: aggregateModeStats(rows, 'deathrun'),
+    horde: aggregateModeStats(rows, 'horde'),
+    competitive: aggregateModeStats(rows, 'competitive'),
+    ranked: aggregateModeStats(rows, 'competitive_ranked'),
+    overall: {
+      ...emptyModeStats('competitive'),
+      mode: 'competitive' as const,
+      matches: rows.length,
+      kills: rows.reduce((n, r) => {
+        const s = r.stats as { kills?: number } | null;
+        return n + (typeof s?.kills === 'number' ? s.kills : 0);
+      }, 0),
+      deaths: rows.reduce((n, r) => {
+        const s = r.stats as { deaths?: number } | null;
+        return n + (typeof s?.deaths === 'number' ? s.deaths : 0);
+      }, 0),
+      wins: rows.filter((r) => r.outcome === 'win' || r.outcome === 'survived').length,
+      losses: rows.filter((r) => r.outcome === 'loss' || r.outcome === 'eliminated').length,
+      kd: (() => {
+        const k = rows.reduce((n, r) => {
+          const s = r.stats as { kills?: number } | null;
+          return n + (typeof s?.kills === 'number' ? s.kills : 0);
+        }, 0);
+        const d = rows.reduce((n, r) => {
+          const s = r.stats as { deaths?: number } | null;
+          return n + (typeof s?.deaths === 'number' ? s.deaths : 0);
+        }, 0);
+        return d > 0 ? Math.round((k / d) * 100) / 100 : k;
+      })(),
+    },
+    history: toHistoryRows(rows, 25),
+  };
+}
+
 /** Persists a completed deathrun as live telemetry the moment a run ends. */
 export async function recordMatchStat(input: {
   userId: string;
@@ -584,6 +645,24 @@ export type RankedStatsSummary = {
   casualLosses: number;
   matchesPlayed: number;
 };
+
+/** Read progression metric counts for unlock gates (weapons / missions). */
+export async function getMyMetricCounts(
+  metrics: string[]
+): Promise<Record<string, number>> {
+  const user = await getSessionUser();
+  if (!user) return {};
+  const { metricCountPublic } = await import('@/lib/progression-actions');
+  const keys = [...new Set(metrics.filter((m) => typeof m === 'string' && m.trim()))].slice(
+    0,
+    40
+  );
+  const out: Record<string, number> = {};
+  for (const key of keys) {
+    out[key] = await metricCountPublic(user.id, key);
+  }
+  return out;
+}
 
 /** Own-profile Ranked panel — KP / peak / competitive win-loss. */
 export async function getMyRankedStats(userId: string): Promise<RankedStatsSummary> {

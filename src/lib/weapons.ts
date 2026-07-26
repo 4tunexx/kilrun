@@ -19,6 +19,9 @@ export type WeaponCombatKind = 'melee' | 'hitscan' | 'cosmetic';
 
 export type WeaponAttackStyle = 'attack' | 'punch';
 
+/** How the trigger behaves while the fire button is held. */
+export type WeaponFireMode = 'auto' | 'semi' | 'bolt';
+
 export interface WeaponCombatConfig {
   /** melee = short cone; hitscan = longer aim cone; cosmetic = looks only */
   kind: WeaponCombatKind;
@@ -34,6 +37,32 @@ export interface WeaponCombatConfig {
   muzzleOffset?: [number, number, number];
   /** Which character anim slot to prefer when swinging. */
   attackStyle?: WeaponAttackStyle;
+  /**
+   * auto = hold to spray · semi = one shot per click · bolt = one shot per click
+   * (sniper-style; pair with adsZoomFov).
+   */
+  fireMode?: WeaponFireMode;
+  /** Hitscan pellet count (shotgun). Each pellet is a separate cone sample. */
+  pellets?: number;
+  /**
+   * When ADS (RMB), camera FOV eases toward this value (e.g. sniper ~28).
+   * 0 / omitted = no extra FOV zoom (boom tighten only).
+   */
+  adsZoomFov?: number;
+  /** Multiply base cone while ADS (sniper < 1 = tighter). */
+  adsConeScale?: number;
+  /** Multiply base cone while hip-firing (sniper > 1 = worse hipfire). */
+  hipfireConeScale?: number;
+  /** Magazine size (0 = unlimited). */
+  magSize?: number;
+  /** Reserve ammo granted on equip. */
+  reserveAmmo?: number;
+  /** Reload duration ms. */
+  reloadMs?: number;
+  /** Clip name on the weapon GLB (optional). */
+  fireClip?: string;
+  /** Clip name on the weapon GLB for reload (optional). */
+  reloadClip?: string;
 }
 
 export const WEAPON_COMBAT_KINDS: {
@@ -67,6 +96,8 @@ export const DEFAULT_MELEE_COMBAT: WeaponCombatConfig = {
   coneRadians: 0.5,
   muzzleOffset: [0, 0.35, 0],
   attackStyle: 'attack',
+  fireMode: 'semi',
+  pellets: 1,
 };
 
 export const DEFAULT_HITSCAN_COMBAT: WeaponCombatConfig = {
@@ -77,6 +108,14 @@ export const DEFAULT_HITSCAN_COMBAT: WeaponCombatConfig = {
   coneRadians: 0.18,
   muzzleOffset: [0, 0.05, 0.45],
   attackStyle: 'attack',
+  fireMode: 'semi',
+  pellets: 1,
+  adsZoomFov: 0,
+  adsConeScale: 0.85,
+  hipfireConeScale: 1,
+  magSize: 12,
+  reserveAmmo: 48,
+  reloadMs: 1600,
 };
 
 export const DEFAULT_COSMETIC_COMBAT: WeaponCombatConfig = {
@@ -85,6 +124,8 @@ export const DEFAULT_COSMETIC_COMBAT: WeaponCombatConfig = {
   damage: 0,
   cooldownMs: 500,
   attackStyle: 'punch',
+  fireMode: 'semi',
+  pellets: 1,
 };
 
 export function defaultCombatForKind(kind: WeaponCombatKind): WeaponCombatConfig {

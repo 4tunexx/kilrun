@@ -106,6 +106,19 @@ export class InputManager {
     return this.mouse.isRightHeld();
   }
 
+  /** Reload (R). Edge-triggered via consumeReloadPulse preferred. */
+  public isReloadPressed(): boolean {
+    return this.keyboard.isPressed('r');
+  }
+
+  private reloadWasDown = false;
+  public consumeReloadPulse(): boolean {
+    const down = this.isReloadPressed();
+    const edge = down && !this.reloadWasDown;
+    this.reloadWasDown = down;
+    return edge;
+  }
+
   /** @deprecated Use isAimHeld — kept for callers that gated mobile crosshair. */
   public isAiming(): boolean {
     return this.isAimHeld();

@@ -7,6 +7,7 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
 import type { EditorEntity } from '@/components/game/editor/map-document';
+import { persistSiteImage } from '@/lib/site-asset-upload';
 
 async function requireStaff() {
   const session = await auth();
@@ -26,6 +27,7 @@ export type CloudPrefabRow = {
   mode: string;
   updatedAt: string;
   entityCount: number;
+  thumbnailUrl?: string | null;
 };
 
 function stripHeavyEntity(e: EditorEntity): EditorEntity {
@@ -66,6 +68,7 @@ export async function listCloudPrefabs(mode?: string): Promise<CloudPrefabRow[]>
       mode: r.mode,
       updatedAt: r.updatedAt.toISOString(),
       entityCount,
+      thumbnailUrl: r.thumbnailUrl,
     };
   });
 }
@@ -86,6 +89,8 @@ export async function publishCloudPrefab(input: {
   name: string;
   mode?: string;
   entities: EditorEntity[];
+  /** Optional WebGL/data-URL thumb — persisted to CDN/blob when possible. */
+  thumbnailDataUrl?: string | null;
 }): Promise<CloudPrefabRow> {
   const staff = await requireStaff();
   if (!input.entities?.length) throw new Error('Select entities first');
@@ -95,6 +100,16 @@ export async function publishCloudPrefab(input: {
     throw new Error('Prefab too large — use /game/... model URLs instead of inline data.');
   }
 
+  let thumbnailUrl: string | null | undefined = undefined;
+  if (input.thumbnailDataUrl) {
+    try {
+      thumbnailUrl = await persistSiteImage(input.thumbnailDataUrl, 'misc');
+    } catch (err) {
+      console.warn('[publishCloudPrefab] thumb persist failed', err);
+      thumbnailUrl = null;
+    }
+  }
+
   const mode = (input.mode || '').trim();
   const data = {
     name: input.name.trim() || 'Prefab',
@@ -102,6 +117,7 @@ export async function publishCloudPrefab(input: {
     entitiesJson,
     localId: input.localId ?? null,
     createdById: staff.id,
+    ...(thumbnailUrl !== undefined ? { thumbnailUrl } : {}),
   };
 
   const existing = input.localId
@@ -119,6 +135,7 @@ export async function publishCloudPrefab(input: {
     mode: row.mode,
     updatedAt: row.updatedAt.toISOString(),
     entityCount: cleaned.length,
+    thumbnailUrl: row.thumbnailUrl,
   };
 }
 

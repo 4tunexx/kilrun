@@ -48,7 +48,7 @@ import {
   type KilrunMode,
 } from '@/lib/game-modes';
 import { getMapGameMode } from '@/components/game/editor/map-document';
-import { listCloudMapDocuments, publishCloudMap } from '@/lib/game-map-actions';
+import { listCloudMapDocuments, publishCloudMap, forkCloudMap } from '@/lib/game-map-actions';
 
 const MapEditor = dynamic(() => import('@/components/game/editor/map-editor'), {
   ssr: false,
@@ -442,6 +442,57 @@ export function AdminMapEditorPanel() {
                           }}
                         >
                           <Copy className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs"
+                          title="Fork cloud copy for co-edit"
+                          onClick={() => {
+                            void (async () => {
+                              try {
+                                const rows = await listCloudMapDocuments(selectedMode);
+                                let cloud = rows.find((r) => r.localId === m.id);
+                                if (!cloud) {
+                                  const doc = loadMapPlayable(m.id);
+                                  if (!doc) throw new Error('Map not loaded');
+                                  const published = await publishCloudMap({
+                                    localId: m.id,
+                                    name: m.name,
+                                    mode: selectedMode,
+                                    document: doc,
+                                    thumbnailDataUrl: getMapThumbnail(m.id),
+                                    setActive: false,
+                                  });
+                                  cloud = { ...published, document: doc };
+                                }
+                                const forked = await forkCloudMap(cloud.id, `${m.name} (fork)`);
+                                const full = await listCloudMapDocuments(selectedMode);
+                                const forkRow = full.find((r) => r.id === forked.id);
+                                if (forkRow) {
+                                  hydrateCloudMapsIntoLocal(
+                                    [forkRow],
+                                    selectedMode,
+                                    setActivePlayMapIdForMode
+                                  );
+                                }
+                                refresh();
+                                toast({
+                                  title: 'Forked cloud map',
+                                  description: forked.name,
+                                });
+                              } catch (err) {
+                                toast({
+                                  title: 'Fork failed',
+                                  description:
+                                    err instanceof Error ? err.message : 'Could not fork',
+                                  variant: 'destructive',
+                                });
+                              }
+                            })();
+                          }}
+                        >
+                          Fork
                         </Button>
                         <Button
                           size="sm"

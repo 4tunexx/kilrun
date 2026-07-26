@@ -1,7 +1,8 @@
 /**
  * Global 3rd-person view tuning — camera boom, crosshair, player framing.
  * Stored in localStorage so Play Test + live matches share one feel.
- * Maps may optionally embed an override via `MapDocument.tpsView`.
+ * Maps may embed `MapDocument.tpsView`. Deathrun MAIN map settings win for
+ * every game mode (Horde / Competitive / Deathrun) when present.
  */
 
 export const TPS_VIEW_STORAGE_KEY = 'kilrun.tpsView.v1';
@@ -153,16 +154,30 @@ export function mouseSensRadians(settings: TpsViewSettings): number {
   return (settings.camera.mouseSensDeg * Math.PI) / 180;
 }
 
-/** Merge map override on top of global (map wins when present). */
+/**
+ * Resolve TPS for a single map. When the map has `tpsView`, it fully replaces
+ * global localStorage (no field-level merge leftovers from other modes).
+ */
 export function resolveTpsView(mapOverride?: unknown | null): TpsViewSettings {
-  const global = loadTpsViewSettings();
-  if (!mapOverride || typeof mapOverride !== 'object') return global;
-  const override = mapOverride as Partial<TpsViewSettings>;
-  return sanitizeTpsView({
-    ...global,
-    ...override,
-    camera: { ...global.camera, ...override.camera },
-    crosshair: { ...global.crosshair, ...override.crosshair },
-    player: { ...global.player, ...override.player },
-  });
+  if (mapOverride && typeof mapOverride === 'object') {
+    return sanitizeTpsView(mapOverride);
+  }
+  return loadTpsViewSettings();
+}
+
+/**
+ * Platform-wide camera for any match mode.
+ * Deathrun MAIN map 3rd View overrides all other modes when authored.
+ */
+export function resolvePlatformTpsView(opts?: {
+  /** Active map for the mode being played (Horde / Comp / Deathrun). */
+  modeMapOverride?: unknown | null;
+  /** Deathrun MAIN map `tpsView` — wins over mode + global when set. */
+  deathrunMapOverride?: unknown | null;
+}): TpsViewSettings {
+  const deathrun = opts?.deathrunMapOverride;
+  if (deathrun && typeof deathrun === 'object') {
+    return sanitizeTpsView(deathrun);
+  }
+  return resolveTpsView(opts?.modeMapOverride ?? null);
 }

@@ -232,6 +232,21 @@ export const HUD: React.FC<{
         <p className="text-[10px] font-bold text-white/55 tabular-nums mt-0.5">
           {Math.round(levelProg.percent)}% to next
         </p>
+        {(player.role === 'survivor' ||
+          player.role === 'team_a' ||
+          player.role === 'team_b') && (
+          <div className="mt-3">
+            <p className="text-[10px] font-bold tracking-[0.2em] text-amber-300/80">CREDITS</p>
+            <p className="text-[22px] font-black text-amber-200 tabular-nums leading-none">
+              {Math.floor(player.credits ?? 0)}
+            </p>
+            {(player.shieldHp ?? 0) > 0 && (
+              <p className="text-[10px] font-bold text-sky-300 mt-1">
+                SHIELD {Math.floor(player.shieldHp ?? 0)}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Bottom-left cluster: bars tuck UNDER the ring (z-10 under z-20 avatar) */}
@@ -272,7 +287,7 @@ export const HUD: React.FC<{
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-center px-3 hidden sm:block">
         <p className="text-[11px] font-bold tracking-widest text-white/55 uppercase">
-          • Space Jump // Shift Sprint // RMB Aim // Mouse Look // Esc Menu
+          • Space Jump // Shift Sprint // RMB Aim // R Reload // Esc Menu
         </p>
       </div>
 
@@ -284,9 +299,18 @@ export const HUD: React.FC<{
           WEAPON
         </p>
         <p className="text-[18px] font-black text-white leading-tight">{weaponLabel(weaponKind)}</p>
-        <p className="text-[9px] font-black tracking-wide" style={{ color: 'rgba(209,230,250,0.9)' }}>
-          READY
-        </p>
+        {(player.weaponMagSize ?? 0) > 0 ? (
+          <p className="text-[14px] font-black tabular-nums tracking-wide mt-0.5" style={{ color: 'rgba(255,220,140,0.95)' }}>
+            {(player.reloadEndsAt ?? 0) > Date.now()
+              ? 'RELOADING…'
+              : `${Math.max(0, Math.floor(player.ammoInMag ?? 0))} / ${Math.max(0, Math.floor(player.reserveAmmo ?? 0))}`}
+          </p>
+        ) : (
+          <p className="text-[9px] font-black tracking-wide" style={{ color: 'rgba(209,230,250,0.9)' }}>
+            READY
+          </p>
+        )}
+        <p className="text-[8px] font-bold text-white/40 mt-1 tracking-wide">R RELOAD</p>
       </div>
     </div>
   );

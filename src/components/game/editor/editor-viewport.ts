@@ -2866,7 +2866,7 @@ export function createEditorViewport(
       if (isPlatformPlayerKind(kind)) {
         handlers.onPlaceResult?.(
           'ok',
-          'Player Model is platform settings — open Player Model from the top bar'
+          'Player Model is platform settings — open Player Model from the left nav'
         );
         return;
       }

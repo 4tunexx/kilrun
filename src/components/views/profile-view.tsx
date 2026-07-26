@@ -48,7 +48,8 @@ import {
 } from '@/components/ui/select';
 import { AvatarWithFrame } from '@/components/avatar-with-frame';
 import { NicknameEffectText } from '@/components/nickname-effect';
-import { getMatchStats, getMyRankedStats, getSessionUser, getStatsSummary, type RankedStatsSummary, type StatsSummary } from '@/lib/actions';
+import { getMatchStats, getModeStatsBundle, getMyRankedStats, getSessionUser, getStatsSummary, type RankedStatsSummary, type StatsSummary } from '@/lib/actions';
+import type { MatchHistoryRow, ModeStatsSummary } from '@/lib/mode-stats';
 import { RankLabel } from '@/components/ui/rank-badge';
 import {
   deactivateOwnEmail,
@@ -78,6 +79,9 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [summary, setSummary] = useState<StatsSummary | null>(null);
   const [ranked, setRanked] = useState<RankedStatsSummary | null>(null);
   const [history, setHistory] = useState<MatchStat[]>([]);
+  const [modeBundle, setModeBundle] = useState<Awaited<
+    ReturnType<typeof getModeStatsBundle>
+  > | null>(null);
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
   const [activity, setActivity] = useState<ProfileActivity | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -112,7 +116,8 @@ export default function ProfileView({ userId }: { userId: string }) {
       getMyInventory(),
       getMyProfileActivity(),
       getMyRankedStats(userId),
-    ]).then(([u, s, h, inv, act, rk]) => {
+      getModeStatsBundle(userId),
+    ]).then(([u, s, h, inv, act, rk, modes]) => {
       if (!isMounted) return;
       setUser(u);
       setBio(u?.bio ?? '');
@@ -129,6 +134,7 @@ export default function ProfileView({ userId }: { userId: string }) {
       setInventory(inv);
       setActivity(act);
       setRanked(rk);
+      setModeBundle(modes);
       setIsLoading(false);
       if (u && !u.emailVerified) setShowEmailForm(true);
     }).catch(() => {
@@ -475,30 +481,70 @@ export default function ProfileView({ userId }: { userId: string }) {
           </Card>
         </TabsContent>
 
-        <TabsContent value="statistics" className="mt-0">
+        <TabsContent value="statistics" className="mt-0 space-y-4">
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>
               <CardTitle>Player Statistics</CardTitle>
               <CardDescription>
-                Your all-time performance stats.
+                Live combat stats from match results — Deathrun, Horde, Competitive &amp; Ranked.
               </CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-6">
-              <div className="text-center bg-slate-900/40 p-4 rounded-lg">
-                <p className="text-4xl font-black text-primary">{summary?.totalRuns ?? 0}</p>
-                <p className="text-slate-400">Total Runs</p>
+            <CardContent>
+              <Tabs defaultValue="deathrun" className="w-full">
+                <TabsList className="w-full h-auto flex flex-wrap justify-start gap-1 bg-slate-900/50 p-1 mb-4">
+                  <TabsTrigger value="deathrun" className="flex-none">
+                    Deathrun
+                  </TabsTrigger>
+                  <TabsTrigger value="horde" className="flex-none">
+                    Horde
+                  </TabsTrigger>
+                  <TabsTrigger value="competitive" className="flex-none">
+                    Competitive
+                  </TabsTrigger>
+                  <TabsTrigger value="ranked" className="flex-none">
+                    Ranked
+                  </TabsTrigger>
+                  <TabsTrigger value="overall" className="flex-none">
+                    Overall
+                  </TabsTrigger>
+                </TabsList>
+                {(
+                  [
+                    ['deathrun', modeBundle?.deathrun],
+                    ['horde', modeBundle?.horde],
+                    ['competitive', modeBundle?.competitive],
+                    ['ranked', modeBundle?.ranked],
+                    ['overall', modeBundle?.overall],
+                  ] as const
+                ).map(([key, m]) => (
+                  <TabsContent key={key} value={key} className="mt-0">
+                    <ModeStatsGrid modeKey={key} stats={m} />
+                  </TabsContent>
+                ))}
+              </Tabs>
+            </CardContent>
+          </Card>
+          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+            <CardHeader>
+              <CardTitle className="text-base">Legacy Deathrun runs</CardTitle>
+              <CardDescription>Distance / score from MatchStat telemetry.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center bg-slate-900/40 p-3 rounded-lg">
+                <p className="text-2xl font-black text-primary">{summary?.totalRuns ?? 0}</p>
+                <p className="text-xs text-slate-400">Total Runs</p>
               </div>
-              <div className="text-center bg-slate-900/40 p-4 rounded-lg">
-                <p className="text-4xl font-black text-primary">{summary?.bestScore ?? 0}</p>
-                <p className="text-slate-400">Best Score</p>
+              <div className="text-center bg-slate-900/40 p-3 rounded-lg">
+                <p className="text-2xl font-black text-primary">{summary?.bestScore ?? 0}</p>
+                <p className="text-xs text-slate-400">Best Score</p>
               </div>
-              <div className="text-center bg-slate-900/40 p-4 rounded-lg">
-                <p className="text-4xl font-black text-primary">{summary?.bestDistance ?? 0}m</p>
-                <p className="text-slate-400">Best Distance</p>
+              <div className="text-center bg-slate-900/40 p-3 rounded-lg">
+                <p className="text-2xl font-black text-primary">{summary?.bestDistance ?? 0}m</p>
+                <p className="text-xs text-slate-400">Best Distance</p>
               </div>
-              <div className="text-center bg-slate-900/40 p-4 rounded-lg">
-                <p className="text-4xl font-black text-primary">{summary?.avgScore ?? 0}</p>
-                <p className="text-slate-400">Avg Score</p>
+              <div className="text-center bg-slate-900/40 p-3 rounded-lg">
+                <p className="text-2xl font-black text-primary">{summary?.avgScore ?? 0}</p>
+                <p className="text-xs text-slate-400">Avg Score</p>
               </div>
             </CardContent>
           </Card>
@@ -672,35 +718,43 @@ export default function ProfileView({ userId }: { userId: string }) {
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>
               <CardTitle>Match History</CardTitle>
-              <CardDescription>Your last {history.length} recorded runs.</CardDescription>
+              <CardDescription>
+                Last {modeBundle?.history?.length ?? 0} matches across all modes.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
                 <div className="flex items-center justify-center py-12 text-slate-400">
                   <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading match history...
                 </div>
-              ) : history.length === 0 ? (
+              ) : !modeBundle?.history?.length ? (
                 <p className="text-center py-12 text-slate-400">
-                  No runs recorded yet. Launch the game to build your match history.
+                  No matches recorded yet. Play Deathrun, Horde, or Competitive to build history.
                 </p>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow className="border-slate-700/50 hover:bg-transparent">
-                      <TableHead>Score</TableHead>
-                      <TableHead>Distance</TableHead>
-                      <TableHead>Lives Remaining</TableHead>
-                      <TableHead className="text-right">Date</TableHead>
+                      <TableHead>Mode</TableHead>
+                      <TableHead>Outcome</TableHead>
+                      <TableHead>K/D</TableHead>
+                      <TableHead>Detail</TableHead>
+                      <TableHead className="text-right">When</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {history.map((match) => (
+                    {modeBundle.history.map((match: MatchHistoryRow) => (
                       <TableRow key={match.id} className="border-slate-700/50">
-                        <TableCell className="font-bold">{match.score}</TableCell>
-                        <TableCell>{match.distance}m</TableCell>
-                        <TableCell className="font-mono">{match.livesRemaining}</TableCell>
+                        <TableCell className="font-bold capitalize">
+                          {match.mode.replace('_', ' ')}
+                        </TableCell>
+                        <TableCell className="capitalize">{match.outcome}</TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {match.kills}/{match.deaths}
+                        </TableCell>
+                        <TableCell className="text-slate-300 text-sm">{match.detail}</TableCell>
                         <TableCell className="text-right text-slate-400">
-                          {formatDistanceToNow(new Date(match.datePlayed))} ago
+                          {formatDistanceToNow(new Date(match.playedAt))} ago
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1121,6 +1175,60 @@ export default function ProfileView({ userId }: { userId: string }) {
       </Tabs>
       </div>
       </div>
+    </div>
+  );
+}
+
+function ModeStatCell({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="text-center bg-slate-900/40 p-3 rounded-lg border border-slate-700/30">
+      <p className="text-2xl font-black tabular-nums text-primary">{value}</p>
+      <p className="text-[11px] text-slate-400">{label}</p>
+    </div>
+  );
+}
+
+function ModeStatsGrid({
+  modeKey,
+  stats,
+}: {
+  modeKey: string;
+  stats: ModeStatsSummary | null | undefined;
+}) {
+  const m = stats;
+  if (!m) {
+    return (
+      <p className="text-center py-8 text-slate-400 text-sm">No matches in this mode yet.</p>
+    );
+  }
+  const cells: Array<{ label: string; value: string | number }> = [
+    { label: 'Matches', value: m.matches },
+    { label: 'Wins', value: m.wins + (modeKey === 'deathrun' || modeKey === 'horde' ? m.survived : 0) },
+    { label: 'Losses', value: m.losses + m.eliminated },
+    { label: 'Kills', value: m.kills },
+    { label: 'Deaths', value: m.deaths },
+    { label: 'K/D', value: m.kd },
+  ];
+  if (modeKey === 'deathrun') {
+    cells.push(
+      { label: 'Best score', value: m.bestScore },
+      { label: 'Best distance', value: `${m.bestDistance}m` }
+    );
+  }
+  if (modeKey === 'horde') {
+    cells.push({ label: 'Waves cleared', value: m.wavesCleared });
+  }
+  if (modeKey === 'competitive' || modeKey === 'ranked') {
+    cells.push(
+      { label: 'Rounds won', value: m.roundsWon },
+      { label: 'Rounds lost', value: m.roundsLost }
+    );
+  }
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+      {cells.map((c) => (
+        <ModeStatCell key={c.label} label={c.label} value={c.value} />
+      ))}
     </div>
   );
 }

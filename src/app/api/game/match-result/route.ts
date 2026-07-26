@@ -22,6 +22,7 @@ type BodyPlayer = {
   isAlive?: boolean;
   hasFinished?: boolean;
   kills?: number;
+  deaths?: number;
   score?: number;
   distance?: number;
   wavesCleared?: number;
@@ -140,6 +141,7 @@ export async function POST(req: NextRequest) {
         score: typeof p.score === 'number' ? p.score : undefined,
         distance: typeof p.distance === 'number' ? p.distance : undefined,
         kills: typeof p.kills === 'number' ? p.kills : undefined,
+        deaths: typeof p.deaths === 'number' ? p.deaths : undefined,
         wavesCleared,
         opponentAvgKp:
           typeof p.opponentAvgKp === 'number' ? p.opponentAvgKp : undefined,

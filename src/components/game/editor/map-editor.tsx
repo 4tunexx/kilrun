@@ -63,6 +63,7 @@ import {
   Unlink2,
   Sword,
   Swords,
+  ShoppingCart,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -79,7 +80,6 @@ import type {
 import {
   HAMMER_SOLID_MODEL,
   ensureAnimation,
-  ensureCombatSettings,
   ensureCompetitiveSettings,
   ensureDeathrunSettings,
   ensureEnvironment,
@@ -154,6 +154,7 @@ import { ModelSkinEditor } from './model-skin-editor';
 import { TpsViewStudio } from './tps-view-studio';
 import { WeaponEditor } from './weapon-editor';
 import { CombatEditor } from './combat-editor';
+import { MapShopPanel } from './map-shop-panel';
 import { ensureMapPlayerEntity } from './player-avatar';
 import type { TpsViewSettings } from '../tps/tps-view-settings';
 import { sanitizeTpsView } from '../tps/tps-view-settings';
@@ -161,6 +162,7 @@ import type { SkinAttachment } from '@/lib/player-skins';
 import { adminUpsertStoreItem } from '@/lib/social-actions';
 import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
 import { publishCloudMap } from '@/lib/game-map-actions';
+import type { MapShopSettings } from './map-document';
 import {
   BUILTIN_TEXTURES,
   deleteCustomTexture,
@@ -190,7 +192,34 @@ import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
 
-type SidebarTab = 'assets' | 'layers' | 'outliner' | 'world' | 'textures' | 'prefabs' | 'settings' | 'help';
+type SidebarTab =
+  | 'assets'
+  | 'layers'
+  | 'outliner'
+  | 'world'
+  | 'textures'
+  | 'prefabs'
+  | 'settings'
+  | 'help'
+  | 'tps'
+  | 'player'
+  | 'skins'
+  | 'weapon'
+  | 'combat'
+  | 'shop';
+
+const STUDIO_SIDEBAR_TABS: SidebarTab[] = [
+  'tps',
+  'player',
+  'skins',
+  'weapon',
+  'combat',
+  'shop',
+];
+
+function isStudioSidebarTab(tab: SidebarTab): boolean {
+  return STUDIO_SIDEBAR_TABS.includes(tab);
+}
 
 function snapshotMapDoc(d: MapDocument) {
   return JSON.stringify(d);
@@ -284,6 +313,7 @@ export function MapEditor({
       name: string;
       updatedAt: string;
       entityCount: number;
+      thumbnailUrl?: string | null;
     }>
   >([]);
   const [prefabName, setPrefabName] = useState('My Prefab');
@@ -309,11 +339,8 @@ export function MapEditor({
     }
     return true;
   });
-  const [playerStudioOpen, setPlayerStudioOpen] = useState(false);
-  const [modelEditorOpen, setModelEditorOpen] = useState(false);
-  const [tpsViewOpen, setTpsViewOpen] = useState(false);
-  const [weaponEditorOpen, setWeaponEditorOpen] = useState(false);
-  const [combatEditorOpen, setCombatEditorOpen] = useState(false);
+  /** Play Test optional camera override (from 3rd View “Test in Play”). */
+  const [playTpsOverride, setPlayTpsOverride] = useState<TpsViewSettings | null>(null);
   const [showAllCollisionGizmos, setShowAllCollisionGizmos] = useState(false);
   const [editorPerf, setEditorPerf] = useState<EditorPerfMode>({
     ...DEFAULT_EDITOR_PERF_MODE,
@@ -338,6 +365,14 @@ export function MapEditor({
 
   const selected = doc.entities.find((e) => e.id === selectedId) ?? null;
   const env = ensureEnvironment(doc);
+  /** Studio open = left-nav tab (single source of truth — no desync with setTab). */
+  const tpsViewOpen = tab === 'tps';
+  const playerStudioOpen = tab === 'player';
+  const modelEditorOpen = tab === 'skins';
+  const weaponEditorOpen = tab === 'weapon';
+  const combatEditorOpen = tab === 'combat';
+  const shopEditorOpen = tab === 'shop';
+  const anyStudioOpen = isStudioSidebarTab(tab);
   const [mapListTick, setMapListTick] = useState(0);
   const maps = useMemo(() => {
     void mapListTick;
@@ -420,12 +455,13 @@ export function MapEditor({
   // Keep ref in sync so viewport callbacks can read current value without stale closure.
   uiCollapsedRef.current = uiCollapsed;
 
-  // Re-open properties when selection changes (unless chrome is fully hidden).
+  // Re-open properties when selection changes (unless chrome is fully hidden or a studio tab is open).
   useEffect(() => {
-    if (selectedId && !uiCollapsed) setPropsOpen(true);
-  }, [selectedId, uiCollapsed]);
+    if (selectedId && !uiCollapsed && !isStudioSidebarTab(tab)) setPropsOpen(true);
+  }, [selectedId, uiCollapsed, tab]);
 
   const collapseAllMenus = () => {
+    setTab((prev) => (isStudioSidebarTab(prev) ? 'assets' : prev));
     setUiCollapsed(true);
     setSidebarOpen(false);
     setPropsOpen(false);
@@ -553,7 +589,10 @@ export function MapEditor({
   }, [isTouch]);
 
   const onTutorialStep = (step: TutorialStep) => {
-    if (step.tab) setTab(step.tab);
+    if (!step.tab) return;
+    // Leaving a studio tab: switch library without desync (tab is the only studio flag).
+    setTab(step.tab as SidebarTab);
+    setSidebarOpen(true);
   };
 
   const publishToMatch = () => {
@@ -1088,12 +1127,10 @@ export function MapEditor({
     setSelectedId(null);
     apiRef.current?.setSelectedId(null);
     setSelectedIds([]);
-    setModelEditorOpen(false);
-    setTpsViewOpen(false);
-    setPlayerStudioOpen(true);
+    setTab('player');
     setUiCollapsed(false);
     setPropsOpen(false);
-    setSidebarOpen(false);
+    setSidebarOpen(true);
     setToolsOpen(false);
   };
 
@@ -1108,37 +1145,50 @@ export function MapEditor({
     setSelectedId(null);
     apiRef.current?.setSelectedId(null);
     setSelectedIds([]);
-    setPlayerStudioOpen(false);
-    setTpsViewOpen(false);
-    setModelEditorOpen(true);
+    setTab('skins');
     setUiCollapsed(false);
     setPropsOpen(false);
-    setSidebarOpen(false);
+    setSidebarOpen(true);
     setToolsOpen(false);
   };
 
   const openWeaponEditor = () => {
-    setPlayerStudioOpen(false);
-    setModelEditorOpen(false);
-    setTpsViewOpen(false);
-    setCombatEditorOpen(false);
-    setWeaponEditorOpen(true);
+    setTab('weapon');
     setUiCollapsed(false);
     setPropsOpen(false);
-    setSidebarOpen(false);
+    setSidebarOpen(true);
     setToolsOpen(false);
   };
 
   const openCombatEditor = () => {
-    setPlayerStudioOpen(false);
-    setModelEditorOpen(false);
-    setTpsViewOpen(false);
-    setWeaponEditorOpen(false);
-    setCombatEditorOpen(true);
+    setTab('combat');
     setUiCollapsed(false);
     setPropsOpen(false);
-    setSidebarOpen(false);
+    setSidebarOpen(true);
     setToolsOpen(false);
+  };
+
+  const openShopEditor = () => {
+    setTab('shop');
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(true);
+    setToolsOpen(false);
+  };
+
+  const saveShopSettings = (settings: MapShopSettings) => {
+    scheduleHistory();
+    setDirty(true);
+    setDoc((d) => {
+      const next = { ...d, shopSettings: settings };
+      docRef.current = next;
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+    toast({
+      title: 'Buy menu saved',
+      description: `${settings.items.filter((i) => i.enabled).length} weapons · Horde & Competitive.`,
+    });
   };
 
   const saveWeaponDef = (def: Partial<import('./map-document').MapWeaponDef>) => {
@@ -1184,7 +1234,11 @@ export function MapEditor({
     });
   };
 
-  const playerAvatar = findPlayerEntity(doc);
+  const playerAvatar =
+    findPlayerEntity(doc) ??
+    (playerStudioOpen || modelEditorOpen || tpsViewOpen
+      ? findPlayerEntity(docRef.current)
+      : null);
 
   const wireTrapToButton = (trapId: string, buttonId: string) => {
     scheduleHistory();
@@ -1221,19 +1275,25 @@ export function MapEditor({
   };
 
   const openTpsViewStudio = () => {
-    // Avatar is optional — Play Test / 3rd View use default mannequin if missing.
-    const player = findPlayerEntity(docRef.current);
-    if (player) {
-      setSelectedId(player.id);
-      apiRef.current?.setSelectedId(player.id);
-    }
-    setPlayerStudioOpen(false);
-    setModelEditorOpen(false);
-    setTpsViewOpen(true);
+    // Don't select the avatar — keeps Properties from fighting the studio panel.
+    setSelectedId(null);
+    apiRef.current?.setSelectedId(null);
+    setSelectedIds([]);
+    setTab('tps');
     setUiCollapsed(false);
     setPropsOpen(false);
-    setSidebarOpen(false);
+    setSidebarOpen(true);
     setToolsOpen(false);
+  };
+
+  const closeStudioPanels = () => {
+    setTab((prev) => (isStudioSidebarTab(prev) ? 'assets' : prev));
+  };
+
+  const selectLibraryTab = (id: SidebarTab) => {
+    if (isStudioSidebarTab(id)) return;
+    setTab(id);
+    setSidebarOpen(true);
   };
 
   const saveTpsToMap = (settings: TpsViewSettings) => {
@@ -1248,11 +1308,14 @@ export function MapEditor({
     setDirty(true);
     toast({
       title: '3rd View saved to map',
-      description: 'Also saved globally for Play Test & matches.',
+      description:
+        gameMode === 'deathrun'
+          ? 'Deathrun MAIN 3rd View overrides camera for all game modes.'
+          : 'Saved on this map. Deathrun MAIN 3rd View still wins in live matches when set.',
     });
   };
 
-  const startPlay = () => {
+  const startPlay = (tpsOverride?: TpsViewSettings | null) => {
     if (freeFly) apiRef.current?.setFreeFly(false);
     // Snapshot camera so Exit restores the exact map view you left
     cameraBeforePlayRef.current = apiRef.current?.getCameraState() ?? null;
@@ -1260,11 +1323,13 @@ export function MapEditor({
     // Do NOT auto-insert Player Avatar into the map — Play Test uses default
     // mannequin / existing avatar, and invents Start on a floor if needed.
     persist();
+    setPlayTpsOverride(tpsOverride ?? null);
     setPlayTest(true);
   };
 
   const exitPlayTest = () => {
     setPlayTest(false);
+    setPlayTpsOverride(null);
     // Keep editor host mounted — resume WebGL and restore camera (fixes blank screen)
     requestAnimationFrame(() => {
       apiRef.current?.setPaused(false);
@@ -1529,6 +1594,7 @@ export function MapEditor({
             }
             const cleaned = stripLegacyBakedStairPads(loaded);
             const withEnv = { ...cleaned, environment: ensureEnvironment(cleaned) };
+            closeStudioPanels();
             setMapId(id);
             setDoc(withEnv);
             docRef.current = withEnv;
@@ -1556,59 +1622,9 @@ export function MapEditor({
         <Button
           size="sm"
           className="ml-2 bg-emerald-600 hover:bg-emerald-500 text-white shrink-0"
-          onClick={startPlay}
+          onClick={() => startPlay()}
         >
           <Play className="w-4 h-4 mr-1" /> Play Test
-        </Button>
-        <Button
-          size="sm"
-          variant={tpsViewOpen ? 'default' : 'secondary'}
-          className={`shrink-0 ${tpsViewOpen ? 'bg-violet-600 hover:bg-violet-500 text-white' : ''}`}
-          onClick={() => (tpsViewOpen ? setTpsViewOpen(false) : openTpsViewStudio())}
-          title="3rd View — in-game camera, crosshair & framing (how players see the match)"
-        >
-          <Eye className="w-4 h-4 mr-1" />
-          {isMobile ? '3rd' : '3rd View'}
-        </Button>
-        <Button
-          size="sm"
-          variant={playerStudioOpen ? 'default' : 'secondary'}
-          className={`shrink-0 ${playerStudioOpen ? 'bg-sky-600 hover:bg-sky-500 text-white' : ''}`}
-          onClick={() => (playerStudioOpen ? setPlayerStudioOpen(false) : openPlayerStudio())}
-          title="Player Model — platform-wide avatar look & animations (not placed on the map)"
-        >
-          <PersonStanding className="w-4 h-4 mr-1" />
-          {isMobile ? 'Avatar' : 'Player Model'}
-        </Button>
-        <Button
-          size="sm"
-          variant={modelEditorOpen ? 'default' : 'secondary'}
-          className={`shrink-0 ${modelEditorOpen ? 'bg-amber-600 hover:bg-amber-500 text-white' : ''}`}
-          onClick={() => (modelEditorOpen ? setModelEditorOpen(false) : openModelEditor())}
-          title="Model Editor — skins, hats, pants, weapons for shop"
-        >
-          <Shirt className="w-4 h-4 mr-1" />
-          {isMobile ? 'Skins' : 'Model Editor'}
-        </Button>
-        <Button
-          size="sm"
-          variant={weaponEditorOpen ? 'default' : 'secondary'}
-          className={`shrink-0 ${weaponEditorOpen ? 'bg-rose-600 hover:bg-rose-500 text-white' : ''}`}
-          onClick={() => (weaponEditorOpen ? setWeaponEditorOpen(false) : openWeaponEditor())}
-          title="Weapon Editor — model, position, combat stats, recoil, sway"
-        >
-          <Sword className="w-4 h-4 mr-1" />
-          {isMobile ? 'Weapon' : 'Weapon Editor'}
-        </Button>
-        <Button
-          size="sm"
-          variant={combatEditorOpen ? 'default' : 'secondary'}
-          className={`shrink-0 ${combatEditorOpen ? 'bg-sky-700 hover:bg-sky-600 text-white' : ''}`}
-          onClick={() => (combatEditorOpen ? setCombatEditorOpen(false) : openCombatEditor())}
-          title="Combat Editor — physics, movement, jump, slide, wall-jump, recoil"
-        >
-          <Swords className="w-4 h-4 mr-1" />
-          {isMobile ? 'Combat' : 'Combat Editor'}
         </Button>
         <Button
           size="sm"
@@ -1690,6 +1706,7 @@ export function MapEditor({
               const withEnv = { ...cleaned, environment: ensureEnvironment(cleaned) };
               const id = `map_${Date.now().toString(36)}`;
               saveMap(id, withEnv);
+              closeStudioPanels();
               setMapId(id);
               setDoc(withEnv);
               docRef.current = withEnv;
@@ -1737,26 +1754,55 @@ export function MapEditor({
         >
           {(
             [
-              ['assets', Box],
-              ['layers', Layers],
-              ['outliner', ListTree],
-              ['prefabs', Stamp],
-              ['world', CloudSun],
-              ['textures', Palette],
-              ['settings', Settings2],
-              ['help', HelpCircle],
+              ['assets', Box, 'Assets'],
+              ['layers', Layers, 'Layers'],
+              ['outliner', ListTree, 'Outliner'],
+              ['prefabs', Stamp, 'Prefabs'],
+              ['world', CloudSun, 'World'],
+              ['textures', Palette, 'Textures'],
+              ['tps', Eye, '3rd View'],
+              ['player', PersonStanding, 'Player Model'],
+              ['skins', Shirt, 'Model Editor'],
+              ['weapon', Sword, 'Weapon Editor'],
+              ['combat', Swords, 'Combat Editor'],
+              ['shop', ShoppingCart, 'Buy Menu'],
+              ['settings', Settings2, 'Settings'],
+              ['help', HelpCircle, 'Help'],
             ] as const
-          ).map(([id, Icon]) => (
+          ).map(([id, Icon, label]) => (
             <button
               key={id}
               type="button"
-              title={id}
+              title={label}
               className={`w-8 h-8 rounded flex items-center justify-center ${
                 tab === id ? 'bg-cyan-500/20 text-cyan-300' : 'text-white/50 hover:text-white'
               }`}
               onClick={() => {
-                setTab(id);
-                setSidebarOpen(true);
+                if (id === 'tps') {
+                  tpsViewOpen ? closeStudioPanels() : openTpsViewStudio();
+                  return;
+                }
+                if (id === 'player') {
+                  playerStudioOpen ? closeStudioPanels() : openPlayerStudio();
+                  return;
+                }
+                if (id === 'skins') {
+                  modelEditorOpen ? closeStudioPanels() : openModelEditor();
+                  return;
+                }
+                if (id === 'weapon') {
+                  weaponEditorOpen ? closeStudioPanels() : openWeaponEditor();
+                  return;
+                }
+                if (id === 'combat') {
+                  combatEditorOpen ? closeStudioPanels() : openCombatEditor();
+                  return;
+                }
+                if (id === 'shop') {
+                  shopEditorOpen ? closeStudioPanels() : openShopEditor();
+                  return;
+                }
+                selectLibraryTab(id);
               }}
             >
               <Icon className="w-4 h-4" />
@@ -1766,7 +1812,10 @@ export function MapEditor({
             type="button"
             title="Collapse library"
             className="mt-auto w-8 h-8 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10"
-            onClick={() => setSidebarOpen(false)}
+            onClick={() => {
+              closeStudioPanels();
+              setSidebarOpen(false);
+            }}
             aria-label="Collapse model panel"
           >
             <ChevronLeft className="w-4 h-4" />
@@ -1778,20 +1827,154 @@ export function MapEditor({
         <div
           className={`border-r border-white/10 bg-[#121a24] flex flex-col min-h-0 z-[70] relative ${
             isMobile
-              ? 'absolute left-10 top-0 bottom-0 w-[min(18rem,calc(100vw-2.5rem))] shadow-2xl'
-              : 'w-72 relative'
+              ? `absolute left-10 top-0 bottom-0 shadow-2xl ${
+                  isStudioSidebarTab(tab)
+                    ? 'w-[min(22rem,calc(100vw-2.5rem))]'
+                    : 'w-[min(18rem,calc(100vw-2.5rem))]'
+                }`
+              : isStudioSidebarTab(tab)
+                ? 'w-[min(26rem,40vw)] relative'
+                : 'w-72 relative'
           }`}
         >
           {/* Edge arrow to collapse the model / library panel */}
           <button
             type="button"
-            onClick={() => setSidebarOpen(false)}
+            onClick={() => {
+              closeStudioPanels();
+              setSidebarOpen(false);
+            }}
             className="absolute -right-3 top-1/2 z-[80] flex h-14 w-6 -translate-y-1/2 items-center justify-center rounded-r-md border border-l-0 border-white/25 bg-[#1a2433] text-white/85 shadow-md hover:bg-cyan-500/25 hover:text-cyan-100 active:scale-95"
             title="Collapse model panel"
             aria-label="Collapse model panel"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
+
+          {tab === 'tps' && (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <TpsViewStudio
+                embedded
+                isMobile={isMobile}
+                mapId={mapId}
+                onClose={closeStudioPanels}
+                onPlayTest={(settings) => {
+                  closeStudioPanels();
+                  startPlay(settings);
+                }}
+                mapDoc={doc}
+                mapOverride={doc.tpsView ? sanitizeTpsView(doc.tpsView) : null}
+                onSaveToMap={saveTpsToMap}
+                playerEntity={playerAvatar}
+                onChangePlayer={(patch) => {
+                  if (!playerAvatar) {
+                    openPlayerStudio();
+                    return;
+                  }
+                  patchEntityById(playerAvatar.id, patch);
+                }}
+                onOpenFullPlayerStudio={() => {
+                  openPlayerStudio();
+                }}
+              />
+            </div>
+          )}
+          {tab === 'player' && (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              {playerAvatar ? (
+                <PlayerModelStudio
+                  embedded
+                  entity={playerAvatar}
+                  isMobile={isMobile}
+                  onClose={closeStudioPanels}
+                  onChange={(patch) => patchEntityById(playerAvatar.id, patch)}
+                />
+              ) : (
+                <div className="p-4 space-y-3 text-sm text-white/70">
+                  <p>No player avatar on this map yet.</p>
+                  <Button size="sm" onClick={() => openPlayerStudio()}>
+                    Create Player Model
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          {tab === 'skins' && (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              {playerAvatar ? (
+                <ModelSkinEditor
+                  embedded
+                  entity={playerAvatar}
+                  isMobile={isMobile}
+                  onClose={closeStudioPanels}
+                  onApplyToPlayer={applySkinsToPlayer}
+                  onPublishToShop={async (payload) => {
+                    try {
+                      await adminSyncDatabaseSchema().catch(() => null);
+                      await adminUpsertStoreItem({
+                        itemName: payload.itemName,
+                        itemCategory: payload.itemCategory,
+                        itemSku: payload.itemSku,
+                        vpPrice: payload.vpPrice,
+                        imageUrl: payload.imageUrl,
+                        cosmeticSlot: payload.cosmeticSlot,
+                        cosmeticConfig: payload.cosmeticConfig,
+                      });
+                      toast({
+                        title: 'Skin published to shop',
+                        description: `${payload.itemName} is now in Skins.`,
+                      });
+                    } catch (e: unknown) {
+                      const msg = e instanceof Error ? e.message : 'Publish failed';
+                      toast({ title: msg, variant: 'destructive' });
+                    }
+                  }}
+                />
+              ) : (
+                <div className="p-4 space-y-3 text-sm text-white/70">
+                  <p>Model Editor needs a player avatar first.</p>
+                  <Button size="sm" onClick={() => openModelEditor()}>
+                    Create avatar & open
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          {tab === 'weapon' && (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <WeaponEditor
+                key={mapId}
+                embedded
+                isMobile={isMobile}
+                mapDoc={doc}
+                onClose={closeStudioPanels}
+                onSaveToMap={saveWeaponDef}
+              />
+            </div>
+          )}
+          {tab === 'combat' && (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <CombatEditor
+                key={mapId}
+                embedded
+                isMobile={isMobile}
+                mapDoc={doc}
+                onClose={closeStudioPanels}
+                onSaveToMap={saveCombatSettings}
+              />
+            </div>
+          )}
+          {tab === 'shop' && (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <MapShopPanel
+                key={mapId}
+                mapDoc={doc}
+                onClose={closeStudioPanels}
+                onSave={saveShopSettings}
+              />
+            </div>
+          )}
+
           {tab === 'assets' && (
             <>
               <div className="p-2 border-b border-white/10 space-y-1">
@@ -2216,6 +2399,19 @@ export function MapEditor({
                           name: prefabName.trim() || 'Prefab',
                           mode: getMapGameMode(doc),
                           entities: relative,
+                          thumbnailDataUrl: await (async () => {
+                            try {
+                              const { renderMapThumbnail } = await import('./map-thumbnail');
+                              const mini = {
+                                ...doc,
+                                name: prefabName.trim() || 'Prefab',
+                                entities: relative,
+                              };
+                              return await renderMapThumbnail(mini);
+                            } catch {
+                              return null;
+                            }
+                          })(),
                         });
                         toast({ title: 'Published to cloud library' });
                         const { listCloudPrefabs } = await import('@/lib/game-prefab-actions');
@@ -2263,6 +2459,14 @@ export function MapEditor({
                       key={p.id}
                       className="flex items-center gap-1 rounded border border-cyan-500/20 bg-cyan-500/5 p-2"
                     >
+                      {p.thumbnailUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={p.thumbnailUrl}
+                          alt=""
+                          className="h-10 w-10 rounded object-cover border border-white/10 shrink-0"
+                        />
+                      ) : null}
                       <button
                         type="button"
                         className="flex-1 text-left text-xs hover:text-cyan-200"
@@ -3066,6 +3270,9 @@ export function MapEditor({
                           <input type="range" min={0} max={s.intermissionSec} className="w-full accent-violet-400"
                             value={Math.min(s.waveBuyTimeSec, s.intermissionSec)}
                             onChange={(e) => patch({ waveBuyTimeSec: Number(e.target.value) })} />
+                          <span className="block text-[9px] text-white/40 mt-1">
+                            Weapon list: left-nav Buy Menu. Also opens during match countdown.
+                          </span>
                         </label>
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-300/80 mt-1">Waves</p>
                         <label className="block text-xs text-white/60">
@@ -3136,6 +3343,9 @@ export function MapEditor({
                           Buy / weapon shop time ({s.buyTimeSec}s per round start)
                           <input type="range" min={0} max={60} className="w-full accent-orange-400" value={s.buyTimeSec}
                             onChange={(e) => patch({ buyTimeSec: Number(e.target.value) })} />
+                          <p className="text-[9px] text-white/40 mt-1">
+                            Weapons listed in left-nav Buy Menu (Competitive flag). Applies every round.
+                          </p>
                         </label>
                         <label className="block text-xs text-white/60">
                           Round time ({s.roundTimeSec}s)
@@ -3236,7 +3446,7 @@ export function MapEditor({
                 <>
                   <p>· <b className="text-white">Select (V)</b> picks · cancels spawn placement</p>
                   <p>· Flag / spawn tools: click once to place · Shift keeps placing</p>
-                  <p>· <b className="text-white">Player Model</b> = platform avatar (not map spawn)</p>
+                  <p>· <b className="text-white">Player Model</b> (left nav) = platform avatar (not map spawn)</p>
                   <p>· <b className="text-white">Hammer (H)</b> solids: Material + size in Properties</p>
                   <p>· <b className="text-white">Textures</b> tab: drag atlas region · paint brush</p>
                   <p>· <b className="text-white">Ctrl</b> free fly · <b className="text-white">G</b> snap · <b className="text-white">W/E/R</b> gizmo · <b className="text-white">Shift</b> exact grid</p>
@@ -3316,7 +3526,7 @@ export function MapEditor({
                       type="button"
                       onClick={() => {
                         setActiveLayerId(layer.id);
-                        setTab('layers');
+                        selectLibraryTab('layers');
                       }}
                       className="px-2 py-1 text-[10px] font-bold text-white/85"
                       title={`Build on ${layer.name} (level ${index})`}
@@ -3442,7 +3652,7 @@ export function MapEditor({
               onClick={() => {
                 setEditTool('paint');
                 if (freeFly) apiRef.current?.setFreeFly(false);
-                setTab('textures');
+                selectLibraryTab('textures');
               }}
               title="Texture brush — tap objects to apply selected texture + UV tile"
             >
@@ -3722,49 +3932,14 @@ export function MapEditor({
                 >
                   <Zap className="w-4 h-4 text-amber-200" />
                 </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('door')}
-                  title="Door"
-                >
-                  <Box className="w-4 h-4 text-violet-200" />
-                </ToolBtn>
+            <ToolBtn
+              onClick={() => armPlaceEntity('door')}
+              title="Door"
+            >
+              <Box className="w-4 h-4 text-violet-200" />
+            </ToolBtn>
               </>
             )}
-            <ToolBtn
-              active={tpsViewOpen}
-              onClick={() => (tpsViewOpen ? setTpsViewOpen(false) : openTpsViewStudio())}
-              title="3rd View — camera / crosshair / player"
-            >
-              <Eye className="w-4 h-4 text-violet-300" />
-            </ToolBtn>
-            <ToolBtn
-              active={playerStudioOpen}
-              onClick={() => (playerStudioOpen ? setPlayerStudioOpen(false) : openPlayerStudio())}
-              title="Player Model studio"
-            >
-              <PersonStanding className="w-4 h-4 text-sky-300" />
-            </ToolBtn>
-            <ToolBtn
-              active={modelEditorOpen}
-              onClick={() => (modelEditorOpen ? setModelEditorOpen(false) : openModelEditor())}
-              title="Model Editor — skins, hats, gear"
-            >
-              <Shirt className="w-4 h-4 text-amber-300" />
-            </ToolBtn>
-            <ToolBtn
-              active={weaponEditorOpen}
-              onClick={() => (weaponEditorOpen ? setWeaponEditorOpen(false) : openWeaponEditor())}
-              title="Weapon Editor — model, position, combat stats, recoil, sway"
-            >
-              <Sword className="w-4 h-4 text-rose-300" />
-            </ToolBtn>
-            <ToolBtn
-              active={combatEditorOpen}
-              onClick={() => (combatEditorOpen ? setCombatEditorOpen(false) : openCombatEditor())}
-              title="Combat Editor — physics, movement, jump, slide, wall-jump"
-            >
-              <Swords className="w-4 h-4 text-sky-300" />
-            </ToolBtn>
             <ToolBtn
               onClick={() => armPlaceEntity('light')}
               title="Light bulb"
@@ -3815,7 +3990,7 @@ export function MapEditor({
           </div>
           )}
 
-          {!uiCollapsed && selected && !propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && !weaponEditorOpen && !combatEditorOpen && (
+          {!uiCollapsed && selected && !propsOpen && !anyStudioOpen && (
             <button
               type="button"
               onClick={() => setPropsOpen(true)}
@@ -3825,7 +4000,7 @@ export function MapEditor({
             </button>
           )}
 
-          {!uiCollapsed && selected && propsOpen && !playerStudioOpen && !modelEditorOpen && !tpsViewOpen && !weaponEditorOpen && !combatEditorOpen && (
+          {!uiCollapsed && selected && propsOpen && !anyStudioOpen && (
             <div
               className={`absolute z-[80] bg-black/80 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm overflow-y-auto ${
                 isMobile
@@ -5804,85 +5979,6 @@ export function MapEditor({
           )}
           </div>
 
-          {tpsViewOpen && (
-            <TpsViewStudio
-              isMobile={isMobile}
-              onClose={() => setTpsViewOpen(false)}
-              onPlayTest={() => {
-                setTpsViewOpen(false);
-                startPlay();
-              }}
-              mapDoc={doc}
-              mapOverride={doc.tpsView ? sanitizeTpsView(doc.tpsView) : null}
-              onSaveToMap={saveTpsToMap}
-              playerEntity={playerAvatar}
-              onChangePlayer={(patch) => {
-                if (!playerAvatar) {
-                  openPlayerStudio();
-                  return;
-                }
-                patchEntityById(playerAvatar.id, patch);
-              }}
-              onOpenFullPlayerStudio={() => {
-                setTpsViewOpen(false);
-                openPlayerStudio();
-              }}
-            />
-          )}
-          {playerStudioOpen && playerAvatar && (
-            <PlayerModelStudio
-              entity={playerAvatar}
-              isMobile={isMobile}
-              onClose={() => setPlayerStudioOpen(false)}
-              onChange={(patch) => patchEntityById(playerAvatar.id, patch)}
-            />
-          )}
-          {modelEditorOpen && playerAvatar && (
-            <ModelSkinEditor
-              entity={playerAvatar}
-              isMobile={isMobile}
-              onClose={() => setModelEditorOpen(false)}
-              onApplyToPlayer={applySkinsToPlayer}
-              onPublishToShop={async (payload) => {
-                try {
-                  // Ensure Mongo has skin fields before first publish
-                  await adminSyncDatabaseSchema().catch(() => null);
-                  await adminUpsertStoreItem({
-                    itemName: payload.itemName,
-                    itemCategory: payload.itemCategory,
-                    itemSku: payload.itemSku,
-                    vpPrice: payload.vpPrice,
-                    imageUrl: payload.imageUrl,
-                    cosmeticSlot: payload.cosmeticSlot,
-                    cosmeticConfig: payload.cosmeticConfig,
-                  });
-                  toast({
-                    title: 'Skin published to shop',
-                    description: `${payload.itemName} is now in Skins.`,
-                  });
-                } catch (e: unknown) {
-                  const msg = e instanceof Error ? e.message : 'Publish failed';
-                  toast({ title: msg, variant: 'destructive' });
-                }
-              }}
-            />
-          )}
-          {weaponEditorOpen && (
-            <WeaponEditor
-              isMobile={isMobile}
-              mapDoc={docRef.current}
-              onClose={() => setWeaponEditorOpen(false)}
-              onSaveToMap={saveWeaponDef}
-            />
-          )}
-          {combatEditorOpen && (
-            <CombatEditor
-              isMobile={isMobile}
-              mapDoc={docRef.current}
-              onClose={() => setCombatEditorOpen(false)}
-              onSaveToMap={saveCombatSettings}
-            />
-          )}
         </div>
       </div>
       {playTest && (
@@ -5890,6 +5986,7 @@ export function MapEditor({
           <MapPlayPreview
             doc={apiRef.current?.getDoc() ?? doc}
             mapId={mapId}
+            tpsViewOverride={playTpsOverride}
             onClose={exitPlayTest}
           />
         </div>

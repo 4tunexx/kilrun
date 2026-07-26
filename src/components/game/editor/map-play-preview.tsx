@@ -55,7 +55,9 @@ import {
   mapDocToSimTeleports,
   mapDocToWorldBounds,
   prepareDocForPlayTest,
+  getActivePlayMapIdForMode,
 } from './prefab-storage';
+import { loadMapPlayable } from './map-storage';
 import { loadPlayerAvatar, getMapPlayerAvatar, fitAvatarLikeEditor, avatarAuthoredScale } from './player-avatar';
 import { updateFollowCamera } from '../renderer/three-world';
 import { applySkinAttachments, tickSkinAttachments } from './skin-attachments';
@@ -66,7 +68,7 @@ import {
 import { Crosshair } from '../ui/crosshair';
 import {
   mouseSensRadians,
-  resolveTpsView,
+  resolvePlatformTpsView,
   sanitizeTpsView,
   type TpsViewSettings,
 } from '../tps/tps-view-settings';
@@ -213,13 +215,15 @@ export function MapPlayPreview({
   }, [doc]);
   const physOptsRef = useRef(physOpts);
   physOptsRef.current = physOpts;
-  const resolvedTps = useMemo(
-    () =>
-      tpsViewOverride
-        ? sanitizeTpsView(tpsViewOverride)
-        : resolveTpsView(doc.tpsView as TpsViewSettings | null | undefined),
-    [doc.tpsView, tpsViewOverride]
-  );
+  const resolvedTps = useMemo(() => {
+    if (tpsViewOverride) return sanitizeTpsView(tpsViewOverride);
+    const deathrunId = getActivePlayMapIdForMode('deathrun');
+    const deathrunDoc = deathrunId ? loadMapPlayable(deathrunId) : null;
+    return resolvePlatformTpsView({
+      modeMapOverride: doc.tpsView as TpsViewSettings | null | undefined,
+      deathrunMapOverride: deathrunDoc?.tpsView ?? null,
+    });
+  }, [doc.tpsView, tpsViewOverride]);
   const tpsRef = useRef<TpsViewSettings>(resolvedTps);
   const onCloseRef = useRef(onClose);
   const [hp, setHp] = useState(100);

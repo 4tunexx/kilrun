@@ -1,6 +1,7 @@
 import type { SkinAttachment } from '@/lib/player-skins';
 import type { KilrunMode } from '@/lib/game-modes';
 import { normalizeKilrunMode } from '@/lib/game-modes';
+import { CATALOG_WEAPONS, resolveCatalogCombat } from '@/lib/weapon-catalog';
 import type {
   TpsCameraSettings,
   TpsCrosshairSettings,
@@ -1017,8 +1018,16 @@ export interface MapWeaponDef {
   muzzleOffset: [number, number, number];
   /** Spread pattern (only for hitscan). */
   bulletsPerShot: number;
+  /** auto / semi / bolt trigger. */
+  fireMode?: 'auto' | 'semi' | 'bolt';
+  /** ADS FOV zoom (sniper). */
+  adsZoomFov?: number;
+  adsConeScale?: number;
+  hipfireConeScale?: number;
   /** Shop price in game currency (0 = free). */
   shopPrice: number;
+  /** Optional texture painted on the weapon mesh (data URL or path). */
+  textureUrl?: string;
   /** Active/hand position on player (character-local). */
   holdPosition: [number, number, number];
   holdRotation: [number, number, number];
@@ -1058,6 +1067,416 @@ export const DEFAULT_WEAPON_DEF: MapWeaponDef = {
   backScale: [1, 1, 1],
 };
 
+// ─── In-match weapon shop (Horde / Competitive) ─────────────────────────────
+
+/** One buy-menu entry authored in Map Editor → Shop. */
+export interface MapShopItem {
+  id: string;
+  label: string;
+  description?: string;
+  kind: 'melee' | 'hitscan';
+  damage: number;
+  range: number;
+  cooldownMs: number;
+  coneRadians: number;
+  /** Display / future economy (0 = free). */
+  shopPrice: number;
+  /** GLB URL (catalog or custom). */
+  modelUrl?: string;
+  /** Catalog weapon id when sourced from /game/weapons. */
+  catalogId?: string;
+  /** Optional albedo / diffuse texture (data URL or http) painted onto the weapon mesh. */
+  textureUrl?: string;
+  /** auto = hold · semi = one click · bolt = one click (sniper). */
+  fireMode?: 'auto' | 'semi' | 'bolt';
+  /** Hitscan pellet count (shotgun). */
+  pellets?: number;
+  /** ADS camera FOV (sniper zoom). 0 = no FOV zoom. */
+  adsZoomFov?: number;
+  /** Cone multiplier while ADS. */
+  adsConeScale?: number;
+  /** Cone multiplier while hip-firing. */
+  hipfireConeScale?: number;
+  /** Magazine size (0 = unlimited / melee). */
+  magSize?: number;
+  reserveAmmo?: number;
+  reloadMs?: number;
+  /** Platform requirement metric (requirement-types) to buy this weapon. */
+  unlockMetric?: string;
+  unlockAmount?: number;
+  enabled: boolean;
+  modes: Array<'horde' | 'competitive'>;
+  sortOrder: number;
+}
+
+/** Purchasable power-up in the in-match shop. */
+export interface MapShopPowerUp {
+  id: string;
+  label: string;
+  description?: string;
+  shopPrice: number;
+  /** Built-in effect id. */
+  effect: 'heal' | 'shield' | 'speed' | 'energy' | 'super_jump';
+  enabled: boolean;
+  modes: Array<'horde' | 'competitive' | 'deathrun'>;
+}
+
+/**
+ * Texture-only weapon skin for the in-match buy menu.
+ * Buying + equipping paints this texture onto whatever weapon mesh the player holds.
+ */
+export interface MapShopSkin {
+  id: string;
+  label: string;
+  description?: string;
+  shopPrice: number;
+  /** Albedo / diffuse texture (data URL or http) applied to the equipped weapon mesh. */
+  textureUrl: string;
+  enabled: boolean;
+  modes: Array<'horde' | 'competitive'>;
+  sortOrder: number;
+}
+
+export interface MapShopSettings {
+  items: MapShopItem[];
+  powerUps?: MapShopPowerUp[];
+  /** Texture-only weapon skins (buy → equip → paint current weapon). */
+  skins?: MapShopSkin[];
+  /** Credits granted when buy phase opens / match starts. */
+  startingCredits: number;
+  /** Credits per player kill (Horde monster / Competitive frag). */
+  creditsPerKill: number;
+  /** Credits when a Horde wave clears (all living players). */
+  creditsPerWaveClear: number;
+}
+
+function clampShopNum(n: unknown, min: number, max: number, fallback: number) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.min(max, Math.max(min, v));
+}
+
+/** Default shop = full weapon catalog (all enabled for Horde + Competitive). */
+export function defaultShopItems(): MapShopItem[] {
+  // Pull combat props from catalog so pistol/SMG/shotgun/sniper stay distinct.
+  return CATALOG_WEAPONS.filter((w) => w.modes.includes('horde') || w.modes.includes('competitive')).map(
+    (cat, i) => {
+      const c = resolveCatalogCombat(cat.id);
+      const fireMode = c.fireMode ?? (cat.id.includes('rifle') && !cat.id.includes('sniper') ? 'auto' : 'semi');
+      return {
+        id: cat.id,
+        label: cat.label,
+        description:
+          cat.id === 'sniper_rifle_001'
+            ? 'Bolt-action · ADS zoom · one shot'
+            : cat.id === 'shotgun_001'
+              ? `${c.pellets ?? 8} pellets · close range`
+              : cat.id === 'rifle_001'
+                ? 'Full-auto SMG-style'
+                : cat.kind === 'melee'
+                  ? 'Melee'
+                  : 'Semi-auto',
+        kind: cat.kind === 'melee' ? 'melee' : 'hitscan',
+        damage: c.damage,
+        range: c.range,
+        cooldownMs: c.cooldownMs,
+        coneRadians: c.coneRadians ?? 0.18,
+        shopPrice:
+          cat.id === 'pistol_001' || cat.id === 'axe_001' || cat.id === 'knife_001'
+            ? 0
+            : cat.id === 'sniper_rifle_001'
+              ? 350
+              : cat.id === 'shotgun_001'
+                ? 250
+                : cat.id === 'rifle_001'
+                  ? 150
+                  : 100,
+        modelUrl: cat.modelUrl,
+        catalogId: cat.id,
+        textureUrl: undefined,
+        fireMode: fireMode as 'auto' | 'semi' | 'bolt',
+        pellets: Math.max(1, Math.floor(c.pellets ?? 1)),
+        adsZoomFov: c.adsZoomFov ?? 0,
+        adsConeScale: c.adsConeScale ?? 1,
+        hipfireConeScale: c.hipfireConeScale ?? 1,
+        magSize: c.magSize ?? (cat.kind === 'melee' ? 0 : 12),
+        reserveAmmo: c.reserveAmmo ?? (cat.kind === 'melee' ? 0 : 48),
+        reloadMs: c.reloadMs ?? (cat.kind === 'melee' ? 0 : 1600),
+        unlockMetric: cat.unlockMetric,
+        unlockAmount: cat.unlockAmount,
+        enabled: true,
+        modes: [...cat.modes],
+        sortOrder: i,
+      };
+    }
+  );
+}
+
+export function defaultShopPowerUps(): MapShopPowerUp[] {
+  return [
+    {
+      id: 'heal',
+      label: 'Medkit',
+      description: 'Restore 50 HP',
+      shopPrice: 100,
+      effect: 'heal',
+      enabled: true,
+      modes: ['horde', 'competitive', 'deathrun'],
+    },
+    {
+      id: 'shield',
+      label: 'Shield',
+      description: 'Absorb 50 damage',
+      shopPrice: 150,
+      effect: 'shield',
+      enabled: true,
+      modes: ['horde', 'competitive', 'deathrun'],
+    },
+    {
+      id: 'energy',
+      label: 'Energy Drink',
+      description: 'Full sprint energy',
+      shopPrice: 75,
+      effect: 'energy',
+      enabled: true,
+      modes: ['horde', 'competitive', 'deathrun'],
+    },
+    {
+      id: 'speed',
+      label: 'Speed Boost',
+      description: 'Temporary speed surge',
+      shopPrice: 200,
+      effect: 'speed',
+      enabled: true,
+      modes: ['horde', 'competitive'],
+    },
+  ];
+}
+
+export function sanitizeShopItem(raw: unknown, index = 0): MapShopItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Partial<MapShopItem>;
+  const id = typeof o.id === 'string' && o.id.trim() ? o.id.trim() : `shop_${index}`;
+  const kind = o.kind === 'melee' ? 'melee' : 'hitscan';
+  const modesRaw = Array.isArray(o.modes) ? o.modes : ['horde', 'competitive'];
+  const modes = modesRaw.filter(
+    (m): m is 'horde' | 'competitive' => m === 'horde' || m === 'competitive'
+  );
+  const catalogId = typeof o.catalogId === 'string' ? o.catalogId : undefined;
+  const fromCat = catalogId ? resolveCatalogCombat(catalogId) : null;
+  const fireRaw = String(o.fireMode || fromCat?.fireMode || (kind === 'melee' ? 'semi' : 'semi'));
+  const fireMode: 'auto' | 'semi' | 'bolt' =
+    fireRaw === 'auto' || fireRaw === 'bolt' ? fireRaw : 'semi';
+  return {
+    id,
+    label: typeof o.label === 'string' && o.label.trim() ? o.label.trim() : id,
+    description: typeof o.description === 'string' ? o.description : undefined,
+    kind,
+    damage: clampShopNum(o.damage, 1, 200, fromCat?.damage ?? (kind === 'melee' ? 40 : 25)),
+    range: clampShopNum(o.range, 0.5, 40, fromCat?.range ?? (kind === 'melee' ? 2.4 : 12)),
+    cooldownMs: clampShopNum(
+      o.cooldownMs,
+      50,
+      5000,
+      fromCat?.cooldownMs ?? 400
+    ),
+    coneRadians: clampShopNum(
+      o.coneRadians,
+      0.02,
+      1.2,
+      fromCat?.coneRadians ?? 0.25
+    ),
+    shopPrice: clampShopNum(o.shopPrice, 0, 99999, 0),
+    modelUrl: typeof o.modelUrl === 'string' && o.modelUrl ? o.modelUrl : undefined,
+    catalogId,
+    textureUrl: typeof o.textureUrl === 'string' && o.textureUrl ? o.textureUrl : undefined,
+    fireMode,
+    pellets: Math.max(1, Math.floor(clampShopNum(o.pellets, 1, 16, fromCat?.pellets ?? 1))),
+    adsZoomFov: clampShopNum(o.adsZoomFov, 0, 90, fromCat?.adsZoomFov ?? 0),
+    adsConeScale: clampShopNum(o.adsConeScale, 0.1, 2, fromCat?.adsConeScale ?? 1),
+    hipfireConeScale: clampShopNum(
+      o.hipfireConeScale,
+      0.5,
+      6,
+      fromCat?.hipfireConeScale ?? 1
+    ),
+    magSize: clampShopNum(
+      o.magSize,
+      0,
+      120,
+      fromCat?.magSize ?? (kind === 'melee' ? 0 : 12)
+    ),
+    reserveAmmo: clampShopNum(
+      o.reserveAmmo,
+      0,
+      400,
+      fromCat?.reserveAmmo ?? (kind === 'melee' ? 0 : 48)
+    ),
+    reloadMs: clampShopNum(
+      o.reloadMs,
+      0,
+      5000,
+      fromCat?.reloadMs ?? (kind === 'melee' ? 0 : 1600)
+    ),
+    unlockMetric:
+      typeof o.unlockMetric === 'string' && o.unlockMetric.trim()
+        ? o.unlockMetric.trim()
+        : CATALOG_WEAPONS.find((w) => w.id === catalogId)?.unlockMetric,
+    unlockAmount: clampShopNum(
+      o.unlockAmount,
+      0,
+      1_000_000,
+      CATALOG_WEAPONS.find((w) => w.id === catalogId)?.unlockAmount ?? 0
+    ),
+    enabled: o.enabled !== false,
+    modes: modes.length ? modes : ['horde', 'competitive'],
+    sortOrder: clampShopNum(o.sortOrder, 0, 999, index),
+  };
+}
+
+export function sanitizeShopPowerUp(raw: unknown): MapShopPowerUp | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Partial<MapShopPowerUp>;
+  const id = typeof o.id === 'string' && o.id.trim() ? o.id.trim() : '';
+  if (!id) return null;
+  const effectRaw = String(o.effect || id);
+  const effect: MapShopPowerUp['effect'] =
+    effectRaw === 'shield' ||
+    effectRaw === 'speed' ||
+    effectRaw === 'energy' ||
+    effectRaw === 'super_jump' ||
+    effectRaw === 'heal'
+      ? effectRaw
+      : 'heal';
+  const modesRaw = Array.isArray(o.modes) ? o.modes : ['horde', 'competitive'];
+  const modes = modesRaw.filter(
+    (m): m is 'horde' | 'competitive' | 'deathrun' =>
+      m === 'horde' || m === 'competitive' || m === 'deathrun'
+  );
+  return {
+    id,
+    label: typeof o.label === 'string' && o.label.trim() ? o.label.trim() : id,
+    description: typeof o.description === 'string' ? o.description : undefined,
+    shopPrice: clampShopNum(o.shopPrice, 0, 99999, 100),
+    effect,
+    enabled: o.enabled !== false,
+    modes: modes.length ? modes : ['horde', 'competitive'],
+  };
+}
+
+export function sanitizeShopSkin(raw: unknown, index = 0): MapShopSkin | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Partial<MapShopSkin>;
+  const id = typeof o.id === 'string' && o.id.trim() ? o.id.trim() : `skin_${index}`;
+  const textureUrl = typeof o.textureUrl === 'string' ? o.textureUrl.trim() : '';
+  if (!textureUrl) return null;
+  const modesRaw = Array.isArray(o.modes) ? o.modes : ['horde', 'competitive'];
+  const modes = modesRaw.filter(
+    (m): m is 'horde' | 'competitive' => m === 'horde' || m === 'competitive'
+  );
+  return {
+    id,
+    label: typeof o.label === 'string' && o.label.trim() ? o.label.trim() : id,
+    description: typeof o.description === 'string' ? o.description : undefined,
+    shopPrice: clampShopNum(o.shopPrice, 0, 99999, 100),
+    textureUrl,
+    enabled: o.enabled !== false,
+    modes: modes.length ? modes : ['horde', 'competitive'],
+    sortOrder: clampShopNum(o.sortOrder, 0, 999, index),
+  };
+}
+
+/** Empty by default — authors upload textures in Buy Menu → Skins. */
+export function defaultShopSkins(): MapShopSkin[] {
+  return [];
+}
+
+export function ensureShopSettings(doc: MapDocument | null | undefined): MapShopSettings {
+  const raw = doc?.shopSettings;
+  const startingCredits = clampShopNum(raw?.startingCredits, 0, 999999, 500);
+  const creditsPerKill = clampShopNum(raw?.creditsPerKill, 0, 9999, 50);
+  const creditsPerWaveClear = clampShopNum(raw?.creditsPerWaveClear, 0, 9999, 100);
+  const powerUps = (
+    raw?.powerUps && Array.isArray(raw.powerUps) && raw.powerUps.length > 0
+      ? raw.powerUps.map(sanitizeShopPowerUp).filter((p): p is MapShopPowerUp => !!p)
+      : defaultShopPowerUps()
+  ).filter((p) => p.enabled !== false);
+  const skins = (
+    raw?.skins && Array.isArray(raw.skins)
+      ? raw.skins.map((s, i) => sanitizeShopSkin(s, i)).filter((s): s is MapShopSkin => !!s)
+      : defaultShopSkins()
+  ).sort((a, b) => a.sortOrder - b.sortOrder);
+
+  if (raw?.items && Array.isArray(raw.items) && raw.items.length > 0) {
+    const items = raw.items
+      .map((it, i) => sanitizeShopItem(it, i))
+      .filter((it): it is MapShopItem => !!it)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    if (items.length) {
+      return { items, powerUps, skins, startingCredits, creditsPerKill, creditsPerWaveClear };
+    }
+  }
+  // Seed from map weaponDef if present as an extra enabled item on top of defaults.
+  const items = defaultShopItems();
+  const wd = doc?.weaponDef;
+  if (wd && (wd.name || wd.model || wd.customModelUrl)) {
+    const customId = 'map_weapon';
+    if (!items.some((i) => i.id === customId)) {
+      items.unshift({
+        id: customId,
+        label: wd.name || 'Map Weapon',
+        description: 'Authored in Weapon Editor',
+        kind: wd.kind === 'hitscan' ? 'hitscan' : 'melee',
+        damage: clampShopNum(wd.damage, 1, 200, 25),
+        range: clampShopNum(wd.range, 0.5, 40, 2.4),
+        cooldownMs: clampShopNum(wd.cooldownMs, 50, 5000, 500),
+        coneRadians: clampShopNum(wd.coneRadians, 0.02, 1.2, 0.5),
+        shopPrice: clampShopNum(wd.shopPrice, 0, 99999, 0),
+        modelUrl: wd.customModelUrl || undefined,
+        catalogId: typeof wd.model === 'string' ? wd.model : undefined,
+        textureUrl: typeof wd.textureUrl === 'string' ? wd.textureUrl : undefined,
+        fireMode: wd.fireMode === 'auto' || wd.fireMode === 'bolt' ? wd.fireMode : 'semi',
+        pellets: Math.max(1, Math.floor(clampShopNum(wd.bulletsPerShot, 1, 16, 1))),
+        adsZoomFov: clampShopNum(wd.adsZoomFov, 0, 90, 0),
+        adsConeScale: clampShopNum(wd.adsConeScale, 0.1, 2, 1),
+        hipfireConeScale: clampShopNum(wd.hipfireConeScale, 0.5, 6, 1),
+        enabled: true,
+        modes: ['horde', 'competitive'],
+        sortOrder: -1,
+      });
+    }
+  }
+  return { items, powerUps, skins, startingCredits, creditsPerKill, creditsPerWaveClear };
+}
+
+/** Items enabled for a given match mode. */
+export function shopItemsForMode(
+  doc: MapDocument | null | undefined,
+  mode: 'horde' | 'competitive'
+): MapShopItem[] {
+  return ensureShopSettings(doc).items.filter(
+    (it) => it.enabled && it.modes.includes(mode)
+  );
+}
+
+export function shopPowerUpsForMode(
+  doc: MapDocument | null | undefined,
+  mode: 'horde' | 'competitive' | 'deathrun'
+): MapShopPowerUp[] {
+  return (ensureShopSettings(doc).powerUps ?? defaultShopPowerUps()).filter(
+    (p) => p.enabled && p.modes.includes(mode)
+  );
+}
+
+export function shopSkinsForMode(
+  doc: MapDocument | null | undefined,
+  mode: 'horde' | 'competitive'
+): MapShopSkin[] {
+  return (ensureShopSettings(doc).skins ?? defaultShopSkins()).filter(
+    (s) => s.enabled && s.modes.includes(mode)
+  );
+}
+
 export interface MapDocument {
   version: 1;
   name: string;
@@ -1078,6 +1497,11 @@ export interface MapDocument {
   combatSettings?: Partial<CombatSettings>;
   /** Custom weapon definition authored in the Weapon Editor. */
   weaponDef?: Partial<MapWeaponDef>;
+  /**
+   * In-match buy menu (Horde / Competitive). When omitted, catalog defaults are used.
+   * Adjust in Map Editor → Shop tab.
+   */
+  shopSettings?: Partial<MapShopSettings>;
   meta?: { createdAt?: string; updatedAt?: string };
 }
 

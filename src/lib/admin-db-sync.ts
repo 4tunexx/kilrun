@@ -16,7 +16,7 @@ import { writeAuditLog } from '@/lib/audit';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-22-party-seasons';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-26-gamemap-prefab';
 
 async function requireAdmin() {
   const session = await auth();
@@ -285,6 +285,29 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`Party verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — Party model not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify: GameMap / GamePrefab (Active maps + prefab library)
+  try {
+    const mapCount = await prisma.gameMap.count();
+    const prefabCount = await prisma.gamePrefab.count();
+    steps.push(`GameMap collection verified (count=${mapCount})`);
+    steps.push(`GamePrefab collection verified (count=${prefabCount})`);
+    // Touch thumbnailUrl fields via a no-op probe create/delete when empty is fine;
+    // just ensuring findFirst with thumbnailUrl select works.
+    await prisma.gameMap.findFirst({
+      select: { id: true, thumbnailUrl: true, isActive: true, mode: true },
+    });
+    await prisma.gamePrefab.findFirst({
+      select: { id: true, thumbnailUrl: true, mode: true },
+    });
+    steps.push('GameMap/GamePrefab thumbnailUrl fields readable');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`GameMap/GamePrefab verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — GameMap/GamePrefab not available. Run db push. (${msg})`
     );
   }
 

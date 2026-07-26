@@ -218,6 +218,13 @@ export class DeathrunRoom extends Room<RoomState> {
       );
     });
 
+    this.onMessage('reload', (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || !player.isAlive) return;
+      const { tryStartReload } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+      tryStartReload(player, Date.now());
+    });
+
     this.onMessage(
       'loadCustomMap',
       (
@@ -516,7 +523,7 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private resetMatchTelemetry(player: PlayerState) {
-    player.kills = 0;
+    player.kills = 0; player.deaths = 0;
     player.score = 0;
     player.distance = 0;
     player.xpEarned = 0;
@@ -663,6 +670,11 @@ export class DeathrunRoom extends Room<RoomState> {
         this.combatPhysOpts
       );
 
+      {
+        const { finishReloadIfDue } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+        finishReloadIfDue(player, now);
+      }
+
       if (player.role === 'runner' && player.isAlive && !player.hasFinished) {
         player.distance = Math.max(
           player.distance,
@@ -718,6 +730,7 @@ export class DeathrunRoom extends Room<RoomState> {
             player.score = Math.max(0, player.score - 1);
           }
         } else {
+          if (player.isAlive) player.deaths = (player.deaths || 0) + 1;
           player.health = 0;
           player.isAlive = false;
         }
@@ -728,8 +741,13 @@ export class DeathrunRoom extends Room<RoomState> {
           const lastShot = this.lastShotAt.get(sessionId) ?? 0;
           const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
           if (now - lastShot >= cooldown) {
-            this.lastShotAt.set(sessionId, now);
-            this.resolveTrapperShot(player);
+            const {
+              tryConsumeShotAmmo,
+            } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+            if (tryConsumeShotAmmo(player, now)) {
+              this.lastShotAt.set(sessionId, now);
+              this.resolveTrapperShot(player);
+            }
           }
         }
       }
@@ -842,8 +860,21 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private damagePlayer(player: PlayerState, amount: number) {
+    const wasAlive = player.isAlive && player.health > 0;
     player.health = Math.max(0, player.health - amount);
     if (player.health <= 0) {
+      if (wasAlive) {
+        player.deaths = (player.deaths || 0) + 1;
+        // Trapper gets a kill credit when eliminating a runner.
+        if (player.role === 'runner') {
+          for (const p of this.state.players.values()) {
+            if (p.role === 'trapper' && p.isAlive) {
+              p.kills = (p.kills || 0) + 1;
+              break;
+            }
+          }
+        }
+      }
       player.isAlive = false;
     }
   }
@@ -883,6 +914,7 @@ export class DeathrunRoom extends Room<RoomState> {
       score: p.score,
       distance: p.distance,
       kills: p.kills,
+      deaths: p.deaths,
     }));
 
     const awards = await reportMatchResults({

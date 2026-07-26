@@ -28,14 +28,14 @@ import { LobbyOverlay } from './modes/deathrun/lobby-overlay';
 import { CountdownOverlay } from './modes/deathrun/countdown-overlay';
 import { ResultsScreen } from './modes/deathrun/results-screen';
 import { MobilePlayGate } from './ui/mobile-play-gate';
-import { WeaponShop, type WeaponPreset } from './ui/weapon-shop';
+import { WeaponShop, type WeaponPreset, mapShopItemsToPresets, mapPowerUpsToPresets, mapShopSkinsToPresets } from './ui/weapon-shop';
 import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
 import { Crosshair } from './ui/crosshair';
 import {
   loadTpsViewSettings,
   mouseSensRadians,
-  resolveTpsView,
+  resolvePlatformTpsView,
   type TpsViewSettings,
 } from './tps/tps-view-settings';
 import dynamic from 'next/dynamic';
@@ -66,10 +66,11 @@ import {
 } from './editor/prefab-storage';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
-import { ensureEnvironment } from './editor/map-document';
+import { ensureEnvironment, shopItemsForMode, shopPowerUpsForMode, shopSkinsForMode, ensureShopSettings, ensureCombatSettings } from './editor/map-document';
 import { applyAuthoredEnvironment } from './editor/map-scene-visuals';
 import type { KilrunMode } from '@/lib/game-modes';
 import { getActiveCloudMapDocument } from '@/lib/game-map-actions';
+import { getMyMetricCounts } from '@/lib/actions';
 import { HordeLobbyOverlay } from './modes/horde/lobby-overlay';
 import { HordeResultsScreen } from './modes/horde/results-screen';
 import { CompetitiveLobbyOverlay } from './modes/competitive/lobby-overlay';
@@ -155,7 +156,10 @@ export default function KilrunEngine({
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
   const cloudDocRef = useRef<MapDocument | null>(null);
+  /** Deathrun MAIN map 3rd View — overrides camera for every game mode. */
+  const deathrunTpsRef = useRef<unknown | null>(null);
   const [cloudReady, setCloudReady] = useState(false);
+  const [shopMetricCounts, setShopMetricCounts] = useState<Record<string, number>>({});
   const equippedSkinsRef = useRef<SkinAttachment[] | null>(equippedSkins ?? null);
   equippedSkinsRef.current = equippedSkins ?? null;
   const charactersRef = useRef<Map<string, ThreeCharacter>>(new Map());
@@ -167,25 +171,49 @@ export default function KilrunEngine({
   const matchDurationRef = useRef(180_000);
 
   // Prefer cloud Active map for this mode (works for all clients), fall back to localStorage.
+  // Deathrun MAIN 3rd View always wins camera/crosshair for Horde / Comp / Deathrun.
   useEffect(() => {
     let cancelled = false;
     setCloudReady(false);
-    void getActiveCloudMapDocument(mode)
-      .then((cloud) => {
+    void Promise.all([
+      getActiveCloudMapDocument(mode),
+      mode === 'deathrun'
+        ? Promise.resolve(null)
+        : getActiveCloudMapDocument('deathrun').catch(() => null),
+    ])
+      .then(([cloud, deathrunCloud]) => {
         if (cancelled) return;
+        const localDeathrunId = getActivePlayMapIdForMode('deathrun');
+        const localDeathrun = localDeathrunId ? loadMapPlayable(localDeathrunId) : null;
+        deathrunTpsRef.current =
+          deathrunCloud?.document?.tpsView ??
+          (mode === 'deathrun' ? cloud?.document?.tpsView : null) ??
+          localDeathrun?.tpsView ??
+          null;
+
         if (cloud?.document) {
           cloudDocRef.current = cloud.document;
-          if (cloud.document.tpsView) {
-            const merged = resolveTpsView(cloud.document.tpsView as TpsViewSettings);
-            tpsRef.current = merged;
-            setTpsHud(merged);
-          }
           // Allow lobby effect to re-push if we already short-circuited on local-only miss.
           customLoadedRef.current = false;
         }
+
+        const applied = resolvePlatformTpsView({
+          modeMapOverride: cloud?.document?.tpsView ?? null,
+          deathrunMapOverride: deathrunTpsRef.current,
+        });
+        tpsRef.current = applied;
+        setTpsHud(applied);
       })
       .catch(() => {
         /* local fallback only */
+        const localDeathrunId = getActivePlayMapIdForMode('deathrun');
+        const localDeathrun = localDeathrunId ? loadMapPlayable(localDeathrunId) : null;
+        deathrunTpsRef.current = localDeathrun?.tpsView ?? null;
+        const applied = resolvePlatformTpsView({
+          deathrunMapOverride: deathrunTpsRef.current,
+        });
+        tpsRef.current = applied;
+        setTpsHud(applied);
       })
       .finally(() => {
         if (!cancelled) setCloudReady(true);
@@ -194,6 +222,33 @@ export default function KilrunEngine({
       cancelled = true;
     };
   }, [mode]);
+
+  // Load progression metrics for weapon unlock gates in the buy shop.
+  useEffect(() => {
+    if (mode !== 'horde' && mode !== 'competitive') return;
+    let cancelled = false;
+    const items = shopItemsForMode(
+      customDocRef.current ?? cloudDocRef.current,
+      mode === 'competitive' ? 'competitive' : 'horde'
+    );
+    const metrics = items
+      .map((it) => it.unlockMetric)
+      .filter((m): m is string => typeof m === 'string' && m.length > 0);
+    if (metrics.length === 0) {
+      setShopMetricCounts({});
+      return;
+    }
+    void getMyMetricCounts(metrics)
+      .then((counts) => {
+        if (!cancelled) setShopMetricCounts(counts);
+      })
+      .catch(() => {
+        if (!cancelled) setShopMetricCounts({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, cloudReady, room.buyPhaseMs]);
 
   // Push Active editor map for this mode to the server when lobby is ready
   useEffect(() => {
@@ -260,6 +315,11 @@ export default function KilrunEngine({
       worldBounds,
       modeSettings: doc.modeSettings as Record<string, unknown> | undefined,
       combatSettings: doc.combatSettings as Record<string, unknown> | undefined,
+      ...(mode === 'horde' || mode === 'competitive'
+        ? {
+            shopSettings: ensureShopSettings(doc) as unknown as Record<string, unknown>,
+          }
+        : {}),
     });
   }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode]);
 
@@ -274,7 +334,11 @@ export default function KilrunEngine({
     const onTps = (ev: Event) => {
       const detail = (ev as CustomEvent<TpsViewSettings>).detail;
       if (!detail) return;
-      const clean = resolveTpsView(detail);
+      // Live editor saves still apply, but Deathrun MAIN map override stays on top.
+      const clean = resolvePlatformTpsView({
+        modeMapOverride: detail,
+        deathrunMapOverride: deathrunTpsRef.current,
+      });
       tpsRef.current = clean;
       setTpsHud(clean);
     };
@@ -339,10 +403,26 @@ export default function KilrunEngine({
       // Match editor cavern default lights a bit warmer when map uses authored env.
       world.ambient.color.set(0xffffff);
       void overlay.load(playDoc);
-      if (playDoc.tpsView) {
-        const merged = resolveTpsView(playDoc.tpsView as TpsViewSettings);
-        tpsRef.current = merged;
-        setTpsHud(merged);
+      {
+        const localDeathrunId = getActivePlayMapIdForMode('deathrun');
+        const localDeathrun = localDeathrunId ? loadMapPlayable(localDeathrunId) : null;
+        deathrunTpsRef.current =
+          deathrunTpsRef.current ??
+          (mode === 'deathrun' ? playDoc.tpsView : null) ??
+          localDeathrun?.tpsView ??
+          null;
+        // Prefer freshest Deathrun / mode map values when available
+        if (mode === 'deathrun' && playDoc.tpsView) {
+          deathrunTpsRef.current = playDoc.tpsView;
+        } else if (!deathrunTpsRef.current && localDeathrun?.tpsView) {
+          deathrunTpsRef.current = localDeathrun.tpsView;
+        }
+        const applied = resolvePlatformTpsView({
+          modeMapOverride: playDoc.tpsView ?? null,
+          deathrunMapOverride: deathrunTpsRef.current,
+        });
+        tpsRef.current = applied;
+        setTpsHud(applied);
       }
     }
 
@@ -353,6 +433,9 @@ export default function KilrunEngine({
     let wasShootEdge = false;
     let meleeUntil = 0;
     let interactPulse = false;
+    /** Visual-only recoil (does not corrupt aimPitch sent to server). */
+    let recoilPitch = 0;
+    let shakeAmp = 0;
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
     // Smoothed local player position for the camera — follows the interpolated
@@ -499,6 +582,45 @@ export default function KilrunEngine({
           view.setBodyColor(player.bodyColorIndex);
         }
         const isLocal = sessionId === localSessionId;
+        // Remote (and late local) weapon mesh/skin sync from authoritative state.
+        {
+          const modelUrl = player.weaponModelUrl || '';
+          const skinId = player.weaponSkinId || '';
+          const syncKey = `${modelUrl}|${skinId}|${player.weaponId || ''}`;
+          if (syncKey !== view.syncedWeaponKey && (modelUrl || skinId)) {
+            view.syncedWeaponKey = syncKey;
+            const shopMode = mode === 'competitive' ? 'competitive' : 'horde';
+            const skinTex = skinId
+              ? shopSkinsForMode(customDocRef.current, shopMode).find((s) => s.id === skinId)
+                  ?.textureUrl
+              : undefined;
+            if (modelUrl && !modelUrl.startsWith('data:')) {
+              const vpTex =
+                !skinTex && isLocal
+                  ? findWeaponAttachment(equippedSkinsRef.current)?.textureUrl
+                  : !skinTex
+                    ? findWeaponAttachment(
+                        parseEquippedSkinsJson(player.equippedSkinsJson)
+                      )?.textureUrl
+                    : undefined;
+              const mapWep = customDocRef.current?.weaponDef;
+              void view.equipWeaponMesh(modelUrl, {
+                kind: player.weaponKind,
+                damage: player.weaponDamage,
+                range: player.weaponRange,
+                cooldownMs: player.weaponCooldownMs,
+                coneRadians: player.weaponConeRadians,
+                // Match buy-menu skin overrides VP cosmetic texture.
+                textureUrl: skinTex || vpTex,
+                fireClip: mapWep?.fireClip,
+                reloadClip: mapWep?.reloadClip,
+                idleClip: mapWep?.idleClip,
+              });
+            } else if (skinTex) {
+              void view.applyWeaponSkinTexture(skinTex);
+            }
+          }
+        }
         view.update(
           player,
           dt,
@@ -553,41 +675,117 @@ export default function KilrunEngine({
       } else {
         overlay.update(dt, null, false, []);
       }
-      // GTA: free orbit always; RMB aim pulls camera tighter over shoulder
+      // GTA: free orbit always; RMB aim pulls camera tighter + optional weapon FOV zoom
       {
         const cam = tpsRef.current.camera;
+        const localWep = localSessionId ? playersRef.current.get(localSessionId) : undefined;
+        const zoomFov = localWep?.weaponAdsZoomFov ?? 0;
+        const combat = ensureCombatSettings(
+          customDocRef.current ?? ({ combatSettings: {} } as MapDocument)
+        );
+        // Decay visual recoil / shake
+        const recover = (combat.recoilRecoverySpeed * Math.PI) / 180;
+        if (recoilPitch > 0) {
+          recoilPitch = Math.max(0, recoilPitch - recover * dt);
+        }
+        shakeAmp *= Math.max(0, 1 - dt * 8);
+        const shakeX = (Math.random() - 0.5) * 2 * shakeAmp;
+        const shakeY = (Math.random() - 0.5) * 2 * shakeAmp;
         const aimCam = aimHeld
           ? {
               ...cam,
-              boomDistance: Math.max(2.2, cam.boomDistance * 0.72),
+              boomDistance: Math.max(
+                zoomFov > 0 ? 1.6 : 2.2,
+                cam.boomDistance * (zoomFov > 0 ? 0.45 : 0.72)
+              ),
               shoulder:
                 cam.shoulder === 0
                   ? 0.42
                   : cam.shoulder + Math.sign(cam.shoulder) * 0.35,
               followSharpness: cam.followSharpness + 8,
+              fov:
+                zoomFov > 0
+                  ? THREE.MathUtils.lerp(cam.fov, zoomFov, 0.92)
+                  : cam.fov,
             }
           : cam;
         const camFollow = hasSmoothCamTarget ? smoothCamTarget : targetPos;
-        updateFollowCamera(world.camera, camFollow, cameraYaw, cameraPitch, dt, aimCam);
+        updateFollowCamera(
+          world.camera,
+          camFollow,
+          cameraYaw + shakeX * 0.35,
+          cameraPitch + recoilPitch + shakeY * 0.5,
+          dt,
+          aimCam
+        );
       }
 
       if (!frozen) {
+        const mapWeaponDef = customDocRef.current?.weaponDef;
+        if (inputManager.consumeReloadPulse()) {
+          connectionRef.current?.sendReload();
+          const localView = localSessionId ? characters.get(localSessionId) : undefined;
+          localView?.triggerAttack('punch');
+          if (mapWeaponDef?.reloadClip) {
+            localView?.playWeaponClip(mapWeaponDef.reloadClip, false);
+          } else {
+            localView?.playWeaponReloadClip();
+          }
+        }
         const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
-        if (shootNow && !wasShootEdge && localSessionId) {
+        const localWep = localSessionId ? playersRef.current.get(localSessionId) : undefined;
+        const fireMode = (localWep?.weaponFireMode || 'semi') as string;
+        const isAuto = fireMode === 'auto';
+        const edge = shootNow && !wasShootEdge;
+        const combatFeel = ensureCombatSettings(
+          customDocRef.current ?? ({ combatSettings: {} } as MapDocument)
+        );
+        const canLocalFireVisual =
+          (localWep?.weaponMagSize ?? 0) <= 0 || (localWep?.ammoInMag ?? 1) > 0;
+        const reloading =
+          (localWep?.reloadEndsAt ?? 0) > 0 &&
+          Date.now() < (localWep?.reloadEndsAt ?? 0);
+        if (edge && localSessionId && canLocalFireVisual && !reloading) {
           const weaponAtt = findWeaponAttachment(equippedSkinsRef.current);
           const combat = resolveWeaponCombat(weaponAtt);
-          characters
-            .get(localSessionId)
-            ?.triggerAttack(combat.attackStyle ?? 'attack');
-          if (combat.kind === 'melee') {
+          const localView = characters.get(localSessionId);
+          localView?.triggerAttack(combat.attackStyle ?? 'attack');
+          const kickDeg = combatFeel.recoilKickDeg ?? 2;
+          recoilPitch += (kickDeg * Math.PI) / 180;
+          shakeAmp = Math.max(shakeAmp, combatFeel.shakeOnFire ?? 0.015);
+          localView?.pulseMuzzle(combatFeel.weaponKickZ ?? 0.06);
+          // Prefer authored map weaponDef clip names, then attachment combat.
+          if (mapWeaponDef?.fireClip) {
+            localView?.playWeaponClip(mapWeaponDef.fireClip, false);
+          } else {
+            localView?.playWeaponFireClip();
+          }
+          if (combat.kind === 'melee' || localWep?.weaponKind === 'melee') {
             meleeUntil = performance.now() + 500;
           }
         }
         wasShootEdge = shootNow;
-        shootHeld = shootHeld || shootNow;
+        // auto = hold-to-fire · semi/bolt = one shot per click edge
+        if (isAuto) {
+          shootHeld = shootHeld || shootNow;
+        } else {
+          shootHeld = shootHeld || edge;
+        }
         sendAccumulatorMs += dtMs;
         if (sendAccumulatorMs >= NETWORK_SEND_INTERVAL_MS && localState) {
           sendAccumulatorMs = 0;
+          if (
+            isAuto &&
+            shootNow &&
+            localSessionId &&
+            canLocalFireVisual &&
+            !reloading
+          ) {
+            const kickDeg = (combatFeel.recoilKickDeg ?? 2) * 0.55;
+            recoilPitch += (kickDeg * Math.PI) / 180;
+            shakeAmp = Math.max(shakeAmp, (combatFeel.shakeOnFire ?? 0.015) * 0.7);
+            characters.get(localSessionId)?.pulseMuzzle((combatFeel.weaponKickZ ?? 0.06) * 0.7);
+          }
           // Camera-relative: W into look, A = left, D = right (screen space).
           // Look flat (sin,cos) in Three XZ → sim; screen-right = (−cos, sin).
           const stick = inputManager.getMoveVector();
@@ -608,6 +806,7 @@ export default function KilrunEngine({
             sprint: inputManager.isSprintPressed(),
             jumpPressed: inputManager.isJumpPressed(),
             shootPressed: shootHeld,
+            aimHeld,
             interactPressed: inputManager.isInteractPressed(),
             meleeActive: performance.now() < meleeUntil,
           };
@@ -734,34 +933,90 @@ export default function KilrunEngine({
               countdownMs={room.countdownMs}
               mode={mode}
             />
-            {(mode === 'competitive' || mode === 'horde') && room.countdownMs > 5000 && (
-              <WeaponShop
-                buySecondsLeft={Math.max(0, Math.ceil((room.countdownMs - 4000) / 1000))}
-                currentWeaponKind={localPlayer?.weaponKind}
-                onBuy={(preset: WeaponPreset) => {
-                  connectionRef.current?.sendBuyWeapon({
+          </>
+        )}
+        {(mode === 'competitive' || mode === 'horde') &&
+          (room.buyPhaseMs ?? 0) > 0 &&
+          !paused &&
+          !editorOpen && (
+            <WeaponShop
+              buySecondsLeft={Math.max(0, Math.ceil((room.buyPhaseMs ?? 0) / 1000))}
+              currentWeaponId={localPlayer?.weaponId}
+              currentWeaponKind={localPlayer?.weaponKind}
+              currentSkinId={localPlayer?.weaponSkinId}
+              credits={localPlayer?.credits ?? 0}
+              items={mapShopItemsToPresets(
+                shopItemsForMode(
+                  customDocRef.current,
+                  mode === 'competitive' ? 'competitive' : 'horde'
+                ),
+                shopMetricCounts
+              )}
+              skins={mapShopSkinsToPresets(
+                shopSkinsForMode(
+                  customDocRef.current,
+                  mode === 'competitive' ? 'competitive' : 'horde'
+                )
+              )}
+              powerUps={mapPowerUpsToPresets(
+                shopPowerUpsForMode(
+                  customDocRef.current,
+                  mode === 'competitive' ? 'competitive' : 'horde'
+                )
+              )}
+              onBuy={(preset: WeaponPreset) => {
+                connectionRef.current?.sendBuyWeapon({
+                  itemId: preset.id,
+                  kind: preset.kind,
+                  damage: preset.damage,
+                  range: preset.range,
+                  cooldownMs: preset.cooldownMs,
+                  coneRadians: preset.coneRadians,
+                  fireMode: preset.fireMode,
+                  pellets: preset.pellets,
+                  adsZoomFov: preset.adsZoomFov,
+                  adsConeScale: preset.adsConeScale,
+                  hipfireConeScale: preset.hipfireConeScale,
+                  magSize: preset.magSize,
+                  reserveAmmo: preset.reserveAmmo,
+                  reloadMs: preset.reloadMs,
+                  modelUrl: preset.modelUrl?.startsWith('data:') ? undefined : preset.modelUrl,
+                });
+                const sid = localSessionRef.current;
+                if (preset.modelUrl && sid) {
+                  const view = charactersRef.current.get(sid);
+                  const shopMode = mode === 'competitive' ? 'competitive' : 'horde';
+                  const skinId = localPlayer?.weaponSkinId;
+                  const equippedSkin = skinId
+                    ? shopSkinsForMode(customDocRef.current, shopMode).find((s) => s.id === skinId)
+                    : undefined;
+                  void view?.equipWeaponMesh(preset.modelUrl, {
                     kind: preset.kind,
                     damage: preset.damage,
                     range: preset.range,
                     cooldownMs: preset.cooldownMs,
                     coneRadians: preset.coneRadians,
+                    // Equipped weapon skin wins over the weapon's default texture.
+                    textureUrl: equippedSkin?.textureUrl || preset.textureUrl,
                   });
-                  const sid = localSessionRef.current;
-                  if (preset.modelUrl && sid) {
-                    const view = charactersRef.current.get(sid);
-                    void view?.equipWeaponMesh(preset.modelUrl, {
-                      kind: preset.kind,
-                      damage: preset.damage,
-                      range: preset.range,
-                      cooldownMs: preset.cooldownMs,
-                      coneRadians: preset.coneRadians,
-                    });
+                  if (view) {
+                    view.syncedWeaponKey = `${preset.modelUrl}|${skinId || ''}|${preset.id}`;
                   }
-                }}
-              />
-            )}
-          </>
-        )}
+                }
+              }}
+              onBuySkin={(skin) => {
+                connectionRef.current?.sendBuyWeaponSkin(skin.id);
+                const sid = localSessionRef.current;
+                if (sid && skin.textureUrl) {
+                  const view = charactersRef.current.get(sid);
+                  void view?.applyWeaponSkinTexture(skin.textureUrl);
+                }
+              }}
+              onBuyPowerUp={(pu) => {
+                connectionRef.current?.sendBuyPowerUp(pu.id);
+              }}
+            />
+          )}
         {room.phase === 'results' && localPlayer && (
           mode === 'horde' ? (
             <HordeResultsScreen room={room} player={localPlayer} onContinue={onExit} />
@@ -784,7 +1039,19 @@ export default function KilrunEngine({
           enabled={isMobile && room.phase === 'playing' && !paused}
         />
         {room.phase === 'playing' && !paused && !editorOpen && (
-          <Crosshair visible={aiming && !paused && !editorOpen} style={tpsHud.crosshair} />
+          <>
+            <Crosshair visible={aiming && !paused && !editorOpen} style={tpsHud.crosshair} />
+            {aiming && (localPlayer?.weaponAdsZoomFov ?? 0) > 20 && (
+              <div
+                className="pointer-events-none absolute inset-0 z-[120]"
+                aria-hidden
+                style={{
+                  background:
+                    'radial-gradient(circle at center, transparent 14%, rgba(0,0,0,0.55) 22%, rgba(0,0,0,0.88) 48%)',
+                }}
+              />
+            )}
+          </>
         )}
 
         <PauseMenu

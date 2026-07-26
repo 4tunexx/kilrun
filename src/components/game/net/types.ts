@@ -36,14 +36,36 @@ export interface NetPlayerState {
    * Keep in sync with server PlayerState.bodyColorIndex.
    */
   bodyColorIndex?: number;
-  /** Current weapon kind (updated by buy phase). */
+  /** Authoritative weapon combat from equipped loadout (clamped on join). */
   weaponKind?: string;
-  weaponDamage?: number;
   weaponRange?: number;
+  weaponDamage?: number;
   weaponCooldownMs?: number;
   weaponConeRadians?: number;
+  /** auto | semi | bolt */
+  weaponFireMode?: string;
+  weaponPellets?: number;
+  weaponAdsZoomFov?: number;
+  weaponAdsConeScale?: number;
+  weaponHipfireConeScale?: number;
+  /** In-match shop credits. */
+  credits?: number;
+  /** Equipped shop weapon id. */
+  weaponId?: string;
+  /** Equipped in-match weapon skin id (texture painted on weapon mesh). */
+  weaponSkinId?: string;
+  /** Public catalog/http weapon mesh URL for remotes (never data:). */
+  weaponModelUrl?: string;
+  weaponMagSize?: number;
+  ammoInMag?: number;
+  reserveAmmo?: number;
+  weaponReloadMs?: number;
+  reloadEndsAt?: number;
+  /** Temporary shield from power-up. */
+  shieldHp?: number;
   /** Per-match telemetry / server-authored rewards. */
   kills?: number;
+  deaths?: number;
   score?: number;
   distance?: number;
   xpEarned?: number;
@@ -75,6 +97,7 @@ export interface NetPlatformState {
   conveyorSpeed?: number;
   conveyorDirX?: number;
   conveyorDirY?: number;
+  rotYaw?: number;
   entityId?: string;
   motionEnabled?: boolean;
 }
@@ -111,6 +134,8 @@ export interface NetRoomState {
   roundIndex?: number;
   scoreA?: number;
   scoreB?: number;
+  /** Remaining buy-phase ms (0 = closed). */
+  buyPhaseMs?: number;
   /** Server-authored match id for reward idempotency. */
   matchId?: string;
   /** True once Colyseus applied awards (or local display fallback). */
@@ -127,6 +152,8 @@ export interface PlayerInputMessage {
   sprint: boolean;
   jumpPressed: boolean;
   shootPressed: boolean;
+  /** True while RMB / aim stick held — server uses for ADS cone scale. */
+  aimHeld?: boolean;
   interactPressed: boolean;
   /** Foundry melee speed_mod 0.5 while swing is active. */
   meleeActive?: boolean;

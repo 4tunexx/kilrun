@@ -49,6 +49,8 @@ export interface PlayerInput {
   sprint: boolean;
   jumpPressed: boolean;
   shootPressed: boolean;
+  /** ADS / RMB — used for sniper cone tighten. */
+  aimHeld?: boolean;
   interactPressed: boolean;
   /** True while melee swing is active (Foundry speed_mod 0.5). */
   meleeActive?: boolean;
@@ -64,6 +66,7 @@ const EMPTY_INPUT: PlayerInput = {
   sprint: false,
   jumpPressed: false,
   shootPressed: false,
+  aimHeld: false,
   interactPressed: false,
   meleeActive: false,
 };

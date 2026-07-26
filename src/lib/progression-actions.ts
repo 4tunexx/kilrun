@@ -399,6 +399,15 @@ export async function progressMissions(
         'mission',
         `mission:${m.templateKey}:${m.periodKey || 'main'}`
       );
+      try {
+        const { grantStoreItemsForUnlock } = await import('@/lib/store-unlock-grants');
+        const n = await grantStoreItemsForUnlock(userId, 'mission', m.templateKey);
+        if (n === 0) {
+          await grantStoreItemsForUnlock(userId, 'mission', m.title);
+        }
+      } catch {
+        /* unlock grant best-effort */
+      }
       await tryUnlockAchievement(userId, 'missions_completed', 1);
       await tryUnlockBadge(userId, 'missions_completed', 1);
     } else if (next !== m.currentCount) {
@@ -448,6 +457,48 @@ async function metricCount(userId: string, metric: string): Promise<number> {
         return sum + (typeof s?.kills === 'number' ? s.kills : 0);
       }, 0);
     }
+    case 'deathrun_kills': {
+      const rows = await prisma.matchResult.findMany({
+        where: { userId, mode: 'deathrun' },
+        select: { stats: true },
+      });
+      return rows.reduce((sum, r) => {
+        const s = r.stats as { kills?: number } | null;
+        return sum + (typeof s?.kills === 'number' ? s.kills : 0);
+      }, 0);
+    }
+    case 'competitive_kills': {
+      const rows = await prisma.matchResult.findMany({
+        where: { userId, mode: { in: ['competitive', 'competitive_ranked'] } },
+        select: { stats: true },
+      });
+      return rows.reduce((sum, r) => {
+        const s = r.stats as { kills?: number } | null;
+        return sum + (typeof s?.kills === 'number' ? s.kills : 0);
+      }, 0);
+    }
+    case 'deaths': {
+      const rows = await prisma.matchResult.findMany({
+        where: { userId },
+        select: { stats: true },
+      });
+      return rows.reduce((sum, r) => {
+        const s = r.stats as { deaths?: number } | null;
+        return sum + (typeof s?.deaths === 'number' ? s.deaths : 0);
+      }, 0);
+    }
+    case 'competitive_ranked_runs':
+      return prisma.matchResult.count({
+        where: { userId, mode: 'competitive_ranked' },
+      });
+    case 'competitive_ranked_wins':
+      return prisma.matchResult.count({
+        where: { userId, mode: 'competitive_ranked', outcome: 'win' },
+      });
+    case 'competitive_casual_wins':
+      return prisma.matchResult.count({
+        where: { userId, mode: 'competitive', outcome: 'win' },
+      });
     case 'competitive_runs':
       return prisma.matchResult.count({
         where: { userId, mode: { in: ['competitive', 'competitive_ranked'] } },
@@ -639,6 +690,11 @@ async function metricCount(userId: string, metric: string): Promise<number> {
   }
 }
 
+/** Public read of a progression metric (weapon unlocks, profile, etc.). */
+export async function metricCountPublic(userId: string, metric: string): Promise<number> {
+  return metricCount(userId, metric);
+}
+
 /**
  * Advances the player's consecutive-day login streak. Call once per hub
  * bootstrap (idempotent per calendar day): same-day repeat visits are a
@@ -706,6 +762,15 @@ export async function tryUnlockAchievement(
       `${def.title} — ${def.description}`,
       'achievement'
     );
+    try {
+      const { grantStoreItemsForUnlock } = await import('@/lib/store-unlock-grants');
+      const n = await grantStoreItemsForUnlock(userId, 'achievement', def.id);
+      if (n === 0) {
+        await grantStoreItemsForUnlock(userId, 'achievement', def.title);
+      }
+    } catch {
+      /* unlock grant best-effort */
+    }
   }
   // Meta-progress: re-check "N achievements unlocked" style unlocks. The
   // metric guard means this can only ever create a *different* definition,
@@ -739,6 +804,15 @@ export async function tryUnlockBadge(userId: string, metric: string, _delta = 1)
       `${def.title} — ${def.description}`,
       'badge'
     );
+    try {
+      const { grantStoreItemsForUnlock } = await import('@/lib/store-unlock-grants');
+      const n = await grantStoreItemsForUnlock(userId, 'badge', def.id);
+      if (n === 0) {
+        await grantStoreItemsForUnlock(userId, 'badge', def.title);
+      }
+    } catch {
+      /* unlock grant best-effort */
+    }
   }
   // Meta-progress: re-check "N badges earned" style unlocks (guarded so it
   // can only ever create a *different* badge, never recurse forever).
@@ -757,6 +831,8 @@ export async function processMatchProgression(input: {
   distance?: number;
   wavesCleared?: number;
   kills?: number;
+  deaths?: number;
+  queue?: 'casual' | 'ranked';
 }) {
   await assertCanMutateUser(input.userId);
   const mode = input.mode ?? 'deathrun';
@@ -773,6 +849,9 @@ export async function processMatchProgression(input: {
     }
     if (input.role === 'runner' && input.outcome === 'survived') {
       await progressMissions(input.userId, 'runner_survives', 1);
+    }
+    if (input.kills && input.kills > 0) {
+      await progressMissions(input.userId, 'deathrun_kills', input.kills);
     }
   } else if (mode === 'horde') {
     await progressMissions(input.userId, 'horde_runs', 1);
@@ -791,9 +870,24 @@ export async function processMatchProgression(input: {
     await processWebsiteAction(input.userId, 'daily_competitive');
     if (input.outcome === 'win') {
       await progressMissions(input.userId, 'competitive_wins', 1);
+      if (input.queue === 'ranked') {
+        await progressMissions(input.userId, 'competitive_ranked_wins', 1);
+      } else {
+        await progressMissions(input.userId, 'competitive_casual_wins', 1);
+      }
+    }
+    if (input.kills && input.kills > 0) {
+      await progressMissions(input.userId, 'competitive_kills', input.kills);
+    }
+    if (input.queue === 'ranked') {
+      await progressMissions(input.userId, 'competitive_ranked_runs', 1);
     }
     await tryUnlockAchievement(input.userId, 'kp');
     await tryUnlockBadge(input.userId, 'kp');
+  }
+
+  if (input.deaths && input.deaths > 0) {
+    await progressMissions(input.userId, 'deaths', input.deaths);
   }
 
   if (input.outcome === 'loss') {
@@ -851,8 +945,13 @@ export async function processMatchProgression(input: {
   await tryUnlockAchievement(input.userId, 'horde_wins');
   await tryUnlockAchievement(input.userId, 'horde_waves');
   await tryUnlockAchievement(input.userId, 'horde_kills');
+  await tryUnlockAchievement(input.userId, 'deathrun_kills');
+  await tryUnlockAchievement(input.userId, 'competitive_kills');
+  await tryUnlockAchievement(input.userId, 'deaths');
   await tryUnlockAchievement(input.userId, 'competitive_runs');
   await tryUnlockAchievement(input.userId, 'competitive_wins');
+  await tryUnlockAchievement(input.userId, 'competitive_ranked_wins');
+  await tryUnlockAchievement(input.userId, 'competitive_casual_wins');
   await tryUnlockBadge(input.userId, 'runs');
   await tryUnlockBadge(input.userId, 'wins');
   await tryUnlockBadge(input.userId, 'level');
@@ -861,8 +960,11 @@ export async function processMatchProgression(input: {
   await tryUnlockBadge(input.userId, 'horde_runs');
   await tryUnlockBadge(input.userId, 'horde_wins');
   await tryUnlockBadge(input.userId, 'horde_waves');
+  await tryUnlockBadge(input.userId, 'horde_kills');
   await tryUnlockBadge(input.userId, 'competitive_runs');
   await tryUnlockBadge(input.userId, 'competitive_wins');
+  await tryUnlockBadge(input.userId, 'competitive_kills');
+  await tryUnlockBadge(input.userId, 'competitive_ranked_wins');
   await tryUnlockBadge(input.userId, 'kp');
 }
 
