@@ -18,6 +18,12 @@ export interface PlatformBlueprint {
   conveyorSpeed?: number;
   conveyorDirX?: number;
   conveyorDirY?: number;
+  motionPeriodMs?: number;
+  motionPhaseMs?: number;
+  motionAmpX?: number;
+  motionAmpY?: number;
+  motionAmpZ?: number;
+  entityId?: string;
 }
 
 export interface ObstacleBlueprint {
@@ -70,6 +76,21 @@ export function createFromBlueprints(blueprints: PlatformBlueprint[]): PlatformS
     platform.conveyorSpeed = bp.conveyorSpeed ?? 0;
     platform.conveyorDirX = bp.conveyorDirX ?? 1;
     platform.conveyorDirY = bp.conveyorDirY ?? 0;
+    const ampX = bp.motionAmpX ?? 0;
+    const ampY = bp.motionAmpY ?? 0;
+    const ampZ = bp.motionAmpZ ?? 0;
+    const moving =
+      Math.abs(ampX) > 1e-4 || Math.abs(ampY) > 1e-4 || Math.abs(ampZ) > 1e-4;
+    platform.motionEnabled = moving;
+    platform.motionPeriodMs = bp.motionPeriodMs ?? 4000;
+    platform.motionPhaseMs = bp.motionPhaseMs ?? 0;
+    platform.motionHomeX = bp.x;
+    platform.motionHomeY = bp.y;
+    platform.motionHomeZ = bp.z;
+    platform.motionAmpX = ampX;
+    platform.motionAmpY = ampY;
+    platform.motionAmpZ = ampZ;
+    platform.entityId = bp.entityId ?? '';
     return platform;
   });
 }
@@ -111,18 +132,24 @@ export function findSupportPlatform(
   radius: number,
   maxSnapDown = 0.35
 ): PlatformHit | null {
-  let best: PlatformHit | null = null;
+  // Prefer highest pad at/under feet; only climb onto a higher overlapping
+  // step when nothing underfoot remains (avoids ramp "highest wins" hops).
+  let bestBelow: PlatformHit | null = null;
+  let bestClimb: PlatformHit | null = null;
   for (const platform of platforms) {
     const halfW = platform.width / 2;
     const halfD = platform.depth / 2;
     if (x < platform.x - halfW - radius || x > platform.x + halfW + radius) continue;
     if (y < platform.y - halfD - radius || y > platform.y + halfD + radius) continue;
     const topZ = platform.z;
-    if (z >= topZ - maxSnapDown && z <= topZ + 0.55) {
-      if (!best || topZ > best.topZ) best = { platform, topZ };
+    if (z < topZ - maxSnapDown || z > topZ + 0.55) continue;
+    if (topZ <= z + 0.05) {
+      if (!bestBelow || topZ > bestBelow.topZ) bestBelow = { platform, topZ };
+    } else if (!bestClimb || topZ < bestClimb.topZ) {
+      bestClimb = { platform, topZ };
     }
   }
-  return best;
+  return bestBelow ?? bestClimb;
 }
 
 /**

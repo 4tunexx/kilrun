@@ -116,12 +116,9 @@ export class ThreeCharacter {
         ) ?? null;
       this.hasPremiumFullBody = Boolean(loadableFullbody);
 
-      // Avatar base: always start with the pack default. applySkinAttachments
-      // below handles fullbody rebinding (hide base body once the premium mesh
-      // is attached and verified loaded). Using the same pipeline as the
-      // editor previews guarantees visibility parity instead of trying to
-      // inline fullbody as a baseOverride here, which previously left edge
-      // cases where malformed skins could hide the base body forever.
+      // Avatar base: always the pack default. Fullbody costumes layer OVER it
+      // via applySkinAttachments (never replace / hide the default body).
+      // Body-slot meshes may hide the default after a successful rebind.
       const { scene, animations, clipNames, isDefaultMannequin } =
         await loadPlayerAvatar(entity, null);
       if (this.disposed) return;
@@ -132,10 +129,8 @@ export class ThreeCharacter {
       const fitted = fitAvatarLikeEditor(scene, entity, isDefaultMannequin);
       pruneExtraMeshes(fitted);
 
-      // Hard visibility guarantee: no matter what the FBX/loader flags say,
-      // every skinned mesh on the base avatar starts visible.
-      // applySkinAttachments (called below) will selectively hide them again
-      // ONLY if a loadable fullbody replacement actually finished attaching.
+      // Ensure base skinned meshes start visible; applySkinAttachments may
+      // hide them only for a successful body-slot mesh swap (not fullbody).
       fitted.traverse((o) => {
         const mesh = o as THREE.SkinnedMesh;
         if (mesh.isSkinnedMesh) mesh.visible = true;
@@ -151,9 +146,7 @@ export class ThreeCharacter {
       this.root.add(fitted);
       this.avatarScene = scene;
 
-      // Full body skin already handled by applySkinAttachments (it has the
-      // rebind + visibility rollback). Body/team-tinted base skins also go
-      // through this path so their attachments layer on top.
+      // Layer equipped skins (fullbody overlays + clothing + body swaps).
       if (allSkins.length > 0) {
         await applySkinAttachments(scene, allSkins);
         if (this.disposed) return;
@@ -258,6 +251,43 @@ export class ThreeCharacter {
     applyTeamTint(this.avatarScene, this.bodyColorIndex, {
       preferEmissive: this.hasPremiumFullBody,
     });
+  }
+
+  /** Hot-swap hand weapon mesh after Horde/Competitive shop buy. */
+  public async equipWeaponMesh(
+    modelUrl: string,
+    combat?: {
+      kind?: string;
+      damage?: number;
+      range?: number;
+      cooldownMs?: number;
+      coneRadians?: number;
+    }
+  ) {
+    if (this.disposed || !this.avatarScene) return;
+    const weaponAtt: SkinAttachment = {
+      id: `shop-weapon-${Date.now()}`,
+      slot: 'weapon',
+      customModelUrl: modelUrl,
+      attachMode: 'bone',
+      bone: 'hand_r',
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      weapon: combat
+        ? {
+            kind: (combat.kind as 'melee' | 'hitscan' | 'cosmetic') || 'hitscan',
+            damage: combat.damage ?? 25,
+            range: combat.range ?? 14,
+            cooldownMs: combat.cooldownMs ?? 350,
+            coneRadians: combat.coneRadians ?? 0.18,
+          }
+        : undefined,
+    };
+    const rest = (this.avatarOpts.equippedSkins ?? []).filter((s) => s.slot !== 'weapon');
+    const next = [...rest, weaponAtt];
+    this.avatarOpts.equippedSkins = next;
+    await applySkinAttachments(this.avatarScene, next);
   }
 
   public update(

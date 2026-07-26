@@ -106,15 +106,14 @@ function main() {
     const matchingPng = pngSet.has(`${base}.png`) ? `${base}.png` : '';
 
     const modelRel = `${classified.folder}/${fbx}`;
-    let textureRel = matchingPng ? `${classified.folder}/${matchingPng}` : '';
-    let thumbRel = textureRel;
-
-    if (!thumbRel && classified.category === 'body') {
-      thumbRel = bodyFallbackThumb(base);
-    }
-    if (!textureRel) {
-      textureRel = `${classified.folder}/${SHARED_ATLAS_DEST}`;
-    }
+    // Matching PNG is a 128px shop/admin icon — never the mesh UV atlas.
+    // Characters_7 FBXs all sample Textures.png in their folder.
+    const thumbRel = matchingPng
+      ? `${classified.folder}/${matchingPng}`
+      : classified.category === 'body'
+        ? bodyFallbackThumb(base)
+        : `${classified.folder}/${SHARED_ATLAS_DEST}`;
+    const textureRel = `${classified.folder}/${SHARED_ATLAS_DEST}`;
 
     copyFile(path.join(SOURCE, fbx), path.join(DEST, modelRel));
     copied += 1;
@@ -132,8 +131,8 @@ function main() {
       currency: 'vp',
       modelPath: `/game/skins/${modelRel}`,
       texturePath: `/game/skins/${textureRel}`,
-      previewPath: thumbRel ? `/game/skins/${thumbRel}` : `/game/skins/${SHARED_ATLAS_DEST}`,
-      thumbnailPath: thumbRel ? `/game/skins/${thumbRel}` : `/game/skins/${SHARED_ATLAS_DEST}`,
+      previewPath: `/game/skins/${thumbRel}`,
+      thumbnailPath: `/game/skins/${thumbRel}`,
       enabled: true,
       hidden: false,
       featured: classified.category === 'fullbody',

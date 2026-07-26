@@ -627,8 +627,15 @@ async function metricCount(userId: string, metric: string): Promise<number> {
       const u = await prisma.user.findUnique({ where: { id: userId } });
       return isSameLocalDay(u?.lastLeaderboardAt) ? 1 : 0;
     }
-    default:
-      return 0;
+    default: {
+      // Custom requirement types created in Admin → Requirement types.
+      try {
+        const { getUserCustomMetric } = await import('@/lib/requirement-actions');
+        return await getUserCustomMetric(userId, metric);
+      } catch {
+        return 0;
+      }
+    }
   }
 }
 
@@ -1230,6 +1237,11 @@ export async function getSiteSettings() {
             (settings as { rankConfigJson?: string }).rankConfigJson ??
             '{}'
         ),
+        inventoryConfigJson: String(
+          doc.inventoryConfigJson ??
+            (settings as { inventoryConfigJson?: string }).inventoryConfigJson ??
+            '{}'
+        ),
       };
     }
   } catch {
@@ -1259,6 +1271,9 @@ export async function getSiteSettings() {
     rankConfigJson: String(
       (settings as { rankConfigJson?: string }).rankConfigJson ?? '{}'
     ),
+    inventoryConfigJson: String(
+      (settings as { inventoryConfigJson?: string }).inventoryConfigJson ?? '{}'
+    ),
   };
 }
 
@@ -1281,6 +1296,7 @@ export async function updateSiteSettings(data: {
   hubChromeJson?: string;
   premiumConfigJson?: string;
   rankConfigJson?: string;
+  inventoryConfigJson?: string;
 }) {
   const staff = await requireStaff();
   await getSiteSettings();
@@ -1303,6 +1319,9 @@ export async function updateSiteSettings(data: {
     '@/lib/premium-config'
   );
   const { serializeRankConfig, parseRankConfig } = await import('@/lib/rank-config');
+  const { serializeInventoryConfig, parseInventoryConfig } = await import(
+    '@/lib/inventory-config'
+  );
   const payload: Record<string, string | boolean | Date | null> = {};
 
   if (typeof data.logoUrl === 'string') {
@@ -1379,6 +1398,11 @@ export async function updateSiteSettings(data: {
   }
   if (typeof data.rankConfigJson === 'string') {
     payload.rankConfigJson = serializeRankConfig(parseRankConfig(data.rankConfigJson));
+  }
+  if (typeof data.inventoryConfigJson === 'string') {
+    payload.inventoryConfigJson = serializeInventoryConfig(
+      parseInventoryConfig(data.inventoryConfigJson)
+    );
   }
 
   let saved;

@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { UnlockChannelSelect } from '@/components/views/admin/unlock-channel-select';
 import { BannerFill } from '@/components/banner-fill';
 import { StoreItemPreview } from '@/components/store-item-preview';
 import { normalizeBannerConfig } from '@/lib/banner';
@@ -53,6 +54,7 @@ const UNLOCK_LABEL: Record<string, string> = {
   mission: 'Mission reward',
   achievement: 'Achievement reward',
   badge: 'Badge reward',
+  purchase: 'Purchase',
 };
 
 const QUICK_CATEGORIES = [
@@ -178,18 +180,7 @@ function QuickEdit({
         <Label className="text-xs flex items-center gap-1">
           <Trophy className="h-3 w-3 text-amber-400" /> Obtained via
         </Label>
-        <Select value={unlockType} onValueChange={setUnlockType}>
-          <SelectTrigger className="h-8 bg-slate-900/50 border-slate-700">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="purchase">Purchase (VP)</SelectItem>
-            <SelectItem value="event">Event reward</SelectItem>
-            <SelectItem value="mission">Mission reward</SelectItem>
-            <SelectItem value="achievement">Achievement reward</SelectItem>
-            <SelectItem value="badge">Badge reward</SelectItem>
-          </SelectContent>
-        </Select>
+        <UnlockChannelSelect value={unlockType} onValueChange={setUnlockType} />
       </div>
       {unlockType !== 'purchase' && (
         <div className="space-y-1">
@@ -295,10 +286,10 @@ export function AdminShopItemsPanel({
             Hidden
           </Badge>
         )}
-        {item.unlockType && UNLOCK_LABEL[item.unlockType] && (
+        {item.unlockType && item.unlockType !== 'purchase' && (
           <Badge className="bg-amber-700 text-[9px] px-1.5 py-0 gap-0.5">
             <Trophy className="h-2.5 w-2.5" />
-            {UNLOCK_LABEL[item.unlockType]}
+            {UNLOCK_LABEL[item.unlockType] ?? item.unlockType}
           </Badge>
         )}
         {item.promoted && (
@@ -414,14 +405,24 @@ export function AdminShopItemsPanel({
                   open && 'border-cyan-500/50'
                 )}
               >
-                <button
-                  type="button"
-                  className="w-full text-left"
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="w-full text-left cursor-pointer"
                   onClick={() => setOpenId(open ? null : item.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setOpenId(open ? null : item.id);
+                    }
+                  }}
                 >
                   <CardContent className="py-3 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-3 min-w-0">
-                      <span onClick={(e) => e.stopPropagation()}>
+                      <span
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
                         <Checkbox
                           checked={fireSaleSelected.includes(item.id)}
                           onCheckedChange={(v) => onToggleFireSale(item.id, Boolean(v))}
@@ -443,7 +444,7 @@ export function AdminShopItemsPanel({
                           {item.itemSku} ·{' '}
                           {item.unlockType && item.unlockType !== 'purchase' ? (
                             <span className="text-amber-300">
-                              {UNLOCK_LABEL[item.unlockType]}
+                              {UNLOCK_LABEL[item.unlockType] ?? item.unlockType}
                               {item.unlockRef ? ` — ${item.unlockRef}` : ''}
                             </span>
                           ) : onFire ? (
@@ -465,7 +466,7 @@ export function AdminShopItemsPanel({
                       )}
                     />
                   </CardContent>
-                </button>
+                </div>
                 {open && (
                   <QuickEdit
                     item={item}
@@ -506,7 +507,7 @@ export function AdminShopItemsPanel({
                       <div className="flex flex-wrap gap-1 mt-1 items-center">
                         <span className="text-[10px] text-slate-400">
                           {item.unlockType && item.unlockType !== 'purchase'
-                            ? UNLOCK_LABEL[item.unlockType]
+                            ? UNLOCK_LABEL[item.unlockType] ?? item.unlockType
                             : `${getEffectiveVpPrice(item)} VP`}
                         </span>
                         {renderBadges(item)}

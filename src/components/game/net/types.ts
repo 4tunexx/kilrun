@@ -75,6 +75,8 @@ export interface NetPlatformState {
   conveyorSpeed?: number;
   conveyorDirX?: number;
   conveyorDirY?: number;
+  entityId?: string;
+  motionEnabled?: boolean;
 }
 
 export interface NetObstacleState {

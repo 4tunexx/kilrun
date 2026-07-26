@@ -6,12 +6,40 @@ import { AnimationDirector } from '../editor/animation-director';
 import { applyTextureToObject, plantLocalFeet, resolveEntityTextureRepeat } from '../editor/editor-mesh';
 import { applyEntityOpacity, makeAuthoredLight, makeGameplayFallback } from '../editor/map-scene-visuals';
 import { makeHammerSolidObject, type HammerPrimitive } from '../editor/hammer-shapes';
+import { ensurePlatformMotion } from '../editor/map-document';
+import { movingPlatformU } from '../../../../shared/moving-platform';
 
 function applyEntTexture(obj: THREE.Object3D, ent: EditorEntity, doc: MapDocument) {
   applyTextureToObject(obj, ent.textureUrl || doc.environment?.defaultTextureUrl, {
     repeat: resolveEntityTextureRepeat(ent),
     offset: ent.textureOffset,
     rotation: ent.textureRotation,
+  });
+}
+
+/** Release GPU resources for a detached Object3D tree. */
+function disposeObjectTree(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry.dispose();
+    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) {
+      const std = m as THREE.MeshStandardMaterial;
+      for (const key of [
+        'map',
+        'normalMap',
+        'roughnessMap',
+        'metalnessMap',
+        'emissiveMap',
+        'aoMap',
+        'alphaMap',
+      ] as const) {
+        const tex = std[key];
+        if (tex) tex.dispose();
+      }
+      m.dispose();
+    }
   });
 }
 
@@ -29,6 +57,11 @@ export class CustomMapOverlay {
   public readonly root = new THREE.Group();
   private director = new AnimationDirector();
   private entityRoots = new Map<string, THREE.Object3D>();
+  private restPositions = new Map<string, THREE.Vector3>();
+  private motionById = new Map<
+    string,
+    { offset: [number, number, number]; periodMs: number; phaseMs: number }
+  >();
   private disposed = false;
 
   constructor(private scene: THREE.Scene) {
@@ -93,6 +126,15 @@ export class CustomMapOverlay {
         obj.userData.editorEntity = ent;
         this.root.add(obj);
         this.entityRoots.set(ent.id, obj);
+        this.restPositions.set(ent.id, new THREE.Vector3(...ent.position));
+        const motion = ensurePlatformMotion(ent);
+        if (motion.enabled) {
+          this.motionById.set(ent.id, {
+            offset: motion.offset,
+            periodMs: motion.periodMs,
+            phaseMs: motion.phaseMs,
+          });
+        }
         this.director.register(ent.id, obj, clips);
         if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
           this.director.playDefault(ent);
@@ -156,9 +198,32 @@ export class CustomMapOverlay {
 
   clear() {
     this.director.clear();
+    for (const obj of this.entityRoots.values()) {
+      obj.removeFromParent();
+      disposeObjectTree(obj);
+    }
     this.entityRoots.clear();
+    this.restPositions.clear();
+    this.motionById.clear();
     while (this.root.children.length) {
-      this.root.remove(this.root.children[0]);
+      const child = this.root.children[0];
+      this.root.remove(child);
+      disposeObjectTree(child);
+    }
+  }
+
+  /** Drive kinematic platform meshes from match/play elapsed time. */
+  tickMotion(elapsedMs: number) {
+    for (const [id, motion] of this.motionById) {
+      const root = this.entityRoots.get(id);
+      const rest = this.restPositions.get(id);
+      if (!root || !rest) continue;
+      const u = movingPlatformU(elapsedMs, motion.periodMs, motion.phaseMs);
+      root.position.set(
+        rest.x + motion.offset[0] * u,
+        rest.y + motion.offset[1] * u,
+        rest.z + motion.offset[2] * u
+      );
     }
   }
 

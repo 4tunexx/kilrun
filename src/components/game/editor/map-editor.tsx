@@ -90,6 +90,7 @@ import {
   ensureJumpPad,
   ensureLight,
   ensureMonsterSpawn,
+  ensurePlatformMotion,
   ensurePushBlock,
   ensurePushRail,
   ensureRedZone,
@@ -139,8 +140,10 @@ import {
 } from './map-storage';
 import {
   createEditorViewport,
+  DEFAULT_EDITOR_PERF_MODE,
   type EditTool,
   type EditorCameraState,
+  type EditorPerfMode,
   type EditorViewLayout,
   type EditorViewportApi,
   type TransformMode,
@@ -275,6 +278,14 @@ export function MapEditor({
   const [canRedo, setCanRedo] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [prefabs, setPrefabs] = useState<PrefabStamp[]>([]);
+  const [cloudPrefabs, setCloudPrefabs] = useState<
+    Array<{
+      id: string;
+      name: string;
+      updatedAt: string;
+      entityCount: number;
+    }>
+  >([]);
   const [prefabName, setPrefabName] = useState('My Prefab');
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
@@ -304,6 +315,9 @@ export function MapEditor({
   const [weaponEditorOpen, setWeaponEditorOpen] = useState(false);
   const [combatEditorOpen, setCombatEditorOpen] = useState(false);
   const [showAllCollisionGizmos, setShowAllCollisionGizmos] = useState(false);
+  const [editorPerf, setEditorPerf] = useState<EditorPerfMode>({
+    ...DEFAULT_EDITOR_PERF_MODE,
+  });
   const lastLockedToastAt = useRef(0);
   const cameraBeforePlayRef = useRef<EditorCameraState | null>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
@@ -2172,9 +2186,124 @@ export function MapEditor({
               >
                 <Stamp className="w-4 h-4 mr-1" /> Save selection as prefab
               </Button>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="flex-1"
+                  disabled={!(selectedIds.length || selectedId)}
+                  onClick={() => {
+                    const ids = selectedIds.length
+                      ? selectedIds
+                      : selectedId
+                        ? [selectedId]
+                        : [];
+                    const ents = doc.entities.filter((e) => ids.includes(e.id));
+                    if (!ents.length) return;
+                    void (async () => {
+                      try {
+                        const { publishCloudPrefab } = await import('@/lib/game-prefab-actions');
+                        const origin = ents[0].position;
+                        const relative = ents.map((e) => ({
+                          ...e,
+                          position: [
+                            e.position[0] - origin[0],
+                            e.position[1] - origin[1],
+                            e.position[2] - origin[2],
+                          ] as [number, number, number],
+                        }));
+                        await publishCloudPrefab({
+                          name: prefabName.trim() || 'Prefab',
+                          mode: getMapGameMode(doc),
+                          entities: relative,
+                        });
+                        toast({ title: 'Published to cloud library' });
+                        const { listCloudPrefabs } = await import('@/lib/game-prefab-actions');
+                        setCloudPrefabs(await listCloudPrefabs(getMapGameMode(doc)));
+                      } catch (err) {
+                        toast({
+                          title: 'Cloud publish failed',
+                          description: err instanceof Error ? err.message : 'Error',
+                          variant: 'destructive',
+                        });
+                      }
+                    })();
+                  }}
+                >
+                  Publish cloud
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        const { listCloudPrefabs } = await import('@/lib/game-prefab-actions');
+                        setCloudPrefabs(await listCloudPrefabs(getMapGameMode(doc)));
+                        toast({ title: 'Cloud library refreshed' });
+                      } catch (err) {
+                        toast({
+                          title: 'Could not load cloud prefabs',
+                          description: err instanceof Error ? err.message : 'Staff only?',
+                          variant: 'destructive',
+                        });
+                      }
+                    })();
+                  }}
+                >
+                  Pull cloud
+                </Button>
+              </div>
+              {cloudPrefabs.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase tracking-widest text-cyan-300/70">Cloud library</p>
+                  {cloudPrefabs.map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center gap-1 rounded border border-cyan-500/20 bg-cyan-500/5 p-2"
+                    >
+                      <button
+                        type="button"
+                        className="flex-1 text-left text-xs hover:text-cyan-200"
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              const { getCloudPrefabEntities } = await import(
+                                '@/lib/game-prefab-actions'
+                              );
+                              const ents = await getCloudPrefabEntities(p.id);
+                              const stamp = {
+                                id: p.id,
+                                name: p.name,
+                                createdAt: p.updatedAt,
+                                entities: ents,
+                              };
+                              const placed = instantiatePrefab(stamp, [0, 0, 0], activeLayerId);
+                              apiRef.current?.stampEntities(placed);
+                            } catch (err) {
+                              toast({
+                                title: 'Stamp failed',
+                                description: err instanceof Error ? err.message : 'Error',
+                                variant: 'destructive',
+                              });
+                            }
+                          })();
+                        }}
+                      >
+                        <span className="font-bold text-white">{p.name}</span>
+                        <span className="text-white/40 block">
+                          {p.entityCount} pieces · cloud
+                        </span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="space-y-1">
+                <p className="text-[10px] uppercase tracking-widest text-white/50">Local</p>
                 {prefabs.length === 0 && (
-                  <p className="text-[11px] text-white/40">No prefabs yet.</p>
+                  <p className="text-[11px] text-white/40">No local prefabs yet.</p>
                 )}
                 {prefabs.map((p) => (
                   <div
@@ -2415,6 +2544,54 @@ export function MapEditor({
               <p className="text-[10px] text-white/35 leading-snug">
                 Toggle the grid overlay off to preview the in-game floor style (solid / void / water) without grid lines on top.
               </p>
+              <p className="text-[10px] tracking-widest text-amber-300/80 uppercase pt-2">
+                Editor performance
+              </p>
+              <p className="text-[10px] text-white/35 leading-snug">
+                Hide heavy visuals while editing to cut RAM / GPU. Play Test and live matches still render full sky, floor, fog, and void effects.
+              </p>
+              {(
+                [
+                  ['hideFloor', 'Hide floor / void disc'],
+                  ['hideSkyTexture', 'Hide sky texture (solid color)'],
+                  ['hideVoidEffects', 'Hide void glow / shadow'],
+                  ['hideFog', 'Hide fog'],
+                ] as const
+              ).map(([key, label]) => (
+                <label
+                  key={key}
+                  className="flex items-center justify-between gap-3 text-xs text-white/70 select-none cursor-pointer"
+                >
+                  <span>{label}</span>
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-amber-400"
+                    checked={editorPerf[key]}
+                    onChange={(e) => {
+                      const next = { ...editorPerf, [key]: e.target.checked };
+                      setEditorPerf(next);
+                      apiRef.current?.setEditorPerfMode(next);
+                    }}
+                  />
+                </label>
+              ))}
+              {(editorPerf.hideFloor ||
+                editorPerf.hideSkyTexture ||
+                editorPerf.hideVoidEffects ||
+                editorPerf.hideFog) && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="w-full text-xs text-amber-200"
+                  onClick={() => {
+                    const next = { ...DEFAULT_EDITOR_PERF_MODE };
+                    setEditorPerf(next);
+                    apiRef.current?.setEditorPerfMode(next);
+                  }}
+                >
+                  Restore all editor visuals
+                </Button>
+              )}
               {env.floor === 'void' && (
                 <div className="mt-3 pt-3 border-t border-white/10 space-y-3">
                   <p className="text-[10px] tracking-widest text-emerald-300/80 uppercase">
@@ -4213,6 +4390,88 @@ export function MapEditor({
                   <label className="flex items-center gap-2 text-xs text-white/70">
                     <input
                       type="checkbox"
+                      checked={ensurePlatformMotion(selected).enabled}
+                      onChange={(e) => {
+                        const m = ensurePlatformMotion(selected);
+                        patchSelected({
+                          motion: { ...m, enabled: e.target.checked },
+                          ...(e.target.checked
+                            ? patchCollideMaterial(selected, 'solid')
+                            : {}),
+                        });
+                      }}
+                    />
+                    Moving platform (ping-pong)
+                  </label>
+                  {ensurePlatformMotion(selected).enabled && (
+                    <div className="space-y-2 pl-1 border-l border-sky-500/30 ml-1">
+                      <p className="text-[10px] text-white/45 leading-snug">
+                        Oscillates between rest pose and rest + offset (Y up). Players ride it.
+                      </p>
+                      {([0, 1, 2] as const).map((i) => (
+                        <label key={i} className="block text-[10px] text-white/55">
+                          Offset {['X', 'Y', 'Z'][i]} (
+                          {ensurePlatformMotion(selected).offset[i].toFixed(1)})
+                          <input
+                            type="range"
+                            min={-12}
+                            max={12}
+                            step={0.5}
+                            className="w-full"
+                            value={ensurePlatformMotion(selected).offset[i]}
+                            onChange={(e) => {
+                              const m = ensurePlatformMotion(selected);
+                              const offset: [number, number, number] = [...m.offset];
+                              offset[i] = Number(e.target.value);
+                              patchSelected({ motion: { ...m, offset } });
+                            }}
+                          />
+                        </label>
+                      ))}
+                      <label className="block text-[10px] text-white/55">
+                        Period ({(ensurePlatformMotion(selected).periodMs / 1000).toFixed(1)}s)
+                        <input
+                          type="range"
+                          min={1000}
+                          max={12000}
+                          step={250}
+                          className="w-full"
+                          value={ensurePlatformMotion(selected).periodMs}
+                          onChange={(e) =>
+                            patchSelected({
+                              motion: {
+                                ...ensurePlatformMotion(selected),
+                                periodMs: Number(e.target.value),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="block text-[10px] text-white/55">
+                        Phase ({ensurePlatformMotion(selected).phaseMs}ms)
+                        <input
+                          type="range"
+                          min={0}
+                          max={8000}
+                          step={100}
+                          className="w-full"
+                          value={ensurePlatformMotion(selected).phaseMs}
+                          onChange={(e) =>
+                            patchSelected({
+                              motion: {
+                                ...ensurePlatformMotion(selected),
+                                phaseMs: Number(e.target.value),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  <label className="flex items-center gap-2 text-xs text-white/70">
+                    <input
+                      type="checkbox"
                       checked={!!ensureTeleport(selected).enabled}
                       onChange={(e) =>
                         patchSelected({
@@ -5630,6 +5889,7 @@ export function MapEditor({
         <div className="fixed inset-0 z-[10050]">
           <MapPlayPreview
             doc={apiRef.current?.getDoc() ?? doc}
+            mapId={mapId}
             onClose={exitPlayTest}
           />
         </div>

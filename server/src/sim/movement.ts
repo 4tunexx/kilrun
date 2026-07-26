@@ -15,6 +15,9 @@ import {
   JUMP_VELOCITY,
   LAND_SNAP_FAST,
   LAND_SNAP_SLOW,
+  GROUND_FOLLOW_SPEED,
+  LAND_STEP_CLIMB,
+  LAND_STEP_DESCEND,
   LEDGE_ASSIST,
   MAX_ENERGY,
   MAX_FALL_SPEED,
@@ -91,6 +94,8 @@ export interface PlayerSimScratch {
   wallJumpCooldownMs: number;
   wallJumpCooldownNormalX: number;
   wallJumpCooldownNormalY: number;
+  /** Platform id under feet last tick (moving-platform carry). */
+  supportPlatformId: string | null;
 }
 
 export function createSimScratch(): PlayerSimScratch {
@@ -108,6 +113,7 @@ export function createSimScratch(): PlayerSimScratch {
     wallJumpCooldownMs: 0,
     wallJumpCooldownNormalX: 0,
     wallJumpCooldownNormalY: 0,
+    supportPlatformId: null,
   };
 }
 
@@ -213,8 +219,6 @@ export function applyMovement(
   }
   if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;
 
-  const LAND_STEP_CLIMB = 0.75;
-  const LAND_STEP_DESCEND = 0.9;
   const wasGroundedLastTick = player.isGrounded;
 
   let support = findSupportPlatform(
@@ -264,26 +268,26 @@ export function applyMovement(
   let grounded = !!support && player.vz <= 0.2;
   player.isGrounded = grounded;
 
-  // GENTLE ground snap: when landing or walking onto an adjacent pad/ramp, never
-  // teleport vertically by more than ~step-climb per tick. The old code wrote
-  // `player.z = support.topZ` every grounded tick, which means walking up a
-  // smooth ramp caused 5–25 cm vertical teleports per server tick → client
-  // extrapolates those as hops/bounces instead of continuous slope climb.
+  // Soft ground glue: stepped ramp pads change topZ in small increments.
+  // Hard-assigning player.z each tick (or absorbing the full delta in one
+  // frame) made walking ramps feel like a bumpy road; the client camera
+  // amplified those hops. Rate-limit while already grounded; allow a larger
+  // snap only on fresh landings.
   if (grounded && support) {
-    const snapMax = wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_STEP_CLIMB;
     const delta = support.topZ - player.z;
-    if (delta > 0) {
-      // Climbing up onto a higher pad/ramp step. Only climb by up to step size
-      // this tick; leave the rest for next gravity pass if still overlapping.
-      player.z += Math.min(delta, snapMax);
-    } else if (delta < -LAND_STEP_CLIMB) {
-      // Stepping down a taller drop than pure gravity would eat this tick —
-      // stay glued to the slope by descending up to step-descend, but no more
-      // (otherwise you'd snap through the bottom of small ledges and feel
-      // weightless).
-      player.z += Math.max(delta, -LAND_STEP_DESCEND);
+    if (!wasGroundedLastTick) {
+      if (delta > 0) player.z += Math.min(delta, LAND_STEP_CLIMB);
+      else if (delta < 0) player.z += Math.max(delta, -LAND_STEP_DESCEND);
+      else player.z = support.topZ;
     } else {
-      player.z = support.topZ;
+      const maxStep = Math.max(GROUND_FOLLOW_SPEED * Math.max(dtSeconds, 1 / 240), 0.002);
+      if (Math.abs(delta) <= 0.0015) {
+        player.z = support.topZ;
+      } else if (delta > 0) {
+        player.z += Math.min(delta, Math.min(maxStep, LAND_STEP_CLIMB));
+      } else {
+        player.z += Math.max(delta, -Math.min(maxStep, LAND_STEP_DESCEND));
+      }
     }
     player.vz = 0;
     scratch.coyoteMs = effCoyoteMs;
@@ -435,6 +439,46 @@ export function applyMovement(
   scratch.touchingWallX = pushed.touchingWall ? pushed.wallNormalX : 0;
   scratch.touchingWallY = pushed.touchingWall ? pushed.wallNormalY : 0;
 
+  // Same-frame re-stick after XY move so feet follow the next ramp cell now.
+  if (player.isGrounded) {
+    let post = findSupportPlatform(
+      player.x,
+      player.y,
+      player.z,
+      platforms,
+      PLAYER_RADIUS,
+      LAND_STEP_DESCEND
+    );
+    if (!post) {
+      post = findSupportPlatform(
+        player.x,
+        player.y,
+        player.z,
+        platforms,
+        PLAYER_RADIUS,
+        LAND_STEP_CLIMB
+      );
+    }
+    if (post) {
+      support = post;
+      const delta = post.topZ - player.z;
+      const maxStep = Math.max(GROUND_FOLLOW_SPEED * Math.max(dtSeconds, 1 / 240), 0.002);
+      if (Math.abs(delta) <= 0.0015) {
+        player.z = post.topZ;
+      } else if (delta > 0) {
+        player.z += Math.min(delta, Math.min(maxStep, LAND_STEP_CLIMB));
+      } else {
+        player.z += Math.max(delta, -Math.min(maxStep, LAND_STEP_DESCEND));
+      }
+      player.vz = 0;
+      player.isGrounded = true;
+      scratch.coyoteMs = effCoyoteMs;
+      scratch.jumpCount = 0;
+    } else {
+      player.isGrounded = false;
+    }
+  }
+
   // Vertical — constant Foundry gravity
   if (!player.isGrounded) {
     const slidingOnWall =
@@ -518,6 +562,20 @@ export function applyMovement(
 
   if (player.z < VOID_Z) {
     player.vz = 0;
+  }
+
+  if (player.isGrounded) {
+    const grounded = findSupportPlatform(
+      player.x,
+      player.y,
+      player.z,
+      platforms,
+      PLAYER_RADIUS,
+      LAND_STEP_DESCEND
+    );
+    scratch.supportPlatformId = grounded?.platform.id ?? null;
+  } else {
+    scratch.supportPlatformId = null;
   }
 }
 

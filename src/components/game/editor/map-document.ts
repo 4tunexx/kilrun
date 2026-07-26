@@ -420,6 +420,20 @@ export interface EntitySurface {
   conveyorSpeed?: number;
 }
 
+/**
+ * Kinematic moving platform — pad oscillates between rest pose and rest+offset.
+ * Exported into match sim; player is carried while grounded on it.
+ */
+export interface EntityPlatformMotion {
+  enabled: boolean;
+  /** Offset from entity.position to the far end (Three.js Y-up). */
+  offset: [number, number, number];
+  /** Full round-trip duration (A→B→A) in ms. */
+  periodMs: number;
+  /** Phase offset so multiple platforms can stagger. */
+  phaseMs: number;
+}
+
 /** Teleport pad — touching sends the player to the linked target. */
 export interface EntityTeleport {
   enabled: boolean;
@@ -656,6 +670,8 @@ export interface EditorEntity {
   jumpPad?: EntityJumpPad;
   /** Ice / conveyor surface */
   surface?: EntitySurface;
+  /** Moving platform path (ping-pong). */
+  motion?: EntityPlatformMotion;
   /** Teleport pad */
   teleport?: EntityTeleport;
   /** kind === 'light' settings */
@@ -1160,6 +1176,30 @@ export function defaultSurface(): EntitySurface {
 
 export function ensureSurface(ent: EditorEntity): EntitySurface {
   return { ...defaultSurface(), ...ent.surface };
+}
+
+export function defaultPlatformMotion(): EntityPlatformMotion {
+  return {
+    enabled: false,
+    offset: [0, 0, 4],
+    periodMs: 4000,
+    phaseMs: 0,
+  };
+}
+
+export function ensurePlatformMotion(ent: EditorEntity): EntityPlatformMotion {
+  const d = defaultPlatformMotion();
+  const m = ent.motion;
+  return {
+    enabled: !!m?.enabled,
+    offset: [
+      Number.isFinite(m?.offset?.[0]) ? m!.offset![0] : d.offset[0],
+      Number.isFinite(m?.offset?.[1]) ? m!.offset![1] : d.offset[1],
+      Number.isFinite(m?.offset?.[2]) ? m!.offset![2] : d.offset[2],
+    ],
+    periodMs: Math.max(500, Number(m?.periodMs) || d.periodMs),
+    phaseMs: Math.max(0, Number(m?.phaseMs) || 0),
+  };
 }
 
 /** Resolve material for UI + collision export. */

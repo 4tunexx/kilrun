@@ -30,8 +30,15 @@ import {
   type PlayerSimScratch,
   type WorldBounds,
 } from '../sim/movement.js';
+import {
+  applyPlatformCarry,
+  tickMovingPlatforms,
+  type PlatformDelta,
+  type PlatformMotionState,
+} from '../sim/moving-platforms.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import { fetchTrustedLoadout } from '../trusted-loadout.js';
 import { nextHordeColor } from '../lib/body-colors.js';
 import {
   authenticateJoin,
@@ -44,6 +51,7 @@ import {
   DISPLAY_HORDE_REWARDS,
   reportMatchResults,
 } from '../match-report.js';
+import { fetchActiveMapPayload } from '../active-map.js';
 
 interface JoinOptions {
   token?: string;
@@ -178,6 +186,8 @@ export class HordeRoom extends Room<RoomState> {
   private respawnOnWaveClear = true;
   private difficultyScale = 1.0;
   private combatPhysOpts: MovementPhysicsOpts = {};
+  private platformMotion = new Map<string, PlatformMotionState>();
+  private matchElapsedMs = 0;
 
   onCreate() {
     this.setState(new RoomState());
@@ -300,6 +310,8 @@ export class HordeRoom extends Room<RoomState> {
 
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(platforms));
+      this.platformMotion.clear();
+      this.matchElapsedMs = 0;
 
       this.staticHazards = Array.isArray(data?.obstacles)
         ? (data.obstacles as ObstacleBlueprint[])
@@ -359,6 +371,69 @@ export class HordeRoom extends Room<RoomState> {
       );
     });
 
+    void fetchActiveMapPayload('horde').then((active) => {
+      if (!active || this.customMapLoaded) return;
+      const pads = active.payload.platforms as PlatformBlueprint[] | undefined;
+      if (!Array.isArray(pads) || pads.length === 0) return;
+      const data = active.payload;
+      while (this.state.platforms.length > 0) this.state.platforms.pop();
+      this.state.platforms.push(...createFromBlueprints(pads));
+      this.platformMotion.clear();
+      this.matchElapsedMs = 0;
+      this.staticHazards = Array.isArray(data.obstacles)
+        ? (data.obstacles as ObstacleBlueprint[])
+        : [];
+      this.rebuildStaticObstacles();
+      if (Array.isArray(data.playerSpawns) && (data.playerSpawns as unknown[]).length) {
+        this.playerSpawns = (data.playerSpawns as { x: number; y: number; z: number }[]).map(
+          (s) => ({ ...s })
+        );
+      }
+      if (Array.isArray(data.monsterSpawns)) {
+        this.monsterSpawnPoints = data.monsterSpawns as typeof this.monsterSpawnPoints;
+      }
+      this.healthFloors = Array.isArray(data.healthFloors)
+        ? (data.healthFloors as typeof this.healthFloors)
+        : [];
+      this.redZones = Array.isArray(data.redZones) ? (data.redZones as typeof this.redZones) : [];
+      this.revivePads = Array.isArray(data.revivePads)
+        ? (data.revivePads as typeof this.revivePads)
+        : [];
+      if (data.worldBounds) {
+        this.worldBounds = { ...(data.worldBounds as typeof this.worldBounds) };
+      }
+      const cs = data.combatSettings as Record<string, unknown> | undefined;
+      if (cs && typeof cs === 'object') {
+        this.combatPhysOpts = {
+          gravity: typeof cs.gravity === 'number' ? cs.gravity : undefined,
+          jumpVelocity: typeof cs.jumpVelocity === 'number' ? cs.jumpVelocity : undefined,
+          doubleJumpVelocity:
+            typeof cs.doubleJumpVelocity === 'number' ? cs.doubleJumpVelocity : undefined,
+          doubleJumpEnabled:
+            typeof cs.doubleJumpEnabled === 'boolean' ? cs.doubleJumpEnabled : undefined,
+          jumpCutMult: typeof cs.jumpCutMult === 'number' ? cs.jumpCutMult : undefined,
+          coyoteMs: typeof cs.coyoteMs === 'number' ? cs.coyoteMs : undefined,
+          jumpBufferMs: typeof cs.jumpBufferMs === 'number' ? cs.jumpBufferMs : undefined,
+          walkSpeed: typeof cs.walkSpeed === 'number' ? cs.walkSpeed : undefined,
+          sprintMult: typeof cs.sprintMult === 'number' ? cs.sprintMult : undefined,
+          crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
+          maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
+          apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+          wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
+          wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
+          wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
+          wallSlideGravMult:
+            typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
+        };
+      }
+      this.customMapLoaded = true;
+      Array.from(this.state.players.values()).forEach((player, index) => {
+        this.applySpawnPosition(player, index);
+        player.vz = 0;
+      });
+      console.log(`[HordeRoom] MAIN map loaded from server (${active.name}): ${pads.length} pads`);
+    });
+
     this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
   }
 
@@ -366,7 +441,7 @@ export class HordeRoom extends Room<RoomState> {
     return authenticateJoin(options);
   }
 
-  onJoin(client: Client, options: JoinOptions) {
+  async onJoin(client: Client, options: JoinOptions) {
     const claims = claimsFromAuth(client.auth, options);
     if (!this.hostSessionId) this.hostSessionId = client.sessionId;
     if (claims.isAdmin) this.adminSessions.add(client.sessionId);
@@ -379,7 +454,8 @@ export class HordeRoom extends Room<RoomState> {
     player.avatarUrl = claims.avatarUrl || '';
     player.role = 'survivor';
     player.kp = claims.kp;
-    applyLoadoutToPlayer(player, options);
+    const trusted = await fetchTrustedLoadout(player.userId);
+    applyLoadoutToPlayer(player, trusted ?? options);
     player.energy = MAX_ENERGY;
     this.applySpawnPosition(player, this.state.players.size);
     const usedColors = Array.from(this.state.players.values()).map((p) => p.bodyColorIndex);
@@ -508,6 +584,8 @@ export class HordeRoom extends Room<RoomState> {
 
     this.state.phase = 'playing';
     this.state.matchTimeRemainingMs = this.matchDurationMs;
+    this.matchElapsedMs = 0;
+    this.platformMotion.clear();
     this.beginWave(this.startingWave);
   }
 
@@ -625,14 +703,20 @@ export class HordeRoom extends Room<RoomState> {
 
   private tickPlaying(dtMs: number) {
     this.state.matchTimeRemainingMs -= dtMs;
+    this.matchElapsedMs += dtMs;
     if (this.state.matchTimeRemainingMs <= 0) {
       this.endMatch('survivor');
       return;
     }
 
+    const platformDeltas = tickMovingPlatforms(
+      this.state.platforms,
+      this.platformMotion,
+      this.matchElapsedMs
+    );
     this.tickSpawnQueue();
     this.tickMonsters(dtMs / 1000);
-    this.tickPlayers(dtMs);
+    this.tickPlayers(dtMs, platformDeltas);
     this.tickPads();
 
     const alivePlayers = Array.from(this.state.players.values()).filter((p) => p.isAlive);
@@ -731,7 +815,7 @@ export class HordeRoom extends Room<RoomState> {
     this.state.monstersAlive = this.monsters.length;
   }
 
-  private tickPlayers(dtMs: number) {
+  private tickPlayers(dtMs: number, platformDeltas: PlatformDelta[] = []) {
     const dtSeconds = dtMs / 1000;
     const now = Date.now();
 
@@ -747,6 +831,8 @@ export class HordeRoom extends Room<RoomState> {
         scratch = createSimScratch();
         this.simScratch.set(sessionId, scratch);
       }
+
+      applyPlatformCarry(player, scratch.supportPlatformId, platformDeltas);
 
       applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
 

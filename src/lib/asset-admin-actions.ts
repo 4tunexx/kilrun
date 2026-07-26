@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
 import { Prisma } from '@/generated/prisma';
 import type { AssetCategory, AssetRarity } from '@/lib/asset-registry';
-import { classifyAssetFilename } from '@/lib/asset-registry';
+import { classifyAssetFilename, isPackPreviewIconUrl } from '@/lib/asset-registry';
 
 async function requireAdmin() {
   const session = await auth();
@@ -173,7 +173,9 @@ export interface AssetShopListingOptions {
   eventEndsAt?: string | null;
   /** Feature on the home dashboard. */
   promoted?: boolean;
-  /** Dashboard promo banner: { headline?, colors?, angle? }. */
+  /** Dashboard promo banner: { headline?, colors?, angle?, opacity?, blur?,
+   *  animated?, animationStyle?, pattern?, patternOpacity?, patternScale?,
+   *  overlayOpacity? }. */
   promoBanner?: Record<string, unknown> | null;
 }
 
@@ -206,7 +208,12 @@ export async function adminPublishAssetToShop(
         id: asset.assetId,
         slot: skinSlot,
         customModelUrl: asset.modelPath,
-        textureUrl: asset.texturePath || undefined,
+        // 128px FullBody_*.png etc. are shop icons, not UV atlases — omit so the
+        // FBX keeps its resolved Textures.png albedo.
+        textureUrl:
+          asset.texturePath && !isPackPreviewIconUrl(asset.texturePath)
+            ? asset.texturePath
+            : undefined,
         position: [0, 0, 0],
         rotation: [0, 0, 0],
         scale: [1, 1, 1],
@@ -279,6 +286,24 @@ export async function adminRemoveAssetFromShop(assetId: string) {
     data: { shopVisible: false },
   });
   return { ok: true };
+}
+
+/** Load the current shop listing for an asset (used to re-edit promo banners). */
+export async function adminGetAssetShopListing(assetId: string) {
+  await requireAdmin();
+  const sku = `asset_${assetId}`;
+  const item = await prisma.storeItem.findUnique({ where: { itemSku: sku } });
+  if (!item || !item.isAvailable) return null;
+  return {
+    id: item.id,
+    itemName: item.itemName,
+    vpPrice: item.vpPrice,
+    unlockType: item.unlockType,
+    unlockRef: item.unlockRef,
+    eventEndsAt: item.eventEndsAt,
+    promoted: item.promoted,
+    promoBanner: item.promoBanner as Record<string, unknown> | null,
+  };
 }
 
 /**

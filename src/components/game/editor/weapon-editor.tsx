@@ -43,12 +43,22 @@ import {
 import { loadPlayerAvatar } from './player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import { PROTOTYPE_MODELS, modelUrl } from './prototype-catalog';
+import { CATALOG_WEAPONS } from '@/lib/weapon-catalog';
 
 type Tab = 'model' | 'hold' | 'back' | 'combat' | 'recoil' | 'sway' | 'anims' | 'shop';
 
-const WEAPON_MODELS = PROTOTYPE_MODELS.filter(
-  (m) => m.startsWith('weapon-') || m.includes('sword') || m.includes('shield')
-);
+const WEAPON_MODELS = [
+  ...PROTOTYPE_MODELS.filter(
+    (m) => m.startsWith('weapon-') || m.includes('sword') || m.includes('shield')
+  ),
+  ...CATALOG_WEAPONS.map((w) => w.id),
+];
+
+function weaponModelSrc(id: string): string {
+  const cat = CATALOG_WEAPONS.find((w) => w.id === id);
+  if (cat) return cat.modelUrl;
+  return modelUrl(id);
+}
 
 // ── Shared field components ─────────────────────────────────────────────────
 
@@ -565,20 +575,31 @@ function ModelTab({
           <>
             <p className="text-[10px] text-white/40 mb-1">Or choose catalog model:</p>
             <div className="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto">
-              {WEAPON_MODELS.map((m) => (
+              {WEAPON_MODELS.map((m) => {
+                const cat = CATALOG_WEAPONS.find((w) => w.id === m);
+                return (
                 <button
                   key={m}
                   type="button"
-                  onClick={() => patch({ model: m, customModelUrl: undefined })}
+                  onClick={() =>
+                    patch({
+                      model: m,
+                      customModelUrl: cat ? cat.modelUrl : undefined,
+                      name: cat?.label ?? def.name,
+                      kind: cat?.kind ?? def.kind,
+                      ...(cat?.combat ?? {}),
+                    })
+                  }
                   className={`rounded-lg border px-2 py-1.5 text-[10px] text-left transition-colors ${
-                    def.model === m
+                    def.model === m || def.customModelUrl === cat?.modelUrl
                       ? 'border-amber-400/60 bg-amber-500/20 text-amber-100'
                       : 'border-white/10 text-white/55 hover:bg-white/5'
                   }`}
                 >
-                  {m}
+                  {cat ? cat.label : m}
                 </button>
-              ))}
+                );
+              })}
             </div>
           </>
         )}
@@ -980,7 +1001,7 @@ async function loadWeaponModel(def: MapWeaponDef, group: THREE.Group) {
     if ('geometry' in child && child.geometry) (child as THREE.Mesh).geometry.dispose();
   }
 
-  const src = def.customModelUrl ?? (def.model ? modelUrl(def.model) : null);
+  const src = def.customModelUrl ?? (def.model ? weaponModelSrc(def.model) : null);
   if (!src) {
     // Default placeholder: sword blade shape
     const mat = new THREE.MeshStandardMaterial({ color: 0xc0c8d0, metalness: 0.8, roughness: 0.2 });

@@ -90,6 +90,18 @@ export class PlatformState extends Schema {
   @type('number') conveyorSpeed = 0;
   @type('number') conveyorDirX = 1;
   @type('number') conveyorDirY = 0;
+  /** Moving platform — home pose + amplitude (sim space). */
+  @type('boolean') motionEnabled = false;
+  @type('number') motionPeriodMs = 4000;
+  @type('number') motionPhaseMs = 0;
+  @type('number') motionHomeX = 0;
+  @type('number') motionHomeY = 0;
+  @type('number') motionHomeZ = 0;
+  @type('number') motionAmpX = 0;
+  @type('number') motionAmpY = 0;
+  @type('number') motionAmpZ = 0;
+  /** Editor entity id for client mesh sync (custom maps). */
+  @type('string') entityId = '';
 }
 
 /** A hazard that toggles on/off on a fixed interval (or stays on when alwaysActive). */

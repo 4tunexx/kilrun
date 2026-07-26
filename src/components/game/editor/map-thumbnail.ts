@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import type { MapDocument } from './map-document';
 import { ensureEnvironment } from './map-document';
 import { getMapThumbnail, loadMapPlayable, saveMap } from './map-storage';
+import { disposeRendererHard } from '../renderer/dispose-renderer';
 
 /**
  * Offline isometric-ish preview of a map for admin library cards.
@@ -169,7 +170,7 @@ export async function renderMapThumbnail(
   });
   box.dispose();
   sphere.dispose();
-  renderer.dispose();
+  disposeRendererHard(renderer);
 
   return dataUrl;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Loader2, Package, ShieldCheck, ShoppingBag, Trash2, Upload } from 'lucide-react';
 import {
   Sheet,
@@ -51,6 +51,12 @@ import {
   normalizeNicknameConfig,
 } from '@/lib/cosmetics';
 import { INVENTORY_RESELL_RATE } from '@/lib/inventory-constants';
+import {
+  DEFAULT_INVENTORY_CONFIG,
+  parseInventoryConfig,
+  type InventoryConfig,
+} from '@/lib/inventory-config';
+import { getSiteSettings } from '@/lib/progression-actions';
 import { resolveShopImageUrl } from '@/lib/shop-images';
 import { resolveShopTab, type ShopTabId } from '@/lib/shop-catalog';
 import type { SkinAttachment } from '@/lib/player-skins';
@@ -85,10 +91,10 @@ const PAGE_TABS: { id: PageTabId; label: string; includes: ShopTabId[] }[] = [
 const EQUIP_SLOTS: {
   key: string;
   label: string;
-  accepts: Array<'skin' | 'banner' | 'frame' | 'nickname' | 'perk' | 'boost'>;
+  accepts: Array<'skin' | 'banner' | 'frame' | 'nickname' | 'perk' | 'boost' | 'emote' | 'other'>;
   side: 'left' | 'right';
   cosmeticSlot?: string;
-  icon?: 'head' | 'torso' | 'legs' | 'boots' | 'gloves' | 'back';
+  icon?: 'head' | 'torso' | 'legs' | 'boots' | 'gloves' | 'back' | 'banner' | 'frame' | 'nickname' | 'emote' | 'other';
 }[] = [
   {
     key: 'head',
@@ -140,6 +146,73 @@ const EQUIP_SLOTS: {
   },
 ];
 
+/** Profile / hub cosmetics — shown on the Cosmetics tab instead of body gear. */
+const COSMETIC_EQUIP_SLOTS: (typeof EQUIP_SLOTS)[number][] = [
+  {
+    key: 'banner',
+    label: 'Banner',
+    accepts: ['banner'],
+    side: 'left',
+    cosmeticSlot: 'banner',
+    icon: 'banner',
+  },
+  {
+    key: 'frame',
+    label: 'Frame',
+    accepts: ['frame'],
+    side: 'right',
+    cosmeticSlot: 'frame',
+    icon: 'frame',
+  },
+  {
+    key: 'nickname',
+    label: 'Nickname',
+    accepts: ['nickname'],
+    side: 'left',
+    cosmeticSlot: 'nickname',
+    icon: 'nickname',
+  },
+  {
+    key: 'emote',
+    label: 'Emote',
+    accepts: ['emote'],
+    side: 'right',
+    cosmeticSlot: 'emote',
+    icon: 'emote',
+  },
+  {
+    key: 'other',
+    label: 'Other',
+    accepts: ['other'],
+    side: 'left',
+    cosmeticSlot: 'other',
+    icon: 'other',
+  },
+];
+
+const POWER_EQUIP_SLOTS: (typeof EQUIP_SLOTS)[number][] = [
+  {
+    key: 'perk',
+    label: 'Perk',
+    accepts: ['perk'],
+    side: 'left',
+    icon: 'other',
+  },
+  {
+    key: 'boost',
+    label: 'Boost',
+    accepts: ['boost'],
+    side: 'right',
+    icon: 'other',
+  },
+];
+
+function equipSlotsForPage(page: PageTabId): (typeof EQUIP_SLOTS)[number][] {
+  if (page === 'cosmetics') return COSMETIC_EQUIP_SLOTS;
+  if (page === 'powers') return POWER_EQUIP_SLOTS;
+  return EQUIP_SLOTS;
+}
+
 type PendingClash = {
   itemId: string;
   itemName: string;
@@ -190,6 +263,27 @@ function itemForEquipSlot(
       (i) => i.isEquipped && i.cosmeticSlot === slot.cosmeticSlot
     );
     if (direct) return direct;
+  }
+  if (slot.key === 'banner') {
+    return items.find((i) => i.isEquipped && inventoryKind(i) === 'banner') ?? null;
+  }
+  if (slot.key === 'frame') {
+    return items.find((i) => i.isEquipped && inventoryKind(i) === 'frame') ?? null;
+  }
+  if (slot.key === 'nickname') {
+    return items.find((i) => i.isEquipped && inventoryKind(i) === 'nickname') ?? null;
+  }
+  if (slot.key === 'emote') {
+    return items.find((i) => i.isEquipped && inventoryKind(i) === 'emote') ?? null;
+  }
+  if (slot.key === 'other') {
+    return items.find((i) => i.isEquipped && inventoryKind(i) === 'other') ?? null;
+  }
+  if (slot.key === 'perk') {
+    return items.find((i) => i.isEquipped && inventoryKind(i) === 'perk') ?? null;
+  }
+  if (slot.key === 'boost') {
+    return items.find((i) => i.isEquipped && inventoryKind(i) === 'boost') ?? null;
   }
   if (slot.key === 'head') {
     return (
@@ -357,6 +451,34 @@ function SlotIcon({ slot }: { slot: (typeof EQUIP_SLOTS)[number] }) {
           strokeLinejoin="round"
         />
       )}
+      {slot.icon === 'banner' && (
+        <path
+          d="M5.5 4.5h13v3.2c0 1.4-.8 2.6-2.1 3.1L12 13.2 7.6 10.8A3.4 3.4 0 0 1 5.5 7.7V4.5Zm1.8 0v12.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+      {slot.icon === 'frame' && (
+        <rect x="5" y="5" width="14" height="14" rx="2.5" />
+      )}
+      {slot.icon === 'nickname' && (
+        <path
+          d="M5 16.5 8.2 7h2.2L14 16.5h-2.1l-.6-1.8H7.7l-.6 1.8H5Zm3.2-3.5h2.6L9.5 9.2 8.2 13Zm6.3-6.5h4.8v1.7h-3v1.6h2.7v1.6h-2.7v2.1H20v1.7h-5.5V6.5Z"
+          strokeLinejoin="round"
+        />
+      )}
+      {slot.icon === 'emote' && (
+        <>
+          <circle cx="12" cy="12" r="7.2" />
+          <path d="M8.8 10.2h.1M15.2 10.2h.1M8.8 14.2c1.1 1.3 2.2 1.9 3.2 1.9s2.1-.6 3.2-1.9" strokeLinecap="round" />
+        </>
+      )}
+      {slot.icon === 'other' && (
+        <path
+          d="M12 5.2v2.4M12 16.4v2.4M5.2 12h2.4M16.4 12h2.4M7.2 7.2l1.7 1.7M15.1 15.1l1.7 1.7M16.8 7.2l-1.7 1.7M8.9 15.1l-1.7 1.7"
+          strokeLinecap="round"
+        />
+      )}
     </svg>
   );
 }
@@ -385,7 +507,18 @@ export function InventoryDrawer({
   const [pendingClash, setPendingClash] = useState<PendingClash | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
   const [skinsLoad, setSkinsLoad] = useState<SkinAttachment[]>([]);
+  const [invCfg, setInvCfg] = useState<InventoryConfig>(DEFAULT_INVENTORY_CONFIG);
   const { toast } = useToast();
+
+  const resellRate = invCfg.resellRate > 0 ? invCfg.resellRate : INVENTORY_RESELL_RATE;
+
+  const pageTabs = useMemo(() => {
+    return PAGE_TABS.filter((t) => {
+      if (t.id === 'cosmetics') return invCfg.showCosmeticsTab;
+      if (t.id === 'powers') return invCfg.showPowersTab;
+      return true;
+    });
+  }, [invCfg.showCosmeticsTab, invCfg.showPowersTab]);
 
   const equippedBanner = useMemo(() => {
     const row =
@@ -407,12 +540,24 @@ export function InventoryDrawer({
     return async () => {
       setLoading(true);
       try {
-        const [next, skins] = await Promise.all([
+        const [next, skins, settings] = await Promise.all([
           getMyInventory(),
           getMyEquippedSkinAttachments().catch(() => [] as SkinAttachment[]),
+          getSiteSettings().catch(() => null),
         ]);
         setItems(next);
         setSkinsLoad(skins);
+        if (settings) {
+          const cfg = parseInventoryConfig(
+            (settings as { inventoryConfigJson?: string }).inventoryConfigJson ?? '{}'
+          );
+          setInvCfg(cfg);
+          setPageTab((cur) => {
+            if (cur === 'cosmetics' && !cfg.showCosmeticsTab) return cfg.defaultPageTab;
+            if (cur === 'powers' && !cfg.showPowersTab) return cfg.defaultPageTab;
+            return cur;
+          });
+        }
       } finally {
         setLoading(false);
       }
@@ -423,7 +568,13 @@ export function InventoryDrawer({
     if (open) void reload();
   }, [open, reload]);
 
-  const pageIncludes = PAGE_TABS.find((p) => p.id === pageTab)?.includes ?? [];
+  const pageIncludes = pageTabs.find((p) => p.id === pageTab)?.includes ?? [];
+  useEffect(() => {
+    if (!pageTabs.some((t) => t.id === pageTab)) {
+      setPageTab(pageTabs[0]?.id ?? 'skins');
+    }
+  }, [pageTab, pageTabs]);
+
   const subTabsForPage = useMemo(() => {
     const out: { id: SubTabId; label: string }[] = [{ id: 'equipped', label: 'Equipped' }];
     for (const inc of pageIncludes) {
@@ -529,7 +680,7 @@ export function InventoryDrawer({
     if (!payload) return;
     if (busyId === payload.id) return;
     const kind = inventoryKind(payload);
-    if (!slot.accepts.includes(kind as 'skin')) {
+    if (!slot.accepts.includes(kind)) {
       toast({
         title: `Doesn't fit ${slot.label}`,
         description: `${payload.itemName} is not valid for this slot.`,
@@ -552,26 +703,33 @@ export function InventoryDrawer({
         <SheetContent
           side="right"
           className={cn(
-            'w-[min(1100px,95vw)] max-w-[min(1100px,95vw)] h-[100vh]',
-            'p-0 gap-0 overflow-hidden',
-            'bg-[#0b1020]/95 backdrop-blur-md border-[#1a2540]/80 text-white',
+            'w-full max-w-full sm:w-[min(var(--inv-max,1100px),95vw)] sm:max-w-[min(var(--inv-max,1100px),95vw)] h-[100dvh]',
+            'p-0 gap-0 overflow-hidden flex flex-col',
+            'bg-slate-900/95 backdrop-blur-md border-slate-700/30 text-white',
             'shadow-[0_30px_80px_-10px_rgba(0,0,0,0.65)]'
           )}
+            style={
+              {
+                '--inv-max': `${invCfg.sheetMaxWidth}px`,
+              } as CSSProperties
+            }
         >
-          <SheetHeader className="relative px-6 pt-5 pb-3 border-b border-white/10 bg-gradient-to-b from-[#121a33] to-transparent">
-            <SheetTitle className="flex items-center justify-between text-xl font-black tracking-wide">
+          <SheetHeader className="relative shrink-0 px-4 sm:px-6 pt-5 pb-3 pr-12 border-b border-slate-700/30 bg-gradient-to-b from-slate-800/60 to-transparent">
+            <SheetTitle className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-xl font-black tracking-wide">
               <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-cyan-500/40 to-indigo-500/50 border border-cyan-400/30 flex items-center justify-center text-cyan-200">
+                <div className="h-9 w-9 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center text-primary">
                   <Package className="h-5 w-5" />
                 </div>
                 <div className="flex flex-col leading-tight">
-                  <span className="text-white">INVENTORY</span>
-                  <span className="text-[11px] uppercase tracking-[0.18em] text-cyan-300/80">
-                    {items.length} item{items.length === 1 ? '' : 's'}
+                  <span className="text-white">{invCfg.title || 'INVENTORY'}</span>
+                  <span className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                    {invCfg.subtitle.trim()
+                      ? invCfg.subtitle
+                      : `${items.length} item${items.length === 1 ? '' : 's'}`}
                   </span>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                 <Tabs
                   value={pageTab}
                   onValueChange={(v) => {
@@ -580,12 +738,12 @@ export function InventoryDrawer({
                   }}
                   className="w-auto"
                 >
-                  <TabsList className="h-9 p-1 rounded-lg bg-slate-800/50 border border-white/10 gap-1">
-                    {PAGE_TABS.map((t) => (
+                  <TabsList className="h-9 p-1 rounded-lg bg-slate-800/60 border border-slate-700/40 gap-1">
+                    {pageTabs.map((t) => (
                       <TabsTrigger
                         key={t.id}
                         value={t.id}
-                        className="h-7 px-4 text-xs font-bold uppercase tracking-[0.14em] data-[state=active]:bg-gradient-to-b data-[state=active]:from-cyan-500/30 data-[state=active]:to-indigo-500/30 data-[state=active]:text-white data-[state=active]:shadow-inner data-[state=active]:border data-[state=active]:border-cyan-400/30 border border-transparent rounded-md"
+                        className="h-7 px-3 sm:px-4 text-xs font-bold uppercase tracking-[0.14em] data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:shadow-inner data-[state=active]:border data-[state=active]:border-primary/30 border border-transparent rounded-md"
                       >
                         {t.label}
                       </TabsTrigger>
@@ -593,10 +751,10 @@ export function InventoryDrawer({
                   </TabsList>
                 </Tabs>
                 <Select value={sort} onValueChange={(v) => setSort(v as SortMode)}>
-                  <SelectTrigger className="w-36 h-9 bg-slate-800/40 border-white/10 text-xs">
+                  <SelectTrigger className="w-32 sm:w-36 h-9 bg-slate-800/60 border-slate-700/40 text-xs">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-white/10 text-white">
+                  <SelectContent className="bg-slate-900 border-slate-700/40 text-white">
                     <SelectItem value="newest" className="text-xs">
                       Newest first
                     </SelectItem>
@@ -615,8 +773,15 @@ export function InventoryDrawer({
             </SheetTitle>
           </SheetHeader>
 
-          <div className="grid grid-cols-1 md:grid-cols-[1.15fr_0.95fr] grid-rows-[auto_auto_1fr] md:grid-rows-[1fr_auto] gap-0 h-[calc(100%-60px)] overflow-hidden">
-            <section className="flex flex-col min-h-0 border-r border-white/5 p-5 gap-4">
+          <div
+            className={cn(
+              'flex-1 min-h-0 grid gap-0 overflow-y-auto md:overflow-hidden overscroll-contain',
+              invCfg.showPreviewColumn
+                ? 'grid-cols-1 md:grid-cols-[1.15fr_0.95fr] md:grid-rows-[minmax(0,1fr)]'
+                : 'grid-cols-1 md:grid-rows-[minmax(0,1fr)]'
+            )}
+          >
+            <section className="flex flex-col md:min-h-0 border-b md:border-b-0 md:border-r border-slate-700/30 p-4 sm:p-5 gap-4">
               <Tabs
                 value={subTab}
                 onValueChange={(v) => {
@@ -625,7 +790,7 @@ export function InventoryDrawer({
                 }}
                 className="w-full"
               >
-                <TabsList className="w-full h-10 p-1 rounded-lg bg-slate-800/30 border border-white/10 gap-1 flex-wrap">
+                <TabsList className="w-full h-auto min-h-10 p-1 rounded-lg bg-slate-800/40 border border-slate-700/40 gap-1 flex-wrap justify-start">
                   {subTabsForPage.map((t) => {
                     const count =
                       t.id === 'equipped'
@@ -639,7 +804,7 @@ export function InventoryDrawer({
                       <TabsTrigger
                         key={t.id}
                         value={t.id}
-                        className="h-8 px-3 text-xs font-semibold data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-200 border border-transparent data-[state=active]:border-cyan-400/30 rounded-md"
+                        className="h-8 px-3 text-xs font-semibold data-[state=active]:bg-primary/20 data-[state=active]:text-primary border border-transparent data-[state=active]:border-primary/30 rounded-md"
                       >
                         <span className="mr-1">{t.label}</span>
                         <span className="text-[10px] opacity-60">{count}</span>
@@ -651,41 +816,60 @@ export function InventoryDrawer({
 
               <div
                 onDragOver={(e) => {
+                  if (!invCfg.enableDragDrop) return;
                   e.preventDefault();
+                  setDragOverSlot('__equip__');
                 }}
+                onDragLeave={() =>
+                  setDragOverSlot((cur) => (cur === '__equip__' ? null : cur))
+                }
                 onDrop={(e) => {
+                  if (!invCfg.enableDragDrop) return;
                   e.preventDefault();
                   const id = e.dataTransfer.getData('text/inventory-item-id');
                   const row = id ? items.find((i) => i.id === id) ?? null : null;
                   void handleDropOnEquipZone(row);
                 }}
                 className={cn(
-                  'rounded-xl border transition-colors',
-                  'p-3 bg-[#0d1528]/60 border-[#1a2644]/80 min-h-[240px] md:min-h-[290px]',
+                  'rounded-xl border transition-colors shrink-0',
+                  'p-3 bg-slate-900/60 border-slate-700/40',
                   dragOverSlot === '__equip__'
-                    ? 'ring-2 ring-cyan-400/70 bg-cyan-500/10 border-cyan-400/40'
+                    ? 'ring-2 ring-primary/70 bg-primary/10 border-primary/40'
                     : ''
                 )}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300/80 font-bold">
-                    Equipped · Drop gear here
+                <div className="flex items-center justify-between mb-2 gap-2">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400 font-bold">
+                    Equipped ·{' '}
+                    {pageTab === 'cosmetics'
+                      ? 'Drop cosmetics here'
+                      : pageTab === 'powers'
+                        ? 'Drop powers here'
+                        : 'Drop gear here'}
                   </p>
-                  <Badge className="bg-white/5 text-cyan-200 border-white/10 text-[10px] h-5">
+                  <Badge className="hidden sm:inline-flex bg-slate-800/60 text-slate-300 border-slate-700/40 text-[10px] h-5">
                     <Upload className="h-3 w-3 mr-1" />
-                    Drag & drop
+                    {invCfg.enableDragDrop ? 'Drag & drop' : 'Click to equip'}
                   </Badge>
                 </div>
-                <div className="grid grid-cols-5 gap-2 md:gap-3">
-                  {EQUIP_SLOTS.filter((s) => s.side === 'left').concat(
-                    EQUIP_SLOTS.filter((s) => s.side === 'right')
-                  ).map((slot) => {
+                <div
+                  className={cn(
+                    'grid gap-2 md:gap-3',
+                    pageTab === 'skins'
+                      ? 'grid-cols-3 sm:grid-cols-6'
+                      : pageTab === 'cosmetics'
+                        ? 'grid-cols-3 sm:grid-cols-5'
+                        : 'grid-cols-2 sm:grid-cols-2'
+                  )}
+                >
+                  {equipSlotsForPage(pageTab).map((slot) => {
                     const equipped = itemForEquipSlot(slot, items);
                     const isOver = dragOverSlot === slot.key;
                     return (
                       <div
                         key={slot.key}
                         onDragOver={(e) => {
+                          if (!invCfg.enableDragDrop) return;
                           e.preventDefault();
                           setDragOverSlot(slot.key);
                         }}
@@ -693,6 +877,7 @@ export function InventoryDrawer({
                           setDragOverSlot((cur) => (cur === slot.key ? null : cur))
                         }
                         onDrop={(e) => {
+                          if (!invCfg.enableDragDrop) return;
                           e.preventDefault();
                           e.stopPropagation();
                           const id = e.dataTransfer.getData('text/inventory-item-id');
@@ -703,15 +888,15 @@ export function InventoryDrawer({
                           'group relative aspect-square rounded-lg border transition-all overflow-hidden',
                           'bg-gradient-to-b from-slate-900/80 to-slate-950/80',
                           isOver
-                            ? 'ring-2 ring-cyan-400 border-cyan-400/60 scale-[1.03]'
-                            : 'border-white/10 hover:border-cyan-400/30'
+                            ? 'ring-2 ring-primary border-primary/60 scale-[1.03]'
+                            : 'border-slate-700/40 hover:border-primary/40'
                         )}
                       >
                         {equipped ? (
                           <div
                             className={cn(
                               'absolute inset-0 cursor-pointer',
-                              selectedItemId === equipped.id && 'ring-2 ring-cyan-400'
+                              selectedItemId === equipped.id && 'ring-2 ring-primary'
                             )}
                             onClick={() => setSelectedItemId(equipped.id)}
                             title={`${equipped.itemName} · ${slot.label}`}
@@ -722,13 +907,13 @@ export function InventoryDrawer({
                               <p className="text-[10px] font-bold truncate text-white">
                                 {equipped.itemName}
                               </p>
-                              <p className="text-[9px] uppercase tracking-wider text-cyan-300/80">
+                              <p className="text-[9px] uppercase tracking-wider text-primary/90">
                                 {slot.label}
                               </p>
                             </div>
                           </div>
                         ) : (
-                          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 group-hover:text-cyan-400/80">
+                          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 group-hover:text-primary/80">
                             <SlotIcon slot={slot} />
                             <p className="mt-1.5 text-[10px] uppercase tracking-[0.12em] opacity-70">
                               {slot.label}
@@ -742,12 +927,12 @@ export function InventoryDrawer({
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-hidden flex flex-col gap-3">
+              <div className="md:min-h-0 md:flex-1 md:overflow-hidden flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300/80 font-bold">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400 font-bold">
                     {subTab === 'equipped' ? 'Equipped list' : 'Backpack'}
                   </p>
-                  <Badge className="bg-white/5 text-slate-200 border-white/10 text-[10px] h-5">
+                  <Badge className="bg-slate-800/60 text-slate-200 border-slate-700/40 text-[10px] h-5">
                     {filtered.length} item{filtered.length === 1 ? '' : 's'}
                   </Badge>
                 </div>
@@ -774,13 +959,13 @@ export function InventoryDrawer({
                     </div>
                   )
                 ) : (
-                  <div className="min-h-0 flex-1 overflow-y-auto pr-1 -mr-1">
-                    <div className="grid grid-cols-3 md:grid-cols-4 gap-3 pb-1">
+                  <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:pr-1 md:-mr-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pb-1">
                       {filtered.map((item) => {
                         const kind = inventoryKind(item);
-                        const draggable = ['skin', 'banner', 'frame', 'nickname'].includes(
-                          kind
-                        );
+                        const draggable =
+                          invCfg.enableDragDrop &&
+                          ['skin', 'banner', 'frame', 'nickname'].includes(kind);
                         const isSelected = selectedItemId === item.id;
                         return (
                           <Card
@@ -795,17 +980,17 @@ export function InventoryDrawer({
                             onClick={() => setSelectedItemId(item.id)}
                             className={cn(
                               'select-none relative bg-slate-900/60 backdrop-blur-md overflow-hidden cursor-pointer transition-all',
-                              'border-white/10',
+                              'border-slate-700/40',
                               item.isEquipped
-                                ? 'ring-1 ring-cyan-400/50 border-cyan-400/30'
+                                ? 'ring-1 ring-primary/50 border-primary/30'
                                 : '',
                               isSelected
-                                ? 'ring-2 ring-cyan-400 -translate-y-0.5 shadow-lg shadow-cyan-500/10'
-                                : 'hover:border-cyan-400/25 hover:-translate-y-0.5'
+                                ? 'ring-2 ring-primary -translate-y-0.5 shadow-lg shadow-primary/10'
+                                : 'hover:border-primary/30 hover:-translate-y-0.5'
                             )}
                           >
                             {draggable && (
-                              <div className="absolute top-1 right-1 z-10 h-5 w-5 rounded bg-black/40 border border-white/10 flex items-center justify-center text-white/60">
+                              <div className="absolute top-1 right-1 z-10 h-5 w-5 rounded bg-black/40 border border-slate-700/40 flex items-center justify-center text-white/60">
                                 <Upload className="h-3 w-3" />
                               </div>
                             )}
@@ -820,7 +1005,7 @@ export function InventoryDrawer({
                                   {item.itemName}
                                 </p>
                                 {item.isEquipped && (
-                                  <Badge className="bg-cyan-500/20 text-cyan-200 border-cyan-400/30 text-[9px] h-4 shrink-0">
+                                  <Badge className="bg-primary/20 text-primary border-primary/30 text-[9px] h-4 shrink-0">
                                     Equipped
                                   </Badge>
                                 )}
@@ -854,7 +1039,7 @@ export function InventoryDrawer({
                                   ) : (
                                     <Button
                                       size="sm"
-                                      className="h-6 text-[10px] flex-1 px-1.5 bg-cyan-600/70 hover:bg-cyan-500"
+                                      className="h-6 text-[10px] flex-1 px-1.5 bg-primary/80 hover:bg-primary"
                                       disabled={busyId === item.id}
                                       onClick={(e) => {
                                         e.stopPropagation();
@@ -888,7 +1073,7 @@ export function InventoryDrawer({
                                     <Loader2 className="w-3 h-3 animate-spin" />
                                   ) : (
                                     `Sell ${Math.floor(
-                                      item.vpValue * INVENTORY_RESELL_RATE
+                                      item.vpValue * resellRate
                                     )} VP`
                                   )}
                                 </Button>
@@ -921,13 +1106,13 @@ export function InventoryDrawer({
                 )}
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-slate-900/40 p-3 min-h-[90px]">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300/80 font-bold mb-2">
+              <div className="rounded-xl border border-slate-700/40 bg-slate-900/60 p-3 min-h-[90px] shrink-0">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-2">
                   Item detail
                 </p>
                 {selectedItem ? (
                   <div className="flex gap-3">
-                    <div className="h-16 w-16 shrink-0 rounded-lg overflow-hidden border border-white/10 bg-slate-950">
+                    <div className="h-16 w-16 shrink-0 rounded-lg overflow-hidden border border-slate-700/40 bg-slate-950">
                       <InventoryPreviewSmall item={selectedItem} />
                     </div>
                     <div className="min-w-0 flex-1 space-y-1">
@@ -936,7 +1121,7 @@ export function InventoryDrawer({
                           {selectedItem.itemName}
                         </p>
                         {selectedItem.isEquipped && (
-                          <Badge className="bg-cyan-500/20 text-cyan-200 border-cyan-400/30 text-[9px] h-4">
+                          <Badge className="bg-primary/20 text-primary border-primary/30 text-[9px] h-4">
                             Equipped
                           </Badge>
                         )}
@@ -947,11 +1132,11 @@ export function InventoryDrawer({
                       </p>
                       <p className="text-[11px] text-slate-300 leading-snug line-clamp-3">
                         {selectedItem.cosmeticSlot
-                          ? `Equip onto your character. Drag onto a slot on the right or use Equip. Resell refund: ${Math.floor(
-                              selectedItem.vpValue * INVENTORY_RESELL_RATE
+                          ? `Equip onto your character. Drag onto a slot or use Equip. Resell refund: ${Math.floor(
+                              selectedItem.vpValue * resellRate
                             )} VP.`
                           : `Power / boost that activates when purchased or equipped. Resell refund: ${Math.floor(
-                              selectedItem.vpValue * INVENTORY_RESELL_RATE
+                              selectedItem.vpValue * resellRate
                             )} VP.`}
                       </p>
                     </div>
@@ -964,25 +1149,26 @@ export function InventoryDrawer({
               </div>
             </section>
 
-            <section className="relative min-h-0 flex flex-col p-5 gap-4 overflow-hidden bg-gradient-to-br from-[#0a1228]/70 via-[#0b1730]/70 to-[#100a26]/60">
+            {invCfg.showPreviewColumn && (
+            <section className="relative md:min-h-0 flex flex-col p-4 sm:p-5 gap-4 md:overflow-y-auto bg-gradient-to-br from-slate-900/70 via-slate-800/50 to-slate-900/70">
               <div className="absolute inset-0 pointer-events-none opacity-40">
-                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(56,189,248,0.25),transparent_60%)]" />
-                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(129,140,248,0.2),transparent_55%)]" />
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(239,68,68,0.14),transparent_60%)]" />
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(148,163,184,0.12),transparent_55%)]" />
               </div>
 
               <div className="relative flex items-center justify-between z-10">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300/80 font-bold">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400 font-bold">
                   {pageTab === 'cosmetics' ? 'Profile preview' : 'Equipment preview'}
                 </p>
-                <Badge className="bg-white/5 text-cyan-200 border-white/10 text-[10px] h-5">
+                <Badge className="bg-slate-800/60 text-slate-300 border-slate-700/40 text-[10px] h-5">
                   {pageTab === 'cosmetics' ? 'Live profile' : 'Idle · Auto spin'}
                 </Badge>
               </div>
 
               {pageTab === 'cosmetics' ? (
-                <div className="relative flex-1 min-h-[380px] rounded-2xl border border-white/10 overflow-hidden bg-gradient-to-b from-[#0d1730]/80 to-[#080d1d]/80 z-10">
+                <div className="relative flex-1 min-h-[280px] sm:min-h-[380px] rounded-2xl border border-slate-700/40 overflow-hidden bg-gradient-to-b from-slate-900/80 to-slate-950/80 z-10">
                   <div className="absolute inset-0 p-3">
-                    <div className="h-full rounded-xl border border-white/10 bg-slate-950/30 overflow-hidden">
+                    <div className="h-full rounded-xl border border-slate-700/40 bg-slate-950/30 overflow-hidden">
                       <ProfileHeroBanner
                         rounded
                         banner={equippedBanner}
@@ -1015,42 +1201,41 @@ export function InventoryDrawer({
                   </div>
                 </div>
               ) : (
-                <div className="relative flex-1 min-h-[380px] rounded-2xl border border-white/10 overflow-hidden bg-gradient-to-b from-[#0d1730]/80 to-[#080d1d]/80 z-10">
+                <div className="relative flex-1 min-h-[280px] sm:min-h-[380px] rounded-2xl border border-slate-700/40 overflow-hidden bg-gradient-to-b from-slate-900/80 to-slate-950/80 z-10">
                   <InventoryAvatarPreview
+                    key={`${invCfg.previewModelUrl}|${invCfg.previewClipName}`}
                     className="absolute inset-0"
                     attachments={skinsLoad}
-                    spinSpeed={0.45}
+                    modelUrl={invCfg.previewModelUrl || null}
+                    defaultClipName={invCfg.previewClipName || undefined}
+                    spinSpeed={invCfg.previewSpinSpeed}
                   />
-                  <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-white/60 pointer-events-none">
-                    <span className="px-2 py-1 rounded-md bg-black/40 border border-white/10">
-                      Default model
+                  <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] text-white/60 pointer-events-none">
+                    <span className="px-2 py-1 rounded-md bg-black/40 border border-slate-700/40">
+                      {invCfg.previewModelUrl.trim() ? 'Custom model' : 'Default model'}
                     </span>
-                    <span className="px-2 py-1 rounded-md bg-black/40 border border-white/10">
-                      Equipped skins preview
+                    <span className="px-2 py-1 rounded-md bg-black/40 border border-slate-700/40">
+                      {invCfg.previewClipName.trim() || 'Idle'} · Equipped skins
                     </span>
                   </div>
                 </div>
               )}
 
-              <div className="relative grid grid-cols-2 gap-3 z-10">
-                {EQUIP_SLOTS.map((slot) => {
+              <div className="relative grid grid-cols-1 sm:grid-cols-2 gap-3 z-10 shrink-0">
+                {equipSlotsForPage(pageTab).map((slot) => {
                   const equipped = itemForEquipSlot(slot, items);
                   return (
                     <div
                       key={slot.key}
-                      className={cn(
-                        'rounded-lg border transition-all',
-                        'bg-slate-900/40 border-white/10 p-2.5',
-                        slot.side === 'left' ? '' : ''
-                      )}
+                      className="rounded-lg border transition-all bg-slate-900/60 border-slate-700/40 p-2.5"
                     >
                       <div className="flex items-center gap-2">
                         <div
                           className={cn(
                             'h-10 w-10 shrink-0 rounded-md flex items-center justify-center border',
                             equipped
-                              ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200 overflow-hidden'
-                              : 'border-white/10 bg-slate-950 text-slate-500'
+                              ? 'border-primary/40 bg-primary/10 text-primary overflow-hidden'
+                              : 'border-slate-700/40 bg-slate-950 text-slate-500'
                           )}
                         >
                           {equipped ? (
@@ -1060,7 +1245,7 @@ export function InventoryDrawer({
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-[10px] uppercase tracking-[0.14em] text-cyan-300/80 font-semibold">
+                          <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400 font-semibold">
                             Slot: {slot.label}
                           </p>
                           <p
@@ -1097,6 +1282,7 @@ export function InventoryDrawer({
                 })}
               </div>
             </section>
+            )}
           </div>
         </SheetContent>
       </Sheet>

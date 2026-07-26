@@ -29,8 +29,15 @@ import {
   type PlayerSimScratch,
   type WorldBounds,
 } from '../sim/movement.js';
+import {
+  applyPlatformCarry,
+  tickMovingPlatforms,
+  type PlatformDelta,
+  type PlatformMotionState,
+} from '../sim/moving-platforms.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import { fetchTrustedLoadout } from '../trusted-loadout.js';
 import { assignCompetitiveColor } from '../lib/body-colors.js';
 import {
   authenticateJoin,
@@ -43,6 +50,7 @@ import {
   DISPLAY_COMPETITIVE_REWARDS,
   reportMatchResults,
 } from '../match-report.js';
+import { fetchActiveMapPayload } from '../active-map.js';
 
 const KP_DEFAULT = 1000;
 
@@ -135,6 +143,8 @@ export class CompetitiveRoom extends Room<RoomState> {
   private overtimeApplied = false;
   private pushPayloads: PushPayloadSim[] = [];
   private pushWinPending: 'team_a' | 'team_b' | null = null;
+  private platformMotion = new Map<string, PlatformMotionState>();
+  private matchElapsedMs = 0;
 
   private rankKey = 'open';
   private mmWaitMs = DEFAULT_MM_WAIT_MS;
@@ -290,6 +300,8 @@ export class CompetitiveRoom extends Room<RoomState> {
 
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(platforms));
+      this.platformMotion.clear();
+      this.matchElapsedMs = 0;
 
       while (this.state.obstacles.length > 0) this.state.obstacles.pop();
       const hazards = Array.isArray(data?.obstacles)
@@ -353,6 +365,71 @@ export class CompetitiveRoom extends Room<RoomState> {
       );
     });
 
+    void fetchActiveMapPayload('competitive').then((active) => {
+      if (!active || this.customMapLoaded) return;
+      const pads = active.payload.platforms as PlatformBlueprint[] | undefined;
+      if (!Array.isArray(pads) || pads.length === 0) return;
+      const data = active.payload;
+      while (this.state.platforms.length > 0) this.state.platforms.pop();
+      this.state.platforms.push(...createFromBlueprints(pads));
+      this.platformMotion.clear();
+      this.matchElapsedMs = 0;
+      while (this.state.obstacles.length > 0) this.state.obstacles.pop();
+      const hazards = Array.isArray(data.obstacles)
+        ? (data.obstacles as ObstacleBlueprint[])
+        : [];
+      if (hazards.length) {
+        this.state.obstacles.push(...createObstaclesFromBlueprints(hazards));
+      }
+      const teamA = data.teamASpawns as { x: number; y: number; z: number }[] | undefined;
+      const teamB = data.teamBSpawns as { x: number; y: number; z: number }[] | undefined;
+      if (Array.isArray(teamA) && teamA.length) this.teamASpawns = teamA.map((s) => ({ ...s }));
+      if (Array.isArray(teamB) && teamB.length) this.teamBSpawns = teamB.map((s) => ({ ...s }));
+      const payloads = data.pushPayloads as typeof this.pushPayloads | undefined;
+      this.pushPayloads = Array.isArray(payloads)
+        ? payloads.map((p) => ({
+            ...p,
+            t: typeof p.t === 'number' ? Math.min(1, Math.max(0, p.t)) : 0.5,
+            pushStrength: Math.max(0.5, p.pushStrength ?? 3),
+            pushRadius: Math.max(0.8, p.pushRadius ?? 1.8),
+            winEpsilon: Math.max(0.02, p.winEpsilon ?? 0.08),
+          }))
+        : [];
+      this.pushWinPending = null;
+      if (data.worldBounds) {
+        this.worldBounds = { ...(data.worldBounds as WorldBounds) };
+      }
+      const cs = data.combatSettings as Record<string, unknown> | undefined;
+      if (cs && typeof cs === 'object') {
+        this.combatPhysOpts = {
+          gravity: typeof cs.gravity === 'number' ? cs.gravity : undefined,
+          jumpVelocity: typeof cs.jumpVelocity === 'number' ? cs.jumpVelocity : undefined,
+          doubleJumpVelocity:
+            typeof cs.doubleJumpVelocity === 'number' ? cs.doubleJumpVelocity : undefined,
+          doubleJumpEnabled:
+            typeof cs.doubleJumpEnabled === 'boolean' ? cs.doubleJumpEnabled : undefined,
+          jumpCutMult: typeof cs.jumpCutMult === 'number' ? cs.jumpCutMult : undefined,
+          coyoteMs: typeof cs.coyoteMs === 'number' ? cs.coyoteMs : undefined,
+          jumpBufferMs: typeof cs.jumpBufferMs === 'number' ? cs.jumpBufferMs : undefined,
+          walkSpeed: typeof cs.walkSpeed === 'number' ? cs.walkSpeed : undefined,
+          sprintMult: typeof cs.sprintMult === 'number' ? cs.sprintMult : undefined,
+          crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
+          maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
+          apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+          wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
+          wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
+          wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
+          wallSlideGravMult:
+            typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
+        };
+      }
+      this.customMapLoaded = true;
+      this.assignTeamsAndSpawn();
+      console.log(
+        `[CompetitiveRoom] MAIN map loaded from server (${active.name}): ${pads.length} pads`
+      );
+    });
+
     this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
   }
 
@@ -360,7 +437,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     return authenticateJoin(options);
   }
 
-  onJoin(client: Client, options: JoinOptions) {
+  async onJoin(client: Client, options: JoinOptions) {
     const claims = claimsFromAuth(client.auth, options);
     const ranked = this.state.modeTag === 'competitive_ranked';
     const allowed = !!(
@@ -382,7 +459,8 @@ export class CompetitiveRoom extends Room<RoomState> {
       claims.username || `Player${client.sessionId.slice(0, 4)}`;
     player.avatarUrl = claims.avatarUrl || '';
     player.kp = claims.kp;
-    applyLoadoutToPlayer(player, options);
+    const trusted = await fetchTrustedLoadout(player.userId);
+    applyLoadoutToPlayer(player, trusted ?? options);
     player.energy = MAX_ENERGY;
 
     // Balance by current team sizes
@@ -543,6 +621,8 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.pushWinPending = null;
     this.state.phase = 'playing';
     this.state.matchTimeRemainingMs = this.roundTimeMs;
+    this.matchElapsedMs = 0;
+    this.platformMotion.clear();
     // Reset payload to mid-rail each round.
     for (const p of this.pushPayloads) {
       p.t = 0.5;
@@ -561,7 +641,13 @@ export class CompetitiveRoom extends Room<RoomState> {
 
   private tickPlaying(dtMs: number) {
     this.state.matchTimeRemainingMs -= dtMs;
-    this.tickPlayers(dtMs);
+    this.matchElapsedMs += dtMs;
+    const platformDeltas = tickMovingPlatforms(
+      this.state.platforms,
+      this.platformMotion,
+      this.matchElapsedMs
+    );
+    this.tickPlayers(dtMs, platformDeltas);
     this.tickPushPayloads(dtMs / 1000);
 
     if (this.pushWinPending) {
@@ -750,7 +836,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     return Math.floor(this.maxRounds / 2) + 1;
   }
 
-  private tickPlayers(dtMs: number) {
+  private tickPlayers(dtMs: number, platformDeltas: PlatformDelta[] = []) {
     const dtSeconds = dtMs / 1000;
     const now = Date.now();
 
@@ -763,6 +849,8 @@ export class CompetitiveRoom extends Room<RoomState> {
         scratch = createSimScratch();
         this.simScratch.set(sessionId, scratch);
       }
+
+      applyPlatformCarry(player, scratch.supportPlatformId, platformDeltas);
 
       applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
 

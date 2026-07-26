@@ -5,13 +5,15 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { loadPlayerAvatar } from './game/editor/player-avatar';
 import { suggestPlayerBindings } from './game/editor/map-document';
-import { applySkinAttachments, tickSkinAttachments } from './game/editor/skin-attachments';
+import { applySkinAttachments, sanitizePackSkinMaterials, tickSkinAttachments } from './game/editor/skin-attachments';
 import { normalizeCharacter } from './game/renderer/asset-loader';
 import type { SkinAttachment } from '@/lib/player-skins';
 
 type Props = {
   className?: string;
   attachments: SkinAttachment[];
+  /** Optional model URL override (admin inventory config). Empty = default pack body. */
+  modelUrl?: string | null;
   /** Exact clip name to play; defaults to first clip containing "idle" (case-insensitive). */
   defaultClipName?: string;
   /** Rotation speed in rad/s. Default ~0.4 */
@@ -19,19 +21,25 @@ type Props = {
 };
 
 /**
- * Standalone three.js turntable preview that loads the default pack body mesh,
- * applies all equipped skin attachments, plays the idle animation and slowly
- * auto-spins. Used inside the inventory dialog.
+ * Standalone three.js turntable preview that loads the configured (or default)
+ * body mesh, applies equipped skin attachments, plays the idle/clip animation
+ * and slowly auto-spins. Used inside the inventory dialog.
  */
 export function InventoryAvatarPreview({
   className,
   attachments,
+  modelUrl,
   defaultClipName,
   spinSpeed = 0.4,
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const attachmentsRef = useRef<SkinAttachment[]>(attachments);
   attachmentsRef.current = attachments;
+  const spinRef = useRef(spinSpeed);
+  spinRef.current = spinSpeed;
+
+  // Remount when model / clip changes so the admin site-wide preview updates live.
+  const bootKey = `${modelUrl?.trim() || ''}|${defaultClipName?.trim() || ''}`;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -45,9 +53,9 @@ export function InventoryAvatarPreview({
         for (const m of mats) {
           const mat = m as THREE.MeshStandardMaterial;
           if (!mat || typeof mat !== 'object') continue;
-          const map = (mat as any).map as THREE.Texture | null | undefined;
+          const map = (mat as { map?: THREE.Texture | null }).map;
           if (map && map.colorSpace !== THREE.SRGBColorSpace) map.colorSpace = THREE.SRGBColorSpace;
-          const emissiveMap = (mat as any).emissiveMap as THREE.Texture | null | undefined;
+          const emissiveMap = (mat as { emissiveMap?: THREE.Texture | null }).emissiveMap;
           if (emissiveMap && emissiveMap.colorSpace !== THREE.SRGBColorSpace) {
             emissiveMap.colorSpace = THREE.SRGBColorSpace;
           }
@@ -75,7 +83,9 @@ export function InventoryAvatarPreview({
     scene.background = null;
     const pmrem = new THREE.PMREMGenerator(renderer);
     const env = pmrem.fromScene(new RoomEnvironment(), 0.04);
+    // Soft env — strong RoomEnvironment + FBX metalness made skins chrome-grey.
     scene.environment = env.texture;
+    scene.environmentIntensity = 0.35;
 
     const camera = new THREE.PerspectiveCamera(35, w / h, 0.05, 50);
     camera.position.set(0, 1.35, 3.2);
@@ -118,10 +128,10 @@ export function InventoryAvatarPreview({
     glow.position.y = 0.002;
     scene.add(glow);
 
-    const clock = new THREE.Clock();
+    const timer = new THREE.Timer();
+    timer.connect(document);
     let mixer: THREE.AnimationMixer | null = null;
     let avatarScene: THREE.Object3D | null = null;
-    let currentAction: THREE.AnimationAction | null = null;
     let skinsAppliedVersion = 0;
     let cancelled = false;
     let raf = 0;
@@ -130,6 +140,7 @@ export function InventoryAvatarPreview({
       if (!avatarScene) return;
       await applySkinAttachments(avatarScene, next);
       fixColorSpaces(avatarScene);
+      sanitizePackSkinMaterials(avatarScene);
     };
 
     let reapplyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -139,25 +150,28 @@ export function InventoryAvatarPreview({
       const targetVersion = ++skinsAppliedVersion;
       reapplyTimer = setTimeout(() => {
         void reapplySkins(snapshot).then(() => {
-          if (targetVersion !== skinsAppliedVersion) return; // newer pending
+          if (targetVersion !== skinsAppliedVersion) return;
         });
       }, 0);
     };
 
     (async () => {
       try {
-        const loaded = await loadPlayerAvatar();
+        const override = modelUrl?.trim() || null;
+        const loaded = await loadPlayerAvatar(null, override);
         if (cancelled) return;
         normalizeCharacter(loaded.scene, 1.75);
         pivot.add(loaded.scene);
         avatarScene = loaded.scene;
+        sanitizePackSkinMaterials(loaded.scene);
+        fixColorSpaces(loaded.scene);
 
         const clips = loaded.animations;
         mixer = new THREE.AnimationMixer(loaded.scene);
         const byName = new Map(clips.map((c) => [c.name || '(unnamed)', c]));
         const bindings = suggestPlayerBindings(loaded.clipNames ?? clips.map((c) => c.name || ''));
         const desiredName =
-          defaultClipName ||
+          defaultClipName?.trim() ||
           bindings.idle ||
           clips.find((c) => /idle/i.test(c.name || ''))?.name ||
           clips.find((c) => /stand/i.test(c.name || ''))?.name ||
@@ -174,15 +188,14 @@ export function InventoryAvatarPreview({
           null;
         if (fallback) {
           mixer.stopAllAction();
-          currentAction = mixer.clipAction(fallback);
-          currentAction.setLoop(THREE.LoopRepeat, Infinity);
-          currentAction.enabled = true;
-          currentAction.play();
+          const action = mixer.clipAction(fallback);
+          action.setLoop(THREE.LoopRepeat, Infinity);
+          action.enabled = true;
+          action.play();
         }
 
         await reapplySkins([...attachmentsRef.current]);
       } catch (e) {
-        // Swallow — empty state will render.
         // eslint-disable-next-line no-console
         console.warn('[InventoryAvatarPreview] failed to load', e);
       }
@@ -200,8 +213,9 @@ export function InventoryAvatarPreview({
     const prevAttachmentsKey = { v: JSON.stringify(attachmentsRef.current) };
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      const dt = Math.min(clock.getDelta(), 0.05);
-      pivot.rotation.y += dt * spinSpeed;
+      timer.update();
+      const dt = Math.min(timer.getDelta(), 0.05);
+      pivot.rotation.y += dt * spinRef.current;
       mixer?.update(dt);
       if (avatarScene) tickSkinAttachments(avatarScene, dt);
       const nextKey = JSON.stringify(attachmentsRef.current);
@@ -220,13 +234,13 @@ export function InventoryAvatarPreview({
       mixer?.stopAllAction();
       if (avatarScene) pivot.remove(avatarScene);
       ro.disconnect();
+      timer.disconnect();
       env.texture.dispose();
       pmrem.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [bootKey, defaultClipName, modelUrl]);
 
   return <div ref={hostRef} className={className} />;
 }

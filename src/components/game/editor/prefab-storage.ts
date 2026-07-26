@@ -6,6 +6,7 @@ import {
   ensurePushBlock,
   ensurePushRail,
   ensureSpinHazard,
+  ensurePlatformMotion,
   generateId,
   isHammerSolidEntity,
   resolveCollideMaterial,
@@ -53,6 +54,12 @@ export function savePrefab(name: string, entities: EditorEntity[]): PrefabStamp 
     hazard: e.hazard ? { ...e.hazard } : undefined,
     jumpPad: e.jumpPad ? { ...e.jumpPad } : undefined,
     surface: e.surface ? { ...e.surface } : undefined,
+    motion: e.motion
+      ? {
+          ...e.motion,
+          offset: [...(e.motion.offset ?? [0, 0, 4])] as [number, number, number],
+        }
+      : undefined,
     teleport: e.teleport ? { ...e.teleport } : undefined,
     light: e.light ? { ...e.light } : undefined,
     monsterSpawn: e.monsterSpawn ? { ...e.monsterSpawn } : undefined,
@@ -97,6 +104,12 @@ export function instantiatePrefab(
     hazard: e.hazard ? { ...e.hazard } : undefined,
     jumpPad: e.jumpPad ? { ...e.jumpPad } : undefined,
     surface: e.surface ? { ...e.surface } : undefined,
+    motion: e.motion
+      ? {
+          ...e.motion,
+          offset: [...(e.motion.offset ?? [0, 0, 4])] as [number, number, number],
+        }
+      : undefined,
     teleport: e.teleport ? { ...e.teleport } : undefined,
     light: e.light ? { ...e.light } : undefined,
     monsterSpawn: e.monsterSpawn ? { ...e.monsterSpawn } : undefined,
@@ -184,6 +197,14 @@ export interface SimPlatformBlueprint {
   conveyorSpeed?: number;
   conveyorDirX?: number;
   conveyorDirY?: number;
+  /** Optional editor entity id — client can move the mesh with the pad. */
+  entityId?: string;
+  /** Moving platform (sim space): home = rest pose, amp = B-home. */
+  motionPeriodMs?: number;
+  motionPhaseMs?: number;
+  motionAmpX?: number;
+  motionAmpY?: number;
+  motionAmpZ?: number;
 }
 
 export interface SimHazardBlueprint {
@@ -359,6 +380,13 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const dirSimX = Math.cos(yaw);
   const dirSimY = Math.sin(yaw);
 
+  const motion = ensurePlatformMotion(e);
+  // Three offset → sim: x_sim = z_three, y_sim = x_three, z_sim = y_three
+  const [ox, oy, oz] = motion.offset;
+  const ampSimX = oz;
+  const ampSimY = ox;
+  const ampSimZ = oy;
+
   return {
     x: tz,
     y: tx,
@@ -371,6 +399,16 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
     conveyorSpeed: conveyor ? Math.max(0.5, e.surface?.conveyorSpeed ?? 4) : undefined,
     conveyorDirX: conveyor ? dirSimX : undefined,
     conveyorDirY: conveyor ? dirSimY : undefined,
+    entityId: e.id,
+    ...(motion.enabled
+      ? {
+          motionPeriodMs: motion.periodMs,
+          motionPhaseMs: motion.phaseMs,
+          motionAmpX: ampSimX,
+          motionAmpY: ampSimY,
+          motionAmpZ: ampSimZ,
+        }
+      : {}),
   };
 }
 
@@ -378,8 +416,8 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
  * Expand stairs/ramps into stepped solid pads so players can climb the mesh
  * instead of walking through a single thin top slab.
  */
-export function stairEntityToSimPads(stairs: EditorEntity, steps = 8): SimPlatformBlueprint[] {
-  const n = Math.max(3, Math.min(16, Math.round(steps)));
+export function stairEntityToSimPads(stairs: EditorEntity, steps = 14): SimPlatformBlueprint[] {
+  const n = Math.max(3, Math.min(28, Math.round(steps)));
   const [sx, sy, sz] = stairs.position;
   const yaw = ((stairs.rotation?.[1] ?? 0) * Math.PI) / 180;
   const foot =
@@ -420,7 +458,7 @@ export function stairEntityToSimPads(stairs: EditorEntity, steps = 8): SimPlatfo
       width: worldSizeZ,
       depth: worldSizeX,
       kind,
-      height: Math.max(0.18, stepRise * 0.85),
+      height: Math.min(0.35, Math.max(0.18, stepRise * 0.85)),
     });
   }
   return pads;
@@ -471,8 +509,8 @@ function isTiltedRampSolid(e: EditorEntity): boolean {
  * driven by the entity's ACTUAL rotation instead of requiring a specific
  * catalog model name, so any hand-tilted block works as a walkable ramp.
  */
-export function rampEntityToSimPads(e: EditorEntity, steps = 12): SimPlatformBlueprint[] {
-  const n = Math.max(4, Math.min(24, Math.round(steps)));
+export function rampEntityToSimPads(e: EditorEntity, steps = 20): SimPlatformBlueprint[] {
+  const n = Math.max(4, Math.min(36, Math.round(steps)));
   const [ex, ey, ez] = e.position;
   const foot =
     e.collisionSize ??
@@ -530,7 +568,7 @@ export function rampEntityToSimPads(e: EditorEntity, steps = 12): SimPlatformBlu
       width: Math.max(0.4, maxThreeZ - minThreeZ),
       depth: Math.max(0.4, maxThreeX - minThreeX),
       kind,
-      height: Math.max(0.18, halfY * 2 * 0.85),
+      height: Math.min(0.35, Math.max(0.18, halfY * 2 * 0.85)),
     });
   }
   return pads;
@@ -540,10 +578,10 @@ function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
   if (resolveCollideMaterial(e) === 'walkthrough') return [];
   const model = e.model ?? '';
   if (model.includes('stair') || model.includes('ramp')) {
-    return stairEntityToSimPads(e, 8);
+    return stairEntityToSimPads(e, 14);
   }
   if (isTiltedRampSolid(e)) {
-    return rampEntityToSimPads(e, 12);
+    return rampEntityToSimPads(e, 20);
   }
   return [entityToPad(e)];
 }

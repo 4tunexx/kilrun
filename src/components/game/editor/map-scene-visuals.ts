@@ -55,27 +55,68 @@ export type ApplyAuthoredEnvironmentOpts = {
   loadSkyTexture?: boolean;
 };
 
+/** Radial gradient used by the void shadow halo planes. */
+function makeVoidShadowTexture(): THREE.CanvasTexture {
+  const size = 512;
+  const cvs = document.createElement('canvas');
+  cvs.width = size;
+  cvs.height = size;
+  const ctx = cvs.getContext('2d')!;
+  const grd = ctx.createRadialGradient(
+    size / 2,
+    size / 2,
+    size * 0.02,
+    size / 2,
+    size / 2,
+    size * 0.5
+  );
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.25, 'rgba(255,255,255,0.75)');
+  grd.addColorStop(0.55, 'rgba(255,255,255,0.25)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 /**
  * Apply map document environment (sky / fog / lights / floor) so Play Test
- * and live match match the editor viewport look.
+ * and live match match the editor viewport look. Includes the void preset
+ * overrides (void fog / sky tint / floor tint / glowing shadow halo) so
+ * World-tab void settings behave identically in every mode.
  */
 export function applyAuthoredEnvironment(
   scene: THREE.Scene,
   env: MapEnvironment,
   opts: ApplyAuthoredEnvironmentOpts = {}
 ): { dispose: () => void } {
+  const isVoid = env.floor === 'void';
   const skyHex = resolveSkyColor(env);
-  const fogHex = resolveFogColor(env);
+  // Void maps: void-specific fog override (density & color) so the abyss keeps
+  // its authored glow. Falls back to global fog settings when unset.
+  const fogHex = isVoid && env.voidFogColor ? env.voidFogColor : resolveFogColor(env);
   const fogDensity = Math.min(
-    env.fogDensity ?? 0.022,
+    isVoid && env.voidFogDensity != null ? env.voidFogDensity : env.fogDensity ?? 0.022,
     opts.maxFogDensity ?? Number.POSITIVE_INFINITY
   );
+  const safeFogDensity = Number.isFinite(fogDensity)
+    ? Math.max(0, Math.min(0.2, fogDensity))
+    : 0.022;
+  // Void maps tint the solid sky towards the void color so the horizon matches
+  // the abyss below (never overrides an authored sky texture).
+  const solidSkyHex = isVoid && env.voidColor && !env.skyTextureUrl ? env.voidColor : skyHex;
 
   let skyTexture: THREE.Texture | null = null;
   let cancelled = false;
+  const disposables: Array<{ dispose: () => void }> = [];
+  const spawnedMeshes: THREE.Object3D[] = [];
 
   const setSolidSky = () => {
-    scene.background = new THREE.Color(skyHex);
+    scene.background = new THREE.Color(solidSkyHex);
     scene.environment = null;
   };
 
@@ -102,7 +143,7 @@ export function applyAuthoredEnvironment(
     setSolidSky();
   }
 
-  scene.fog = new THREE.FogExp2(fogHex, Number.isFinite(fogDensity) ? fogDensity : 0.022);
+  scene.fog = new THREE.FogExp2(fogHex, safeFogDensity);
 
   if (opts.lights) {
     const { ambient, sun, hemi } = opts.lights;
@@ -120,7 +161,15 @@ export function applyAuthoredEnvironment(
 
   if (opts.floorMesh) {
     const floor = opts.floorMesh;
-    floor.visible = env.floor !== 'void';
+    // Void floor tint: when authored, render the floor plane as a translucent
+    // colored disc instead of hiding it entirely (matches editor viewport).
+    const legacyVoidTint = Boolean(env.voidColor);
+    const voidFloorColor = env.voidFloorColor ?? env.voidColor ?? '#050810';
+    const voidFloorOpacity = env.voidFloorOpacity ?? (legacyVoidTint ? 0.92 : 1);
+    const showVoidFloor =
+      isVoid &&
+      (env.voidFloorColor != null || env.voidColor != null || voidFloorOpacity > 0.01);
+    floor.visible = !isVoid || showVoidFloor;
     const mat = floor.material as THREE.MeshStandardMaterial;
     if (env.floor === 'water') {
       mat.color.set('#0e4a6e');
@@ -128,6 +177,18 @@ export function applyAuthoredEnvironment(
       mat.opacity = 0.75;
       mat.metalness = 0.4;
       mat.roughness = 0.2;
+    } else if (isVoid && showVoidFloor) {
+      mat.color.set(voidFloorColor);
+      mat.transparent = voidFloorOpacity < 0.999;
+      mat.opacity = Math.max(0, Math.min(1, voidFloorOpacity));
+      mat.metalness = 0.08;
+      mat.roughness = 0.95;
+    } else if (isVoid) {
+      mat.color.set('#000000');
+      mat.transparent = true;
+      mat.opacity = 0;
+      mat.metalness = 0;
+      mat.roughness = 1;
     } else {
       mat.color.set(env.floorColor || '#1a2740');
       mat.transparent = false;
@@ -136,7 +197,7 @@ export function applyAuthoredEnvironment(
       mat.roughness = 1;
     }
     const tile = Math.max(1, env.floorTextureScale ?? 40);
-    if (env.defaultTextureUrl) {
+    if (!isVoid && env.defaultTextureUrl) {
       new THREE.TextureLoader().load(env.defaultTextureUrl, (tex) => {
         if (cancelled) {
           tex.dispose();
@@ -156,6 +217,58 @@ export function applyAuthoredEnvironment(
     }
   }
 
+  // Void shadow / glowing fog halo under the platforms (two-stage additive
+  // radial glow) — same construction as the editor viewport.
+  const shadowIntensity = isVoid ? Math.max(0, Math.min(2, env.voidShadowIntensity ?? 0)) : 0;
+  if (shadowIntensity > 0) {
+    const voidFloorColorForShadow = env.voidFloorColor ?? env.voidColor ?? '#050810';
+    const shadowColor = env.voidShadowColor ?? env.voidFogColor ?? voidFloorColorForShadow;
+    const voidShadowTex = makeVoidShadowTexture();
+    disposables.push(voidShadowTex);
+
+    const voidShadowMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(shadowColor),
+      transparent: true,
+      opacity: 0.9 * shadowIntensity,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      map: voidShadowTex,
+    });
+    disposables.push(voidShadowMat);
+    const voidShadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), voidShadowMat);
+    disposables.push(voidShadowMesh.geometry);
+    voidShadowMesh.rotation.x = -Math.PI / 2;
+    voidShadowMesh.position.y = -0.012;
+    voidShadowMesh.renderOrder = 1;
+    scene.add(voidShadowMesh);
+    spawnedMeshes.push(voidShadowMesh);
+
+    // Inner halo uses a slightly brighter shade — feels more volumetric right
+    // under the platforms.
+    const brighter = new THREE.Color(shadowColor).offsetHSL(0, 0, 0.06);
+    const voidShadowInnerMat = new THREE.MeshBasicMaterial({
+      color: brighter,
+      transparent: true,
+      opacity: 0.55 * shadowIntensity,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      map: voidShadowTex,
+    });
+    disposables.push(voidShadowInnerMat);
+    const voidShadowInner = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), voidShadowInnerMat);
+    disposables.push(voidShadowInner.geometry);
+    voidShadowInner.rotation.x = -Math.PI / 2;
+    voidShadowInner.position.y = -0.008;
+    voidShadowInner.renderOrder = 2;
+    scene.add(voidShadowInner);
+    spawnedMeshes.push(voidShadowInner);
+
+    // Expand shadow halo radius for denser void fog (bigger perceived abyss).
+    const scale = 0.85 + Math.min(1.6, safeFogDensity * 18);
+    voidShadowMesh.scale.setScalar(scale);
+    voidShadowInner.scale.setScalar(scale);
+  }
+
   return {
     dispose: () => {
       cancelled = true;
@@ -163,6 +276,8 @@ export function applyAuthoredEnvironment(
         skyTexture.dispose();
         skyTexture = null;
       }
+      for (const mesh of spawnedMeshes) scene.remove(mesh);
+      for (const d of disposables) d.dispose();
     },
   };
 }

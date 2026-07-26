@@ -158,6 +158,13 @@ export default function KilrunEngine({
   const [cloudReady, setCloudReady] = useState(false);
   const equippedSkinsRef = useRef<SkinAttachment[] | null>(equippedSkins ?? null);
   equippedSkinsRef.current = equippedSkins ?? null;
+  const charactersRef = useRef<Map<string, ThreeCharacter>>(new Map());
+  const localSessionRef = useRef<string | null>(null);
+  const roomPhaseRef = useRef(room.phase);
+  roomPhaseRef.current = room.phase;
+  const matchRemainingRef = useRef(room.matchTimeRemainingMs ?? 0);
+  matchRemainingRef.current = room.matchTimeRemainingMs ?? 0;
+  const matchDurationRef = useRef(180_000);
 
   // Prefer cloud Active map for this mode (works for all clients), fall back to localStorage.
   useEffect(() => {
@@ -308,6 +315,7 @@ export default function KilrunEngine({
     });
     const overlay = new CustomMapOverlay(world.scene);
     const characters = new Map<string, ThreeCharacter>();
+    charactersRef.current = characters;
     const inputManager = new InputManager(hostElement, isMobile);
     joystickRef.current = inputManager.joystick;
     let envHandle: { dispose: () => void } | null = null;
@@ -476,6 +484,7 @@ export default function KilrunEngine({
       }
 
       const localSessionId = connectionRef.current?.sessionId;
+      localSessionRef.current = localSessionId ?? null;
       const localState = localSessionId ? playersRef.current.get(localSessionId) : undefined;
 
       const stick = inputManager.getMoveVector();
@@ -500,18 +509,31 @@ export default function KilrunEngine({
         if (isLocal) {
           const pl = tpsRef.current.player;
           const cam = tpsRef.current.camera;
-          view.root.scale.setScalar(pl.scale);
+          view.root.scale.setScalar(
+            Number.isFinite(pl.scale) && pl.scale > 0 ? pl.scale : 1
+          );
           // Capture the smoothed ground position for the camera BEFORE the
           // visual Y offset so camera height matches the old behavior.
           smoothCamTarget.copy(view.root.position);
           hasSmoothCamTarget = true;
-          view.root.position.y += pl.offsetY;
+          view.root.position.y += Number.isFinite(pl.offsetY) ? pl.offsetY : 0;
+          if (Number.isFinite(pl.yawOffsetDeg) && pl.yawOffsetDeg !== 0) {
+            view.root.rotation.y += (pl.yawOffsetDeg * Math.PI) / 180;
+          }
           if (pl.hideWhenClose && cam.boomDistance < pl.hideDistance) {
             view.root.visible = false;
           }
         }
       });
       map.update(dt);
+
+      if (roomPhaseRef.current === 'playing') {
+        const remain = matchRemainingRef.current;
+        const elapsed = Math.max(0, matchDurationRef.current - remain);
+        overlay.tickMotion(elapsed);
+      } else {
+        overlay.tickMotion(0);
+      }
 
       if (!frozen && (inputManager.isInteractPressed() || inputManager.consumeInteractPulse())) {
         interactPulse = true;
@@ -724,6 +746,17 @@ export default function KilrunEngine({
                     cooldownMs: preset.cooldownMs,
                     coneRadians: preset.coneRadians,
                   });
+                  const sid = localSessionRef.current;
+                  if (preset.modelUrl && sid) {
+                    const view = charactersRef.current.get(sid);
+                    void view?.equipWeaponMesh(preset.modelUrl, {
+                      kind: preset.kind,
+                      damage: preset.damage,
+                      range: preset.range,
+                      cooldownMs: preset.cooldownMs,
+                      coneRadians: preset.coneRadians,
+                    });
+                  }
                 }}
               />
             )}

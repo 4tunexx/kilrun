@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { loadAnimatedPrefab } from './model-scan';
+import { isPackPreviewIconUrl } from '@/lib/asset-registry';
+import { sanitizePackSkinMaterials } from './skin-attachments';
 
 export interface ThumbnailCaptureOptions {
   /** Output square size in pixels. Default 512. */
@@ -128,7 +130,7 @@ export function createThumbnailCaptureSession(): ThumbnailCaptureSession {
     scene.add(root);
     try {
       let replacementMap: THREE.Texture | null = null;
-      if (options.textureUrl) {
+      if (options.textureUrl && !isPackPreviewIconUrl(options.textureUrl)) {
         try {
           replacementMap = await loadTextureFromUrl(options.textureUrl);
         } catch {
@@ -156,6 +158,7 @@ export function createThumbnailCaptureSession(): ThumbnailCaptureSession {
           }
         }
       });
+      sanitizePackSkinMaterials(root);
 
       // Cheap after the first hit on any given URL/atlas — loadAnimatedPrefab
       // and the underlying texture cache mean repeat/shared textures (e.g.

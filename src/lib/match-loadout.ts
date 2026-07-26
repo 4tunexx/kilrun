@@ -11,18 +11,16 @@ import {
 const MAX_SKIN_JSON_CHARS = 48_000;
 
 /** Strip huge data URLs before sending skins over the wire.
- * NOTE: Full-body skins need their custom model URLs to render at all.
- * Preserve customModelUrl unless it would blow the 48KB cap, in which
- * case we also clear the fullbody slot marker so rendering falls back to
- * the default base body (otherwise base body is hidden + no FBX = invisible).
+ * NOTE: Full-body costumes layer OVER the default pack body — keep their
+ * customModelUrl so they render as overlays. Only demote if a data URL would
+ * blow the join payload budget.
  */
 export function compactSkinsForMatch(attachments: SkinAttachment[]): SkinAttachment[] {
   return attachments.slice(0, 16).map((att) => {
     const next: SkinAttachment = { ...att };
     const isFullbody = next.slot === 'fullbody';
 
-    // Never blindly delete customModelUrl for full-body costumes —
-    // those ARE the player mesh and we would otherwise render nothing.
+    // Preserve model URLs for fullbody overlays so live matches still show them.
     if (!isFullbody && next.customModelUrl?.startsWith('data:')) {
       delete next.customModelUrl;
     } else if (
@@ -30,10 +28,8 @@ export function compactSkinsForMatch(attachments: SkinAttachment[]): SkinAttachm
       next.customModelUrl?.startsWith('data:') &&
       next.customModelUrl.length > 32_000
     ) {
-      // Data FBX too large for network strip: demote so attach code falls
-      // through to default body instead of hiding base with no replacement.
+      // Data FBX too large for network — drop overlay rather than break join.
       delete next.customModelUrl;
-      next.slot = 'body';
     }
 
     if (next.textureUrl?.startsWith('data:')) {

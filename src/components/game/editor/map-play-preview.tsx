@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
 import type { MapDocument } from './map-document';
-import { ensureCombatSettings } from './map-document';
+import { ensureCombatSettings, ensurePlatformMotion } from './map-document';
 import {
   HAMMER_SOLID_MODEL,
   ensureEnvironment,
@@ -40,6 +40,13 @@ import {
   type SimPad,
   type SimPhysicsOpts,
 } from '@/lib/platformer-sim';
+import { hasMovingAmp, movingPlatformPos, movingPlatformU } from '@shared/moving-platform';
+import {
+  applyGhostPose,
+  createGhostMesh,
+  sampleGhostAt,
+} from './ghost-replay';
+import type { GhostSample } from '@/lib/ghost-actions';
 import {
   mapDocSpawnPoints,
   mapDocToSimFinishes,
@@ -167,12 +174,15 @@ export function MapPlayPreview({
   embedded = false,
   tpsViewOverride,
   previewSkins = true,
+  mapId,
 }: {
   doc: MapDocument;
   onClose?: () => void;
   embedded?: boolean;
   tpsViewOverride?: TpsViewSettings | null;
   previewSkins?: boolean;
+  /** Stable id for ghost WR (local or cloud map id). */
+  mapId?: string;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
@@ -218,7 +228,12 @@ export function MapPlayPreview({
   const [autoStartNote, setAutoStartNote] = useState(false);
   const [tpsHud, setTpsHud] = useState<TpsViewSettings>(() => resolvedTps);
   const [aimingHud, setAimingHud] = useState(false);
+  const [showGhost, setShowGhost] = useState(true);
+  const [ghostLabel, setGhostLabel] = useState<string | null>(null);
+  const [ghostResult, setGhostResult] = useState<string | null>(null);
   const isTouch = typeof window !== 'undefined' && detectTouchDevice();
+  const showGhostRef = useRef(showGhost);
+  showGhostRef.current = showGhost;
 
   useEffect(() => {
     tpsRef.current = resolvedTps;
@@ -238,6 +253,8 @@ export function MapPlayPreview({
     setLoading(true);
     setAutoStartNote(false);
     setAimingHud(false);
+    setGhostLabel(null);
+    setGhostResult(null);
 
     const prepared = prepareDocForPlayTest(doc);
     const playDoc = prepared.doc;
@@ -251,7 +268,13 @@ export function MapPlayPreview({
     const env = ensureEnvironment(playDoc);
 
     const camera = new THREE.PerspectiveCamera(initialTps.camera.fov, 1, 0.1, 300);
-    const pads = mapDocToSimPlatforms(playDoc);
+    const pads = mapDocToSimPlatforms(playDoc).map((p, i) => ({
+      ...p,
+      id: p.entityId || `pad_${i}`,
+      homeX: p.x,
+      homeY: p.y,
+      homeZ: p.z,
+    }));
     const finishes = mapDocToSimFinishes(playDoc);
     const hazards = mapDocToSimHazards(playDoc);
     const teleports = mapDocToSimTeleports(playDoc);
@@ -310,8 +333,10 @@ export function MapPlayPreview({
     const envHandle = applyAuthoredEnvironment(scene, env, {
       lights: { ambient, sun, hemi },
       floorMesh: floor,
-      // Slightly lighter fog on mobile playtest for readability.
-      maxFogDensity: 0.014,
+      // Cap fog only for non-void floors so World-tab void fog/shadow settings
+      // still match the editor. Non-void playtest keeps a lighter fog for
+      // readability on dense maps.
+      maxFogDensity: env.floor === 'void' ? undefined : 0.014,
     });
 
     // Collision pads are sim-only; enable this when debugging exported platform volumes.
@@ -319,6 +344,22 @@ export function MapPlayPreview({
 
     const director = new AnimationDirector();
     const roots = new Map<string, THREE.Object3D>();
+    const motionVisual = new Map<
+      string,
+      {
+        rest: [number, number, number];
+        offset: [number, number, number];
+        periodMs: number;
+        phaseMs: number;
+      }
+    >();
+    const ghostMesh = createGhostMesh();
+    scene.add(ghostMesh);
+    let wrSamples: GhostSample[] = [];
+    const recordedSamples: GhostSample[] = [];
+    let lastGhostSampleAt = 0;
+    let ghostSubmitted = false;
+    let matchElapsedMs = 0;
     let playerRoot: THREE.Object3D | null = null;
     let playerId: string | null = null;
     let playerBaseScale: [number, number, number] = [1, 1, 1];
@@ -360,14 +401,13 @@ export function MapPlayPreview({
       try {
         const previewAttachments =
           previewSkins && avatarEntity?.playerSkins?.length ? avatarEntity.playerSkins : [];
-        const bodySkin = previewAttachments.find((skin) => skin.slot === 'body') ?? undefined;
-        const baseOverride = bodySkin ? resolveModelSrc(bodySkin.model, bodySkin.customModelUrl) : null;
-        const loaded = await loadPlayerAvatar(avatarEntity, baseOverride);
+        // Always keep the default pack player as the base. Body / fullbody /
+        // clothing skins layer via applySkinAttachments — fullbody must never
+        // replace the whole avatar (it stays over the default model).
+        const loaded = await loadPlayerAvatar(avatarEntity, null);
         if (disposed) return;
-        const layeredSkins = previewAttachments.filter((skin) => skin !== bodySkin);
-        if (layeredSkins.length) {
-          // Rebind clothes before the animation director resolves bone tracks.
-          await applySkinAttachments(loaded.scene, layeredSkins);
+        if (previewAttachments.length) {
+          await applySkinAttachments(loaded.scene, previewAttachments);
           if (disposed) return;
         }
         // Same 1.75m planted fit used by player and skin studios.
@@ -449,6 +489,15 @@ export function MapPlayPreview({
           planted.userData.entityId = ent.id;
           scene.add(planted);
           roots.set(ent.id, planted);
+          const motion = ensurePlatformMotion(ent);
+          if (motion.enabled) {
+            motionVisual.set(ent.id, {
+              rest: [...ent.position] as [number, number, number],
+              offset: [...(motion.offset ?? [0, 0, 4])] as [number, number, number],
+              periodMs: motion.periodMs,
+              phaseMs: motion.phaseMs,
+            });
+          }
           if (clips.length) {
             director.register(ent.id, planted, clips);
             if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
@@ -489,6 +538,20 @@ export function MapPlayPreview({
       if (!disposed) {
         worldReady = true;
         setLoading(false);
+        if (mapId) {
+          void (async () => {
+            try {
+              const { getMapWorldRecord } = await import('@/lib/ghost-actions');
+              const wr = await getMapWorldRecord(mapId);
+              if (disposed || !wr?.samples?.length) return;
+              wrSamples = wr.samples;
+              const sec = (wr.finishMs / 1000).toFixed(2);
+              setGhostLabel(`WR ${wr.username} · ${sec}s`);
+            } catch {
+              /* guest / no table yet */
+            }
+          })();
+        }
       }
     };
     void loadAll();
@@ -547,6 +610,7 @@ export function MapPlayPreview({
 
     const clock = new THREE.Clock();
     const playerPos = new THREE.Vector3();
+    let smoothCamY: number | null = null;
     const tick = () => {
       if (disposed) return;
       raf = requestAnimationFrame(tick);
@@ -590,6 +654,54 @@ export function MapPlayPreview({
       const moveY = wishFwd * s - wishStrafe * c;
 
       if (worldReady && hpLocal > 0 && !finishedLocal) {
+        matchElapsedMs += dt * 1000;
+
+        const platformDeltas: { id: string; dx: number; dy: number; dz: number }[] = [];
+        for (const pad of pads) {
+          const ampX = pad.motionAmpX ?? 0;
+          const ampY = pad.motionAmpY ?? 0;
+          const ampZ = pad.motionAmpZ ?? 0;
+          if (!hasMovingAmp({ ampX, ampY, ampZ })) continue;
+          const home = {
+            homeX: pad.homeX ?? pad.x,
+            homeY: pad.homeY ?? pad.y,
+            homeZ: pad.homeZ ?? pad.z,
+            ampX,
+            ampY,
+            ampZ,
+            periodMs: pad.motionPeriodMs || 4000,
+            phaseMs: pad.motionPhaseMs || 0,
+          };
+          const next = movingPlatformPos(home, matchElapsedMs);
+          const dx = next.x - pad.x;
+          const dy = next.y - pad.y;
+          const dz = next.z - pad.z;
+          pad.x = next.x;
+          pad.y = next.y;
+          pad.z = next.z;
+          if (pad.id && (Math.abs(dx) > 1e-8 || Math.abs(dy) > 1e-8 || Math.abs(dz) > 1e-8)) {
+            platformDeltas.push({ id: pad.id, dx, dy, dz });
+          }
+        }
+        for (const [id, motion] of motionVisual) {
+          const root = roots.get(id);
+          if (!root) continue;
+          const u = movingPlatformU(matchElapsedMs, motion.periodMs, motion.phaseMs);
+          root.position.set(
+            motion.rest[0] + motion.offset[0] * u,
+            motion.rest[1] + motion.offset[1] * u,
+            motion.rest[2] + motion.offset[2] * u
+          );
+        }
+        if (body.isGrounded && scratch.supportPadId && platformDeltas.length) {
+          const d = platformDeltas.find((x) => x.id === scratch.supportPadId);
+          if (d) {
+            body.x += d.dx;
+            body.y += d.dy;
+            body.z += d.dz;
+          }
+        }
+
         stepPlatformer(
           body,
           {
@@ -606,6 +718,24 @@ export function MapPlayPreview({
           bounds,
           physOptsRef.current
         );
+
+        if (matchElapsedMs - lastGhostSampleAt >= 80) {
+          lastGhostSampleAt = matchElapsedMs;
+          recordedSamples.push({
+            t: Math.round(matchElapsedMs),
+            x: body.x,
+            y: body.y,
+            z: body.z,
+          });
+        }
+      }
+
+      if (wrSamples.length && showGhostRef.current) {
+        const pose = sampleGhostAt(wrSamples, matchElapsedMs);
+        if (pose) applyGhostPose(ghostMesh, pose);
+        else ghostMesh.visible = false;
+      } else {
+        ghostMesh.visible = false;
       }
 
       for (const pad of pads) {
@@ -631,6 +761,25 @@ export function MapPlayPreview({
           if (!finishedLocal) {
             finishedLocal = true;
             setFinished(true);
+            if (mapId && !ghostSubmitted && recordedSamples.length > 2) {
+              ghostSubmitted = true;
+              const finishMs = Math.round(matchElapsedMs);
+              void (async () => {
+                try {
+                  const { submitGhostRun } = await import('@/lib/ghost-actions');
+                  const res = await submitGhostRun({
+                    mapId,
+                    finishMs,
+                    samples: recordedSamples,
+                  });
+                  if (disposed) return;
+                  if (res.worldRecord) setGhostResult(`New WR · ${(finishMs / 1000).toFixed(2)}s`);
+                  else if (res.personalBest) setGhostResult(`PB · ${(finishMs / 1000).toFixed(2)}s`);
+                } catch {
+                  /* not signed in */
+                }
+              })();
+            }
           }
         }
       }
@@ -658,7 +807,14 @@ export function MapPlayPreview({
       }
 
       const [tx, ty, tz] = simToThree(body.x, body.y, body.z);
-      playerPos.set(tx, ty, tz);
+      // Soften visual/camera height on stepped ramps so Play Test matches live feel.
+      if (smoothCamY === null || Math.abs(smoothCamY - ty) > 3.5) {
+        smoothCamY = ty;
+      } else {
+        const yLerp = 1 - Math.pow(0.001, dt * 16);
+        smoothCamY += (ty - smoothCamY) * Math.min(1, yLerp);
+      }
+      playerPos.set(tx, smoothCamY, tz);
 
       const liveTps = tpsRef.current;
       if (camera.fov !== liveTps.camera.fov) {
@@ -695,7 +851,7 @@ export function MapPlayPreview({
         playerRoot.visible = !(
           liveTps.player.hideWhenClose && liveTps.camera.boomDistance < liveTps.player.hideDistance
         );
-        playerRoot.position.set(tx, ty + liveTps.player.offsetY, tz);
+        playerRoot.position.set(tx, smoothCamY + liveTps.player.offsetY, tz);
         const tpsScale = liveTps.player.scale || 1;
         playerRoot.scale.set(
           playerBaseScale[0] * tpsScale,
@@ -858,7 +1014,7 @@ export function MapPlayPreview({
       renderer.dispose();
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
     };
-  }, [doc, previewSkins, embedded]);
+  }, [doc, previewSkins, embedded, mapId]);
 
   return (
     <div className={`${embedded ? 'absolute inset-0 z-0' : 'fixed inset-0 z-[9999]'} bg-black flex flex-col`}>
@@ -882,6 +1038,23 @@ export function MapPlayPreview({
           <span className={hp <= 0 ? 'text-red-400 font-bold' : 'text-white/70'}>{hp}</span>
         </div>
         <div className="flex-1" />
+        {ghostLabel && (
+          <button
+            type="button"
+            className={`mr-2 text-[10px] sm:text-xs px-2 py-1 rounded border ${
+              showGhost
+                ? 'border-sky-400/50 text-sky-200 bg-sky-500/15'
+                : 'border-white/15 text-white/40'
+            }`}
+            onClick={() => setShowGhost((v) => !v)}
+            title="Toggle WR ghost"
+          >
+            Ghost {showGhost ? 'ON' : 'OFF'} · {ghostLabel}
+          </button>
+        )}
+        {ghostResult && (
+          <span className="mr-2 text-[10px] sm:text-xs text-amber-300 font-semibold">{ghostResult}</span>
+        )}
         {onClose && (
           <Button size="sm" variant="destructive" onClick={onClose}>
             <X className="w-4 h-4 mr-1" /> {embedded ? 'Close' : 'Exit Test'}

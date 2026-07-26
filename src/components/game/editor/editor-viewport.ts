@@ -52,6 +52,24 @@ import {
   type HammerPrimitive,
 } from './hammer-shapes';
 
+/** Editor-only rendering shortcuts — never written into MapDocument.environment. */
+export type EditorPerfMode = {
+  /** Hide floor plane + void floor disc. */
+  hideFloor: boolean;
+  /** Skip equirect sky texture (use solid sky color). */
+  hideSkyTexture: boolean;
+  /** Hide void shadow halo planes. */
+  hideVoidEffects: boolean;
+  /** Disable scene fog in the editor viewport. */
+  hideFog: boolean;
+};
+
+export const DEFAULT_EDITOR_PERF_MODE: EditorPerfMode = {
+  hideFloor: false,
+  hideSkyTexture: false,
+  hideVoidEffects: false,
+  hideFog: false,
+};
 function makeLightBulb(ent: EditorEntity): THREE.Group {
   const lightCfg = ensureLight(ent);
   const group = new THREE.Group();
@@ -201,6 +219,9 @@ export interface EditorViewportApi {
   setMeasureMode: (on: boolean) => void;
   isMeasureMode: () => boolean;
   applyEnvironment: (env: MapEnvironment) => void;
+  /** Editor-only visual toggles (not saved to the map — Play Test / live keep full effects). */
+  setEditorPerfMode: (opts: Partial<EditorPerfMode>) => void;
+  getEditorPerfMode: () => EditorPerfMode;
   placeSpawn: (
     kind:
       | 'spawn_runner'
@@ -418,6 +439,7 @@ export function createEditorViewport(
   const hemiLight = new THREE.HemisphereLight(0x88aacc, 0x334455, 0.45);
   scene.add(hemiLight);
   let skyTexture: THREE.Texture | null = null;
+  let editorPerf: EditorPerfMode = { ...DEFAULT_EDITOR_PERF_MODE };
 
   const grid = new THREE.GridHelper(80, 80, 0x4b9fff, 0x2a3a4a);
   scene.add(grid);
@@ -509,6 +531,7 @@ export function createEditorViewport(
   function applyEnvironment(env: MapEnvironment) {
     const skyHex = env.sky === 'custom' ? env.skyColor : SKY_COLORS[env.sky] ?? env.skyColor;
     const isVoid = env.floor === 'void';
+    const perf = editorPerf;
 
     // Void maps: use VOID-SPECIFIC fog override (density & color) so the abyss
     // looks like Minecraft-style glowing-green shadow fog instead of the regular
@@ -532,7 +555,7 @@ export function createEditorViewport(
       skyTexture = null;
     }
 
-    if (env.skyTextureUrl) {
+    if (!perf.hideSkyTexture && env.skyTextureUrl) {
       new THREE.TextureLoader().load(
         env.skyTextureUrl,
         (tex) => {
@@ -553,7 +576,14 @@ export function createEditorViewport(
       scene.environment = null;
     }
 
-    scene.fog = new THREE.FogExp2(effectiveFogColor, effectiveFogDensity);
+    if (perf.hideFog) {
+      scene.fog = null;
+    } else {
+      const fogDensity = Number.isFinite(effectiveFogDensity)
+        ? Math.max(0, Math.min(0.2, effectiveFogDensity))
+        : 0.022;
+      scene.fog = new THREE.FogExp2(effectiveFogColor, fogDensity);
+    }
     grid.visible = env.gridVisible ?? true;
 
     const legacyVoidTint = Boolean(env.voidColor);
@@ -562,7 +592,7 @@ export function createEditorViewport(
     const showVoidFloor =
       isVoid &&
       (env.voidFloorColor != null || env.voidColor != null || voidFloorOpacity > 0.01);
-    floorMesh.visible = !isVoid || showVoidFloor;
+    floorMesh.visible = !perf.hideFloor && (!isVoid || showVoidFloor);
     const mat = floorMesh.material as THREE.MeshStandardMaterial;
     if (env.floor === 'water') {
       mat.color.set('#0e4a6e');
@@ -592,7 +622,10 @@ export function createEditorViewport(
     }
 
     // Void shadow / glowing fog halo (the "green fog falling down" look).
-    const shadowIntensity = isVoid ? Math.max(0, Math.min(2, env.voidShadowIntensity ?? 0)) : 0;
+    const shadowIntensity =
+      !perf.hideVoidEffects && isVoid
+        ? Math.max(0, Math.min(2, env.voidShadowIntensity ?? 0))
+        : 0;
     voidShadowMesh.visible = shadowIntensity > 0;
     voidShadowInner.visible = shadowIntensity > 0;
     if (shadowIntensity > 0) {
@@ -617,7 +650,7 @@ export function createEditorViewport(
     if (env.horizonColor) hemiLight.groundColor.set(env.horizonColor);
 
     const tile = Math.max(1, env.floorTextureScale ?? 40);
-    if (!isVoid && env.defaultTextureUrl) {
+    if (!isVoid && !perf.hideFloor && env.defaultTextureUrl) {
       new THREE.TextureLoader().load(env.defaultTextureUrl, (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -1553,6 +1586,15 @@ export function createEditorViewport(
     director.unregister(id);
     entityClips.delete(id);
     obj.removeFromParent();
+    obj.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) {
+        m.dispose();
+      }
+    });
     roots.delete(id);
   }
 
@@ -2800,6 +2842,11 @@ export function createEditorViewport(
       applyEnvironment(env);
       handlers.onDocChange(doc);
     },
+    setEditorPerfMode: (opts) => {
+      editorPerf = { ...editorPerf, ...opts };
+      applyEnvironment(ensureEnvironment(doc));
+    },
+    getEditorPerfMode: () => ({ ...editorPerf }),
     placeSpawn: (kind) => {
       // Click-to-place on the floor — not camera-forward dump.
       setPendingPlace(kind);
@@ -3373,9 +3420,26 @@ export function createEditorViewport(
       if (document.pointerLockElement) document.exitPointerLock?.();
       boxOverlay.remove();
       director.clear();
+      for (const id of [...roots.keys()]) disposeRoot(id);
+      if (skyTexture) {
+        skyTexture.dispose();
+        skyTexture = null;
+      }
+      floorMesh.geometry.dispose();
+      (floorMesh.material as THREE.Material).dispose();
+      voidShadowMesh.geometry.dispose();
+      voidShadowMat.dispose();
+      voidShadowInner.geometry.dispose();
+      voidShadowInnerMat.dispose();
+      voidShadowTex.dispose();
       transform.dispose();
       orbit.dispose();
-      renderer.dispose();
+      try {
+        renderer.dispose();
+        renderer.forceContextLoss();
+      } catch {
+        /* ignore */
+      }
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
     },
   };

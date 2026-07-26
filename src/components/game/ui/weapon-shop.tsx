@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Sword, Crosshair, Zap, Shield } from 'lucide-react';
+import { SHOP_PRESET_TO_CATALOG, catalogWeaponUrl } from '@/lib/weapon-catalog';
 
 export interface WeaponPreset {
   id: string;
@@ -14,6 +15,13 @@ export interface WeaponPreset {
   range: number;
   cooldownMs: number;
   coneRadians: number;
+  /** GLB under /game/weapons — shown on the player hand after buy */
+  modelUrl?: string;
+}
+
+function shopModel(id: string): string | undefined {
+  const cat = SHOP_PRESET_TO_CATALOG[id];
+  return cat ? catalogWeaponUrl(cat) ?? undefined : undefined;
 }
 
 export const WEAPON_PRESETS: WeaponPreset[] = [
@@ -28,6 +36,7 @@ export const WEAPON_PRESETS: WeaponPreset[] = [
     range: 14,
     cooldownMs: 350,
     coneRadians: 0.18,
+    modelUrl: shopModel('pistol'),
   },
   {
     id: 'sniper',
@@ -40,6 +49,7 @@ export const WEAPON_PRESETS: WeaponPreset[] = [
     range: 22,
     cooldownMs: 1200,
     coneRadians: 0.05,
+    modelUrl: shopModel('sniper'),
   },
   {
     id: 'shotgun',
@@ -52,6 +62,7 @@ export const WEAPON_PRESETS: WeaponPreset[] = [
     range: 6,
     cooldownMs: 900,
     coneRadians: 0.45,
+    modelUrl: shopModel('shotgun'),
   },
   {
     id: 'smg',
@@ -64,10 +75,11 @@ export const WEAPON_PRESETS: WeaponPreset[] = [
     range: 10,
     cooldownMs: 150,
     coneRadians: 0.28,
+    modelUrl: shopModel('smg'),
   },
   {
     id: 'sword',
-    label: 'Sword',
+    label: 'Axe',
     description: 'Melee — high damage, very close range',
     icon: <Sword className="w-5 h-5 text-rose-300" />,
     accentClass: 'border-rose-400/60 bg-rose-500/15 hover:bg-rose-500/25',
@@ -76,10 +88,11 @@ export const WEAPON_PRESETS: WeaponPreset[] = [
     range: 2.4,
     cooldownMs: 500,
     coneRadians: 0.5,
+    modelUrl: shopModel('sword'),
   },
   {
     id: 'fists',
-    label: 'Fists',
+    label: 'Knife',
     description: 'Melee — light damage, fast swing',
     icon: <Shield className="w-5 h-5 text-purple-300" />,
     accentClass: 'border-purple-400/60 bg-purple-500/15 hover:bg-purple-500/25',
@@ -88,6 +101,7 @@ export const WEAPON_PRESETS: WeaponPreset[] = [
     range: 1.8,
     cooldownMs: 300,
     coneRadians: 0.6,
+    modelUrl: shopModel('fists'),
   },
 ];
 
