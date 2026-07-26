@@ -360,21 +360,11 @@ export function MapPlayPreview({
       try {
         const previewAttachments =
           previewSkins && avatarEntity?.playerSkins?.length ? avatarEntity.playerSkins : [];
-        const fullBody = previewAttachments.find((skin) => skin.slot === 'fullbody');
-        const bodySkin = !fullBody
-          ? previewAttachments.find((skin) => skin.slot === 'body')
-          : undefined;
-        const baseOverride =
-          (fullBody
-            ? resolveModelSrc(fullBody.model, fullBody.customModelUrl)
-            : null) ||
-          (bodySkin ? resolveModelSrc(bodySkin.model, bodySkin.customModelUrl) : null);
+        const bodySkin = previewAttachments.find((skin) => skin.slot === 'body') ?? undefined;
+        const baseOverride = bodySkin ? resolveModelSrc(bodySkin.model, bodySkin.customModelUrl) : null;
         const loaded = await loadPlayerAvatar(avatarEntity, baseOverride);
         if (disposed) return;
-        // Full-body replaces the whole avatar (no layers). Body mesh keeps hair/hat/etc.
-        const layeredSkins = fullBody
-          ? []
-          : previewAttachments.filter((skin) => skin !== bodySkin);
+        const layeredSkins = previewAttachments.filter((skin) => skin !== bodySkin);
         if (layeredSkins.length) {
           // Rebind clothes before the animation director resolves bone tracks.
           await applySkinAttachments(loaded.scene, layeredSkins);

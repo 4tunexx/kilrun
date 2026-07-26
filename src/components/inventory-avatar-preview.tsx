@@ -2,7 +2,9 @@
 
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { loadPlayerAvatar } from './game/editor/player-avatar';
+import { suggestPlayerBindings } from './game/editor/map-document';
 import { applySkinAttachments, tickSkinAttachments } from './game/editor/skin-attachments';
 import { normalizeCharacter } from './game/renderer/asset-loader';
 import type { SkinAttachment } from '@/lib/player-skins';
@@ -35,12 +37,33 @@ export function InventoryAvatarPreview({
     const host = hostRef.current;
     if (!host) return;
 
+    const fixColorSpaces = (root: THREE.Object3D) => {
+      root.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.material) return;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) {
+          const mat = m as THREE.MeshStandardMaterial;
+          if (!mat || typeof mat !== 'object') continue;
+          const map = (mat as any).map as THREE.Texture | null | undefined;
+          if (map && map.colorSpace !== THREE.SRGBColorSpace) map.colorSpace = THREE.SRGBColorSpace;
+          const emissiveMap = (mat as any).emissiveMap as THREE.Texture | null | undefined;
+          if (emissiveMap && emissiveMap.colorSpace !== THREE.SRGBColorSpace) {
+            emissiveMap.colorSpace = THREE.SRGBColorSpace;
+          }
+        }
+      });
+    };
+
     const w = Math.max(1, host.clientWidth);
     const h = Math.max(1, host.clientHeight);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(w, h, false);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.95;
     Object.assign(renderer.domElement.style, {
       width: '100%',
       height: '100%',
@@ -50,6 +73,9 @@ export function InventoryAvatarPreview({
 
     const scene = new THREE.Scene();
     scene.background = null;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const env = pmrem.fromScene(new RoomEnvironment(), 0.04);
+    scene.environment = env.texture;
 
     const camera = new THREE.PerspectiveCamera(35, w / h, 0.05, 50);
     camera.position.set(0, 1.35, 3.2);
@@ -103,6 +129,7 @@ export function InventoryAvatarPreview({
     const reapplySkins = async (next: SkinAttachment[]) => {
       if (!avatarScene) return;
       await applySkinAttachments(avatarScene, next);
+      fixColorSpaces(avatarScene);
     };
 
     let reapplyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -127,18 +154,27 @@ export function InventoryAvatarPreview({
 
         const clips = loaded.animations;
         mixer = new THREE.AnimationMixer(loaded.scene);
-        let pick = defaultClipName
-          ? clips.find((c) => c.name?.toLowerCase() === defaultClipName.toLowerCase()) || null
-          : null;
-        if (!pick) {
-          pick =
-            clips.find((c) => /idle/i.test(c.name || '')) ||
-            clips.find((c) => /relax/i.test(c.name || '')) ||
-            clips[0] ||
-            null;
-        }
-        if (pick) {
-          currentAction = mixer.clipAction(pick);
+        const byName = new Map(clips.map((c) => [c.name || '(unnamed)', c]));
+        const bindings = suggestPlayerBindings(loaded.clipNames ?? clips.map((c) => c.name || ''));
+        const desiredName =
+          defaultClipName ||
+          bindings.idle ||
+          clips.find((c) => /idle/i.test(c.name || ''))?.name ||
+          clips.find((c) => /stand/i.test(c.name || ''))?.name ||
+          clips.find((c) => /breath/i.test(c.name || ''))?.name ||
+          null;
+        const pick = desiredName ? byName.get(desiredName) ?? null : null;
+        const fallback =
+          pick ||
+          clips.find((c) => /idle/i.test(c.name || '')) ||
+          clips.find((c) => /stand/i.test(c.name || '')) ||
+          clips.find((c) => /breath/i.test(c.name || '')) ||
+          clips.find((c) => /relax/i.test(c.name || '')) ||
+          clips[0] ||
+          null;
+        if (fallback) {
+          mixer.stopAllAction();
+          currentAction = mixer.clipAction(fallback);
           currentAction.setLoop(THREE.LoopRepeat, Infinity);
           currentAction.enabled = true;
           currentAction.play();
@@ -184,6 +220,8 @@ export function InventoryAvatarPreview({
       mixer?.stopAllAction();
       if (avatarScene) pivot.remove(avatarScene);
       ro.disconnect();
+      env.texture.dispose();
+      pmrem.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };

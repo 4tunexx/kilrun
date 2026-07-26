@@ -505,8 +505,6 @@ export async function applySkinAttachments(
   clearSkinAttachments(avatarRoot);
   const generation = attachmentGeneration.get(avatarRoot) ?? 0;
   const isCurrent = () => attachmentGeneration.get(avatarRoot) === generation;
-  // Always reset base body visibility first — previous fullbody hide call may
-  // have flipped it off. We'll re-hide only if a loadable fullbody exists.
   avatarRoot.traverse((o) => {
     const mesh = o as THREE.SkinnedMesh;
     if (mesh.isSkinnedMesh) mesh.visible = true;
@@ -518,37 +516,13 @@ export async function applySkinAttachments(
   avatarRoot.add(group);
 
   const expanded = expandAttachments(attachments);
-  const fullbodyAtts = expanded.filter((att) => att.slot === 'fullbody');
-  const loadableFullbodies = fullbodyAtts.filter(
-    (att) => !!resolveModelSrc(att.model, att.customModelUrl)
-  );
-  let baseHidden = false;
-  if (loadableFullbodies.length > 0) {
-    // In editor previews the full-body mesh is rebound like clothing, so hide
-    // Body_Blue_001 instead of rendering two bodies on top of each other.
-    avatarRoot.traverse((o) => {
-      const mesh = o as THREE.SkinnedMesh;
-      if (mesh.isSkinnedMesh && !mesh.userData.reboundToPlayer) mesh.visible = false;
-    });
-    baseHidden = true;
-  }
-  let anyFullbodyLoaded = false;
   for (const att of expanded) {
     try {
       await attachOne(avatarRoot, group, att, isCurrent);
-      if (att.slot === 'fullbody') anyFullbodyLoaded = true;
       if (!isCurrent()) return;
     } catch (err) {
       console.warn('[applySkinAttachments]', att.slot, err);
     }
-  }
-  // Safety net: if fullbody slot was supposed to hide base body but nothing
-  // actually loaded, restore base visibility so player isn't invisible.
-  if (baseHidden && !anyFullbodyLoaded) {
-    avatarRoot.traverse((o) => {
-      const mesh = o as THREE.SkinnedMesh;
-      if (mesh.isSkinnedMesh) mesh.visible = true;
-    });
   }
 }
 

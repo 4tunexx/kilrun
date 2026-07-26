@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Package, ShieldCheck, ShoppingBag, Trash2, Upload } from 'lucide-react';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -39,6 +39,9 @@ import {
 } from '@/lib/social-actions';
 import { normalizeBannerConfig } from '@/lib/banner';
 import { BannerFill } from '@/components/banner-fill';
+import { ProfileHeroBanner } from '@/components/profile-hero-banner';
+import { AvatarWithFrame } from '@/components/avatar-with-frame';
+import { NicknameEffectText } from '@/components/nickname-effect';
 import {
   frameAnimationClass,
   frameWrapperStyle,
@@ -384,6 +387,22 @@ export function InventoryDrawer({
   const [skinsLoad, setSkinsLoad] = useState<SkinAttachment[]>([]);
   const { toast } = useToast();
 
+  const equippedBanner = useMemo(() => {
+    const row =
+      items.find((i) => i.isEquipped && i.cosmeticSlot === 'banner' && i.bannerConfig) ?? null;
+    return row ? normalizeBannerConfig(row.bannerConfig) : null;
+  }, [items]);
+  const equippedFrame = useMemo(() => {
+    const row =
+      items.find((i) => i.isEquipped && i.cosmeticSlot === 'frame' && i.cosmeticConfig) ?? null;
+    return row ? normalizeFrameConfig(row.cosmeticConfig) : null;
+  }, [items]);
+  const equippedNickname = useMemo(() => {
+    const row =
+      items.find((i) => i.isEquipped && i.cosmeticSlot === 'nickname' && i.cosmeticConfig) ?? null;
+    return row ? normalizeNicknameConfig(row.cosmeticConfig) : null;
+  }, [items]);
+
   const reload = useMemo(() => {
     return async () => {
       setLoading(true);
@@ -529,17 +548,18 @@ export function InventoryDrawer({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="right"
           className={cn(
-            'max-w-[1100px] w-[95vw] h-[88vh] md:h-[82vh]',
+            'w-[min(1100px,95vw)] max-w-[min(1100px,95vw)] h-[100vh]',
             'p-0 gap-0 overflow-hidden',
             'bg-[#0b1020]/95 backdrop-blur-md border-[#1a2540]/80 text-white',
             'shadow-[0_30px_80px_-10px_rgba(0,0,0,0.65)]'
           )}
         >
-          <DialogHeader className="relative px-6 pt-5 pb-3 border-b border-white/10 bg-gradient-to-b from-[#121a33] to-transparent">
-            <DialogTitle className="flex items-center justify-between text-xl font-black tracking-wide">
+          <SheetHeader className="relative px-6 pt-5 pb-3 border-b border-white/10 bg-gradient-to-b from-[#121a33] to-transparent">
+            <SheetTitle className="flex items-center justify-between text-xl font-black tracking-wide">
               <div className="flex items-center gap-3">
                 <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-cyan-500/40 to-indigo-500/50 border border-cyan-400/30 flex items-center justify-center text-cyan-200">
                   <Package className="h-5 w-5" />
@@ -592,8 +612,8 @@ export function InventoryDrawer({
                   </SelectContent>
                 </Select>
               </div>
-            </DialogTitle>
-          </DialogHeader>
+            </SheetTitle>
+          </SheetHeader>
 
           <div className="grid grid-cols-1 md:grid-cols-[1.15fr_0.95fr] grid-rows-[auto_auto_1fr] md:grid-rows-[1fr_auto] gap-0 h-[calc(100%-60px)] overflow-hidden">
             <section className="flex flex-col min-h-0 border-r border-white/5 p-5 gap-4">
@@ -641,7 +661,7 @@ export function InventoryDrawer({
                 }}
                 className={cn(
                   'rounded-xl border transition-colors',
-                  'p-3 bg-[#0d1528]/60 border-[#1a2644]/80 min-h-[280px] md:min-h-[340px]',
+                  'p-3 bg-[#0d1528]/60 border-[#1a2644]/80 min-h-[240px] md:min-h-[290px]',
                   dragOverSlot === '__equip__'
                     ? 'ring-2 ring-cyan-400/70 bg-cyan-500/10 border-cyan-400/40'
                     : ''
@@ -741,9 +761,18 @@ export function InventoryDrawer({
                     <p>No items yet. Visit the store to buy cosmetics and boosts.</p>
                   </div>
                 ) : filtered.length === 0 ? (
-                  <div className="py-10 text-center text-slate-400 text-sm">
-                    No items in this category.
-                  </div>
+                  subTab === 'equipped' ? (
+                    <div className="py-10 text-center text-slate-400 text-sm space-y-2">
+                      <p>No equipped items yet.</p>
+                      <p className="text-xs text-slate-500">
+                        Pick a category tab above to view your backpack and equip items.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="py-10 text-center text-slate-400 text-sm">
+                      No items in this category.
+                    </div>
+                  )
                 ) : (
                   <div className="min-h-0 flex-1 overflow-y-auto pr-1 -mr-1">
                     <div className="grid grid-cols-3 md:grid-cols-4 gap-3 pb-1">
@@ -943,28 +972,65 @@ export function InventoryDrawer({
 
               <div className="relative flex items-center justify-between z-10">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-300/80 font-bold">
-                  Equipment preview
+                  {pageTab === 'cosmetics' ? 'Profile preview' : 'Equipment preview'}
                 </p>
                 <Badge className="bg-white/5 text-cyan-200 border-white/10 text-[10px] h-5">
-                  Idle · Auto spin
+                  {pageTab === 'cosmetics' ? 'Live profile' : 'Idle · Auto spin'}
                 </Badge>
               </div>
 
-              <div className="relative flex-1 min-h-[380px] rounded-2xl border border-white/10 overflow-hidden bg-gradient-to-b from-[#0d1730]/80 to-[#080d1d]/80 z-10">
-                <InventoryAvatarPreview
-                  className="absolute inset-0"
-                  attachments={skinsLoad}
-                  spinSpeed={0.45}
-                />
-                <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-white/60 pointer-events-none">
-                  <span className="px-2 py-1 rounded-md bg-black/40 border border-white/10">
-                    Default model
-                  </span>
-                  <span className="px-2 py-1 rounded-md bg-black/40 border border-white/10">
-                    Equipped skins preview
-                  </span>
+              {pageTab === 'cosmetics' ? (
+                <div className="relative flex-1 min-h-[380px] rounded-2xl border border-white/10 overflow-hidden bg-gradient-to-b from-[#0d1730]/80 to-[#080d1d]/80 z-10">
+                  <div className="absolute inset-0 p-3">
+                    <div className="h-full rounded-xl border border-white/10 bg-slate-950/30 overflow-hidden">
+                      <ProfileHeroBanner
+                        rounded
+                        banner={equippedBanner}
+                        avatar={
+                          <AvatarWithFrame
+                            src={avatarUrl}
+                            fallback={(username?.trim() || 'You').charAt(0).toUpperCase()}
+                            alt={username ?? 'Player'}
+                            frameConfig={equippedFrame}
+                            sizeClass="h-20 w-20 sm:h-24 sm:w-24"
+                            borderClassName="border-4 border-slate-900 shadow-2xl"
+                          />
+                        }
+                        title={
+                          <div className="min-w-0">
+                            <NicknameEffectText
+                              name={username?.trim() || 'You'}
+                              effect={equippedNickname}
+                              className="text-xl sm:text-2xl font-black truncate"
+                            />
+                          </div>
+                        }
+                        subtitle={
+                          <p className="text-xs text-slate-300/80 mt-1">
+                            Banner · Frame · Nickname preview
+                          </p>
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="relative flex-1 min-h-[380px] rounded-2xl border border-white/10 overflow-hidden bg-gradient-to-b from-[#0d1730]/80 to-[#080d1d]/80 z-10">
+                  <InventoryAvatarPreview
+                    className="absolute inset-0"
+                    attachments={skinsLoad}
+                    spinSpeed={0.45}
+                  />
+                  <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-white/60 pointer-events-none">
+                    <span className="px-2 py-1 rounded-md bg-black/40 border border-white/10">
+                      Default model
+                    </span>
+                    <span className="px-2 py-1 rounded-md bg-black/40 border border-white/10">
+                      Equipped skins preview
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="relative grid grid-cols-2 gap-3 z-10">
                 {EQUIP_SLOTS.map((slot) => {
@@ -1032,8 +1098,8 @@ export function InventoryDrawer({
               </div>
             </section>
           </div>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       <AlertDialog
         open={Boolean(pendingClash)}
