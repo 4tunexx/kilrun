@@ -67,6 +67,7 @@ import {
 } from '@/components/profile-hero-banner';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import { ShowcaseEditor } from '@/components/views/profile/showcase-editor';
+import { GameProgressionCard } from '@/components/game-progression-card';
 import { useToast } from '@/hooks/use-toast';
 import { EmailVerificationForm } from '@/components/email-verification-form';
 import { COUNTRIES, flagUrl, getCountryName } from '@/lib/countries';
@@ -524,6 +525,14 @@ export default function ProfileView({ userId }: { userId: string }) {
               </Tabs>
             </CardContent>
           </Card>
+          <div>
+            <h3 className="text-base font-semibold text-white mb-1">In-Game Powers</h3>
+            <p className="text-xs text-slate-400 mb-3">
+              In-match level, Skill Points, and power upgrades — earned by playing and spent
+              from the in-game menu (press M during a match). Separate from your account level.
+            </p>
+            <GameProgressionCard userId={userId} />
+          </div>
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>
               <CardTitle className="text-base">Legacy Deathrun runs</CardTitle>

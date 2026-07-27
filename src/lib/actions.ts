@@ -196,49 +196,99 @@ export async function getLandingPageData(): Promise<{
     catalogFallback,
   ] = await Promise.all([
     // Mongo: `isBanned: false` skips docs where the field was never set.
-    prisma.user.count({ where: { NOT: { isBanned: true } } }),
-    prisma.matchResult.count(),
-    prisma.matchResult.count({ where: { playedAt: { gte: startOfToday } } }),
-    prisma.matchResult.aggregate({ _sum: { vpEarned: true } }),
-    prisma.user.findMany({
-      where: { NOT: { isBanned: true } },
-      orderBy: [
-        { xpProgress: 'desc' },
-        { vpCurrency: 'desc' },
-        { createdAt: 'asc' },
-      ],
-      take: 10,
-      select: {
-        id: true,
-        username: true,
-        avatarUrl: true,
-        xpProgress: true,
-        currentRank: true,
-        isVip: true,
-        role: true,
-      },
+    prisma.user
+      .count({ where: { NOT: { isBanned: true } } })
+      .catch((err) => {
+        console.error('[getLandingPageData] registeredPlayers failed', err);
+        return 0;
+      }),
+    prisma.matchResult.count().catch((err) => {
+      console.error('[getLandingPageData] matchesPlayed failed', err);
+      return 0;
     }),
-    prisma.purchase.groupBy({
-      by: ['itemSku'],
-      _count: { itemSku: true },
-      orderBy: { _count: { itemSku: 'desc' } },
-      take: 6,
+    prisma.matchResult
+      .count({ where: { playedAt: { gte: startOfToday } } })
+      .catch((err) => {
+        console.error('[getLandingPageData] matchesPlayedToday failed', err);
+        return 0;
+      }),
+    prisma.matchResult.aggregate({ _sum: { vpEarned: true } }).catch((err) => {
+      console.error('[getLandingPageData] vpAgg failed', err);
+      return { _sum: { vpEarned: 0 } };
     }),
-    prisma.storeItem.findMany({
-      where: { isAvailable: true },
-      orderBy: [{ purchaseCount: 'desc' }, { vpPrice: 'asc' }],
-      take: 6,
-      select: {
-        id: true,
-        itemName: true,
-        itemCategory: true,
-        vpPrice: true,
-        imageUrl: true,
-        cosmeticSlot: true,
-        bannerConfig: true,
-        cosmeticConfig: true,
-      },
-    }),
+    prisma.user
+      .findMany({
+        where: { NOT: { isBanned: true } },
+        orderBy: [
+          { xpProgress: 'desc' },
+          { vpCurrency: 'desc' },
+          { createdAt: 'asc' },
+        ],
+        take: 10,
+        select: {
+          id: true,
+          username: true,
+          avatarUrl: true,
+          xpProgress: true,
+          currentRank: true,
+          isVip: true,
+          role: true,
+        },
+      })
+      .catch((err) => {
+        console.error('[getLandingPageData] topPlayers failed', err);
+        return [] as Array<{
+          id: string;
+          username: string;
+          avatarUrl: string;
+          xpProgress: number;
+          currentRank: string;
+          isVip: boolean;
+          role: string;
+        }>;
+      }),
+    prisma.purchase
+      .groupBy({
+        by: ['itemSku'],
+        _count: { itemSku: true },
+        orderBy: { _count: { itemSku: 'desc' } },
+        take: 6,
+      })
+      .catch((err) => {
+        // Mongo groupBy can be flakier than other queries — a failure here
+        // must NOT take down topPlayers/stats with it.
+        console.error('[getLandingPageData] purchaseGroups failed', err);
+        return [] as Array<{ itemSku: string; _count: { itemSku: number } }>;
+      }),
+    prisma.storeItem
+      .findMany({
+        where: { isAvailable: true },
+        orderBy: [{ purchaseCount: 'desc' }, { vpPrice: 'asc' }],
+        take: 6,
+        select: {
+          id: true,
+          itemName: true,
+          itemCategory: true,
+          vpPrice: true,
+          imageUrl: true,
+          cosmeticSlot: true,
+          bannerConfig: true,
+          cosmeticConfig: true,
+        },
+      })
+      .catch((err) => {
+        console.error('[getLandingPageData] catalogFallback failed', err);
+        return [] as Array<{
+          id: string;
+          itemName: string;
+          itemCategory: string;
+          vpPrice: number;
+          imageUrl: string | null;
+          cosmeticSlot: string | null;
+          bannerConfig: unknown;
+          cosmeticConfig: unknown;
+        }>;
+      }),
   ]);
 
   const toLandingItem = (item: {
@@ -263,27 +313,32 @@ export async function getLandingPageData(): Promise<{
 
   let popularItems: LandingStoreItem[] = catalogFallback.map(toLandingItem);
   if (purchaseGroups.length > 0) {
-    const skus = purchaseGroups.map((g) => g.itemSku);
-    const purchasedItems = await prisma.storeItem.findMany({
-      where: { itemSku: { in: skus }, isAvailable: true },
-      select: {
-        id: true,
-        itemName: true,
-        itemCategory: true,
-        vpPrice: true,
-        imageUrl: true,
-        itemSku: true,
-        cosmeticSlot: true,
-        bannerConfig: true,
-        cosmeticConfig: true,
-      },
-    });
-    const bySku = new Map(purchasedItems.map((i) => [i.itemSku, i]));
-    const ranked = skus
-      .map((sku) => bySku.get(sku))
-      .filter((i): i is NonNullable<typeof i> => Boolean(i))
-      .map(toLandingItem);
-    if (ranked.length > 0) popularItems = ranked;
+    try {
+      const skus = purchaseGroups.map((g) => g.itemSku);
+      const purchasedItems = await prisma.storeItem.findMany({
+        where: { itemSku: { in: skus }, isAvailable: true },
+        select: {
+          id: true,
+          itemName: true,
+          itemCategory: true,
+          vpPrice: true,
+          imageUrl: true,
+          itemSku: true,
+          cosmeticSlot: true,
+          bannerConfig: true,
+          cosmeticConfig: true,
+        },
+      });
+      const bySku = new Map(purchasedItems.map((i) => [i.itemSku, i]));
+      const ranked = skus
+        .map((sku) => bySku.get(sku))
+        .filter((i): i is NonNullable<typeof i> => Boolean(i))
+        .map(toLandingItem);
+      if (ranked.length > 0) popularItems = ranked;
+    } catch (err) {
+      console.error('[getLandingPageData] purchasedItems ranking failed', err);
+      // Keep the catalogFallback list already assigned above.
+    }
   }
 
   return {

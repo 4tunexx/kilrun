@@ -9,7 +9,6 @@ import {
 import {
   COMPETITIVE_MIN_PLAYERS_TO_START,
   LOBBY_COUNTDOWN_MS,
-  MAX_ENERGY,
   OBSTACLE_DAMAGE,
   OBSTACLE_HIT_COOLDOWN_MS,
   PLAYER_RADIUS,
@@ -45,6 +44,7 @@ import {
   weaponPelletDamage,
 } from '../sim/weapon-combat.js';
 import { fetchTrustedLoadout } from '../trusted-loadout.js';
+import { applyAbilityStatsToPlayer, getMaxHealth, getMaxEnergyFor } from '../sim/ability-stats.js';
 import { assignCompetitiveColor } from '../lib/body-colors.js';
 import {
   authenticateJoin,
@@ -364,7 +364,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       if (price > 0) player.credits = Math.max(0, player.credits - price);
       const effect = String(hit.effect || hit.id);
       if (effect === 'heal') {
-        player.health = Math.min(100, player.health + 50);
+        player.health = Math.min(getMaxHealth(player), player.health + 50);
       } else if (effect === 'shield') {
         player.shieldHp = Math.min(100, (player.shieldHp || 0) + 50);
       } else if (effect === 'energy' || effect === 'speed' || effect === 'super_jump') {
@@ -651,7 +651,9 @@ export class CompetitiveRoom extends Room<RoomState> {
     player.kp = claims.kp;
     const trusted = await fetchTrustedLoadout(player.userId);
     applyLoadoutToPlayer(player, trusted ?? options);
-    player.energy = MAX_ENERGY;
+    applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
+    player.health = getMaxHealth(player);
+    player.energy = getMaxEnergyFor(player);
 
     // Balance by current team sizes
     const aCount = Array.from(this.state.players.values()).filter((p) => p.role === 'team_a').length;
@@ -834,8 +836,8 @@ export class CompetitiveRoom extends Room<RoomState> {
     }
 
     Array.from(this.state.players.values()).forEach((player) => {
-      player.health = 100;
-      player.energy = MAX_ENERGY;
+      player.health = getMaxHealth(player);
+      player.energy = getMaxEnergyFor(player);
       player.isAlive = true;
       player.hasFinished = false;
       this.applyTeamSpawn(player);
@@ -1152,7 +1154,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       if (wasAlive) player.deaths = (player.deaths || 0) + 1;
       if (this.respawnInRound) {
         // Respawn: send back to spawn point at full health after a brief moment.
-        player.health = 100;
+        player.health = getMaxHealth(player);
         this.applyTeamSpawn(player);
         if (wasAlive && shooter && shooter.sessionId !== player.sessionId) {
           shooter.kills += 1;

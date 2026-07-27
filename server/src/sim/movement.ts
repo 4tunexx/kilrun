@@ -19,7 +19,6 @@ import {
   LAND_STEP_CLIMB,
   LAND_STEP_DESCEND,
   LEDGE_ASSIST,
-  MAX_ENERGY,
   MAX_FALL_SPEED,
   MAX_GROUND_SPEED,
   MELEE_MOVE_MULT,
@@ -37,6 +36,7 @@ import {
   WORLD_WIDTH,
 } from './constants.js';
 import { findSupportPlatform, resolveSolidCollisions } from './platforms.js';
+import { getMaxEnergyFor } from './ability-stats.js';
 
 export interface PlayerInput {
   moveX: number; // -1..1, camera-relative forward/back intent (world X after client rotates)
@@ -172,13 +172,14 @@ export function applyMovement(
 
   // Resolve per-map overrides over base constants.
   const effGravity = physOpts?.gravity ?? GRAVITY;
-  const effJumpVel = physOpts?.jumpVelocity ?? JUMP_VELOCITY;
-  const effDoubleJumpVel = physOpts?.doubleJumpVelocity ?? DOUBLE_JUMP_VELOCITY;
+  const effJumpVel = (physOpts?.jumpVelocity ?? JUMP_VELOCITY) * (player.abilityJumpMult || 1);
+  const effDoubleJumpVel =
+    (physOpts?.doubleJumpVelocity ?? DOUBLE_JUMP_VELOCITY) * (player.abilityJumpMult || 1);
   const effDoubleJumpEnabled = physOpts?.doubleJumpEnabled ?? true;
   const effJumpCut = physOpts?.jumpCutMult ?? JUMP_CUT_MULTIPLIER;
   const effCoyoteMs = physOpts?.coyoteMs ?? COYOTE_TIME_MS;
   const effJumpBufferMs = physOpts?.jumpBufferMs ?? JUMP_BUFFER_MS;
-  const effWalkSpeed = physOpts?.walkSpeed ?? MAX_GROUND_SPEED;
+  const effWalkSpeed = (physOpts?.walkSpeed ?? MAX_GROUND_SPEED) * (player.abilitySpeedMult || 1);
   const effSprintMult = physOpts?.sprintMult ?? SPRINT_MULTIPLIER;
   const effCrouchMult = physOpts?.crouchMult ?? CROUCH_SPEED_MULTIPLIER;
   const effMaxFall = physOpts?.maxFallSpeed ?? MAX_FALL_SPEED;
@@ -217,7 +218,7 @@ export function applyMovement(
     if (player.energy <= 0) scratch.exhausted = true;
   } else {
     player.isSprinting = false;
-    player.energy = Math.min(MAX_ENERGY, player.energy + ENERGY_REGEN_RATE * dtSeconds);
+    player.energy = Math.min(getMaxEnergyFor(player), player.energy + ENERGY_REGEN_RATE * dtSeconds);
     if (player.energy >= ENERGY_EXHAUSTED_THRESHOLD) scratch.exhausted = false;
   }
   if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;

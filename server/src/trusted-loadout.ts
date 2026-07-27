@@ -13,6 +13,13 @@ function resolveWebAppUrl(): string | null {
 export async function fetchTrustedLoadout(userId: string): Promise<{
   equippedSkinsJson?: string;
   weaponCombat?: unknown;
+  abilityStatBonuses?: {
+    maxHealthBonus?: number;
+    speedMultiplier?: number;
+    jumpMultiplier?: number;
+    maxEnergyBonus?: number;
+    punchDamageMultiplier?: number;
+  };
 } | null> {
   const base = resolveWebAppUrl();
   const secret = (process.env.GAME_SERVER_ADMIN_SECRET || '').trim();
@@ -31,11 +38,19 @@ export async function fetchTrustedLoadout(userId: string): Promise<{
       ok?: boolean;
       equippedSkinsJson?: string;
       weaponCombat?: unknown;
+      abilityStatBonuses?: {
+        maxHealthBonus?: number;
+        speedMultiplier?: number;
+        jumpMultiplier?: number;
+        maxEnergyBonus?: number;
+        punchDamageMultiplier?: number;
+      };
     };
     if (!data?.ok) return null;
     return {
       equippedSkinsJson: data.equippedSkinsJson,
       weaponCombat: data.weaponCombat,
+      abilityStatBonuses: data.abilityStatBonuses,
     };
   } catch {
     return null;

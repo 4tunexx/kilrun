@@ -9,7 +9,6 @@ import {
 import {
   HORDE_MIN_PLAYERS_TO_START,
   LOBBY_COUNTDOWN_MS,
-  MAX_ENERGY,
   OBSTACLE_DAMAGE,
   OBSTACLE_HIT_COOLDOWN_MS,
   PLAYER_HEIGHT,
@@ -46,6 +45,7 @@ import {
   weaponPelletDamage,
 } from '../sim/weapon-combat.js';
 import { fetchTrustedLoadout } from '../trusted-loadout.js';
+import { applyAbilityStatsToPlayer, getMaxHealth, getMaxEnergyFor } from '../sim/ability-stats.js';
 import { nextHordeColor } from '../lib/body-colors.js';
 import {
   authenticateJoin,
@@ -364,13 +364,13 @@ export class HordeRoom extends Room<RoomState> {
       if (price > 0) player.credits = Math.max(0, player.credits - price);
       const effect = String(hit.effect || hit.id);
       if (effect === 'heal') {
-        player.health = Math.min(100, player.health + 50);
+        player.health = Math.min(getMaxHealth(player), player.health + 50);
       } else if (effect === 'shield') {
         player.shieldHp = Math.min(100, (player.shieldHp || 0) + 50);
       } else if (effect === 'energy') {
-        player.energy = 100;
+        player.energy = getMaxEnergyFor(player);
       } else if (effect === 'speed' || effect === 'super_jump') {
-        player.energy = 100;
+        player.energy = getMaxEnergyFor(player);
         player.shieldHp = Math.min(100, (player.shieldHp || 0) + 15);
       }
     });
@@ -636,7 +636,9 @@ export class HordeRoom extends Room<RoomState> {
     player.kp = claims.kp;
     const trusted = await fetchTrustedLoadout(player.userId);
     applyLoadoutToPlayer(player, trusted ?? options);
-    player.energy = MAX_ENERGY;
+    applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
+    player.health = getMaxHealth(player);
+    player.energy = getMaxEnergyFor(player);
     this.applySpawnPosition(player, this.state.players.size);
     const usedColors = Array.from(this.state.players.values()).map((p) => p.bodyColorIndex);
     player.bodyColorIndex = nextHordeColor(usedColors);
@@ -750,8 +752,8 @@ export class HordeRoom extends Room<RoomState> {
 
     Array.from(this.state.players.values()).forEach((player, i) => {
       player.role = 'survivor';
-      player.health = 100;
-      player.energy = MAX_ENERGY;
+      player.health = getMaxHealth(player);
+      player.energy = getMaxEnergyFor(player);
       player.isAlive = true;
       player.hasFinished = false;
       player.kills = 0; player.deaths = 0;
@@ -793,7 +795,7 @@ export class HordeRoom extends Room<RoomState> {
       const players = Array.from(this.state.players.values());
       players.forEach((player, index) => {
         if (!player.isAlive) {
-          player.health = 100;
+          player.health = getMaxHealth(player);
           player.isAlive = true;
           this.applySpawnPosition(player, index);
         }
@@ -1079,7 +1081,7 @@ export class HordeRoom extends Room<RoomState> {
         // Revive pad: standing teammate not required for MVP — auto revive if body on pad
         for (const pad of this.revivePads) {
           if (this.isOnPad(player, pad)) {
-            player.health = 60;
+            player.health = Math.min(getMaxHealth(player), 60);
             player.isAlive = true;
             player.z = pad.z + 0.1;
           }
@@ -1093,7 +1095,7 @@ export class HordeRoom extends Room<RoomState> {
         const interval = floor.intervalMs ?? 500;
         if (now - last < interval) continue;
         this.lastHealAt.set(key, now);
-        player.health = Math.min(100, player.health + (floor.healPerTick ?? 8));
+        player.health = Math.min(getMaxHealth(player), player.health + (floor.healPerTick ?? 8));
       }
     }
   }

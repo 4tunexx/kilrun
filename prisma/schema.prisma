@@ -94,6 +94,15 @@ model User {
   /// { entries: [...], layout: { position, align } }.
   showcaseItems Json?
 
+  /// IN-GAME level/XP — earned from kills/wins in matches, upgrades powers
+  /// via the in-game menu (press M). Completely separate from `xpProgress`
+  /// (the website account level). Do NOT confuse the two.
+  gameXp          Int   @default(0)
+  /// Unspent Skill Points available to upgrade powers.
+  gameSkillPoints Int   @default(0)
+  /// Map of AbilityKey -> level (0..10). See shared/ability-progression.ts.
+  gameAbilities   Json?
+
   matchStats         MatchStat[]
   activeMissions     ActiveMission[]
   matchResults       MatchResult[]

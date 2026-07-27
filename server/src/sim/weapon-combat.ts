@@ -20,7 +20,11 @@ export function weaponPelletCount(player: PlayerState): number {
 
 /** Damage dealt by one pellet (shop damage is per-pellet for multi-pellet weapons). */
 export function weaponPelletDamage(player: PlayerState): number {
-  return player.weaponDamage > 0 ? player.weaponDamage : 25;
+  const base = player.weaponDamage > 0 ? player.weaponDamage : 25;
+  if (player.weaponKind === 'melee') {
+    return base * (player.abilityPunchDamageMult || 1);
+  }
+  return base;
 }
 
 /**

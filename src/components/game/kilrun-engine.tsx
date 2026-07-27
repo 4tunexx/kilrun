@@ -23,6 +23,7 @@ import {
   WORLD_HEIGHT,
 } from './utils/constants';
 import { HUD } from './ui/hud';
+import { GameMenu, useGameProgression } from './ui/game-menu';
 import { PauseMenu, useGameFullscreen } from './ui/pause-menu';
 import { LobbyOverlay } from './modes/deathrun/lobby-overlay';
 import { CountdownOverlay } from './modes/deathrun/countdown-overlay';
@@ -146,6 +147,12 @@ export default function KilrunEngine({
   const isMobile = detectTouchDevice();
   const [assetsReady, setAssetsReady] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [gameMenuOpen, setGameMenuOpen] = useState(false);
+  const gameProgression = useGameProgression(joinOptions.userId);
+  useEffect(() => {
+    if (room.phase === 'results') gameProgression.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room.phase]);
   const [editorOpen, setEditorOpen] = useState(false);
   const [aiming, setAiming] = useState(false);
   const aimingRef = useRef(false);
@@ -356,6 +363,18 @@ export default function KilrunEngine({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [editorOpen]);
+
+  // In-game leveling / power upgrade menu (separate from Esc pause menu).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'm') return;
+      if (editorOpen || paused) return;
+      e.preventDefault();
+      setGameMenuOpen((open) => !open);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editorOpen, paused]);
 
   useEffect(() => {
     if (!cloudReady) return;
@@ -1052,6 +1071,32 @@ export default function KilrunEngine({
               />
             )}
           </>
+        )}
+
+        <GameMenu
+          open={gameMenuOpen && !paused && !editorOpen}
+          onClose={() => setGameMenuOpen(false)}
+          userId={joinOptions.userId}
+          username={joinOptions.username}
+          avatarUrl={joinOptions.avatarUrl}
+          progression={gameProgression.progression}
+          loading={gameProgression.loading}
+          upgrading={gameProgression.upgrading}
+          error={gameProgression.error}
+          onUpgrade={gameProgression.upgrade}
+        />
+
+        {!paused && !editorOpen && !gameMenuOpen && gameProgression.hasUnspentPoints && (
+          <div className="absolute top-3 right-16 pointer-events-auto z-[200]">
+            <button
+              onClick={() => setGameMenuOpen(true)}
+              aria-label="Upgrade powers"
+              title="Skill Points available — press M"
+              className="w-11 h-11 rounded-xl shadow-lg bg-emerald-500 hover:bg-emerald-400 text-black font-black text-2xl flex items-center justify-center animate-pulse"
+            >
+              +
+            </button>
+          </div>
         )}
 
         <PauseMenu

@@ -20,6 +20,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { GameProgressionCard } from '@/components/game-progression-card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LevelBar } from '@/components/ui/level-bar';
 import { RankLabel } from '@/components/ui/rank-badge';
@@ -529,6 +530,9 @@ export default function PublicProfileView({
                   </div>
                 </TabsContent>
                 <TabsContent value="game" className="mt-4 space-y-2">
+                  <div className="mb-3">
+                    <GameProgressionCard userId={userId} />
+                  </div>
                   {gameAch.map((ach) => (
                     <AchievementRow key={ach.id} ach={ach} />
                   ))}

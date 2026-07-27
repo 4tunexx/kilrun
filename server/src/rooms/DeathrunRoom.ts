@@ -10,7 +10,6 @@ import {
   FINISH_X,
   LOBBY_COUNTDOWN_MS,
   MATCH_DURATION_MS,
-  MAX_ENERGY,
   MIN_PLAYERS_TO_START,
   OBSTACLE_DAMAGE,
   OBSTACLE_HIT_COOLDOWN_MS,
@@ -39,6 +38,7 @@ import {
   tickMovingPlatforms,
 } from '../sim/moving-platforms.js';
 import { fetchTrustedLoadout } from '../trusted-loadout.js';
+import { applyAbilityStatsToPlayer, getMaxHealth, getMaxEnergyFor } from '../sim/ability-stats.js';
 import { assignDeathrunColors, BODY_COLOR_NONE } from '../lib/body-colors.js';
 import {
   authenticateJoin,
@@ -410,8 +410,10 @@ export class DeathrunRoom extends Room<RoomState> {
     player.avatarUrl = claims.avatarUrl || '';
     const trusted = await fetchTrustedLoadout(player.userId);
     applyLoadoutToPlayer(player, trusted ?? options);
+    applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
     this.applySpawnPosition(player, this.state.players.size);
-    player.energy = MAX_ENERGY;
+    player.health = getMaxHealth(player);
+    player.energy = getMaxEnergyFor(player);
     player.role = 'runner';
     player.bodyColorIndex = BODY_COLOR_NONE;
 
@@ -511,8 +513,8 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private resetPlayerOnSpawn(player: PlayerState, laneIndex: number) {
-    player.health = 100;
-    player.energy = MAX_ENERGY;
+    player.health = getMaxHealth(player);
+    player.energy = getMaxEnergyFor(player);
     player.isAlive = true;
     player.hasFinished = false;
     this.applySpawnPosition(player, laneIndex);
@@ -954,8 +956,8 @@ export class DeathrunRoom extends Room<RoomState> {
       this.state.rewardsReady = false;
       Array.from(this.state.players.values()).forEach((player, index) => {
         player.role = 'runner';
-        player.health = 100;
-        player.energy = MAX_ENERGY;
+        player.health = getMaxHealth(player);
+        player.energy = getMaxEnergyFor(player);
         player.isAlive = true;
         player.hasFinished = false;
         this.resetMatchTelemetry(player);

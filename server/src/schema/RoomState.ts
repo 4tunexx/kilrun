@@ -85,6 +85,17 @@ export class PlayerState extends Schema {
   @type('number') xpEarned = 0;
   @type('number') vpEarned = 0;
   @type('number') kpDelta = 0;
+  /**
+   * IN-GAME power upgrades (Health/Speed/Jump/Energy/Punch) fetched from the
+   * account's persisted ability levels at join — see
+   * shared/ability-progression.ts. Neutral defaults (0 bonus / 1x mult) if
+   * the trusted lookup fails, so gameplay is unaffected.
+   */
+  @type('number') abilityMaxHealthBonus = 0;
+  @type('number') abilitySpeedMult = 1;
+  @type('number') abilityJumpMult = 1;
+  @type('number') abilityMaxEnergyBonus = 0;
+  @type('number') abilityPunchDamageMult = 1;
 }
 
 /** Solid walkable surface for the shared platformer physics. */

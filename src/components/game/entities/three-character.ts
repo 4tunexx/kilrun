@@ -277,11 +277,11 @@ export class ThreeCharacter {
     if (!this.avatarScene) return;
     let holderFound: THREE.Object3D | null = null;
     this.avatarScene.traverse((o) => {
-  if (holderFound) return;
-  if (o.userData?.isWeaponSkin) holderFound = o;
-});
-const holder = holderFound as THREE.Object3D | null;
-if (!holder) return;
+      if (holderFound) return;
+      if (o.userData?.isWeaponSkin) holderFound = o;
+    });
+    const holder = holderFound as THREE.Object3D | null;
+    if (!holder) return;
     const found: THREE.AnimationClip[] = [];
     const pushClips = (o: THREE.Object3D) => {
       const nested = o.userData?.gltfClips as THREE.AnimationClip[] | undefined;

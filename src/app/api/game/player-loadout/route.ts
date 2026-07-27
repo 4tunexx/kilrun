@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { flattenEquippedSkinsMap } from '@/lib/player-skins';
 import { resolveWeaponCombat, findWeaponAttachment } from '@/lib/weapons';
 import { compactSkinsForMatch } from '@/lib/match-loadout';
+import { getAbilityStatBonuses, parseAbilityLevels } from '@shared/ability-progression';
 
 export const runtime = 'nodejs';
 
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
   try {
     const user = await prisma.user.findFirst({
       where: { OR: [{ id: userId }, { steamId: userId }] },
-      select: { id: true, equippedSkins: true },
+      select: { id: true, equippedSkins: true, gameAbilities: true },
     });
     if (!user) {
       return NextResponse.json({ ok: true, equippedSkinsJson: '[]', weaponCombat: null });
@@ -47,12 +48,14 @@ export async function GET(req: NextRequest) {
     const packed = compactSkinsForMatch(attachments);
     const equippedSkinsJson = JSON.stringify(packed);
     const weaponCombat = resolveWeaponCombat(findWeaponAttachment(packed));
+    const abilityStatBonuses = getAbilityStatBonuses(parseAbilityLevels(user.gameAbilities));
 
     return NextResponse.json({
       ok: true,
       userId: user.id,
       equippedSkinsJson,
       weaponCombat,
+      abilityStatBonuses,
     });
   } catch (err) {
     console.error('[api/game/player-loadout]', err);

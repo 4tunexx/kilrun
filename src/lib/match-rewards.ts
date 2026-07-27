@@ -11,6 +11,18 @@ import {
   processMatchProgression,
 } from '@/lib/progression-actions';
 import { runAsTrustedServer } from '@/lib/trusted-server';
+import { grantGameXp } from '@/lib/game-progression-actions';
+
+/**
+ * IN-GAME XP (separate from website `xpEarned`/`xpProgress`) — kills matter
+ * more here since it's a combat power-progression system, not the website
+ * leveling curve.
+ */
+function computeInGameXp(base: { xp: number; kills?: number; wavesCleared?: number }): number {
+  const killBonus = Math.min(200, (base.kills ?? 0) * 6);
+  const waveBonus = Math.min(120, (base.wavesCleared ?? 0) * 5);
+  return Math.round(base.xp * 0.6 + killBonus + waveBonus);
+}
 
 export const DEATHRUN_REWARDS: Record<
   'win' | 'loss' | 'survived' | 'eliminated',
@@ -165,6 +177,7 @@ async function applyDeathrunPlayer(
   });
 
   await grantXp(player.userId, reward.xp, 'Deathrun match');
+  await grantGameXp(player.userId, computeInGameXp({ xp: reward.xp, kills }));
   await processMatchProgression({
     userId: player.userId,
     mode: 'deathrun',
@@ -228,6 +241,7 @@ async function applyHordePlayer(
   });
 
   await grantXp(player.userId, xpEarned, 'Horde match');
+  await grantGameXp(player.userId, computeInGameXp({ xp: xpEarned, kills, wavesCleared }));
   await processMatchProgression({
     userId: player.userId,
     mode: 'horde',
@@ -360,6 +374,7 @@ async function applyCompetitivePlayer(
     reward.xp,
     queue === 'ranked' ? 'Competitive Ranked' : 'Competitive Casual'
   );
+  await grantGameXp(player.userId, computeInGameXp({ xp: reward.xp, kills }));
 
   let nextKp = playerKp;
   let rank = user.currentRank || getRankForKp(playerKp);
