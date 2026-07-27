@@ -9,6 +9,7 @@ import {
 } from '@/lib/announcement-carousel-config';
 import { auth } from '@/auth';
 import { isAdminRole } from '@/lib/roles';
+import { getAnnouncementActivityCutoff } from '@/lib/announcement-carousel-utils';
 
 export type AnnouncementItem = {
   id: string;
@@ -68,7 +69,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
   };
 
   const now = new Date();
-  const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // last 7 days
+  const cutoff = getAnnouncementActivityCutoff(now);
 
   await Promise.all(
     config.types.map(async (type) => {
@@ -275,8 +276,33 @@ export async function getAnnouncementCarouselItems(): Promise<{
     })
   );
 
-  // Shuffle so types are interleaved
+  // Shuffle so types are interleaved. If the configured activity types produce
+  // no items, surface the latest news items so the carousel still has content.
   items.sort(() => Math.random() - 0.5);
+
+  if (items.length === 0) {
+    try {
+      const posts = await prisma.newsPost.findMany({
+        where: { published: true },
+        orderBy: { createdAt: 'desc' },
+        take: PER_TYPE_LIMIT,
+        select: { id: true, title: true, summary: true, createdAt: true },
+      });
+
+      for (const post of posts) {
+        items.push({
+          id: `news-${post.id}`,
+          type: 'news',
+          label: 'News',
+          user: null,
+          detail: post.title,
+          createdAt: post.createdAt.toISOString(),
+        });
+      }
+    } catch {
+      // ignore fallback failures
+    }
+  }
 
   return { config, items };
 }
