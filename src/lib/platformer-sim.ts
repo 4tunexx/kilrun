@@ -335,7 +335,11 @@ export function stepPlatformer(
       scratch.jumpCount = 1;
     } else if (scratch.jumpCount === 0 || scratch.jumpCount === 2) {
       scratch.jumpBufferMs = JUMP_BUFFER_MS;
-    } else if (scratch.jumpCount === 1 && body.energy >= JUMP_ENERGY * 0.2) {
+    } else if (
+      scratch.jumpCount === 1 &&
+      doubleJumpEnabled &&
+      body.energy >= JUMP_ENERGY * 0.2
+    ) {
       body.vz = DOUBLE_JUMP_VELOCITY;
       body.isGrounded = false;
       grounded = false;

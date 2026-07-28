@@ -128,7 +128,7 @@ function applyCustomQuat(c: CustomConv, x: number, y: number, z: number, w: numb
   let qx = c.quatNegX ? -x : x;
   let qy = c.quatNegY ? -y : y;
   let qz = c.quatNegZ ? -z : z;
-  let qw = c.quatNegW ? -w : w;
+  const qw = c.quatNegW ? -w : w;
   if (c.quatSwapYZ) {
     const t = qy;
     qy = qz;

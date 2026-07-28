@@ -79,7 +79,6 @@ import type {
 import {
   HAMMER_SOLID_MODEL,
   ensureAnimation,
-  ensureCombatSettings,
   ensureCompetitiveSettings,
   ensureDeathrunSettings,
   ensureEnvironment,
