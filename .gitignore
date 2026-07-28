@@ -49,3 +49,7 @@ next-env.d.ts
 !.env.example
 # clerk configuration (can include secrets)
 /.clerk/
+
+# Local weapon source copies. Runtime uses public/game/weapons/.
+/weapon_models/
+

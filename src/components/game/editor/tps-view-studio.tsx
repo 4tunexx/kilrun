@@ -98,32 +98,39 @@ export function TpsViewStudio({
   onClose,
   onPlayTest,
   mapDoc,
+  mapId,
   mapOverride,
   onSaveToMap,
   playerEntity,
   onChangePlayer,
   onOpenFullPlayerStudio,
+  embedded,
 }: {
   isMobile?: boolean;
   onClose: () => void;
-  onPlayTest?: () => void;
+  onPlayTest?: (settings: TpsViewSettings) => void;
   mapDoc?: MapDocument;
+  /** Remount / reseed when the edited map changes. */
+  mapId?: string;
   mapOverride?: TpsViewSettings | null;
   onSaveToMap?: (settings: TpsViewSettings) => void;
   /** Map player avatar — model + anim bindings. */
   playerEntity?: EditorEntity | null;
   onChangePlayer?: (patch: Partial<EditorEntity>) => void;
   onOpenFullPlayerStudio?: () => void;
+  /** Render inside map-editor left nav (stacked preview + controls). */
+  embedded?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const settingsRef = useRef<TpsViewSettings>(loadTpsViewSettings());
+  const initial = sanitizeTpsView(mapOverride ?? loadTpsViewSettings());
+  const settingsRef = useRef<TpsViewSettings>(initial);
   const playerRef = useRef(playerEntity);
   playerRef.current = playerEntity ?? null;
-  const [settings, setSettings] = useState<TpsViewSettings>(() => loadTpsViewSettings());
+  const [settings, setSettings] = useState<TpsViewSettings>(initial);
   const [tab, setTab] = useState<Tab>('camera');
   const [dirty, setDirty] = useState(false);
   const [yaw, setYaw] = useState(0.35);
-  const [pitch, setPitch] = useState(settings.camera.defaultPitch);
+  const [pitch, setPitch] = useState(initial.camera.defaultPitch);
   const [clips, setClips] = useState<string[]>([]);
   const [modelBusy, setModelBusy] = useState(false);
   const [previewSkins, setPreviewSkins] = useState(false);
@@ -131,6 +138,16 @@ export function TpsViewStudio({
   const avatarReloadToken = useRef(0);
 
   settingsRef.current = settings;
+
+  // Prefer map-authored 3rd View when opening / switching maps (Deathrun MAIN source of truth).
+  useEffect(() => {
+    const seed = sanitizeTpsView(mapOverride ?? loadTpsViewSettings());
+    settingsRef.current = seed;
+    setSettings(seed);
+    setPitch(seed.camera.defaultPitch);
+    setDirty(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only reseed on map identity change
+  }, [mapId]);
 
   const patch = useCallback((mutator: (s: TpsViewSettings) => void) => {
     setSettings((prev) => {
@@ -432,12 +449,14 @@ export function TpsViewStudio({
 
   return (
     <div
-      className={`flex flex-col bg-[#0b1220] border-l border-white/10 ${
-        isMobile
-          ? 'fixed inset-0 z-[80]'
-          : mapDoc
-            ? 'w-[min(820px,72vw)] shrink-0 h-full max-h-full'
-            : 'w-[min(420px,42vw)] shrink-0 h-full max-h-full'
+      className={`flex flex-col bg-[#0b1220] ${
+        embedded
+          ? 'h-full min-h-0 w-full border-0'
+          : isMobile
+            ? 'fixed inset-0 z-[80] border-l border-white/10'
+            : mapDoc
+              ? 'w-[min(820px,72vw)] shrink-0 h-full max-h-full border-l border-white/10'
+              : 'w-[min(420px,42vw)] shrink-0 h-full max-h-full border-l border-white/10'
       }`}
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 bg-black/30">
@@ -445,7 +464,9 @@ export function TpsViewStudio({
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold text-white tracking-wide">3rd View</p>
           <p className="text-[10px] text-white/45 truncate">
-            Preview the real map + camera framing used in Play Test / match
+            {embedded
+              ? 'Deathrun MAIN 3rd View overrides all game modes'
+              : 'Preview the real map + camera framing used in Play Test / match'}
           </p>
         </div>
         <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-white/70" onClick={onClose}>
@@ -453,12 +474,12 @@ export function TpsViewStudio({
         </Button>
       </div>
 
-      <div className={mapDoc && !isMobile ? 'flex flex-1 min-h-0' : 'contents'}>
+      <div className={mapDoc && !isMobile && !embedded ? 'flex flex-1 min-h-0' : 'contents'}>
       <div
         className={`relative shrink-0 border-b border-white/10 bg-black/40 ${
           mapDoc
-            ? isMobile
-              ? 'h-[42vh]'
+            ? isMobile || embedded
+              ? 'h-[28vh] min-h-[140px]'
               : 'h-auto flex-1 min-w-0 border-b-0 border-r'
             : 'h-[220px]'
         }`}
@@ -482,7 +503,7 @@ export function TpsViewStudio({
         </p>
       </div>
 
-      <div className={mapDoc && !isMobile ? 'w-[320px] shrink-0 flex flex-col min-h-0' : 'contents'}>
+      <div className={mapDoc && !isMobile && !embedded ? 'w-[320px] shrink-0 flex flex-col min-h-0' : 'contents'}>
       <div className="flex border-b border-white/10">
         {tabs.map((t) => (
           <button
@@ -733,9 +754,21 @@ export function TpsViewStudio({
         {tab === 'model' && (
           <>
             {!onChangePlayer || !playerEntity ? (
-              <p className="text-[11px] text-amber-200/80">
-                No player avatar on this map yet. Open Player Model once, or place a Player entity.
-              </p>
+              <div className="space-y-2">
+                <p className="text-[11px] text-amber-200/80">
+                  No player avatar on this map yet. Open Player Model once to create one.
+                </p>
+                {onOpenFullPlayerStudio && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 text-[11px] w-full"
+                    onClick={onOpenFullPlayerStudio}
+                  >
+                    Open Player Model studio
+                  </Button>
+                )}
+              </div>
             ) : (
               <>
                 <p className="text-[10px] text-white/45">
@@ -868,25 +901,24 @@ export function TpsViewStudio({
           <Button
             size="sm"
             className="flex-1 bg-violet-600 hover:bg-violet-500 text-white h-8 text-[11px]"
-            onClick={persistGlobal}
+            onClick={() => {
+              persistGlobal();
+              onSaveToMap?.(settings);
+            }}
+            title="Save camera / crosshair. On Deathrun MAIN this map override wins for all modes."
           >
             <Save className="w-3.5 h-3.5 mr-1" />
-            {dirty ? 'Save → overrides game' : 'Saved (live)'}
+            {dirty ? 'Save → all modes' : 'Saved (live)'}
           </Button>
-          {onSaveToMap && (
-            <Button
-              size="sm"
-              variant="secondary"
-              className="h-8 text-[11px]"
-              onClick={() => {
-                persistGlobal();
-                onSaveToMap(settings);
-              }}
-              title="Also embed these settings in this map"
-            >
-              Save to map
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-8 text-[11px]"
+            onClick={persistGlobal}
+            title="Write global localStorage only (ignored in matches when Deathrun MAIN has map override)"
+          >
+            Global only
+          </Button>
           <Button
             size="sm"
             variant="secondary"
@@ -928,7 +960,8 @@ export function TpsViewStudio({
               className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white h-8 text-[11px]"
               onClick={() => {
                 persistGlobal();
-                onPlayTest();
+                onSaveToMap?.(settings);
+                onPlayTest(settings);
               }}
             >
               <Play className="w-3.5 h-3.5 mr-1" /> Test in Play

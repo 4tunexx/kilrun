@@ -2,9 +2,43 @@
  * Plain (non-Colyseus) platformer step used by Map Play Test so preview
  * matches DeathrunRoom / applyMovement behavior as closely as practical.
  *
- * Keep tunables in sync with `server/src/sim/constants.ts` + `movement.ts`.
- * Feel ported from The Foundry Godot Player.gd.
+ * Tunables: `shared/sim-constants.ts` (same source as the Colyseus server).
  */
+
+import {
+  COLLISION_SKIN,
+  COYOTE_TIME_MS,
+  CROUCH_SPEED_MULTIPLIER,
+  DOUBLE_JUMP_VELOCITY,
+  ENERGY_DRAIN_RATE,
+  ENERGY_EXHAUSTED_SPEED_MULT,
+  ENERGY_EXHAUSTED_THRESHOLD,
+  ENERGY_REGEN_RATE,
+  GRAVITY,
+  GROUND_FOLLOW_SPEED,
+  JUMP_BUFFER_MS,
+  JUMP_CUT_MULTIPLIER,
+  JUMP_ENERGY_COST,
+  JUMP_PAD_BOOST,
+  JUMP_VELOCITY,
+  LAND_SNAP_FAST,
+  LAND_SNAP_SLOW,
+  LAND_STEP_CLIMB,
+  LAND_STEP_DESCEND,
+  LEDGE_ASSIST,
+  MAX_ENERGY,
+  MAX_FALL_SPEED,
+  MAX_GROUND_SPEED,
+  MELEE_MOVE_MULT,
+  PLAYER_HEIGHT,
+  PLAYER_RADIUS,
+  SPRINT_MULTIPLIER,
+  WALL_JUMP_HORIZ_VEL,
+  WALL_JUMP_LOCKOUT_MS,
+  WALL_JUMP_SAME_WALL_COOLDOWN_MS,
+  WALL_JUMP_VERT_VEL,
+  WALL_SLIDE_GRAV_MULT,
+} from '@shared/sim-constants';
 
 export interface SimPad {
   x: number;
@@ -18,6 +52,17 @@ export interface SimPad {
   conveyorSpeed?: number;
   conveyorDirX?: number;
   conveyorDirY?: number;
+  /** Moving platform (optional). */
+  id?: string;
+  entityId?: string;
+  homeX?: number;
+  homeY?: number;
+  homeZ?: number;
+  motionPeriodMs?: number;
+  motionPhaseMs?: number;
+  motionAmpX?: number;
+  motionAmpY?: number;
+  motionAmpZ?: number;
 }
 
 export interface SimBounds {
@@ -50,6 +95,8 @@ export interface SimScratch {
   wallJumpCooldownMs: number;
   wallJumpCooldownNormalX: number;
   wallJumpCooldownNormalY: number;
+  /** Moving-platform carry (pad id / entityId under feet). */
+  supportPadId: string | null;
 }
 
 export interface SimInput {
@@ -61,38 +108,21 @@ export interface SimInput {
   meleeActive?: boolean;
 }
 
-/** === Tunables (mirror server/src/sim/constants.ts — Foundry) === */
-const BASE_GRAVITY = 20;
-const BASE_JUMP_VELOCITY = 10;
-const BASE_DOUBLE_JUMP_VELOCITY = BASE_JUMP_VELOCITY / 1.25;
-const BASE_JUMP_CUT = 0.5;
-const JUMP_PAD_BOOST = 14;
-const BASE_COYOTE_MS = 1000 / 6;
-const BASE_JUMP_BUFFER_MS = 200;
-const BASE_MAX_GROUND_SPEED = 5;
-const BASE_SPRINT_MULT = 1.35;
-const BASE_MAX_FALL = 40;
-/** Horizontal capsule radius — keep in sync with visual CapsuleGeometry(0.35). */
-const PLAYER_RADIUS = 0.35;
-const PLAYER_HEIGHT = 1.7;
-const MAX_ENERGY = 100;
-const ENERGY_DRAIN = 28;
-const ENERGY_REGEN = 18;
-const JUMP_ENERGY = 4;
-const SKIN = 0.02;
-const ENERGY_EXHAUSTED_THRESHOLD = 50;
-const ENERGY_EXHAUSTED_SPEED_MULT = 0.72;
-const LAND_SNAP_FAST = 0.7;
-const LAND_SNAP_SLOW = 0.4;
-const LEDGE_ASSIST = 0.55;
-const MELEE_MOVE_MULT = 0.5;
-const BASE_CROUCH_MULT = 0.55;
-/** Mirror server/src/sim/constants.ts wall-jump defaults exactly. */
-const WALL_JUMP_HORIZ_VEL = 5;
-const WALL_JUMP_VERT_VEL = 9;
-const WALL_SLIDE_GRAV_MULT = 0.35;
-const WALL_JUMP_LOCKOUT_MS = 180;
-const WALL_JUMP_SAME_WALL_COOLDOWN_MS = 300;
+/** === Tunables from shared/sim-constants.ts === */
+const BASE_GRAVITY = GRAVITY;
+const BASE_JUMP_VELOCITY = JUMP_VELOCITY;
+const BASE_DOUBLE_JUMP_VELOCITY = DOUBLE_JUMP_VELOCITY;
+const BASE_JUMP_CUT = JUMP_CUT_MULTIPLIER;
+const BASE_COYOTE_MS = COYOTE_TIME_MS;
+const BASE_JUMP_BUFFER_MS = JUMP_BUFFER_MS;
+const BASE_MAX_GROUND_SPEED = MAX_GROUND_SPEED;
+const BASE_SPRINT_MULT = SPRINT_MULTIPLIER;
+const BASE_MAX_FALL = MAX_FALL_SPEED;
+const BASE_CROUCH_MULT = CROUCH_SPEED_MULTIPLIER;
+const ENERGY_DRAIN = ENERGY_DRAIN_RATE;
+const ENERGY_REGEN = ENERGY_REGEN_RATE;
+const JUMP_ENERGY = JUMP_ENERGY_COST;
+const SKIN = COLLISION_SKIN;
 
 /** Optional per-map physics overrides from CombatSettings (passed via stepPlatformer opts). */
 export interface SimPhysicsOpts {
@@ -133,6 +163,7 @@ export function createSimScratch(): SimScratch {
     wallJumpCooldownMs: 0,
     wallJumpCooldownNormalX: 0,
     wallJumpCooldownNormalY: 0,
+    supportPadId: null,
   };
 }
 
@@ -144,18 +175,50 @@ function findSupport(
   maxSnapDown = LAND_SNAP_SLOW,
   radius = PLAYER_RADIUS
 ) {
-  let best: { pad: SimPad; topZ: number } | null = null;
+  // Prefer the highest pad at/under the feet. Only take a higher overlapping
+  // step when nothing underfoot remains — otherwise "highest wins" hops you
+  // up every ramp cell early, and "nearest" can stick you to a lower pad forever.
+  let bestBelow: { pad: SimPad; topZ: number } | null = null;
+  let bestClimb: { pad: SimPad; topZ: number } | null = null;
   for (const pad of pads) {
     const halfW = pad.width / 2;
     const halfD = pad.depth / 2;
     if (x < pad.x - halfW - radius || x > pad.x + halfW + radius) continue;
     if (y < pad.y - halfD - radius || y > pad.y + halfD + radius) continue;
     const topZ = pad.z;
-    if (z >= topZ - maxSnapDown && z <= topZ + 0.55) {
-      if (!best || topZ > best.topZ) best = { pad, topZ };
+    if (z < topZ - maxSnapDown || z > topZ + 0.55) continue;
+    if (topZ <= z + 0.05) {
+      if (!bestBelow || topZ > bestBelow.topZ) bestBelow = { pad, topZ };
+    } else if (!bestClimb || topZ < bestClimb.topZ) {
+      bestClimb = { pad, topZ };
     }
   }
-  return best;
+  return bestBelow ?? bestClimb;
+}
+
+/** Rate-limited vertical stick to a support top (shared by pre- and post-move glue). */
+function softGlueToSupport(
+  body: SimBody,
+  supportTopZ: number,
+  dt: number,
+  freshLanding: boolean
+) {
+  const delta = supportTopZ - body.z;
+  if (freshLanding) {
+    if (delta > 0) body.z += Math.min(delta, LAND_STEP_CLIMB);
+    else if (delta < 0) body.z += Math.max(delta, -LAND_STEP_DESCEND);
+    else body.z = supportTopZ;
+  } else {
+    const maxStep = Math.max(GROUND_FOLLOW_SPEED * Math.max(dt, 1 / 240), 0.002);
+    if (Math.abs(delta) <= 0.0015) {
+      body.z = supportTopZ;
+    } else if (delta > 0) {
+      body.z += Math.min(delta, Math.min(maxStep, LAND_STEP_CLIMB));
+    } else {
+      body.z += Math.max(delta, -Math.min(maxStep, LAND_STEP_DESCEND));
+    }
+  }
+  body.vz = 0;
 }
 
 function tryLedgeAssist(
@@ -266,24 +329,46 @@ export function stepPlatformer(
   }
   if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;
 
-  let support = findSupport(body.x, body.y, body.z, pads);
+  const wasGroundedLastTick = body.isGrounded;
+  let support = findSupport(
+    body.x,
+    body.y,
+    body.z,
+    pads,
+    wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_SNAP_SLOW
+  );
+  if (!support && wasGroundedLastTick && body.vz >= -0.5) {
+    support = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+  }
   if (!support) {
     const nudged = tryLedgeAssist(body.x, body.y, body.z, pads);
     if (nudged) {
       body.x = nudged.x;
       body.y = nudged.y;
-      support = findSupport(body.x, body.y, body.z, pads);
+      support = findSupport(
+        body.x,
+        body.y,
+        body.z,
+        pads,
+        wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_SNAP_SLOW
+      );
+      if (!support && wasGroundedLastTick && body.vz >= -0.5) {
+        support = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+      }
     }
   }
 
   let grounded = !!support && body.vz <= 0.2;
   body.isGrounded = grounded;
 
+  // Soft ground glue (mirrors server movement.ts). Stepped ramp pads change
+  // topZ by small amounts each cell — hard-assigning body.z caused one-frame
+  // hops that the camera read as a bumpy road. Rate-limit vertical correction
+  // while already grounded; allow a larger snap only on fresh landings.
   if (grounded && support) {
-    scratch.coyoteMs = COYOTE_MS;
+    softGlueToSupport(body, support.topZ, dt, !wasGroundedLastTick);
+    scratch.coyoteMs = COYOTE_TIME_MS;
     scratch.jumpCount = 0;
-    body.z = support.topZ;
-    body.vz = 0;
   } else {
     if (scratch.jumpCount === 0 && scratch.coyoteMs <= 0) {
       scratch.jumpCount = 1;
@@ -415,6 +500,24 @@ export function stepPlatformer(
   scratch.touchingWallX = pushed.touchingWall ? pushed.wallNormalX : 0;
   scratch.touchingWallY = pushed.touchingWall ? pushed.wallNormalY : 0;
 
+  // Same-frame re-stick after XY move so feet follow the next ramp cell now,
+  // not one tick late (that lag was a big part of the bumpy-road feel).
+  if (body.isGrounded) {
+    let post = findSupport(body.x, body.y, body.z, pads, LAND_STEP_DESCEND);
+    if (!post) {
+      post = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+    }
+    if (post) {
+      support = post;
+      softGlueToSupport(body, post.topZ, dt, false);
+      body.isGrounded = true;
+      scratch.coyoteMs = COYOTE_TIME_MS;
+      scratch.jumpCount = 0;
+    } else {
+      body.isGrounded = false;
+    }
+  }
+
   if (!body.isGrounded) {
     const slidingOnWall =
       wallJumpEnabled && pushed.touchingWall && body.vz <= 0 && scratch.wallJumpLockoutMs <= 0;
@@ -422,17 +525,24 @@ export function stepPlatformer(
     body.vz = Math.max(-MAX_FALL, body.vz - gravityThisTick * dt);
     body.z += body.vz * dt;
 
-    const snap = body.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
-    let land = findSupport(body.x, body.y, body.z, pads, snap);
+    const baseSnap = body.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
+    const softSnap = body.vz > -2 ? Math.max(baseSnap, LAND_STEP_CLIMB) : baseSnap;
+    let land = findSupport(body.x, body.y, body.z, pads, softSnap);
+    if (!land && body.vz >= -0.5) {
+      land = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+    }
     if (!land) {
       const nudged = tryLedgeAssist(body.x, body.y, body.z, pads);
       if (nudged) {
         body.x = nudged.x;
         body.y = nudged.y;
-        land = findSupport(body.x, body.y, body.z, pads, snap);
+        land = findSupport(body.x, body.y, body.z, pads, softSnap);
+        if (!land && body.vz >= -0.5) {
+          land = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+        }
       }
     }
-    if (land && body.vz <= 0 && body.z <= land.topZ + 0.08) {
+    if (land && body.vz <= 0 && body.z <= land.topZ + 0.15) {
       body.z = land.topZ;
       if (land.pad.kind === 'jumpPad') {
         body.vz = land.pad.boost && land.pad.boost > 0 ? land.pad.boost : JUMP_PAD_BOOST;
@@ -442,7 +552,7 @@ export function stepPlatformer(
       } else {
         body.vz = 0;
         body.isGrounded = true;
-        scratch.coyoteMs = COYOTE_MS;
+        scratch.coyoteMs = COYOTE_TIME_MS;
         scratch.jumpCount = 0;
         if (scratch.jumpBufferMs > 0 && body.energy >= JUMP_ENERGY * 0.2) {
           body.vz = JUMP_VELOCITY;
@@ -454,6 +564,13 @@ export function stepPlatformer(
         }
       }
     }
+  }
+
+  if (body.isGrounded) {
+    const under = findSupport(body.x, body.y, body.z, pads, LAND_STEP_DESCEND);
+    scratch.supportPadId = under?.pad.id ?? under?.pad.entityId ?? null;
+  } else {
+    scratch.supportPadId = null;
   }
 
   return body;

@@ -16,7 +16,7 @@ export function extractClipNames(gltf: GLTF): string[] {
 export function resolveModelSrc(model?: string, customModelUrl?: string): string | null {
   if (customModelUrl) return customModelUrl;
   if (!model || model === HAMMER_SOLID_MODEL) return null;
-  if (model.startsWith('/game/skins/')) return model;
+  if (model.startsWith('/game/')) return model;
   if (model.startsWith('charasset:')) return null;
   return modelUrl(model);
 }

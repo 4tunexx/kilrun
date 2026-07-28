@@ -914,12 +914,12 @@ export default function GameHubInterface({
             <div
               className={
                 isMobile
-                  ? `fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-[50] w-20 bg-slate-900/95 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 overflow-hidden transition-all duration-300 ${
+                  ? `fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-[50] w-20 bg-slate-900/95 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 overflow-y-auto overflow-x-hidden overscroll-contain transition-all duration-300 ${
                       isLeftMenuOpen
                         ? 'translate-x-0 opacity-100'
                         : '-translate-x-full opacity-0 pointer-events-none'
                     }`
-                  : `w-20 sm:w-24 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 h-full overflow-hidden transition-opacity duration-300 ${
+                  : `w-20 sm:w-24 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 h-full overflow-y-auto overflow-x-hidden transition-opacity duration-300 ${
                       isLeftMenuOpen ? 'opacity-100' : 'opacity-0'
                     }`
               }
@@ -1041,7 +1041,7 @@ export default function GameHubInterface({
                 </TooltipContent>
               </Tooltip>
 
-              <div className="flex-1 shrink-0" />
+              <div className="flex-1 min-h-2" />
 
               {showAdmin && <NavButton icon={Shield} label="Admin Panel" page="admin" />}
 

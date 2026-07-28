@@ -104,6 +104,24 @@ export const REQUIREMENT_TYPES: RequirementType[] = [
     category: 'game',
   },
   {
+    value: 'deathrun_kills',
+    label: 'Deathrun kills',
+    description: 'Trapper eliminations in Deathrun.',
+    category: 'game',
+  },
+  {
+    value: 'competitive_kills',
+    label: 'Competitive kills',
+    description: 'Player kills across Casual + Ranked Competitive.',
+    category: 'game',
+  },
+  {
+    value: 'deaths',
+    label: 'Deaths',
+    description: 'Times eliminated / downed across all modes.',
+    category: 'game',
+  },
+  {
     value: 'competitive_runs',
     label: 'Competitive matches played',
     description: 'Total Competitive 4v4 matches completed.',
@@ -113,6 +131,24 @@ export const REQUIREMENT_TYPES: RequirementType[] = [
     value: 'competitive_wins',
     label: 'Competitive matches won',
     description: 'Competitive 4v4 matches won by your team.',
+    category: 'game',
+  },
+  {
+    value: 'competitive_ranked_runs',
+    label: 'Ranked matches played',
+    description: 'Competitive Ranked matches completed.',
+    category: 'game',
+  },
+  {
+    value: 'competitive_ranked_wins',
+    label: 'Ranked matches won',
+    description: 'Competitive Ranked wins (KP ladder).',
+    category: 'game',
+  },
+  {
+    value: 'competitive_casual_wins',
+    label: 'Casual Competitive wins',
+    description: 'Competitive Casual queue wins.',
     category: 'game',
   },
   {

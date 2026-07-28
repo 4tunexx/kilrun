@@ -52,13 +52,50 @@ export class PlayerState extends Schema {
   @type('number') weaponDamage = 25;
   @type('number') weaponCooldownMs = 350;
   @type('number') weaponConeRadians = 0.18;
+  /** auto | semi | bolt */
+  @type('string') weaponFireMode = 'semi';
+  /** Hitscan pellet count (shotgun). */
+  @type('number') weaponPellets = 1;
+  /** ADS FOV target for client zoom (0 = none). */
+  @type('number') weaponAdsZoomFov = 0;
+  @type('number') weaponAdsConeScale = 0.85;
+  @type('number') weaponHipfireConeScale = 1;
+  /** In-match shop credits (Horde / Competitive buy phase). */
+  @type('number') credits = 0;
+  /** Last purchased shop weapon id (for equipped highlight). */
+  @type('string') weaponId = '';
+  /** Equipped weapon skin id from map buy menu (looked up client-side for texture). */
+  @type('string') weaponSkinId = '';
+  /** Public weapon mesh URL for remote clients (catalog path; never a data: URL). */
+  @type('string') weaponModelUrl = '';
+  /** Mag capacity (0 = unlimited / melee). */
+  @type('number') weaponMagSize = 0;
+  @type('number') ammoInMag = 0;
+  @type('number') reserveAmmo = 0;
+  @type('number') weaponReloadMs = 0;
+  /** Timestamp ms when reload finishes (0 = not reloading). */
+  @type('number') reloadEndsAt = 0;
+  /** Temporary shield HP from power-up shop. */
+  @type('number') shieldHp = 0;
   /** Per-match telemetry / server-authored rewards. */
   @type('number') kills = 0;
+  @type('number') deaths = 0;
   @type('number') score = 0;
   @type('number') distance = 0;
   @type('number') xpEarned = 0;
   @type('number') vpEarned = 0;
   @type('number') kpDelta = 0;
+  /**
+   * IN-GAME power upgrades (Health/Speed/Jump/Energy/Punch) fetched from the
+   * account's persisted ability levels at join — see
+   * shared/ability-progression.ts. Neutral defaults (0 bonus / 1x mult) if
+   * the trusted lookup fails, so gameplay is unaffected.
+   */
+  @type('number') abilityMaxHealthBonus = 0;
+  @type('number') abilitySpeedMult = 1;
+  @type('number') abilityJumpMult = 1;
+  @type('number') abilityMaxEnergyBonus = 0;
+  @type('number') abilityPunchDamageMult = 1;
 }
 
 /** Solid walkable surface for the shared platformer physics. */
@@ -90,6 +127,20 @@ export class PlatformState extends Schema {
   @type('number') conveyorSpeed = 0;
   @type('number') conveyorDirX = 1;
   @type('number') conveyorDirY = 0;
+  /** Moving platform — home pose + amplitude (sim space). */
+  @type('boolean') motionEnabled = false;
+  @type('number') motionPeriodMs = 4000;
+  @type('number') motionPhaseMs = 0;
+  @type('number') motionHomeX = 0;
+  @type('number') motionHomeY = 0;
+  @type('number') motionHomeZ = 0;
+  @type('number') motionAmpX = 0;
+  @type('number') motionAmpY = 0;
+  @type('number') motionAmpZ = 0;
+  /** Yaw rotation in radians (sim XY plane). Used for rotated pad colliders. */
+  @type('number') rotYaw = 0;
+  /** Editor entity id for client mesh sync (custom maps). */
+  @type('string') entityId = '';
 }
 
 /** A hazard that toggles on/off on a fixed interval (or stays on when alwaysActive). */
@@ -140,6 +191,11 @@ export class RoomState extends Schema {
   @type('number') scoreA = 0;
   /** Competitive: Team B rounds won. */
   @type('number') scoreB = 0;
+  /**
+   * Buy-phase remaining ms (Horde between-wave window + Competitive buy countdown).
+   * 0 = shop closed. Synced so clients can show WeaponShop without guessing.
+   */
+  @type('number') buyPhaseMs = 0;
   /** Unique id for this match — used for reward idempotency. */
   @type('string') matchId = '';
   /** True once server (or local display) awards are written onto players. */

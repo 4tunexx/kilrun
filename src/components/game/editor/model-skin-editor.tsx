@@ -96,12 +96,14 @@ export function ModelSkinEditor({
   onApplyToPlayer,
   onPublishToShop,
   isMobile,
+  embedded,
 }: {
   entity: EditorEntity;
   onClose: () => void;
   onApplyToPlayer: (attachments: SkinAttachment[]) => void;
   onPublishToShop?: (payload: ReturnType<typeof skinPresetShopPayload>) => Promise<void> | void;
   isMobile?: boolean;
+  embedded?: boolean;
 }) {
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<SkinPreview | null>(null);
@@ -480,7 +482,11 @@ export function ModelSkinEditor({
   return (
     <aside
       className={`flex flex-col bg-[#0c121a] border-white/10 text-white shadow-2xl z-[90] ${
-        isMobile ? 'absolute inset-0 border-0' : 'relative w-[min(100%,460px)] shrink-0 border-l'
+        embedded
+          ? 'h-full min-h-0 w-full border-0 shadow-none'
+          : isMobile
+            ? 'absolute inset-0 border-0'
+            : 'relative w-[min(100%,460px)] shrink-0 border-l'
       }`}
       aria-label="Model Editor"
     >

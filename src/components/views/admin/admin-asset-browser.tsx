@@ -19,13 +19,16 @@ import {
   adminBulkUpdateAssets,
   adminDeleteAsset,
   adminListAssets,
+  adminPatchAsset,
   adminSetAssetThumbnail,
   adminUploadAsset,
 } from '@/lib/asset-admin-actions';
 import { loadAnimatedPrefab } from '@/components/game/editor/model-scan';
+import { sanitizePackSkinMaterials } from '@/components/game/editor/skin-attachments';
 import { captureModelThumbnail, createThumbnailCaptureSession } from '@/components/game/editor/thumbnail-capture';
 import {
   EDITOR_CHARACTER_CATEGORIES,
+  isPackPreviewIconUrl,
   loadCharacterAssetManifest,
   type AssetRegistryEntry,
 } from '@/lib/asset-registry';
@@ -121,23 +124,49 @@ const CATEGORY_TINT: Record<string, string> = {
   eyebrow: 'from-neutral-500/70 to-neutral-900/50',
 };
 
-function PreviewCanvas({ modelPath }: { modelPath: string | null }) {
+function PreviewCanvas({
+  modelPath,
+  textureUrl,
+  tint,
+}: {
+  modelPath: string | null;
+  /** Pending or saved texture — live-applied to the preview before commit. */
+  textureUrl?: string | null;
+  /** Pending material tint hex — live-applied to the preview before commit. */
+  tint?: string | null;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(true);
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const rootRef = useRef<THREE.Object3D | null>(null);
+  const pendingTexRef = useRef<THREE.Texture | null>(null);
+  const originalMapsRef = useRef<Map<THREE.Material, THREE.Texture | null>>(new Map());
+  const originalColorsRef = useRef<Map<THREE.Material, THREE.Color>>(new Map());
 
+  // Load / reload the model whenever the path changes.
   useEffect(() => {
     const host = hostRef.current;
     if (!host || !modelPath) return;
 
     let disposed = false;
     setStatus('loading');
+    rootRef.current = null;
+    originalMapsRef.current.clear();
+    originalColorsRef.current.clear();
+    if (pendingTexRef.current) {
+      pendingTexRef.current.dispose();
+      pendingTexRef.current = null;
+    }
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x12121a);
     const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 80);
     camera.position.set(1.6, 1.4, 2.2);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     host.appendChild(renderer.domElement);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -152,7 +181,8 @@ function PreviewCanvas({ modelPath }: { modelPath: string | null }) {
 
     let mixer: THREE.AnimationMixer | null = null;
     let raf = 0;
-    const clock = new THREE.Clock();
+    const timer = new THREE.Timer();
+    timer.connect(document);
 
     const resize = () => {
       const w = host.clientWidth || 320;
@@ -168,7 +198,22 @@ function PreviewCanvas({ modelPath }: { modelPath: string | null }) {
     void loadAnimatedPrefab(modelPath)
       .then(({ root, clips }) => {
         if (disposed) return;
+        // Snapshot original maps/colors so we can restore when pending edits clear.
+        root.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh || !mesh.material) return;
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const m of mats) {
+            const std = m as THREE.MeshStandardMaterial;
+            if ('map' in std) originalMapsRef.current.set(m, std.map ?? null);
+            if ('color' in std && std.color) {
+              originalColorsRef.current.set(m, std.color.clone());
+            }
+          }
+        });
         scene.add(root);
+        rootRef.current = root;
+        sanitizePackSkinMaterials(root);
         const box = new THREE.Box3().setFromObject(root);
         const size = box.getSize(new THREE.Vector3()).length() || 1;
         const center = box.getCenter(new THREE.Vector3());
@@ -187,8 +232,9 @@ function PreviewCanvas({ modelPath }: { modelPath: string | null }) {
 
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      const dt = clock.getDelta();
-      if (playing) mixer?.update(dt);
+      timer.update();
+      const dt = timer.getDelta();
+      if (playingRef.current) mixer?.update(dt);
       controls.update();
       renderer.render(scene, camera);
     };
@@ -198,11 +244,87 @@ function PreviewCanvas({ modelPath }: { modelPath: string | null }) {
       disposed = true;
       cancelAnimationFrame(raf);
       ro.disconnect();
+      timer.disconnect();
       controls.dispose();
       renderer.dispose();
+      if (pendingTexRef.current) {
+        pendingTexRef.current.dispose();
+        pendingTexRef.current = null;
+      }
+      rootRef.current = null;
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
     };
-  }, [modelPath, playing]);
+  }, [modelPath]);
+
+  // Live-apply pending texture / tint onto the loaded preview mesh.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || status !== 'ready') return;
+    let cancelled = false;
+
+    const applyAppearance = async () => {
+      let replacement: THREE.Texture | null = null;
+      if (textureUrl && !isPackPreviewIconUrl(textureUrl)) {
+        replacement = await new Promise<THREE.Texture | null>((resolve) => {
+          new THREE.TextureLoader().load(
+            textureUrl,
+            (tex) => {
+              tex.colorSpace = THREE.SRGBColorSpace;
+              tex.needsUpdate = true;
+              resolve(tex);
+            },
+            undefined,
+            () => resolve(null)
+          );
+        });
+        if (cancelled) {
+          replacement?.dispose();
+          return;
+        }
+        if (pendingTexRef.current && pendingTexRef.current !== replacement) {
+          pendingTexRef.current.dispose();
+        }
+        pendingTexRef.current = replacement;
+      } else if (pendingTexRef.current) {
+        pendingTexRef.current.dispose();
+        pendingTexRef.current = null;
+      }
+
+      root.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.material) return;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) {
+          const std = m as THREE.MeshStandardMaterial;
+          if ('map' in std) {
+            if (replacement) {
+              std.map = replacement;
+            } else {
+              std.map = originalMapsRef.current.get(m) ?? null;
+            }
+            std.needsUpdate = true;
+          }
+          if ('color' in std && std.color) {
+            const original = originalColorsRef.current.get(m);
+            if (tint) {
+              try {
+                std.color.set(tint);
+              } catch {
+                if (original) std.color.copy(original);
+              }
+            } else if (original) {
+              std.color.copy(original);
+            }
+          }
+        }
+      });
+    };
+
+    void applyAppearance();
+    return () => {
+      cancelled = true;
+    };
+  }, [textureUrl, tint, status, modelPath]);
 
   return (
     <div className="space-y-2">
@@ -218,6 +340,11 @@ function PreviewCanvas({ modelPath }: { modelPath: string | null }) {
         {status === 'error' && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 text-rose-300 text-xs px-4 text-center">
             Could not load model (FBX). Check path / console.
+          </div>
+        )}
+        {(textureUrl || tint) && status === 'ready' && (
+          <div className="absolute left-2 top-2 z-10 rounded bg-amber-500/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black">
+            Live preview
           </div>
         )}
       </div>
@@ -300,7 +427,10 @@ export function AdminAssetBrowser() {
   const [uploading, setUploading] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [regenAll, setRegenAll] = useState<{ done: number; total: number } | null>(null);
+  const [pendingTextureUrl, setPendingTextureUrl] = useState<string | null>(null);
+  const [pendingMaterialTint, setPendingMaterialTint] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const textureUploadRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -362,6 +492,12 @@ export function AdminAssetBrowser() {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    setPendingTextureUrl(null);
+    setPendingMaterialTint(null);
+    if (textureUploadRef.current) textureUploadRef.current.value = '';
+  }, [selected?.assetId]);
+
   const onUploadFile = async (file: File | null) => {
     if (!file) return;
     if (!/\.(glb|gltf|fbx)$/i.test(file.name)) {
@@ -396,7 +532,12 @@ export function AdminAssetBrowser() {
   const regenerateThumbnail = async (asset: GridAsset) => {
     setRegenerating(true);
     try {
-      const dataUrl = await captureModelThumbnail(asset.modelPath);
+      const dataUrl = await captureModelThumbnail(asset.modelPath, {
+        textureUrl: asset.texturePath?.trim() && !isPackPreviewIconUrl(asset.texturePath)
+          ? asset.texturePath.trim()
+          : undefined,
+        size: 512,
+      });
       const res = await adminSetAssetThumbnail(asset.assetId, dataUrl);
       setItems((prev) =>
         prev.map((a) =>
@@ -449,7 +590,12 @@ export function AdminAssetBrowser() {
     for (const asset of withModel) {
       let dataUrl: string | null = null;
       try {
-        dataUrl = await session.capture(asset.modelPath);
+        dataUrl = await session.capture(asset.modelPath, {
+          textureUrl: asset.texturePath?.trim() && !isPackPreviewIconUrl(asset.texturePath)
+          ? asset.texturePath.trim()
+          : undefined,
+          size: 512,
+        });
       } catch (e) {
         failed++;
         done++;
@@ -720,7 +866,17 @@ export function AdminAssetBrowser() {
               <div className="aspect-square w-full overflow-hidden rounded-md border border-white/10">
                 <AssetThumb asset={selected} />
               </div>
-              <PreviewCanvas modelPath={selected.modelPath} />
+              <PreviewCanvas
+                modelPath={selected.modelPath}
+                textureUrl={pendingTextureUrl ?? selected.texturePath ?? null}
+                tint={pendingMaterialTint}
+              />
+              {(pendingTextureUrl || pendingMaterialTint) && (
+                <p className="text-[11px] text-amber-200/90">
+                  Preview shows your pending texture/tint. Click Apply to save it for the shop
+                  and live matches.
+                </p>
+              )}
               <div className="text-xs text-muted-foreground space-y-1">
                 <div className="font-medium text-foreground">{selected.displayName}</div>
                 <div className="capitalize">
@@ -729,6 +885,158 @@ export function AdminAssetBrowser() {
                 <div>Slot: {selected.equipSlot}</div>
                 <div className="break-all opacity-70">{selected.modelPath}</div>
               </div>
+
+              {source === 'db' && (
+                <div className="space-y-2 pt-2 mt-2 border-t border-border">
+                  <p className="text-[11px] tracking-widest text-white/50 uppercase font-medium">
+                    Skin Texture & Appearance
+                  </p>
+                  <div className="space-y-2">
+                    <input
+                      ref={textureUploadRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null;
+                        if (!f) return;
+                        if (f.size > 3_000_000) {
+                          toast({
+                            title: 'Texture too large',
+                            description: 'Keep under ~3 MB.',
+                            variant: 'destructive',
+                          });
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = () =>
+                          setPendingTextureUrl(
+                            typeof reader.result === 'string' ? reader.result : null
+                          );
+                        reader.readAsDataURL(f);
+                      }}
+                    />
+                    <div className="flex gap-2 flex-wrap items-center">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || regenerating}
+                        onClick={() => textureUploadRef.current?.click()}
+                      >
+                        <Upload className="h-3.5 w-3.5 mr-1" />
+                        {pendingTextureUrl ? 'Replace texture…' : 'Upload texture…'}
+                      </Button>
+                      {pendingTextureUrl && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() => {
+                              setPendingTextureUrl(null);
+                              if (textureUploadRef.current) textureUploadRef.current.value = '';
+                            }}
+                            className="h-8 px-2 text-xs text-red-400 hover:text-red-300"
+                          >
+                            Cancel
+                          </Button>
+                          <div className="flex items-center gap-2 text-[11px] text-white/60">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={pendingTextureUrl}
+                              alt="pending"
+                              className="h-10 w-10 rounded border border-white/10 object-cover bg-black/30"
+                            />
+                            New texture loaded
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <label className="block text-xs text-white/70">
+                      Material tint color
+                      <div className="flex gap-2 items-center mt-1">
+                        <input
+                          type="color"
+                          className="h-9 w-20 bg-transparent"
+                          value={pendingMaterialTint || '#ffffff'}
+                          onChange={(e) => setPendingMaterialTint(e.target.value)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy || !pendingMaterialTint}
+                          onClick={() => setPendingMaterialTint(null)}
+                          className="h-8 px-2 text-xs text-white/50"
+                        >
+                          Reset tint
+                        </Button>
+                      </div>
+                    </label>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="w-full"
+                      disabled={
+                        busy ||
+                        regenerating ||
+                        (!pendingTextureUrl && !pendingMaterialTint)
+                      }
+                      onClick={() =>
+                        void (async () => {
+                          if (!selected) return;
+                          setBusy(true);
+                          try {
+                            const patch: {
+                              texturePath?: string | null;
+                              materialTint?: string | null;
+                            } = {};
+                            if (pendingTextureUrl) patch.texturePath = pendingTextureUrl;
+                            if (pendingMaterialTint !== null) {
+                              patch.materialTint = pendingMaterialTint;
+                            }
+                            await adminPatchAsset(selected.assetId, patch);
+                            // Now render a fresh thumbnail with the new texture applied
+                            const cap = await captureModelThumbnail(selected.modelPath, {
+                              tint: pendingMaterialTint || undefined,
+                              textureUrl:
+                                pendingTextureUrl || selected.texturePath || undefined,
+                              size: 512,
+                            });
+                            if (cap) {
+                              await adminSetAssetThumbnail(selected.assetId, cap);
+                            }
+                            toast({
+                              title: 'Skin updated',
+                              description:
+                                'Saved texture/material change, regenerated asset + shop listing thumbnails.',
+                            });
+                            setPendingTextureUrl(null);
+                            setPendingMaterialTint(null);
+                            if (textureUploadRef.current) textureUploadRef.current.value = '';
+                            await refresh();
+                          } catch (e: unknown) {
+                            toast({
+                              title:
+                                e instanceof Error ? e.message : 'Failed to update texture',
+                              variant: 'destructive',
+                            });
+                          } finally {
+                            setBusy(false);
+                          }
+                        })()
+                      }
+                    >
+                      {busy ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <ImagePlus className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      Apply texture & regenerate shop thumbnails
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {source === 'db' && (
                 <div className="space-y-2 pt-1">
                   <div className="flex flex-wrap gap-2">

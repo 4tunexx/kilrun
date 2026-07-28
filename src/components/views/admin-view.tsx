@@ -25,6 +25,8 @@ import {
   Trophy,
   Users,
   Gem,
+  Package,
+  ListChecks,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -55,6 +57,8 @@ import { AdminRanksPanel } from '@/components/views/admin/admin-ranks-panel';
 import { AdminAnnouncementCarouselPanel } from '@/components/views/admin/admin-announcement-carousel-panel';
 import { AdminAssetBrowser } from '@/components/views/admin/admin-asset-browser';
 import { AdminShopItemsPanel } from '@/components/views/admin/admin-shop-items-panel';
+import { AdminRequirementTypesPanel } from '@/components/views/admin/admin-requirement-types-panel';
+import { AdminInventoryPanel } from '@/components/views/admin/admin-inventory-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -118,8 +122,10 @@ const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   missions: { label: 'Missions', icon: <Target className="h-3.5 w-3.5" /> },
   achievements: { label: 'Achievements', icon: <Trophy className="h-3.5 w-3.5" /> },
   badges: { label: 'Badges', icon: <Medal className="h-3.5 w-3.5" /> },
+  requirements: { label: 'Requirement types', icon: <ListChecks className="h-3.5 w-3.5" /> },
   support: { label: 'Support', icon: <Ticket className="h-3.5 w-3.5" /> },
   shop: { label: 'Shop', icon: <ShoppingBag className="h-3.5 w-3.5" /> },
+  inventory: { label: 'Inventory', icon: <Package className="h-3.5 w-3.5" /> },
   assets: { label: 'Assets', icon: <Database className="h-3.5 w-3.5" /> },
   premium: { label: 'Premium', icon: <Gem className="h-3.5 w-3.5 text-amber-300 fill-amber-400/30" /> },
   ranks: { label: 'Ranks', icon: <Trophy className="h-3.5 w-3.5" /> },
@@ -138,8 +144,10 @@ const ADMIN_TABS = [
   'missions',
   'achievements',
   'badges',
+  'requirements',
   'support',
   'shop',
+  'inventory',
   'assets',
   'premium',
   'ranks',
@@ -1354,6 +1362,9 @@ export default function AdminView({
                   <RequirementTypeSelect
                     value={missionForm.metric}
                     onValueChange={(v) => setMissionForm((f) => ({ ...f, metric: v }))}
+                    categoriesFilter={
+                      missionForm.missionKind === 'daily' ? ['daily'] : undefined
+                    }
                   />
                 </div>
                 <div className="space-y-1">
@@ -1805,6 +1816,12 @@ export default function AdminView({
           </TabsContent>
         )}
 
+        {isAdmin && (
+          <TabsContent value="requirements" className="mt-4">
+            <AdminRequirementTypesPanel />
+          </TabsContent>
+        )}
+
         <TabsContent value="support" className="mt-4 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <Label className="text-slate-400">Status</Label>
@@ -2202,6 +2219,12 @@ export default function AdminView({
               }
               onChanged={reload}
             />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="inventory" className="mt-4">
+            <AdminInventoryPanel />
           </TabsContent>
         )}
 

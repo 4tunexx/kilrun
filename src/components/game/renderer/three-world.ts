@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { TpsCameraSettings } from '../tps/tps-view-settings';
 import { DEFAULT_TPS_VIEW } from '../tps/tps-view-settings';
+import { disposeRendererHard } from './dispose-renderer';
 
 export interface ThreeWorld {
   renderer: THREE.WebGLRenderer;
@@ -83,7 +84,7 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
     render: () => renderer.render(scene, camera),
     destroy: () => {
       window.removeEventListener('resize', onResize);
-      renderer.dispose();
+      disposeRendererHard(renderer);
       if (renderer.domElement.parentElement === host) {
         host.removeChild(renderer.domElement);
       }
@@ -148,6 +149,24 @@ export function updateFollowCamera(
   _right.set(-cosYaw, 0, sinYaw);
 
   _pivot.set(target.x, target.y + lookHeight, target.z);
+
+  // Soften vertical follow so stepped-ramp height changes don't make the
+  // boom hop up/down every pad. XZ still use followSharpness; Y is slower.
+  const camState = camera.userData as {
+    _followPivotY?: number;
+  };
+  const desiredPivotY = _pivot.y;
+  let pivotY = camState._followPivotY;
+  if (pivotY === undefined || !Number.isFinite(pivotY) || Math.abs(pivotY - desiredPivotY) > 3.5) {
+    pivotY = desiredPivotY;
+  } else {
+    const ySharp = Math.max(4, followSharpness * 0.28);
+    const yLerp = 1 - Math.pow(0.001, dt * ySharp);
+    pivotY += (desiredPivotY - pivotY) * Math.min(1, yLerp);
+  }
+  camState._followPivotY = pivotY;
+  _pivot.y = pivotY;
+
   _desired
     .copy(_pivot)
     .addScaledVector(_forward, -dist)

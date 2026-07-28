@@ -111,6 +111,7 @@ export function StoreItemPreview({
         src={imageSrc}
         alt={item.itemName}
         fill
+        sizes="(max-width: 640px) 40vw, 160px"
         className={cn(
           'object-cover group-hover:scale-110 transition-transform duration-300',
           className

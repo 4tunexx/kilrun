@@ -155,6 +155,33 @@ export function characterAssetModelUrl(entry: Pick<AssetRegistryEntry, 'modelPat
   return `${CHARACTER_SKINS_BASE}/${entry.modelPath.replace(/^\//, '')}`;
 }
 
+/**
+ * Pack sidecar PNGs (`FullBody_Banana_001.png`, `Hat_001.png`, …) are 128×128
+ * shop/admin preview icons — NOT UV atlases. The real albedo for every
+ * Characters_7 FBX is `Textures.png` / `Texture.png` in the same folder.
+ * Applying an icon as `material.map` washes the mesh out to flat grey/metal.
+ */
+export function isPackPreviewIconUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const cleaned = url.split('?')[0]!.replace(/\\/g, '/');
+  if (!/\/game\/skins\//i.test(cleaned)) return false;
+  const file = cleaned.split('/').pop()?.toLowerCase() ?? '';
+  if (!file || /^textures?\.png$/i.test(file)) return false;
+  return /\.(png|jpe?g|webp)$/i.test(file);
+}
+
+/** Mesh albedo URL for a registry asset — atlas only, never the preview icon. */
+export function characterAssetTextureUrl(
+  entry: Pick<AssetRegistryEntry, 'texturePath' | 'modelPath' | 'category'>
+): string | undefined {
+  const tex = entry.texturePath?.trim();
+  if (tex && !isPackPreviewIconUrl(tex)) return tex;
+  const model = entry.modelPath?.replace(/\\/g, '/') || '';
+  const dir = model.includes('/') ? model.replace(/\/[^/]+$/, '/') : `${CHARACTER_SKINS_BASE}/`;
+  const base = dir.startsWith('/') ? dir : `${CHARACTER_SKINS_BASE}/${dir.replace(/^\//, '')}`;
+  return `${base.replace(/\/?$/, '/')}Textures.png`;
+}
+
 /** Categories useful in Player / Model editors (bodies + premium + accessories). */
 export const EDITOR_CHARACTER_CATEGORIES: AssetCategory[] = [
   'fullbody',

@@ -15,10 +15,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { UnlockChannelSelect } from '@/components/views/admin/unlock-channel-select';
 import { BannerFill } from '@/components/banner-fill';
-import { normalizeBannerConfig } from '@/lib/banner';
+import {
+  BANNER_ANIMATION_STYLES,
+  BANNER_PATTERNS,
+  normalizeBannerConfig,
+  type BannerAnimationStyle,
+  type BannerPattern,
+} from '@/lib/banner';
 import { useToast } from '@/hooks/use-toast';
 import {
+  adminGetAssetShopListing,
   adminListAssets,
   adminPublishAssetToShop,
   adminRemoveAssetFromShop,
@@ -49,7 +57,7 @@ const UNLOCK_TYPES = [
   { id: 'badge', label: 'Badge reward', hint: 'Comes with a badge' },
 ] as const;
 
-type UnlockTypeId = (typeof UNLOCK_TYPES)[number]['id'];
+type UnlockTypeId = string;
 
 function assetThumb(a: ListableAsset): string | null {
   // A real thumbnail (ideally a rendered 3D icon) always wins over the raw
@@ -62,6 +70,14 @@ function assetThumb(a: ListableAsset): string | null {
     a.texturePath?.trim() ||
     null
   );
+}
+
+function toLocalDatetimeValue(d: Date | string | null | undefined): string {
+  if (!d) return '';
+  const date = new Date(d);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 /**
@@ -87,6 +103,13 @@ export function PackSkinListingPanel({ onCreated }: { onCreated?: () => void }) 
   const [promoColorA, setPromoColorA] = useState('#7c3aed');
   const [promoColorB, setPromoColorB] = useState('#0ea5e9');
   const [promoAngle, setPromoAngle] = useState(120);
+  const [promoOpacity, setPromoOpacity] = useState(1);
+  const [promoBlur, setPromoBlur] = useState(0);
+  const [promoAnimation, setPromoAnimation] =
+    useState<BannerAnimationStyle>('shimmer');
+  const [promoPattern, setPromoPattern] = useState<BannerPattern>('none');
+  const [promoPatternOpacity, setPromoPatternOpacity] = useState(0.35);
+  const [promoOverlayOpacity, setPromoOverlayOpacity] = useState(0.3);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -160,13 +183,74 @@ export function PackSkinListingPanel({ onCreated }: { onCreated?: () => void }) 
     setEventEndsAt('');
     setPromoted(false);
     setPromoHeadline(`NEW: ${a.displayName}`);
+    setPromoColorA('#7c3aed');
+    setPromoColorB('#0ea5e9');
+    setPromoAngle(120);
+    setPromoOpacity(1);
+    setPromoBlur(0);
+    setPromoAnimation('shimmer');
+    setPromoPattern('none');
+    setPromoPatternOpacity(0.35);
+    setPromoOverlayOpacity(0.3);
+
+    if (!a.shopVisible) return;
+    void adminGetAssetShopListing(a.assetId)
+      .then((listing) => {
+        if (!listing) return;
+        setItemName(listing.itemName);
+        setPrice(listing.vpPrice);
+        setUnlockType((listing.unlockType as UnlockTypeId) || 'purchase');
+        setUnlockRef(listing.unlockRef || '');
+        setEventEndsAt(toLocalDatetimeValue(listing.eventEndsAt));
+        setPromoted(Boolean(listing.promoted));
+        const banner = normalizeBannerConfig(listing.promoBanner ?? {});
+        const raw = (listing.promoBanner ?? {}) as Record<string, unknown>;
+        setPromoHeadline(
+          typeof raw.headline === 'string' && raw.headline.trim()
+            ? raw.headline
+            : listing.itemName
+        );
+        setPromoColorA(banner.colors[0] ?? '#7c3aed');
+        setPromoColorB(banner.colors[1] ?? '#0ea5e9');
+        setPromoAngle(banner.angle);
+        setPromoOpacity(banner.opacity ?? 1);
+        setPromoBlur(banner.blur ?? 0);
+        setPromoAnimation(
+          banner.animationStyle !== 'none' ? banner.animationStyle : 'shimmer'
+        );
+        setPromoPattern(banner.pattern ?? 'none');
+        setPromoPatternOpacity(banner.patternOpacity ?? 0.35);
+        setPromoOverlayOpacity(
+          typeof raw.overlayOpacity === 'number' && Number.isFinite(raw.overlayOpacity)
+            ? Math.max(0, Math.min(0.85, raw.overlayOpacity))
+            : 0.3
+        );
+      })
+      .catch(() => {});
   };
 
   const promoBannerConfig = normalizeBannerConfig({
     colors: [promoColorA, promoColorB],
     angle: promoAngle,
-    animated: true,
-    animationStyle: 'shimmer',
+    animated: promoAnimation !== 'none',
+    animationStyle: promoAnimation,
+    opacity: promoOpacity,
+    blur: promoBlur,
+    pattern: promoPattern,
+    patternOpacity: promoPatternOpacity,
+  });
+
+  const buildPromoBannerPayload = () => ({
+    headline: promoHeadline.trim() || itemName.trim(),
+    colors: [promoColorA, promoColorB],
+    angle: promoAngle,
+    opacity: promoOpacity,
+    blur: promoBlur,
+    animated: promoAnimation !== 'none',
+    animationStyle: promoAnimation,
+    pattern: promoPattern,
+    patternOpacity: promoPatternOpacity,
+    overlayOpacity: promoOverlayOpacity,
   });
 
   const eventDate = eventEndsAt ? new Date(eventEndsAt) : null;
@@ -188,13 +272,7 @@ export function PackSkinListingPanel({ onCreated }: { onCreated?: () => void }) 
         unlockRef: unlockRef.trim() || null,
         eventEndsAt: eventDate ? eventDate.toISOString() : null,
         promoted,
-        promoBanner: promoted
-          ? {
-              headline: promoHeadline.trim() || itemName.trim(),
-              colors: [promoColorA, promoColorB],
-              angle: promoAngle,
-            }
-          : null,
+        promoBanner: promoted ? buildPromoBannerPayload() : null,
       });
       toast({
         title: `“${itemName}” is live in the shop`,
@@ -343,21 +421,11 @@ export function PackSkinListingPanel({ onCreated }: { onCreated?: () => void }) 
               <Label className="flex items-center gap-1.5">
                 <Trophy className="h-3.5 w-3.5 text-amber-400" /> How is it obtained?
               </Label>
-              <Select value={unlockType} onValueChange={(v) => setUnlockType(v as UnlockTypeId)}>
-                <SelectTrigger className="bg-slate-900/50 border-slate-700">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {UNLOCK_TYPES.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[10px] text-slate-500">
-                {UNLOCK_TYPES.find((u) => u.id === unlockType)?.hint}
-              </p>
+              <UnlockChannelSelect
+                value={unlockType}
+                onValueChange={(v) => setUnlockType(v)}
+                className="bg-slate-900/50 border-slate-700"
+              />
             </div>
 
             {unlockType === 'purchase' ? (
@@ -468,10 +536,107 @@ export function PackSkinListingPanel({ onCreated }: { onCreated?: () => void }) 
                       />
                     </div>
                   </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs">
+                      <Label>Fill opacity</Label>
+                      <span className="text-slate-400">{Math.round(promoOpacity * 100)}%</span>
+                    </div>
+                    <Slider
+                      min={0.4}
+                      max={1}
+                      step={0.05}
+                      value={[promoOpacity]}
+                      onValueChange={([v]) => setPromoOpacity(v)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs">
+                      <Label>Soft blur</Label>
+                      <span className="text-slate-400">{promoBlur.toFixed(2)}</span>
+                    </div>
+                    <Slider
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={[promoBlur]}
+                      onValueChange={([v]) => setPromoBlur(v)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs">
+                      <Label>Content overlay (dark wash)</Label>
+                      <span className="text-slate-400">
+                        {Math.round(promoOverlayOpacity * 100)}%
+                      </span>
+                    </div>
+                    <Slider
+                      min={0}
+                      max={0.75}
+                      step={0.05}
+                      value={[promoOverlayOpacity]}
+                      onValueChange={([v]) => setPromoOverlayOpacity(v)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Effect / animation</Label>
+                    <Select
+                      value={promoAnimation}
+                      onValueChange={(v) => setPromoAnimation(v as BannerAnimationStyle)}
+                    >
+                      <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BANNER_ANIMATION_STYLES.map((s) => (
+                          <SelectItem key={s.value} value={s.value}>
+                            {s.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Pattern overlay</Label>
+                    <Select
+                      value={promoPattern}
+                      onValueChange={(v) => setPromoPattern(v as BannerPattern)}
+                    >
+                      <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BANNER_PATTERNS.map((p) => (
+                          <SelectItem key={p.value} value={p.value}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {promoPattern !== 'none' && (
+                      <div className="space-y-2 pt-1">
+                        <div className="flex justify-between text-xs">
+                          <Label>Pattern strength</Label>
+                          <span className="text-slate-400">
+                            {promoPatternOpacity.toFixed(2)}
+                          </span>
+                        </div>
+                        <Slider
+                          min={0.05}
+                          max={1}
+                          step={0.05}
+                          value={[promoPatternOpacity]}
+                          onValueChange={([v]) => setPromoPatternOpacity(v)}
+                        />
+                      </div>
+                    )}
+                  </div>
                   {/* Live promo preview — same layout as the home dashboard strip */}
                   <div className="relative overflow-hidden rounded-lg border border-slate-700">
                     <BannerFill banner={promoBannerConfig} className="absolute inset-0" />
-                    <div className="relative z-10 flex items-center gap-3 p-3 bg-black/25">
+                    <div
+                      className="relative z-10 flex items-center gap-3 p-3"
+                      style={{ backgroundColor: `rgba(0,0,0,${promoOverlayOpacity})` }}
+                    >
                       {assetThumb(selected) && (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -487,7 +652,7 @@ export function PackSkinListingPanel({ onCreated }: { onCreated?: () => void }) 
                         <p className="text-[10px] text-white/80">
                           {unlockType === 'purchase'
                             ? `${price} VP in the shop`
-                            : `${UNLOCK_TYPES.find((u) => u.id === unlockType)?.label}${unlockRef ? ` · ${unlockRef}` : ''}`}
+                            : `${UNLOCK_TYPES.find((u) => u.id === unlockType)?.label ?? unlockType}${unlockRef ? ` · ${unlockRef}` : ''}`}
                           {eventDate && eventValid && eventDate.getTime() > Date.now()
                             ? ` · ends in ${formatFireSaleCountdown(eventDate)}`
                             : ''}

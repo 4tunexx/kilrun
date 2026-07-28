@@ -50,20 +50,33 @@ export function HomePromoBanner({ onNavigate }: { onNavigate?: (page: string) =>
   return (
     <div className="space-y-3">
       {promos.slice(0, 2).map((promo) => {
-        const banner = promo.promoBanner as {
-          headline?: string;
-          colors?: string[];
-          angle?: number;
-        } | null;
+        const raw = (promo.promoBanner ?? {}) as Record<string, unknown>;
         const bannerConfig = normalizeBannerConfig({
           colors:
-            Array.isArray(banner?.colors) && banner.colors.length >= 2
-              ? banner.colors
+            Array.isArray(raw.colors) && (raw.colors as unknown[]).length >= 2
+              ? (raw.colors as string[])
               : ['#7c3aed', '#0ea5e9'],
-          angle: typeof banner?.angle === 'number' ? banner.angle : 120,
-          animated: true,
-          animationStyle: 'shimmer',
+          angle: typeof raw.angle === 'number' ? raw.angle : 120,
+          opacity: typeof raw.opacity === 'number' ? raw.opacity : 1,
+          blur: typeof raw.blur === 'number' ? raw.blur : 0,
+          animated:
+            raw.animated !== false &&
+            (typeof raw.animationStyle === 'string'
+              ? raw.animationStyle !== 'none'
+              : true),
+          animationStyle:
+            typeof raw.animationStyle === 'string' ? raw.animationStyle : 'shimmer',
+          pattern: typeof raw.pattern === 'string' ? raw.pattern : 'none',
+          patternOpacity:
+            typeof raw.patternOpacity === 'number' ? raw.patternOpacity : 0.35,
+          patternScale: typeof raw.patternScale === 'number' ? raw.patternScale : 1,
         });
+        const overlayOpacity =
+          typeof raw.overlayOpacity === 'number' && Number.isFinite(raw.overlayOpacity)
+            ? Math.max(0, Math.min(0.85, raw.overlayOpacity))
+            : 0.3;
+        const headline =
+          typeof raw.headline === 'string' ? raw.headline.trim() : '';
         const earned = Boolean(promo.unlockType && promo.unlockType !== 'purchase');
         const eventLive =
           promo.eventEndsAt && new Date(promo.eventEndsAt).getTime() > Date.now();
@@ -73,7 +86,10 @@ export function HomePromoBanner({ onNavigate }: { onNavigate?: (page: string) =>
             className="relative overflow-hidden rounded-xl border border-white/10 shadow-lg"
           >
             <BannerFill banner={bannerConfig} className="absolute inset-0" />
-            <div className="relative z-10 flex flex-wrap items-center gap-3 sm:gap-4 bg-black/30 px-4 py-3 sm:px-6">
+            <div
+              className="relative z-10 flex flex-wrap items-center gap-3 sm:gap-4 px-4 py-3 sm:px-6"
+              style={{ backgroundColor: `rgba(0,0,0,${overlayOpacity})` }}
+            >
               {promo.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -88,7 +104,7 @@ export function HomePromoBanner({ onNavigate }: { onNavigate?: (page: string) =>
               )}
               <div className="min-w-0 flex-1">
                 <p className="text-sm sm:text-base font-black truncate text-white drop-shadow">
-                  {banner?.headline?.trim() || promo.itemName}
+                  {headline || promo.itemName}
                 </p>
                 <p className="text-[11px] sm:text-xs text-white/85 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   {earned ? (

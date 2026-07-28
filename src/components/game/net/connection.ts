@@ -249,6 +249,7 @@ export class GameConnection {
         roundIndex: s.roundIndex,
         scoreA: s.scoreA,
         scoreB: s.scoreB,
+        buyPhaseMs: (s as { buyPhaseMs?: number }).buyPhaseMs ?? 0,
         matchId: s.matchId,
         rewardsReady: s.rewardsReady,
       });
@@ -268,6 +269,7 @@ export class GameConnection {
       'roundIndex',
       'scoreA',
       'scoreB',
+      'buyPhaseMs',
       'matchId',
       'rewardsReady',
     ].forEach((field) => {
@@ -290,13 +292,35 @@ export class GameConnection {
    * Server validates and applies the new loadout for the current round/wave.
    */
   public sendBuyWeapon(weaponPreset: {
+    itemId?: string;
     kind: 'hitscan' | 'melee';
     damage: number;
     range: number;
     cooldownMs: number;
     coneRadians: number;
+    fireMode?: 'auto' | 'semi' | 'bolt';
+    pellets?: number;
+    adsZoomFov?: number;
+    adsConeScale?: number;
+    hipfireConeScale?: number;
+    magSize?: number;
+    reserveAmmo?: number;
+    reloadMs?: number;
+    modelUrl?: string;
   }): void {
     this.room?.send('buyWeapon', weaponPreset);
+  }
+
+  public sendBuyPowerUp(powerUpId: string): void {
+    this.room?.send('buyPowerUp', { powerUpId });
+  }
+
+  public sendBuyWeaponSkin(skinId: string): void {
+    this.room?.send('buyWeaponSkin', { skinId });
+  }
+
+  public sendReload(): void {
+    this.room?.send('reload', {});
   }
 
   /** Colyseus room id after a successful connect (for party queue sync). */
@@ -317,6 +341,13 @@ export class GameConnection {
       conveyorSpeed?: number;
       conveyorDirX?: number;
       conveyorDirY?: number;
+      rotYaw?: number;
+      entityId?: string;
+      motionPeriodMs?: number;
+      motionPhaseMs?: number;
+      motionAmpX?: number;
+      motionAmpY?: number;
+      motionAmpZ?: number;
     }[];
     obstacles?: {
       id?: string;
@@ -456,6 +487,7 @@ export class GameConnection {
     };
     modeSettings?: Record<string, unknown>;
     combatSettings?: Record<string, unknown>;
+    shopSettings?: Record<string, unknown>;
   }): void {
     this.room?.send('loadCustomMap', payload);
   }

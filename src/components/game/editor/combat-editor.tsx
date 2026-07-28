@@ -139,15 +139,25 @@ function Toggle({
   label: string;
   hint?: string;
   value: boolean;
-  accentTrue?: string;
+  accentTrue?: 'emerald' | 'violet' | 'sky' | 'amber' | 'rose' | string;
   onChange: (v: boolean) => void;
 }) {
+  const onClass =
+    accentTrue === 'violet'
+      ? 'bg-violet-500'
+      : accentTrue === 'sky'
+        ? 'bg-sky-500'
+        : accentTrue === 'amber'
+          ? 'bg-amber-500'
+          : accentTrue === 'rose'
+            ? 'bg-rose-500'
+            : 'bg-emerald-500';
   return (
     <label className="flex items-start gap-2 cursor-pointer">
       <div
         onClick={() => onChange(!value)}
         className={`w-8 h-4 rounded-full mt-0.5 shrink-0 relative transition-colors cursor-pointer ${
-          value ? `bg-${accentTrue}-500` : 'bg-white/15'
+          value ? onClass : 'bg-white/15'
         }`}
       >
         <div
@@ -194,11 +204,14 @@ export function CombatEditor({
   mapDoc,
   onClose,
   onSaveToMap,
+  embedded,
 }: {
   isMobile?: boolean;
   mapDoc: MapDocument;
   onClose: () => void;
   onSaveToMap: (settings: Partial<CombatSettings>) => void;
+  /** Render inside map-editor left nav instead of fullscreen overlay. */
+  embedded?: boolean;
 }) {
   const [settings, setSettings] = useState<CombatSettings>(() => ensureCombatSettings(mapDoc));
   const [tab, setTab] = useState<Tab>('movement');
@@ -224,7 +237,13 @@ export function CombatEditor({
   const gameMode = mapDoc.gameMode ?? 'deathrun';
 
   return (
-    <div className="fixed inset-0 z-[3000] flex flex-col bg-slate-950/96 backdrop-blur-md">
+    <div
+      className={
+        embedded
+          ? 'flex flex-col h-full min-h-0 w-full bg-slate-950/96'
+          : 'fixed inset-0 z-[3000] flex flex-col bg-slate-950/96 backdrop-blur-md'
+      }
+    >
       {/* ── Top bar ──────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/10 bg-slate-900/60 shrink-0">
         <Settings2 className="w-4 h-4 text-sky-300" />

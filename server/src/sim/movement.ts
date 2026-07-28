@@ -15,8 +15,10 @@ import {
   JUMP_VELOCITY,
   LAND_SNAP_FAST,
   LAND_SNAP_SLOW,
+  GROUND_FOLLOW_SPEED,
+  LAND_STEP_CLIMB,
+  LAND_STEP_DESCEND,
   LEDGE_ASSIST,
-  MAX_ENERGY,
   MAX_FALL_SPEED,
   MAX_GROUND_SPEED,
   MELEE_MOVE_MULT,
@@ -34,6 +36,7 @@ import {
   WORLD_WIDTH,
 } from './constants.js';
 import { findSupportPlatform, resolveSolidCollisions } from './platforms.js';
+import { getMaxEnergyFor } from './ability-stats.js';
 
 export interface PlayerInput {
   moveX: number; // -1..1, camera-relative forward/back intent (world X after client rotates)
@@ -46,6 +49,8 @@ export interface PlayerInput {
   sprint: boolean;
   jumpPressed: boolean;
   shootPressed: boolean;
+  /** ADS / RMB — used for sniper cone tighten. */
+  aimHeld?: boolean;
   interactPressed: boolean;
   /** True while melee swing is active (Foundry speed_mod 0.5). */
   meleeActive?: boolean;
@@ -61,6 +66,7 @@ const EMPTY_INPUT: PlayerInput = {
   sprint: false,
   jumpPressed: false,
   shootPressed: false,
+  aimHeld: false,
   interactPressed: false,
   meleeActive: false,
 };
@@ -91,6 +97,8 @@ export interface PlayerSimScratch {
   wallJumpCooldownMs: number;
   wallJumpCooldownNormalX: number;
   wallJumpCooldownNormalY: number;
+  /** Platform id under feet last tick (moving-platform carry). */
+  supportPlatformId: string | null;
 }
 
 export function createSimScratch(): PlayerSimScratch {
@@ -108,6 +116,7 @@ export function createSimScratch(): PlayerSimScratch {
     wallJumpCooldownMs: 0,
     wallJumpCooldownNormalX: 0,
     wallJumpCooldownNormalY: 0,
+    supportPlatformId: null,
   };
 }
 
@@ -163,13 +172,14 @@ export function applyMovement(
 
   // Resolve per-map overrides over base constants.
   const effGravity = physOpts?.gravity ?? GRAVITY;
-  const effJumpVel = physOpts?.jumpVelocity ?? JUMP_VELOCITY;
-  const effDoubleJumpVel = physOpts?.doubleJumpVelocity ?? DOUBLE_JUMP_VELOCITY;
+  const effJumpVel = (physOpts?.jumpVelocity ?? JUMP_VELOCITY) * (player.abilityJumpMult || 1);
+  const effDoubleJumpVel =
+    (physOpts?.doubleJumpVelocity ?? DOUBLE_JUMP_VELOCITY) * (player.abilityJumpMult || 1);
   const effDoubleJumpEnabled = physOpts?.doubleJumpEnabled ?? true;
   const effJumpCut = physOpts?.jumpCutMult ?? JUMP_CUT_MULTIPLIER;
   const effCoyoteMs = physOpts?.coyoteMs ?? COYOTE_TIME_MS;
   const effJumpBufferMs = physOpts?.jumpBufferMs ?? JUMP_BUFFER_MS;
-  const effWalkSpeed = physOpts?.walkSpeed ?? MAX_GROUND_SPEED;
+  const effWalkSpeed = (physOpts?.walkSpeed ?? MAX_GROUND_SPEED) * (player.abilitySpeedMult || 1);
   const effSprintMult = physOpts?.sprintMult ?? SPRINT_MULTIPLIER;
   const effCrouchMult = physOpts?.crouchMult ?? CROUCH_SPEED_MULTIPLIER;
   const effMaxFall = physOpts?.maxFallSpeed ?? MAX_FALL_SPEED;
@@ -208,10 +218,12 @@ export function applyMovement(
     if (player.energy <= 0) scratch.exhausted = true;
   } else {
     player.isSprinting = false;
-    player.energy = Math.min(MAX_ENERGY, player.energy + ENERGY_REGEN_RATE * dtSeconds);
+    player.energy = Math.min(getMaxEnergyFor(player), player.energy + ENERGY_REGEN_RATE * dtSeconds);
     if (player.energy >= ENERGY_EXHAUSTED_THRESHOLD) scratch.exhausted = false;
   }
   if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;
+
+  const wasGroundedLastTick = player.isGrounded;
 
   let support = findSupportPlatform(
     player.x,
@@ -219,8 +231,18 @@ export function applyMovement(
     player.z,
     platforms,
     PLAYER_RADIUS,
-    LAND_SNAP_SLOW
+    wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_SNAP_SLOW
   );
+  if (!support && wasGroundedLastTick && player.vz >= -0.5) {
+    support = findSupportPlatform(
+      player.x,
+      player.y,
+      player.z,
+      platforms,
+      PLAYER_RADIUS,
+      LAND_STEP_CLIMB
+    );
+  }
   if (!support) {
     const nudged = tryLedgeAssist(player.x, player.y, player.z, platforms);
     if (nudged) {
@@ -232,19 +254,48 @@ export function applyMovement(
         player.z,
         platforms,
         PLAYER_RADIUS,
-        LAND_SNAP_SLOW
+        wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_SNAP_SLOW
       );
+      if (!support && wasGroundedLastTick && player.vz >= -0.5) {
+        support = findSupportPlatform(
+          player.x,
+          player.y,
+          player.z,
+          platforms,
+          PLAYER_RADIUS,
+          LAND_STEP_CLIMB
+        );
+      }
     }
   }
 
   let grounded = !!support && player.vz <= 0.2;
   player.isGrounded = grounded;
 
+  // Soft ground glue: stepped ramp pads change topZ in small increments.
+  // Hard-assigning player.z each tick (or absorbing the full delta in one
+  // frame) made walking ramps feel like a bumpy road; the client camera
+  // amplified those hops. Rate-limit while already grounded; allow a larger
+  // snap only on fresh landings.
   if (grounded && support) {
+    const delta = support.topZ - player.z;
+    if (!wasGroundedLastTick) {
+      if (delta > 0) player.z += Math.min(delta, LAND_STEP_CLIMB);
+      else if (delta < 0) player.z += Math.max(delta, -LAND_STEP_DESCEND);
+      else player.z = support.topZ;
+    } else {
+      const maxStep = Math.max(GROUND_FOLLOW_SPEED * Math.max(dtSeconds, 1 / 240), 0.002);
+      if (Math.abs(delta) <= 0.0015) {
+        player.z = support.topZ;
+      } else if (delta > 0) {
+        player.z += Math.min(delta, Math.min(maxStep, LAND_STEP_CLIMB));
+      } else {
+        player.z += Math.max(delta, -Math.min(maxStep, LAND_STEP_DESCEND));
+      }
+    }
+    player.vz = 0;
     scratch.coyoteMs = effCoyoteMs;
     scratch.jumpCount = 0;
-    player.z = support.topZ;
-    player.vz = 0;
   } else {
     if (scratch.jumpCount === 0 && scratch.coyoteMs <= 0) {
       scratch.jumpCount = 1;
@@ -392,6 +443,46 @@ export function applyMovement(
   scratch.touchingWallX = pushed.touchingWall ? pushed.wallNormalX : 0;
   scratch.touchingWallY = pushed.touchingWall ? pushed.wallNormalY : 0;
 
+  // Same-frame re-stick after XY move so feet follow the next ramp cell now.
+  if (player.isGrounded) {
+    let post = findSupportPlatform(
+      player.x,
+      player.y,
+      player.z,
+      platforms,
+      PLAYER_RADIUS,
+      LAND_STEP_DESCEND
+    );
+    if (!post) {
+      post = findSupportPlatform(
+        player.x,
+        player.y,
+        player.z,
+        platforms,
+        PLAYER_RADIUS,
+        LAND_STEP_CLIMB
+      );
+    }
+    if (post) {
+      support = post;
+      const delta = post.topZ - player.z;
+      const maxStep = Math.max(GROUND_FOLLOW_SPEED * Math.max(dtSeconds, 1 / 240), 0.002);
+      if (Math.abs(delta) <= 0.0015) {
+        player.z = post.topZ;
+      } else if (delta > 0) {
+        player.z += Math.min(delta, Math.min(maxStep, LAND_STEP_CLIMB));
+      } else {
+        player.z += Math.max(delta, -Math.min(maxStep, LAND_STEP_DESCEND));
+      }
+      player.vz = 0;
+      player.isGrounded = true;
+      scratch.coyoteMs = effCoyoteMs;
+      scratch.jumpCount = 0;
+    } else {
+      player.isGrounded = false;
+    }
+  }
+
   // Vertical — constant Foundry gravity
   if (!player.isGrounded) {
     const slidingOnWall =
@@ -403,15 +494,26 @@ export function applyMovement(
     player.vz = Math.max(-effMaxFall, player.vz - gravityThisTick * dtSeconds);
     player.z += player.vz * dtSeconds;
 
-    const snap = player.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
+    const baseSnap = player.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
+    const softSnap = player.vz > -2 ? Math.max(baseSnap, LAND_STEP_CLIMB) : baseSnap;
     let land = findSupportPlatform(
       player.x,
       player.y,
       player.z,
       platforms,
       PLAYER_RADIUS,
-      snap
+      softSnap
     );
+    if (!land && player.vz >= -0.5) {
+      land = findSupportPlatform(
+        player.x,
+        player.y,
+        player.z,
+        platforms,
+        PLAYER_RADIUS,
+        LAND_STEP_CLIMB
+      );
+    }
     if (!land) {
       const nudged = tryLedgeAssist(player.x, player.y, player.z, platforms);
       if (nudged) {
@@ -423,11 +525,21 @@ export function applyMovement(
           player.z,
           platforms,
           PLAYER_RADIUS,
-          snap
+          softSnap
         );
+        if (!land && player.vz >= -0.5) {
+          land = findSupportPlatform(
+            player.x,
+            player.y,
+            player.z,
+            platforms,
+            PLAYER_RADIUS,
+            LAND_STEP_CLIMB
+          );
+        }
       }
     }
-    if (land && player.vz <= 0 && player.z <= land.topZ + 0.08) {
+    if (land && player.vz <= 0 && player.z <= land.topZ + 0.15) {
       player.z = land.topZ;
       if (land.platform.kind === 'jumpPad') {
         player.vz = land.platform.boost > 0 ? land.platform.boost : JUMP_PAD_BOOST;
@@ -454,6 +566,20 @@ export function applyMovement(
 
   if (player.z < VOID_Z) {
     player.vz = 0;
+  }
+
+  if (player.isGrounded) {
+    const grounded = findSupportPlatform(
+      player.x,
+      player.y,
+      player.z,
+      platforms,
+      PLAYER_RADIUS,
+      LAND_STEP_DESCEND
+    );
+    scratch.supportPlatformId = grounded?.platform.id ?? null;
+  } else {
+    scratch.supportPlatformId = null;
   }
 }
 

@@ -4,18 +4,25 @@
  *
  * Pack note: FBX exports from different source packs often embed the same
  * generic internal texture reference name ("Textures.png", sometimes with a
- * stale absolute path from whoever authored it). For the actual shared
- * Characters_7 pack that's correct — they really do share one atlas at
- * `/game/skins/Textures.png`. But several standalone packs (fullbody
- * costume/novelty skins in particular) reuse that same generic export name
- * while shipping their OWN dedicated same-named PNG right next to the FBX
- * (e.g. `FullBody_Demon_001.fbx` + `FullBody_Demon_001.png`). Blindly
- * redirecting every "texturesname.png" reference to the shared atlas was
- * silently breaking every one of those — they rendered with the wrong
- * pack's colors (often reading as flat black) instead of their own texture.
+ * stale absolute path from whoever authored it). Blindly redirecting every
+ * one of those to a single global shared atlas breaks anything that isn't
+ * actually part of that pack. In practice this repo has THREE different
+ * legitimate texture sources behind that same generic reference, and which
+ * one is correct depends on the specific asset:
  *
- * Fix: before assuming "shared atlas", check whether the FBX being loaded
- * has its own sibling PNG (same directory, same basename) and prefer that.
+ *  1. A dedicated PNG next to the FBX, same basename (e.g.
+ *     `FullBody_Demon_001.fbx` + `FullBody_Demon_001.png`). Verified: every
+ *     asset in fullbody/hair/gloves/outerwear/eyebrows/shoes/hats/pants has
+ *     one of these — highest priority when present.
+ *  2. A per-folder shared atlas (`<category>/Textures.png`), for categories
+ *     where individual assets DON'T have their own PNG — verified: every
+ *     one of the 36 `mustaches/*.fbx` relies on `mustaches/Textures.png`.
+ *  3. The true global Characters_7 atlas (`/game/skins/Textures.png`), for
+ *     assets from that pack that have neither of the above.
+ *
+ * Resolution checks 1 → 2 → 3 in order (existence-checked up front, not
+ * guessed), plus a reactive fallback: if whatever we picked still 404s at
+ * runtime, swap to the global atlas rather than rendering untextured/black.
  */
 
 import * as THREE from 'three';
@@ -36,22 +43,92 @@ function isGenericTexturesReference(url: string): boolean {
   );
 }
 
-/** Cache: does <fbxUrl-minus-extension>.png actually exist? Checked once per URL. */
-const siblingPngCache = new Map<string, Promise<boolean>>();
+const urlExistsCache = new Map<string, Promise<boolean>>();
+
+function urlExists(url: string): Promise<boolean> {
+  let pending = urlExistsCache.get(url);
+  if (!pending) {
+    pending = fetch(url, { method: 'HEAD' })
+      .then((res) => res.ok)
+      .catch(() => false);
+    urlExistsCache.set(url, pending);
+  }
+  return pending;
+}
 
 function siblingPngPath(fbxUrl: string): string {
   return fbxUrl.replace(/\.fbx(\?.*)?$/i, '.png');
 }
 
-async function hasSiblingPng(fbxUrl: string): Promise<boolean> {
-  let pending = siblingPngCache.get(fbxUrl);
+function folderAtlasPath(fbxUrl: string): string {
+  return fbxUrl.replace(/[^/]+$/, '') + 'Textures.png';
+}
+
+/** Which of the 3 sources to use for a given FBX's generic texture refs — checked once per URL. */
+type TextureSource = { kind: 'sibling' | 'folder' | 'global'; path: string };
+const textureSourceCache = new Map<string, Promise<TextureSource>>();
+
+async function resolveTextureSource(fbxUrl: string): Promise<TextureSource> {
+  let pending = textureSourceCache.get(fbxUrl);
   if (!pending) {
-    pending = fetch(siblingPngPath(fbxUrl), { method: 'HEAD' })
-      .then((res) => res.ok)
-      .catch(() => false);
-    siblingPngCache.set(fbxUrl, pending);
+    pending = (async () => {
+      const sibling = siblingPngPath(fbxUrl);
+      const folder = folderAtlasPath(fbxUrl);
+      const [siblingOk, folderOk] = await Promise.all([urlExists(sibling), urlExists(folder)]);
+      if (siblingOk) return { kind: 'sibling' as const, path: sibling };
+      if (folderOk) return { kind: 'folder' as const, path: folder };
+      return { kind: 'global' as const, path: SHARED_SKIN_ATLAS };
+    })();
+    textureSourceCache.set(fbxUrl, pending);
   }
   return pending;
+}
+
+/** Reusable texture for the true global Characters_7 atlas — lazily created
+ * so a runtime 404 fallback can swap to it without another network round trip. */
+let _sharedAtlasTexture: THREE.Texture | null = null;
+function getSharedAtlasTexture(): THREE.Texture {
+  if (!_sharedAtlasTexture) {
+    _sharedAtlasTexture = new THREE.TextureLoader().load(SHARED_SKIN_ATLAS);
+    _sharedAtlasTexture.colorSpace = THREE.SRGBColorSpace;
+    _sharedAtlasTexture.wrapS = _sharedAtlasTexture.wrapT = THREE.RepeatWrapping;
+  }
+  return _sharedAtlasTexture;
+}
+
+/** Safety net: if the texture we picked (sibling or folder atlas) still
+ * fails to actually load at runtime for any reason, swap to the global
+ * atlas rather than leaving the material untextured/black. */
+function installTextureFallback(group: THREE.Object3D, chosenPath: string) {
+  if (chosenPath === SHARED_SKIN_ATLAS) return;
+  const MAP_SLOTS = ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'] as const;
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) {
+      const std = m as THREE.MeshStandardMaterial;
+      for (const slot of MAP_SLOTS) {
+        const tex = std[slot] as THREE.Texture | null | undefined;
+        if (!tex || !tex.image) continue;
+        const img = tex.image as HTMLImageElement | undefined;
+        const swapToShared = () => {
+          try {
+            (std as unknown as Record<string, THREE.Texture>)[slot] = getSharedAtlasTexture();
+            std.needsUpdate = true;
+          } catch {
+            /* ignore */
+          }
+        };
+        if (img && typeof img.complete === 'boolean' && img.complete) {
+          if (!img.naturalWidth || img.naturalWidth === 0) swapToShared();
+        } else if (img && typeof img.addEventListener === 'function') {
+          img.addEventListener('error', swapToShared, { once: true });
+        }
+      }
+    }
+  });
 }
 
 const cache = new Map<string, Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] }>>();
@@ -76,16 +153,13 @@ export function loadFbxModel(
     pending = (async () => {
       // Resolve texture redirect for THIS load only — a fresh manager per
       // FBX (not one shared, mutable, global modifier) so concurrent loads
-      // of different models can never race on which one's sibling-PNG
-      // check is "current".
-      const preferSibling = await hasSiblingPng(url);
-      const sibling = siblingPngPath(url);
+      // of different models can never race on which one's resolved source
+      // is "current".
+      const source = await resolveTextureSource(url);
       const manager = new THREE.LoadingManager();
       manager.setURLModifier((texUrl) => {
         const cleaned = texUrl.replace(/\\/g, '/').split('?')[0]!;
-        if (isGenericTexturesReference(texUrl)) {
-          return preferSibling ? sibling : SHARED_SKIN_ATLAS;
-        }
+        if (isGenericTexturesReference(texUrl)) return source.path;
         if (cleaned.toLowerCase().includes('/game/skins/')) return cleaned;
         return texUrl;
       });
@@ -104,6 +178,7 @@ export function loadFbxModel(
                   obj.receiveShadow = true;
                 }
               });
+              installTextureFallback(group, source.path);
               resolve({
                 scene: group,
                 animations: group.animations ?? [],

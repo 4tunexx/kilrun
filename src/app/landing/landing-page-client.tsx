@@ -204,7 +204,9 @@ export default function LandingPageClient({
         setTopPlayers(data.topPlayers);
         setPopularItems(data.popularItems);
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error('[landing-page] getLandingPageData failed', err);
+      })
       .finally(() => setDataLoading(false));
   }, []);
 

@@ -388,7 +388,7 @@ export const SKIN_ATTACH_SLOTS: {
   {
     id: 'fullbody',
     label: 'Full body skin',
-    hint: 'Replaces the entire character model (premium)',
+    hint: 'Layers over the default player model (costume / outfit)',
     defaultOffset: [0, 0, 0],
     boneHints: ['hips', 'pelvis', 'root'],
     cosmeticSlot: 'skin_fullbody',

@@ -313,8 +313,8 @@ export default function HomeView({
         <HomePromoBanner onNavigate={onNavigate} />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Card className={PANEL}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <Card className={`${PANEL} h-full flex flex-col`}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 shrink-0">
               <CardTitle className="flex items-center gap-2">
                 <MessageCircle className="w-5 h-5 text-primary" /> Live Chat
               </CardTitle>
@@ -345,7 +345,7 @@ export default function HomeView({
                 </Button>
               )}
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="flex-1 flex flex-col min-h-0 gap-3">
               {!chatEnabled ? (
                 <p className="text-slate-400 text-sm">Chat is disabled by staff.</p>
               ) : chatCollapsed ? (
@@ -354,7 +354,7 @@ export default function HomeView({
                 </p>
               ) : (
                 <>
-                  <div className="h-56 overflow-y-auto space-y-2 rounded-lg bg-slate-900/40 p-3 border border-slate-700/40">
+                  <div className="min-h-[14rem] flex-1 overflow-y-auto space-y-2 rounded-lg bg-slate-900/40 p-3 border border-slate-700/40">
                     {chat.length === 0 ? (
                       <p className="text-slate-500 text-sm text-center py-8">
                         No messages yet — say hello!
@@ -424,7 +424,7 @@ export default function HomeView({
             </CardContent>
           </Card>
 
-          <Card className={PANEL}>
+          <Card className={`${PANEL} h-full`}>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle>Daily Missions</CardTitle>

@@ -1,115 +1,74 @@
-/** Shared tuning values for the authoritative simulation. Keep every magic number here.
- *  Mirror horizontal / jump feel in `src/lib/platformer-sim.ts` (Play Test).
- *
- *  Movement feel ported from The Foundry (Godot) Prototype/Scripts/Player.gd:
- *  speed 5, gravity 20, jump 10, double jump 10/1.25, coyote 1/6s, buffer 0.2s,
- *  jump-cut ×0.5 on first jump only. Horizontal velocity is set directly (no Quake accel).
+/**
+ * Shared tuning values for the authoritative simulation.
+ * Physics/movement numbers live in `shared/sim-constants.ts` (also used by Play Test).
  */
 
-export const TICK_RATE_HZ = 30;
-export const TICK_DT_MS = 1000 / TICK_RATE_HZ;
+export {
+  TICK_RATE_HZ,
+  TICK_DT_MS,
+  PLAYER_RADIUS,
+  PLAYER_HEIGHT,
+  MAX_GROUND_SPEED,
+  SPRINT_MULTIPLIER,
+  GROUND_ACCEL,
+  GROUND_FRICTION,
+  AIR_ACCEL,
+  AIR_CONTROL,
+  MAX_AIR_SPEED_MULT,
+  CROUCH_SPEED_MULTIPLIER,
+  GRAVITY,
+  APEX_GRAVITY_MULT,
+  APEX_VZ_THRESHOLD,
+  JUMP_VELOCITY,
+  DOUBLE_JUMP_MOD,
+  DOUBLE_JUMP_VELOCITY,
+  JUMP_CUT_MULTIPLIER,
+  COYOTE_TIME_MS,
+  JUMP_BUFFER_MS,
+  MAX_FALL_SPEED,
+  LAND_SNAP_SLOW,
+  LAND_SNAP_FAST,
+  GROUND_FOLLOW_SPEED,
+  LAND_STEP_CLIMB,
+  LAND_STEP_DESCEND,
+  LEDGE_ASSIST,
+  COLLISION_SKIN,
+  VOID_Z,
+  WALL_JUMP_ENABLED_DEFAULT,
+  WALL_JUMP_HORIZ_VEL,
+  WALL_JUMP_VERT_VEL,
+  WALL_SLIDE_GRAV_MULT,
+  WALL_JUMP_LOCKOUT_MS,
+  WALL_JUMP_SAME_WALL_COOLDOWN_MS,
+  MAX_ENERGY,
+  ENERGY_DRAIN_RATE,
+  ENERGY_REGEN_RATE,
+  ENERGY_EXHAUSTED_THRESHOLD,
+  ENERGY_EXHAUSTED_SPEED_MULT,
+  JUMP_ENERGY_COST,
+  JUMP_PAD_BOOST,
+  HITSCAN_RANGE,
+  HITSCAN_DAMAGE,
+  SHOOT_COOLDOWN_MS,
+  MELEE_MOVE_MULT,
+  MELEE_DURATION_MS,
+} from '../../../shared/sim-constants.js';
 
 export const MIN_PLAYERS_TO_START = 1;
-/** Horde auto-starts when this many players are connected (admin can force sooner). */
 export const HORDE_MIN_PLAYERS_TO_START = 4;
-/** Competitive auto-starts when this many players are connected (admin can force sooner). */
 export const COMPETITIVE_MIN_PLAYERS_TO_START = 2;
 export const LOBBY_COUNTDOWN_MS = 5000;
 export const MATCH_DURATION_MS = 180_000;
 
-/** Track length (forward / depth axis). */
 export const WORLD_WIDTH = 48;
-/** Track width (lateral axis). */
 export const WORLD_HEIGHT = 10;
 export const FINISH_X = WORLD_WIDTH - 2;
 export const SPAWN_X = 2;
 export const SPAWN_Z = 0;
 
-/** Horizontal capsule radius — match visual CapsuleGeometry(0.35) / Play Test sim. */
-export const PLAYER_RADIUS = 0.35;
-/** Match visual avatar height (~1.8) with a slightly shorter collision capsule. */
-export const PLAYER_HEIGHT = 1.7;
-
-/**
- * Foundry CharacterBody3D — direct wish * speed each frame (ground + air).
- * Sprint / crouch are Kilrun extras on top of base speed.
- */
-export const MAX_GROUND_SPEED = 5;
-export const SPRINT_MULTIPLIER = 1.35;
-/** Unused by Foundry-style direct velocity; kept for ice conveyor blending. */
-export const GROUND_ACCEL = 80;
-export const GROUND_FRICTION = 24;
-export const AIR_ACCEL = 80;
-export const AIR_CONTROL = 1;
-export const MAX_AIR_SPEED_MULT = 1;
-export const CROUCH_SPEED_MULTIPLIER = 0.55;
-
-/** Foundry: gravity 20, jump 10, double = jump / 1.25, cut ×0.5 on first jump. */
-export const GRAVITY = 20;
-/** Foundry has constant gravity (no apex hang). */
-export const APEX_GRAVITY_MULT = 1;
-export const APEX_VZ_THRESHOLD = 0;
-export const JUMP_VELOCITY = 10;
-/** Double jump impulse = JUMP_VELOCITY / DOUBLE_JUMP_MOD (Foundry double_jump_mod). */
-export const DOUBLE_JUMP_MOD = 1.25;
-export const DOUBLE_JUMP_VELOCITY = JUMP_VELOCITY / DOUBLE_JUMP_MOD;
-/** Multiply ascending vz when jump is released (first jump only). */
-export const JUMP_CUT_MULTIPLIER = 0.5;
-/** coyote_time = 1/6 s */
-export const COYOTE_TIME_MS = 1000 / 6;
-/** jump_buffer_time = 0.2 s */
-export const JUMP_BUFFER_MS = 200;
-export const MAX_FALL_SPEED = 40;
-export const LAND_SNAP_SLOW = 0.4;
-export const LAND_SNAP_FAST = 0.7;
-/** How far past a pad rim (beyond capsule) we still pull the player back on. */
-export const LEDGE_ASSIST = 0.55;
-/** Skin width for solid AABB push-out. */
-export const COLLISION_SKIN = 0.02;
-/** Below this height the runner falls into the void and is eliminated. */
-export const VOID_Z = -4;
-
-/**
- * Wall parkour — Mirror's Edge / Celeste style, layered on top of the
- * Foundry base feel: slide down walls slower than free-fall, jump off them
- * with an outward + upward kick, chainable wall-to-wall.
- *
- * Off by default (map creator opts in via Combat Editor → Wall-jump) — see
- * CombatSettings.wallJumpEnabled in map-document.ts, which already shipped
- * this UI + these exact default numbers before the sim itself existed.
- */
-export const WALL_JUMP_ENABLED_DEFAULT = false;
-export const WALL_JUMP_HORIZ_VEL = 5;
-export const WALL_JUMP_VERT_VEL = 9;
-/** Multiplies gravity (not an absolute cap) while pressed against a wall and falling. */
-export const WALL_SLIDE_GRAV_MULT = 0.35;
-/** Briefly ignore wish-input horizontal override so the outward kick isn't
- * instantly cancelled by still holding into the wall. */
-export const WALL_JUMP_LOCKOUT_MS = 180;
-/** Need to have left contact with the SAME wall normal before it counts
- * again — stops standing still humping one wall for infinite height.
- * Switching to a different wall (or jumping away and back) is unaffected. */
-export const WALL_JUMP_SAME_WALL_COOLDOWN_MS = 300;
-
-export const MAX_ENERGY = 100;
-export const ENERGY_DRAIN_RATE = 28;
-export const ENERGY_REGEN_RATE = 18;
-export const ENERGY_EXHAUSTED_THRESHOLD = 50;
-export const ENERGY_EXHAUSTED_SPEED_MULT = 0.72;
-export const JUMP_ENERGY_COST = 4;
-
+import { MAX_GROUND_SPEED } from '../../../shared/sim-constants.js';
 export const RUNNER_MOVE_SPEED = MAX_GROUND_SPEED;
 export const TRAPPER_MOVE_SPEED = MAX_GROUND_SPEED * 0.92;
 
 export const OBSTACLE_DAMAGE = 40;
 export const OBSTACLE_HIT_COOLDOWN_MS = 600;
-/** Default vertical launch when landing on a jumpPad with boost=0. */
-export const JUMP_PAD_BOOST = 14;
-
-/** Hitscan / melee aim from screen center (Foundry Camera.get_aim_point). */
-export const HITSCAN_RANGE = 14;
-export const HITSCAN_DAMAGE = 25;
-export const SHOOT_COOLDOWN_MS = 350;
-/** Foundry MeleeDurationTimer ≈ 0.5s; melee slows move to 0.5× while active. */
-export const MELEE_MOVE_MULT = 0.5;
-export const MELEE_DURATION_MS = 500;

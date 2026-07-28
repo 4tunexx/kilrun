@@ -10,12 +10,33 @@ import {
 
 const MAX_SKIN_JSON_CHARS = 48_000;
 
-/** Strip huge data URLs before sending skins over the wire. */
+/** Strip huge data URLs before sending skins over the wire.
+ * NOTE: Full-body costumes layer OVER the default pack body — keep their
+ * customModelUrl so they render as overlays. Only demote if a data URL would
+ * blow the join payload budget.
+ */
 export function compactSkinsForMatch(attachments: SkinAttachment[]): SkinAttachment[] {
   return attachments.slice(0, 16).map((att) => {
     const next: SkinAttachment = { ...att };
-    if (next.customModelUrl?.startsWith('data:')) delete next.customModelUrl;
-    if (next.textureUrl?.startsWith('data:')) delete next.textureUrl;
+    const isFullbody = next.slot === 'fullbody';
+
+    // Preserve model URLs for fullbody overlays so live matches still show them.
+    if (!isFullbody && next.customModelUrl?.startsWith('data:')) {
+      delete next.customModelUrl;
+    } else if (
+      isFullbody &&
+      next.customModelUrl?.startsWith('data:') &&
+      next.customModelUrl.length > 32_000
+    ) {
+      // Data FBX too large for network — drop overlay rather than break join.
+      delete next.customModelUrl;
+    }
+
+    if (next.textureUrl?.startsWith('data:')) {
+      // Data URLs can't be sent over the network; fall back to shared pack atlas
+      // so live matches render textured skins instead of black.
+      next.textureUrl = '/game/skins/Textures.png';
+    }
     if (next.sculpt && next.sculpt.positions.length > 24_000) delete next.sculpt;
     if (next.bonded?.length) {
       next.bonded = next.bonded.slice(0, 12).map((b) => {

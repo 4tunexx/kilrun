@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
 import { Prisma } from '@/generated/prisma';
 import type { AssetCategory, AssetRarity } from '@/lib/asset-registry';
-import { classifyAssetFilename } from '@/lib/asset-registry';
+import { classifyAssetFilename, isPackPreviewIconUrl } from '@/lib/asset-registry';
 
 async function requireAdmin() {
   const session = await auth();
@@ -126,6 +126,19 @@ export async function adminUpsertAsset(input: {
 
 export async function adminDeleteAsset(assetId: string) {
   await requireAdmin();
+  const sku = `asset_${assetId}`;
+  try {
+    await prisma.storeItem.updateMany({
+      where: { itemSku: sku },
+      data: {
+        isAvailable: false,
+        promoted: false,
+        promoBanner: null,
+      },
+    });
+  } catch {
+    /* ignore — proceed with asset delete even if store-item cleanup fails */
+  }
   await prisma.asset.delete({ where: { assetId } });
   return { ok: true };
 }
@@ -160,7 +173,9 @@ export interface AssetShopListingOptions {
   eventEndsAt?: string | null;
   /** Feature on the home dashboard. */
   promoted?: boolean;
-  /** Dashboard promo banner: { headline?, colors?, angle? }. */
+  /** Dashboard promo banner: { headline?, colors?, angle?, opacity?, blur?,
+   *  animated?, animationStyle?, pattern?, patternOpacity?, patternScale?,
+   *  overlayOpacity? }. */
   promoBanner?: Record<string, unknown> | null;
 }
 
@@ -193,7 +208,12 @@ export async function adminPublishAssetToShop(
         id: asset.assetId,
         slot: skinSlot,
         customModelUrl: asset.modelPath,
-        textureUrl: asset.texturePath || undefined,
+        // 128px FullBody_*.png etc. are shop icons, not UV atlases — omit so the
+        // FBX keeps its resolved Textures.png albedo.
+        textureUrl:
+          asset.texturePath && !isPackPreviewIconUrl(asset.texturePath)
+            ? asset.texturePath
+            : undefined,
         position: [0, 0, 0],
         rotation: [0, 0, 0],
         scale: [1, 1, 1],
@@ -255,13 +275,35 @@ export async function adminRemoveAssetFromShop(assetId: string) {
   const sku = `asset_${assetId}`;
   await prisma.storeItem.updateMany({
     where: { itemSku: sku },
-    data: { isAvailable: false },
+    data: {
+      isAvailable: false,
+      promoted: false,
+      promoBanner: null,
+    },
   });
   await prisma.asset.update({
     where: { assetId },
     data: { shopVisible: false },
   });
   return { ok: true };
+}
+
+/** Load the current shop listing for an asset (used to re-edit promo banners). */
+export async function adminGetAssetShopListing(assetId: string) {
+  await requireAdmin();
+  const sku = `asset_${assetId}`;
+  const item = await prisma.storeItem.findUnique({ where: { itemSku: sku } });
+  if (!item || !item.isAvailable) return null;
+  return {
+    id: item.id,
+    itemName: item.itemName,
+    vpPrice: item.vpPrice,
+    unlockType: item.unlockType,
+    unlockRef: item.unlockRef,
+    eventEndsAt: item.eventEndsAt,
+    promoted: item.promoted,
+    promoBanner: item.promoBanner as Record<string, unknown> | null,
+  };
 }
 
 /**
@@ -362,6 +404,89 @@ export async function adminSetAssetThumbnail(assetId: string, thumbnailDataUrl: 
   }
 
   return { ok: true as const, assetId: asset.assetId, thumbnailUrl };
+}
+
+/**
+ * Patch an individual asset with texture/material/metadata overrides.
+ * Persists any image data URLs (uploads to storage) and syncs the new
+ * texture/material settings to any already-published shop listings for this
+ * asset so players see the updated skin in the shop + live matches.
+ */
+export async function adminPatchAsset(
+  assetId: string,
+  patch: {
+    texturePath?: string | null;
+    materialTint?: string | null;
+    displayName?: string;
+    rarity?: string;
+    equipSlot?: string;
+  }
+) {
+  await requireAdmin();
+
+  const data: Prisma.AssetUpdateInput = {};
+  if (patch.displayName !== undefined) data.displayName = patch.displayName;
+  if (patch.rarity !== undefined) data.rarity = patch.rarity;
+  if (patch.equipSlot !== undefined) data.equipSlot = patch.equipSlot;
+
+  // Persist data-URL textures to site storage (keep existing relative URLs).
+  if (patch.texturePath !== undefined) {
+    if (!patch.texturePath) {
+      data.texturePath = '';
+    } else if (patch.texturePath.startsWith('data:image/')) {
+      const { persistSiteImage } = await import('@/lib/site-asset-upload');
+      data.texturePath = await persistSiteImage(patch.texturePath, 'misc');
+    } else {
+      data.texturePath = patch.texturePath;
+    }
+  }
+
+  const asset = Object.keys(data).length
+    ? await prisma.asset.update({ where: { assetId }, data })
+    : await prisma.asset.findUnique({ where: { assetId } });
+  if (!asset) throw new Error('Asset not found');
+
+  // Push the new texture/tint into any published store listing for this asset
+  // so the cosmetic config delivered to live matches picks it up.
+  const sku = `asset_${assetId}`;
+  const existing = await prisma.storeItem.findUnique({ where: { itemSku: sku } });
+  if (existing) {
+    const cfg = (existing.cosmeticConfig as Record<string, unknown> | null) ?? {};
+    const nextAttachmentsRaw = cfg.attachments;
+    if (Array.isArray(nextAttachmentsRaw) && nextAttachmentsRaw.length > 0) {
+      const attachments = nextAttachmentsRaw.map((a) => ({
+        ...(a && typeof a === 'object' ? (a as Record<string, unknown>) : {}),
+      }));
+      for (const att of attachments) {
+        if (patch.texturePath !== undefined) {
+          att.textureUrl = data.texturePath ?? att.textureUrl ?? null;
+        }
+        if (patch.materialTint !== undefined) {
+          const mat =
+            att.material && typeof att.material === 'object'
+              ? { ...(att.material as Record<string, unknown>) }
+              : {};
+          if (patch.materialTint) {
+            mat.color = patch.materialTint;
+          } else {
+            delete mat.color;
+          }
+          att.material = Object.keys(mat).length > 0 ? mat : undefined;
+        }
+      }
+      await prisma.storeItem.update({
+        where: { itemSku: sku },
+        data: {
+          cosmeticConfig: {
+            ...cfg,
+            attachments,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    }
+  }
+
+  return { ok: true as const, asset };
 }
 
 /** Public/editor: list enabled assets (falls back empty if table missing). */

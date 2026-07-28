@@ -41,12 +41,22 @@ import {
 import { loadPlayerAvatar } from './player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
 import { PROTOTYPE_MODELS, modelUrl } from './prototype-catalog';
+import { CATALOG_WEAPONS } from '@/lib/weapon-catalog';
 
 type Tab = 'model' | 'hold' | 'back' | 'combat' | 'recoil' | 'sway' | 'anims' | 'shop';
 
-const WEAPON_MODELS = PROTOTYPE_MODELS.filter(
-  (m) => m.startsWith('weapon-') || m.includes('sword') || m.includes('shield')
-);
+const WEAPON_MODELS = [
+  ...PROTOTYPE_MODELS.filter(
+    (m) => m.startsWith('weapon-') || m.includes('sword') || m.includes('shield')
+  ),
+  ...CATALOG_WEAPONS.map((w) => w.id),
+];
+
+function weaponModelSrc(id: string): string {
+  const cat = CATALOG_WEAPONS.find((w) => w.id === id);
+  if (cat) return cat.modelUrl;
+  return modelUrl(id);
+}
 
 // ── Shared field components ─────────────────────────────────────────────────
 
@@ -155,11 +165,14 @@ export function WeaponEditor({
   mapDoc,
   onClose,
   onSaveToMap,
+  embedded,
 }: {
   isMobile?: boolean;
   mapDoc: MapDocument;
   onClose: () => void;
   onSaveToMap: (def: Partial<MapWeaponDef>) => void;
+  /** Render inside map-editor left nav instead of fullscreen overlay. */
+  embedded?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>('model');
@@ -184,9 +197,12 @@ export function WeaponEditor({
   // ── Three.js preview ────────────────────────────────────────────────────────
   const sceneRef = useRef<THREE.Scene | null>(null);
   const weaponGroupRef = useRef<THREE.Group | null>(null);
+  const weaponMixerRef = useRef<THREE.AnimationMixer | null>(null);
+  const weaponActionsRef = useRef<Map<string, THREE.AnimationAction>>(new Map());
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rafRef = useRef(0);
+  const clockRef = useRef(new THREE.Clock());
   const yawRef = useRef(0.4);
   const pitchRef = useRef(0.15);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
@@ -270,7 +286,17 @@ export function WeaponEditor({
     weaponGroupRef.current = weaponGroup;
 
     // Load initial weapon model
-    loadWeaponModel(defRef.current, weaponGroup);
+    void loadWeaponModel(defRef.current, weaponGroup).then((clips) => {
+      if (!clips.length || !weaponGroup.children[0]) return;
+      const mixer = new THREE.AnimationMixer(weaponGroup.children[0]);
+      weaponMixerRef.current = mixer;
+      weaponActionsRef.current.clear();
+      for (const clip of clips) {
+        const action = mixer.clipAction(clip);
+        weaponActionsRef.current.set((clip.name || '').toLowerCase(), action);
+        if (clip.name) weaponActionsRef.current.set(clip.name, action);
+      }
+    });
 
     // Orbit drag
     const onPointerDown = (e: PointerEvent) => {
@@ -292,6 +318,8 @@ export function WeaponEditor({
     const tick = () => {
       raf = requestAnimationFrame(tick);
       if (!rendererRef.current) return;
+      const dt = clockRef.current.getDelta();
+      weaponMixerRef.current?.update(dt);
       const r = 3.2;
       const cy = pitchRef.current;
       camera.position.set(
@@ -341,9 +369,42 @@ export function WeaponEditor({
   useEffect(() => {
     const wg = weaponGroupRef.current;
     if (!wg) return;
-    loadWeaponModel(def, wg);
+    void loadWeaponModel(def, wg).then((clips) => {
+      weaponMixerRef.current?.stopAllAction();
+      weaponMixerRef.current = null;
+      weaponActionsRef.current.clear();
+      if (!clips.length || !wg.children[0]) return;
+      const mixer = new THREE.AnimationMixer(wg.children[0]);
+      weaponMixerRef.current = mixer;
+      for (const clip of clips) {
+        const action = mixer.clipAction(clip);
+        weaponActionsRef.current.set((clip.name || '').toLowerCase(), action);
+        if (clip.name) weaponActionsRef.current.set(clip.name, action);
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [def.model, def.customModelUrl]);
+  }, [def.model, def.customModelUrl, def.textureUrl]);
+
+  const previewWeaponClip = useCallback((name?: string) => {
+    if (!name || !weaponMixerRef.current) return;
+    let action =
+      weaponActionsRef.current.get(name) ||
+      weaponActionsRef.current.get(name.toLowerCase());
+    if (!action) {
+      const want = name.toLowerCase();
+      for (const [n, a] of weaponActionsRef.current) {
+        if (n.toLowerCase().includes(want)) {
+          action = a;
+          break;
+        }
+      }
+    }
+    if (!action) return;
+    weaponMixerRef.current.stopAllAction();
+    action.reset().setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    action.play();
+  }, []);
 
   const save = () => {
     onSaveToMap(def);
@@ -367,9 +428,21 @@ export function WeaponEditor({
   ];
 
   return (
-    <div className="fixed inset-0 z-[3000] flex bg-slate-950/95 backdrop-blur-md">
+    <div
+      className={
+        embedded
+          ? 'flex flex-col h-full min-h-0 w-full bg-slate-950/95'
+          : 'fixed inset-0 z-[3000] flex bg-slate-950/95 backdrop-blur-md'
+      }
+    >
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
-      <div className="w-72 shrink-0 flex flex-col bg-slate-900/60 border-r border-white/10 overflow-hidden">
+      <div
+        className={
+          embedded
+            ? 'flex flex-col flex-1 min-h-0 overflow-hidden'
+            : 'w-72 shrink-0 flex flex-col bg-slate-900/60 border-r border-white/10 overflow-hidden'
+        }
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <div className="flex items-center gap-2">
@@ -412,7 +485,9 @@ export function WeaponEditor({
           {tab === 'combat' && <CombatTab def={def} patch={patch} />}
           {tab === 'recoil' && <RecoilTab def={def} patch={patch} />}
           {tab === 'sway' && <SwayTab def={def} patch={patch} mapDoc={mapDoc} />}
-          {tab === 'anims' && <AnimsTab def={def} patch={patch} />}
+          {tab === 'anims' && (
+            <AnimsTab def={def} patch={patch} onPreviewClip={previewWeaponClip} />
+          )}
           {tab === 'shop' && <ShopTab def={def} patch={patch} />}
         </div>
 
@@ -454,6 +529,7 @@ export function WeaponEditor({
       </div>
 
       {/* ── 3D Preview ──────────────────────────────────────────────── */}
+      {!embedded && (
       <div className="flex-1 relative min-w-0">
         <div ref={hostRef} className="absolute inset-0" />
         {/* Overlay info */}
@@ -479,6 +555,15 @@ export function WeaponEditor({
           </div>
         </div>
       </div>
+      )}
+      {embedded && (
+        <div className="relative h-44 shrink-0 border-t border-white/10 bg-black/40">
+          <div ref={hostRef} className="absolute inset-0" />
+          <p className="absolute bottom-1 left-2 text-[9px] text-white/40 pointer-events-none">
+            Drag to orbit · Hold / Back tabs for grip
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -494,6 +579,7 @@ function ModelTab({
   patch: (p: Partial<MapWeaponDef>) => void;
   fileRef: React.RefObject<HTMLInputElement | null>;
 }) {
+  const texRef = React.useRef<HTMLInputElement>(null);
   return (
     <div className="space-y-3">
       <Section title="Weapon Name" accent="amber">
@@ -535,23 +621,89 @@ function ModelTab({
           <>
             <p className="text-[10px] text-white/40 mb-1">Or choose catalog model:</p>
             <div className="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto">
-              {WEAPON_MODELS.map((m) => (
+              {WEAPON_MODELS.map((m) => {
+                const cat = CATALOG_WEAPONS.find((w) => w.id === m);
+                return (
                 <button
                   key={m}
                   type="button"
-                  onClick={() => patch({ model: m, customModelUrl: undefined })}
+                  onClick={() =>
+                    patch({
+                      model: m,
+                      customModelUrl: cat ? cat.modelUrl : undefined,
+                      name: cat?.label ?? def.name,
+                      kind: cat?.kind ?? def.kind,
+                      ...(cat?.combat ?? {}),
+                    })
+                  }
                   className={`rounded-lg border px-2 py-1.5 text-[10px] text-left transition-colors ${
-                    def.model === m
+                    def.model === m || def.customModelUrl === cat?.modelUrl
                       ? 'border-amber-400/60 bg-amber-500/20 text-amber-100'
                       : 'border-white/10 text-white/55 hover:bg-white/5'
                   }`}
                 >
-                  {m}
+                  {cat ? cat.label : m}
                 </button>
-              ))}
+                );
+              })}
             </div>
           </>
         )}
+      </Section>
+
+      <Section title="Weapon Texture" accent="amber">
+        <p className="text-[10px] text-white/40 mb-1.5 leading-snug">
+          Upload a PNG/JPG to recolor the mesh. Download to edit externally, then upload again.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => texRef.current?.click()}
+            className="flex items-center gap-1.5 rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-[11px] text-white/70 hover:bg-white/10"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            Upload texture
+          </button>
+          {def.textureUrl && (
+            <>
+              <a
+                href={def.textureUrl}
+                download={`${def.name || 'weapon'}-texture.png`}
+                className="flex items-center gap-1.5 rounded-lg border border-sky-400/30 bg-sky-500/10 px-3 py-1.5 text-[11px] text-sky-200 hover:bg-sky-500/20"
+              >
+                Download
+              </a>
+              <button
+                type="button"
+                onClick={() => patch({ textureUrl: undefined })}
+                className="rounded-lg border border-rose-400/30 px-3 py-1.5 text-[11px] text-rose-300"
+              >
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+        {def.textureUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={def.textureUrl}
+            alt=""
+            className="mt-2 h-16 w-16 rounded border border-white/15 object-cover"
+          />
+        )}
+        <input
+          ref={texRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/*"
+          className="hidden"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (!file) return;
+            const url = await fileToDataUrl(file);
+            if (url) patch({ textureUrl: url });
+          }}
+        />
       </Section>
     </div>
   );
@@ -731,13 +883,70 @@ function CombatTab({
             />
             {def.kind === 'hitscan' && (
               <Slider
-                label="Bullets / shot"
+                label="Bullets / shot (pellets)"
                 value={def.bulletsPerShot}
                 min={1}
                 max={12}
                 step={1}
                 onChange={(v) => patch({ bulletsPerShot: Math.round(v) })}
               />
+            )}
+            <div className="space-y-1">
+              <p className="text-[9px] text-white/45">Fire mode</p>
+              <div className="grid grid-cols-3 gap-1">
+                {(
+                  [
+                    { id: 'auto', label: 'Auto' },
+                    { id: 'semi', label: 'Semi' },
+                    { id: 'bolt', label: 'Bolt' },
+                  ] as const
+                ).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => patch({ fireMode: m.id })}
+                    className={`text-[9px] font-bold py-1.5 rounded border ${
+                      (def.fireMode || 'semi') === m.id
+                        ? 'border-rose-400/60 bg-rose-500/20 text-rose-100'
+                        : 'border-white/10 text-white/45'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[8px] text-white/30">
+                Auto = hold · Semi = 1 click · Bolt = sniper (1 click + zoom)
+              </p>
+            </div>
+            {def.kind === 'hitscan' && (
+              <>
+                <Slider
+                  label="ADS zoom FOV"
+                  value={def.adsZoomFov ?? 0}
+                  min={0}
+                  max={75}
+                  step={1}
+                  unit="°"
+                  onChange={(v) => patch({ adsZoomFov: v })}
+                />
+                <Slider
+                  label="ADS cone ×"
+                  value={def.adsConeScale ?? 1}
+                  min={0.1}
+                  max={2}
+                  step={0.05}
+                  onChange={(v) => patch({ adsConeScale: v })}
+                />
+                <Slider
+                  label="Hipfire cone ×"
+                  value={def.hipfireConeScale ?? 1}
+                  min={0.5}
+                  max={6}
+                  step={0.1}
+                  onChange={(v) => patch({ hipfireConeScale: v })}
+                />
+              </>
             )}
           </Section>
 
@@ -859,9 +1068,11 @@ function SwayTab({
 function AnimsTab({
   def,
   patch,
+  onPreviewClip,
 }: {
   def: MapWeaponDef;
   patch: (p: Partial<MapWeaponDef>) => void;
+  onPreviewClip?: (name?: string) => void;
 }) {
   return (
     <div className="space-y-3">
@@ -883,19 +1094,30 @@ function AnimsTab({
               {label}
               <span className="text-white/30 ml-1">— {hint}</span>
             </span>
-            <input
-              type="text"
-              value={def[key] ?? ''}
-              onChange={(e) => patch({ [key]: e.target.value || undefined })}
-              placeholder="clip name…"
-              className="w-full rounded bg-black/40 border border-white/10 px-2 py-1 text-[11px] text-white/80"
-            />
+            <div className="flex gap-1">
+              <input
+                type="text"
+                value={def[key] ?? ''}
+                onChange={(e) => patch({ [key]: e.target.value || undefined })}
+                placeholder="clip name…"
+                className="flex-1 rounded bg-black/40 border border-white/10 px-2 py-1 text-[11px] text-white/80"
+              />
+              <button
+                type="button"
+                className="rounded border border-violet-400/40 bg-violet-500/15 px-2 text-[10px] text-violet-200 hover:bg-violet-500/25"
+                onClick={() => onPreviewClip?.(def[key])}
+                disabled={!def[key]}
+              >
+                Play
+              </button>
+            </div>
           </label>
         ))}
       </Section>
       <p className="text-[9px] text-white/35 leading-snug">
         Character attack / punch animations are set in the Player Model studio → Anims tab.
-        Weapon clip names must match those in the uploaded GLB exactly.
+        Weapon clip names must match those in the uploaded GLB exactly. Live matches play
+        fire/reload clips when authored here.
       </p>
     </div>
   );
@@ -926,14 +1148,14 @@ function ShopTab({
       </Section>
       <p className="text-[10px] text-white/35 leading-snug">
         Set price to 0 for the default / free weapon every player starts with.
-        Paid weapons appear in the buy-phase weapon shop during competitive rounds and
-        horde wave intermissions.
+        Paid weapons appear in the buy-phase menu during Horde / Competitive.
+        Use the left-nav Buy Menu tab to enable weapons, set prices, and pick modes.
       </p>
       <div className="rounded-lg border border-sky-400/20 bg-sky-500/5 px-3 py-2 text-[10px] text-white/50 leading-snug">
         <p className="font-semibold text-sky-300/80 mb-1">Buy phase</p>
         <p>
-          Players can buy this weapon during the countdown buy-phase window. Price
-          is deducted from their round credits (set per-mode in the Mode Settings).
+          Buy timers live under Settings → Horde / Competitive. The Buy Menu tab controls
+          which weapons appear in the live shop.
         </p>
       </div>
     </div>
@@ -942,7 +1164,10 @@ function ShopTab({
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-async function loadWeaponModel(def: MapWeaponDef, group: THREE.Group) {
+async function loadWeaponModel(
+  def: MapWeaponDef,
+  group: THREE.Group
+): Promise<THREE.AnimationClip[]> {
   // Clear existing weapon mesh
   while (group.children.length) {
     const child = group.children[0];
@@ -950,7 +1175,7 @@ async function loadWeaponModel(def: MapWeaponDef, group: THREE.Group) {
     if ('geometry' in child && child.geometry) (child as THREE.Mesh).geometry.dispose();
   }
 
-  const src = def.customModelUrl ?? (def.model ? modelUrl(def.model) : null);
+  const src = def.customModelUrl ?? (def.model ? weaponModelSrc(def.model) : null);
   if (!src) {
     // Default placeholder: sword blade shape
     const mat = new THREE.MeshStandardMaterial({ color: 0xc0c8d0, metalness: 0.8, roughness: 0.2 });
@@ -958,21 +1183,48 @@ async function loadWeaponModel(def: MapWeaponDef, group: THREE.Group) {
     blade.position.y = 0.3;
     const guard = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.03), mat);
     group.add(blade, guard);
-    return;
+    return [];
   }
 
   try {
     const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
     const loader = new GLTFLoader();
-    const gltf = await new Promise<{ scene: THREE.Group }>((res, rej) =>
-      loader.load(src, res as unknown as Parameters<typeof loader.load>[1], undefined, rej)
+    const gltf = await new Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] }>(
+      (res, rej) =>
+        loader.load(src, res as unknown as Parameters<typeof loader.load>[1], undefined, rej)
     );
     normalizeCharacter(gltf.scene, 0.8);
+    if (def.textureUrl) {
+      const texLoader = new THREE.TextureLoader();
+      try {
+        const map = await new Promise<THREE.Texture>((res, rej) =>
+          texLoader.load(def.textureUrl!, res, undefined, rej)
+        );
+        map.colorSpace = THREE.SRGBColorSpace;
+        map.flipY = false;
+        gltf.scene.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const m of mats) {
+            const std = m as THREE.MeshStandardMaterial;
+            if (std && 'map' in std) {
+              std.map = map;
+              std.needsUpdate = true;
+            }
+          }
+        });
+      } catch {
+        /* ignore texture load errors in preview */
+      }
+    }
     group.add(gltf.scene);
+    return gltf.animations ?? [];
   } catch {
     // Fallback: orange box
     const mat = new THREE.MeshStandardMaterial({ color: 0xf97316 });
     group.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.6, 0.08), mat));
+    return [];
   }
 }
 

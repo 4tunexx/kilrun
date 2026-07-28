@@ -10,7 +10,6 @@ import {
   FINISH_X,
   LOBBY_COUNTDOWN_MS,
   MATCH_DURATION_MS,
-  MAX_ENERGY,
   MIN_PLAYERS_TO_START,
   OBSTACLE_DAMAGE,
   OBSTACLE_HIT_COOLDOWN_MS,
@@ -34,6 +33,12 @@ import {
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import {
+  applyPlatformCarry,
+  tickMovingPlatforms,
+} from '../sim/moving-platforms.js';
+import { fetchTrustedLoadout } from '../trusted-loadout.js';
+import { applyAbilityStatsToPlayer, getMaxHealth, getMaxEnergyFor } from '../sim/ability-stats.js';
 import { assignDeathrunColors, BODY_COLOR_NONE } from '../lib/body-colors.js';
 import {
   authenticateJoin,
@@ -46,6 +51,7 @@ import {
   DISPLAY_DEATHRUN_REWARDS,
   reportMatchResults,
 } from '../match-report.js';
+import { fetchActiveMapPayload } from '../active-map.js';
 
 interface JoinOptions {
   token?: string;
@@ -155,6 +161,12 @@ export class DeathrunRoom extends Room<RoomState> {
   private trapCooldownSec = 5;
   private checkpointRespawn = true;
   private combatPhysOpts: MovementPhysicsOpts = {};
+  /** Moving platform homes + last positions. */
+  private platformMotion = new Map<
+    string,
+    import('../sim/moving-platforms.js').PlatformMotionState
+  >();
+  private matchElapsedMs = 0;
 
   /** True after a client successfully pushed the Active/MAIN map. */
   private customMapLoaded = false;
@@ -206,6 +218,13 @@ export class DeathrunRoom extends Room<RoomState> {
       );
     });
 
+    this.onMessage('reload', (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || !player.isAlive) return;
+      const { tryStartReload } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+      tryStartReload(player, Date.now());
+    });
+
     this.onMessage(
       'loadCustomMap',
       (
@@ -237,117 +256,148 @@ export class DeathrunRoom extends Room<RoomState> {
           );
           return;
         }
-        const platforms = data?.platforms;
-        if (!Array.isArray(platforms) || platforms.length === 0) return;
-
-        while (this.state.platforms.length > 0) this.state.platforms.pop();
-        this.state.platforms.push(...createFromBlueprints(platforms));
-
-        while (this.state.obstacles.length > 0) this.state.obstacles.pop();
-        const hazards = Array.isArray(data?.obstacles) ? data.obstacles : [];
-        if (hazards.length > 0) {
-          this.state.obstacles.push(...createObstaclesFromBlueprints(hazards));
-        }
-        this.obstacleTimers = this.state.obstacles.map(() => 0);
-        this.buttonArmRemaining.clear();
-        this.customMapLoaded = true;
-
-        const settings = (data.modeSettings?.deathrun ?? data.modeSettings) as Record<string, unknown> | undefined;
-        if (settings && typeof settings === 'object') {
-          if (typeof settings.warmupSec === 'number') {
-            this.lobbyCountdownMs = Math.max(0, settings.warmupSec) * 1000;
-          }
-          if (typeof settings.roundTimeSec === 'number') {
-            this.matchDurationMs = Math.max(30, settings.roundTimeSec) * 1000;
-          }
-          if (typeof settings.maxRunners === 'number') {
-            this.maxRunners = Math.max(1, Math.min(8, Math.floor(settings.maxRunners)));
-            this.maxClients = this.maxRunners;
-          }
-          if (typeof settings.trapperEnabled === 'boolean') {
-            this.trapperEnabled = settings.trapperEnabled;
-          }
-          if (typeof settings.livesPerRunner === 'number' && Number.isFinite(settings.livesPerRunner)) {
-            this.livesPerRunner = Math.max(0, Math.floor(settings.livesPerRunner));
-          }
-          if (typeof settings.trapCooldownSec === 'number' && Number.isFinite(settings.trapCooldownSec)) {
-            this.trapCooldownSec = Math.max(1, settings.trapCooldownSec);
-          }
-          if (typeof settings.checkpointRespawn === 'boolean') {
-            this.checkpointRespawn = settings.checkpointRespawn;
-          }
-        }
-
-        // Apply combat/physics overrides from map combatSettings.
-        const cs = data?.combatSettings as Record<string, unknown> | undefined;
-        if (cs && typeof cs === 'object') {
-          this.combatPhysOpts = {
-            gravity: typeof cs.gravity === 'number' ? cs.gravity : undefined,
-            jumpVelocity: typeof cs.jumpVelocity === 'number' ? cs.jumpVelocity : undefined,
-            doubleJumpVelocity: typeof cs.doubleJumpVelocity === 'number' ? cs.doubleJumpVelocity : undefined,
-            doubleJumpEnabled: typeof cs.doubleJumpEnabled === 'boolean' ? cs.doubleJumpEnabled : undefined,
-            jumpCutMult: typeof cs.jumpCutMult === 'number' ? cs.jumpCutMult : undefined,
-            coyoteMs: typeof cs.coyoteMs === 'number' ? cs.coyoteMs : undefined,
-            jumpBufferMs: typeof cs.jumpBufferMs === 'number' ? cs.jumpBufferMs : undefined,
-            walkSpeed: typeof cs.walkSpeed === 'number' ? cs.walkSpeed : undefined,
-            sprintMult: typeof cs.sprintMult === 'number' ? cs.sprintMult : undefined,
-            crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
-            maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
-            apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
-            wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
-            wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
-            wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
-            wallSlideGravMult: typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
-          };
-        }
-
-        this.customFinishes = Array.isArray(data?.finishes) ? data.finishes : [];
-        this.customButtons = Array.isArray(data?.buttons) ? data.buttons : [];
-        this.customActions = Array.isArray(data.actions) ? data.actions : [];
-        this.customTeleports = Array.isArray(data?.teleports) ? data.teleports : [];
-        if (Array.isArray(data.playerSpawns) && data.playerSpawns.length) {
-          this.customRunnerSpawns = data.playerSpawns
-            .map((s) => ({ ...s }))
-            .slice(0, this.maxRunners);
-        } else if (data.spawn) {
-          this.customRunnerSpawns = [{ ...data.spawn }];
-        }
-        if (data.trapperSpawn) this.customTrapperSpawn = { ...data.trapperSpawn };
-        if (data.worldBounds) {
-          this.worldBounds = { ...data.worldBounds };
-        } else {
-          this.worldBounds = { ...DEFAULT_WORLD_BOUNDS };
-        }
-
-        this.state.courseStartX = this.customRunnerSpawns[0]?.x ?? SPAWN_X;
-        if (this.customFinishes.length > 0) {
-          this.state.courseFinishX = this.customFinishes[this.customFinishes.length - 1].x;
-        } else {
-          let maxX = this.state.courseStartX + 10;
-          for (const p of this.state.platforms) maxX = Math.max(maxX, p.x);
-          this.state.courseFinishX = maxX;
-        }
-
-        Array.from(this.state.players.values()).forEach((player, index) => {
-          player.hasCheckpoint = false;
-          this.applySpawnPosition(player, index);
-          player.vz = 0;
-        });
-
-        console.log(
-          `[DeathrunRoom] MAIN map loaded by ${client.sessionId}: ${platforms.length} platforms, ${hazards.length} hazards, ${this.customButtons.length} buttons, ${this.customActions.length} actions, ${this.customTeleports.length} teles`
-        );
+        this.bootstrapCustomMap(data, `client:${client.sessionId}`);
       }
     );
 
+    void fetchActiveMapPayload('deathrun').then((active) => {
+      if (!active || this.customMapLoaded) return;
+      this.bootstrapCustomMap(
+        active.payload as Parameters<DeathrunRoom['bootstrapCustomMap']>[0],
+        `server:${active.name}`
+      );
+    });
+
     this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
+  }
+
+  /** Apply MAIN map payload from server fetch or client push (shared body). */
+  private bootstrapCustomMap(
+    data: {
+      platforms?: PlatformBlueprint[];
+      obstacles?: ObstacleBlueprint[];
+      finishes?: FinishZone[];
+      buttons?: ButtonZone[];
+      actions?: ActionZone[];
+      teleports?: TeleportZone[];
+      spawn?: SpawnPoint;
+      playerSpawns?: SpawnPoint[];
+      trapperSpawn?: SpawnPoint;
+      worldBounds?: WorldBounds;
+      modeSettings?: Record<string, unknown>;
+      combatSettings?: Record<string, unknown>;
+    },
+    source = 'client'
+  ) {
+    const platforms = data?.platforms;
+    if (!Array.isArray(platforms) || platforms.length === 0) return;
+    if (this.customMapLoaded && source.startsWith('server:')) return;
+
+    while (this.state.platforms.length > 0) this.state.platforms.pop();
+    this.state.platforms.push(...createFromBlueprints(platforms));
+
+    while (this.state.obstacles.length > 0) this.state.obstacles.pop();
+    const hazards = Array.isArray(data?.obstacles) ? data.obstacles : [];
+    if (hazards.length > 0) {
+      this.state.obstacles.push(...createObstaclesFromBlueprints(hazards));
+    }
+    this.obstacleTimers = this.state.obstacles.map(() => 0);
+    this.buttonArmRemaining.clear();
+    this.customMapLoaded = true;
+    this.platformMotion.clear();
+    this.matchElapsedMs = 0;
+
+    const settings = (data.modeSettings?.deathrun ?? data.modeSettings) as
+      | Record<string, unknown>
+      | undefined;
+    if (settings && typeof settings === 'object') {
+      if (typeof settings.warmupSec === 'number') {
+        this.lobbyCountdownMs = Math.max(0, settings.warmupSec) * 1000;
+      }
+      if (typeof settings.roundTimeSec === 'number') {
+        this.matchDurationMs = Math.max(30, settings.roundTimeSec) * 1000;
+      }
+      if (typeof settings.maxRunners === 'number') {
+        this.maxRunners = Math.max(1, Math.min(8, Math.floor(settings.maxRunners)));
+        this.maxClients = this.maxRunners;
+      }
+      if (typeof settings.trapperEnabled === 'boolean') {
+        this.trapperEnabled = settings.trapperEnabled;
+      }
+      if (typeof settings.livesPerRunner === 'number' && Number.isFinite(settings.livesPerRunner)) {
+        this.livesPerRunner = Math.max(0, Math.floor(settings.livesPerRunner));
+      }
+      if (typeof settings.trapCooldownSec === 'number' && Number.isFinite(settings.trapCooldownSec)) {
+        this.trapCooldownSec = Math.max(1, settings.trapCooldownSec);
+      }
+      if (typeof settings.checkpointRespawn === 'boolean') {
+        this.checkpointRespawn = settings.checkpointRespawn;
+      }
+    }
+
+    const cs = data?.combatSettings;
+    if (cs && typeof cs === 'object') {
+      this.combatPhysOpts = {
+        gravity: typeof cs.gravity === 'number' ? cs.gravity : undefined,
+        jumpVelocity: typeof cs.jumpVelocity === 'number' ? cs.jumpVelocity : undefined,
+        doubleJumpVelocity: typeof cs.doubleJumpVelocity === 'number' ? cs.doubleJumpVelocity : undefined,
+        doubleJumpEnabled: typeof cs.doubleJumpEnabled === 'boolean' ? cs.doubleJumpEnabled : undefined,
+        jumpCutMult: typeof cs.jumpCutMult === 'number' ? cs.jumpCutMult : undefined,
+        coyoteMs: typeof cs.coyoteMs === 'number' ? cs.coyoteMs : undefined,
+        jumpBufferMs: typeof cs.jumpBufferMs === 'number' ? cs.jumpBufferMs : undefined,
+        walkSpeed: typeof cs.walkSpeed === 'number' ? cs.walkSpeed : undefined,
+        sprintMult: typeof cs.sprintMult === 'number' ? cs.sprintMult : undefined,
+        crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
+        maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
+        apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+        wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
+        wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
+        wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
+        wallSlideGravMult: typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
+      };
+    }
+
+    this.customFinishes = Array.isArray(data?.finishes) ? data.finishes : [];
+    this.customButtons = Array.isArray(data?.buttons) ? data.buttons : [];
+    this.customActions = Array.isArray(data.actions) ? data.actions : [];
+    this.customTeleports = Array.isArray(data?.teleports) ? data.teleports : [];
+    if (Array.isArray(data.playerSpawns) && data.playerSpawns.length) {
+      this.customRunnerSpawns = data.playerSpawns.map((s) => ({ ...s })).slice(0, this.maxRunners);
+    } else if (data.spawn) {
+      this.customRunnerSpawns = [{ ...data.spawn }];
+    }
+    if (data.trapperSpawn) this.customTrapperSpawn = { ...data.trapperSpawn };
+    if (data.worldBounds) {
+      this.worldBounds = { ...data.worldBounds };
+    } else {
+      this.worldBounds = { ...DEFAULT_WORLD_BOUNDS };
+    }
+
+    this.state.courseStartX = this.customRunnerSpawns[0]?.x ?? SPAWN_X;
+    if (this.customFinishes.length > 0) {
+      this.state.courseFinishX = this.customFinishes[this.customFinishes.length - 1].x;
+    } else {
+      let maxX = this.state.courseStartX + 10;
+      for (const p of this.state.platforms) maxX = Math.max(maxX, p.x);
+      this.state.courseFinishX = maxX;
+    }
+
+    Array.from(this.state.players.values()).forEach((player, index) => {
+      player.hasCheckpoint = false;
+      this.applySpawnPosition(player, index);
+      player.vz = 0;
+    });
+
+    console.log(
+      `[DeathrunRoom] MAIN map loaded (${source}): ${platforms.length} platforms, ${hazards.length} hazards`
+    );
   }
 
   onAuth(_client: Client, options: JoinOptions): GameJoinClaims {
     return authenticateJoin(options);
   }
 
-  onJoin(client: Client, options: JoinOptions) {
+  async onJoin(client: Client, options: JoinOptions) {
     const claims = claimsFromAuth(client.auth, options);
     if (!this.hostSessionId) this.hostSessionId = client.sessionId;
     if (claims.isAdmin) this.adminSessions.add(client.sessionId);
@@ -358,9 +408,12 @@ export class DeathrunRoom extends Room<RoomState> {
     player.username =
       claims.username || `Player${client.sessionId.slice(0, 4)}`;
     player.avatarUrl = claims.avatarUrl || '';
-    applyLoadoutToPlayer(player, options);
+    const trusted = await fetchTrustedLoadout(player.userId);
+    applyLoadoutToPlayer(player, trusted ?? options);
+    applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
     this.applySpawnPosition(player, this.state.players.size);
-    player.energy = MAX_ENERGY;
+    player.health = getMaxHealth(player);
+    player.energy = getMaxEnergyFor(player);
     player.role = 'runner';
     player.bodyColorIndex = BODY_COLOR_NONE;
 
@@ -460,8 +513,8 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private resetPlayerOnSpawn(player: PlayerState, laneIndex: number) {
-    player.health = 100;
-    player.energy = MAX_ENERGY;
+    player.health = getMaxHealth(player);
+    player.energy = getMaxEnergyFor(player);
     player.isAlive = true;
     player.hasFinished = false;
     this.applySpawnPosition(player, laneIndex);
@@ -472,7 +525,7 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private resetMatchTelemetry(player: PlayerState) {
-    player.kills = 0;
+    player.kills = 0; player.deaths = 0;
     player.score = 0;
     player.distance = 0;
     player.xpEarned = 0;
@@ -525,13 +578,21 @@ export class DeathrunRoom extends Room<RoomState> {
     this.state.phase = 'playing';
     this.state.matchTimeRemainingMs = this.matchDurationMs;
     this.state.winnerRole = '';
+    this.matchElapsedMs = 0;
+    this.platformMotion.clear();
   }
 
   private tickPlaying(dtMs: number) {
     this.state.matchTimeRemainingMs -= dtMs;
+    this.matchElapsedMs += dtMs;
 
+    const platformDeltas = tickMovingPlatforms(
+      this.state.platforms,
+      this.platformMotion,
+      this.matchElapsedMs
+    );
     this.tickObstacles(dtMs);
-    this.tickPlayers(dtMs);
+    this.tickPlayers(dtMs, platformDeltas);
 
     if (this.state.matchTimeRemainingMs <= 0) {
       this.endRound('runner');
@@ -584,7 +645,10 @@ export class DeathrunRoom extends Room<RoomState> {
     });
   }
 
-  private tickPlayers(dtMs: number) {
+  private tickPlayers(
+    dtMs: number,
+    platformDeltas: import('../sim/moving-platforms.js').PlatformDelta[] = []
+  ) {
     const dtSeconds = dtMs / 1000;
     const now = Date.now();
 
@@ -596,6 +660,8 @@ export class DeathrunRoom extends Room<RoomState> {
         this.simScratch.set(sessionId, scratch);
       }
 
+      applyPlatformCarry(player, scratch.supportPlatformId, platformDeltas);
+
       applyMovement(
         player,
         input,
@@ -605,6 +671,11 @@ export class DeathrunRoom extends Room<RoomState> {
         this.worldBounds,
         this.combatPhysOpts
       );
+
+      {
+        const { finishReloadIfDue } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+        finishReloadIfDue(player, now);
+      }
 
       if (player.role === 'runner' && player.isAlive && !player.hasFinished) {
         player.distance = Math.max(
@@ -661,6 +732,7 @@ export class DeathrunRoom extends Room<RoomState> {
             player.score = Math.max(0, player.score - 1);
           }
         } else {
+          if (player.isAlive) player.deaths = (player.deaths || 0) + 1;
           player.health = 0;
           player.isAlive = false;
         }
@@ -671,8 +743,13 @@ export class DeathrunRoom extends Room<RoomState> {
           const lastShot = this.lastShotAt.get(sessionId) ?? 0;
           const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
           if (now - lastShot >= cooldown) {
-            this.lastShotAt.set(sessionId, now);
-            this.resolveTrapperShot(player);
+            const {
+              tryConsumeShotAmmo,
+            } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+            if (tryConsumeShotAmmo(player, now)) {
+              this.lastShotAt.set(sessionId, now);
+              this.resolveTrapperShot(player);
+            }
           }
         }
       }
@@ -785,8 +862,21 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private damagePlayer(player: PlayerState, amount: number) {
+    const wasAlive = player.isAlive && player.health > 0;
     player.health = Math.max(0, player.health - amount);
     if (player.health <= 0) {
+      if (wasAlive) {
+        player.deaths = (player.deaths || 0) + 1;
+        // Trapper gets a kill credit when eliminating a runner.
+        if (player.role === 'runner') {
+          for (const p of this.state.players.values()) {
+            if (p.role === 'trapper' && p.isAlive) {
+              p.kills = (p.kills || 0) + 1;
+              break;
+            }
+          }
+        }
+      }
       player.isAlive = false;
     }
   }
@@ -826,6 +916,7 @@ export class DeathrunRoom extends Room<RoomState> {
       score: p.score,
       distance: p.distance,
       kills: p.kills,
+      deaths: p.deaths,
     }));
 
     const awards = await reportMatchResults({
@@ -865,8 +956,8 @@ export class DeathrunRoom extends Room<RoomState> {
       this.state.rewardsReady = false;
       Array.from(this.state.players.values()).forEach((player, index) => {
         player.role = 'runner';
-        player.health = 100;
-        player.energy = MAX_ENERGY;
+        player.health = getMaxHealth(player);
+        player.energy = getMaxEnergyFor(player);
         player.isAlive = true;
         player.hasFinished = false;
         this.resetMatchTelemetry(player);

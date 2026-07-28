@@ -18,6 +18,14 @@ export interface PlatformBlueprint {
   conveyorSpeed?: number;
   conveyorDirX?: number;
   conveyorDirY?: number;
+  motionPeriodMs?: number;
+  motionPhaseMs?: number;
+  motionAmpX?: number;
+  motionAmpY?: number;
+  motionAmpZ?: number;
+  /** Yaw in radians (sim XY). Enables OBB support/side collision. */
+  rotYaw?: number;
+  entityId?: string;
 }
 
 export interface ObstacleBlueprint {
@@ -70,6 +78,22 @@ export function createFromBlueprints(blueprints: PlatformBlueprint[]): PlatformS
     platform.conveyorSpeed = bp.conveyorSpeed ?? 0;
     platform.conveyorDirX = bp.conveyorDirX ?? 1;
     platform.conveyorDirY = bp.conveyorDirY ?? 0;
+    const ampX = bp.motionAmpX ?? 0;
+    const ampY = bp.motionAmpY ?? 0;
+    const ampZ = bp.motionAmpZ ?? 0;
+    const moving =
+      Math.abs(ampX) > 1e-4 || Math.abs(ampY) > 1e-4 || Math.abs(ampZ) > 1e-4;
+    platform.motionEnabled = moving;
+    platform.motionPeriodMs = bp.motionPeriodMs ?? 4000;
+    platform.motionPhaseMs = bp.motionPhaseMs ?? 0;
+    platform.motionHomeX = bp.x;
+    platform.motionHomeY = bp.y;
+    platform.motionHomeZ = bp.z;
+    platform.motionAmpX = ampX;
+    platform.motionAmpY = ampY;
+    platform.motionAmpZ = ampZ;
+    platform.rotYaw = bp.rotYaw ?? 0;
+    platform.entityId = bp.entityId ?? '';
     return platform;
   });
 }
@@ -103,6 +127,35 @@ export interface PlatformHit {
   topZ: number;
 }
 
+/** World XY → pad-local XY (rotYaw around Z-up sim). */
+function toPadLocal(
+  x: number,
+  y: number,
+  cx: number,
+  cy: number,
+  rotYaw: number
+): { lx: number; ly: number } {
+  const dx = x - cx;
+  const dy = y - cy;
+  if (!rotYaw) return { lx: dx, ly: dy };
+  const c = Math.cos(-rotYaw);
+  const s = Math.sin(-rotYaw);
+  return { lx: dx * c - dy * s, ly: dx * s + dy * c };
+}
+
+function fromPadLocal(
+  lx: number,
+  ly: number,
+  cx: number,
+  cy: number,
+  rotYaw: number
+): { x: number; y: number } {
+  if (!rotYaw) return { x: cx + lx, y: cy + ly };
+  const c = Math.cos(rotYaw);
+  const s = Math.sin(rotYaw);
+  return { x: cx + lx * c - ly * s, y: cy + lx * s + ly * c };
+}
+
 export function findSupportPlatform(
   x: number,
   y: number,
@@ -111,18 +164,25 @@ export function findSupportPlatform(
   radius: number,
   maxSnapDown = 0.35
 ): PlatformHit | null {
-  let best: PlatformHit | null = null;
+  // Prefer highest pad at/under feet; only climb onto a higher overlapping
+  // step when nothing underfoot remains (avoids ramp "highest wins" hops).
+  let bestBelow: PlatformHit | null = null;
+  let bestClimb: PlatformHit | null = null;
   for (const platform of platforms) {
     const halfW = platform.width / 2;
     const halfD = platform.depth / 2;
-    if (x < platform.x - halfW - radius || x > platform.x + halfW + radius) continue;
-    if (y < platform.y - halfD - radius || y > platform.y + halfD + radius) continue;
+    const { lx, ly } = toPadLocal(x, y, platform.x, platform.y, platform.rotYaw || 0);
+    if (lx < -halfW - radius || lx > halfW + radius) continue;
+    if (ly < -halfD - radius || ly > halfD + radius) continue;
     const topZ = platform.z;
-    if (z >= topZ - maxSnapDown && z <= topZ + 0.55) {
-      if (!best || topZ > best.topZ) best = { platform, topZ };
+    if (z < topZ - maxSnapDown || z > topZ + 0.55) continue;
+    if (topZ <= z + 0.05) {
+      if (!bestBelow || topZ > bestBelow.topZ) bestBelow = { platform, topZ };
+    } else if (!bestClimb || topZ < bestClimb.topZ) {
+      bestClimb = { platform, topZ };
     }
   }
-  return best;
+  return bestBelow ?? bestClimb;
 }
 
 /**
@@ -169,25 +229,33 @@ export function resolveSolidCollisions(
 
     const halfW = platform.width / 2 + radius;
     const halfD = platform.depth / 2 + radius;
-    const dx = x - platform.x;
-    const dy = y - platform.y;
-    if (Math.abs(dx) >= halfW || Math.abs(dy) >= halfD) continue;
+    const yaw = platform.rotYaw || 0;
+    const { lx, ly } = toPadLocal(x, y, platform.x, platform.y, yaw);
+    if (Math.abs(lx) >= halfW || Math.abs(ly) >= halfD) continue;
 
-    // Push out along the shallowest axis
-    const pushX = halfW - Math.abs(dx);
-    const pushY = halfD - Math.abs(dy);
+    // Push out along the shallowest local axis, then rotate back to world.
+    const pushX = halfW - Math.abs(lx);
+    const pushY = halfD - Math.abs(ly);
     touchingWall = true;
+    let outLx = lx;
+    let outLy = ly;
+    let nLx = 0;
+    let nLy = 0;
     if (pushX < pushY) {
-      const sign = Math.sign(dx || 1);
-      x = platform.x + sign * halfW;
-      wallNormalX = sign;
-      wallNormalY = 0;
+      const sign = Math.sign(lx || 1);
+      outLx = sign * halfW;
+      nLx = sign;
     } else {
-      const sign = Math.sign(dy || 1);
-      y = platform.y + sign * halfD;
-      wallNormalX = 0;
-      wallNormalY = sign;
+      const sign = Math.sign(ly || 1);
+      outLy = sign * halfD;
+      nLy = sign;
     }
+    const world = fromPadLocal(outLx, outLy, platform.x, platform.y, yaw);
+    x = world.x;
+    y = world.y;
+    const nWorld = fromPadLocal(nLx, nLy, 0, 0, yaw);
+    wallNormalX = nWorld.x;
+    wallNormalY = nWorld.y;
   }
 
   return { x, y, touchingWall, wallNormalX, wallNormalY };

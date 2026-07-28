@@ -4,7 +4,6 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@/generated/prisma';
 import type { BannerConfig } from '@/lib/banner';
-import { INVENTORY_RESELL_RATE } from '@/lib/inventory-constants';
 import {
   canAccessAdmin,
   steamIdsPromotedToAdmin,
@@ -533,34 +532,35 @@ export async function getLeaderboard(opts?: {
   });
 
   const matchResults = await prisma.matchResult.findMany({
-    select: { userId: true, role: true, outcome: true, mode: true },
+    select: { userId: true, role: true, outcome: true, mode: true, stats: true },
   });
 
   const statsByUser = new Map<
     string,
-    { wins: number; losses: number; kills: number }
+    { wins: number; losses: number; kills: number; deaths: number }
   >();
   for (const r of matchResults) {
     let s = statsByUser.get(r.userId);
     if (!s) {
-      s = { wins: 0, losses: 0, kills: 0 };
+      s = { wins: 0, losses: 0, kills: 0, deaths: 0 };
       statsByUser.set(r.userId, s);
     }
     if (r.outcome === 'win' || r.outcome === 'survived') s.wins += 1;
     if (r.outcome === 'loss' || r.outcome === 'eliminated') s.losses += 1;
-    // Trapper / Competitive kills proxy
-    if (r.role === 'trapper' && r.outcome === 'win') s.kills += 1;
-    if ((r.mode === 'competitive' || r.mode === 'competitive_ranked') && r.outcome === 'win') {
-      s.kills += 1;
-    }
+    const st = r.stats as { kills?: number; deaths?: number } | null;
+    if (typeof st?.kills === 'number') s.kills += st.kills;
+    if (typeof st?.deaths === 'number') s.deaths += st.deaths;
   }
 
   const { isPremiumActive } = await import('@/lib/premium');
   const { getRankForKp, KP_DEFAULT } = await import('@/lib/kp');
 
   let rows: LeaderboardRow[] = users.map((u) => {
-    const s = statsByUser.get(u.id) ?? { wins: 0, losses: 0, kills: 0 };
-    const kd = s.losses > 0 ? Math.round((s.kills / s.losses) * 100) / 100 : s.kills;
+    const s = statsByUser.get(u.id) ?? { wins: 0, losses: 0, kills: 0, deaths: 0 };
+    const kd =
+      s.deaths > 0
+        ? Math.round((s.kills / s.deaths) * 100) / 100
+        : Math.round(s.kills * 100) / 100;
     const kp =
       typeof (u as { kp?: number }).kp === 'number' ? (u as { kp: number }).kp : KP_DEFAULT;
     const premium = isPremiumActive({
@@ -1664,7 +1664,13 @@ export async function resellInventoryItem(inventoryItemId: string) {
   const item = await prisma.inventoryItem.findUnique({ where: { id: inventoryItemId } });
   if (!item || item.userId !== user.id) throw new Error('Item not found');
 
-  const refund = Math.floor(item.vpValue * INVENTORY_RESELL_RATE);
+  const { getSiteSettings } = await import('@/lib/progression-actions');
+  const { parseInventoryConfig } = await import('@/lib/inventory-config');
+  const settings = await getSiteSettings();
+  const invCfg = parseInventoryConfig(
+    (settings as { inventoryConfigJson?: string }).inventoryConfigJson ?? '{}'
+  );
+  const refund = Math.floor(item.vpValue * invCfg.resellRate);
   await prisma.$transaction([
     prisma.inventoryItem.delete({ where: { id: item.id } }),
     prisma.user.update({

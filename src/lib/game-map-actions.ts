@@ -32,6 +32,36 @@ export type CloudMapListItem = {
   updatedAt: string;
 };
 
+/** Strip oversized inline data-URLs so cloud publish stays under the size cap.
+ * Prefer `/game/...` asset paths or uploaded URLs instead of embedding GLBs. */
+function stripInlineDataUrls(doc: MapDocument): MapDocument {
+  const clone = JSON.parse(JSON.stringify(doc)) as MapDocument;
+  const strip = (url: unknown): string | undefined => {
+    if (typeof url !== 'string') return undefined;
+    if (url.startsWith('data:') && url.length > 8_000) return undefined;
+    return url;
+  };
+  for (const ent of clone.entities ?? []) {
+    if (ent.customModelUrl?.startsWith('data:') && ent.customModelUrl.length > 8_000) {
+      delete ent.customModelUrl;
+    }
+    if (Array.isArray(ent.playerSkins)) {
+      for (const skin of ent.playerSkins) {
+        if (skin && typeof skin === 'object') {
+          const s = skin as { customModelUrl?: string; textureUrl?: string };
+          const cm = strip(s.customModelUrl);
+          if (cm === undefined) delete s.customModelUrl;
+          else s.customModelUrl = cm;
+          const tx = strip(s.textureUrl);
+          if (tx === undefined) delete s.textureUrl;
+          else s.textureUrl = tx;
+        }
+      }
+    }
+  }
+  return clone;
+}
+
 /** Publish (or update) a map document to Mongo and optionally mark it Active for the mode. */
 export async function publishCloudMap(input: {
   localId?: string;
@@ -43,9 +73,12 @@ export async function publishCloudMap(input: {
 }): Promise<CloudMapListItem> {
   const staff = await requireStaff();
   const mode = normalizeKilrunMode(input.mode);
-  const documentJson = JSON.stringify(input.document);
+  const cleaned = stripInlineDataUrls(input.document);
+  const documentJson = JSON.stringify(cleaned);
   if (documentJson.length > 4_500_000) {
-    throw new Error('Map is too large to publish to cloud. Reduce custom GLB/data URLs first.');
+    throw new Error(
+      'Map is too large to publish. Move custom GLBs to /public/game/... URLs (not inline data URLs), then retry.'
+    );
   }
 
   let thumbnailUrl: string | null | undefined = undefined;
@@ -233,4 +266,38 @@ export async function deleteCloudMap(mapId: string): Promise<{ ok: true }> {
   await requireStaff();
   await prisma.gameMap.delete({ where: { id: mapId } });
   return { ok: true };
+}
+
+/**
+ * Duplicate a cloud map into a new editable cloud row (co-edit precursor).
+ * Returns the new map id; client can hydrate locally via listCloudMapDocuments.
+ */
+export async function forkCloudMap(
+  mapId: string,
+  newName?: string
+): Promise<CloudMapListItem> {
+  const staff = await requireStaff();
+  const src = await prisma.gameMap.findUnique({ where: { id: mapId } });
+  if (!src) throw new Error('Map not found');
+  const localId = `fork_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+  const row = await prisma.gameMap.create({
+    data: {
+      name: (newName?.trim() || `${src.name} (fork)`).slice(0, 120),
+      mode: src.mode,
+      documentJson: src.documentJson,
+      thumbnailUrl: src.thumbnailUrl,
+      isActive: false,
+      createdById: staff.id,
+      localId,
+    },
+  });
+  return {
+    id: row.id,
+    localId: row.localId,
+    name: row.name,
+    mode: normalizeKilrunMode(row.mode),
+    thumbnailUrl: row.thumbnailUrl,
+    isActive: row.isActive,
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }

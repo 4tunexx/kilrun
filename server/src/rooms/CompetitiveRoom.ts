@@ -9,7 +9,6 @@ import {
 import {
   COMPETITIVE_MIN_PLAYERS_TO_START,
   LOBBY_COUNTDOWN_MS,
-  MAX_ENERGY,
   OBSTACLE_DAMAGE,
   OBSTACLE_HIT_COOLDOWN_MS,
   PLAYER_RADIUS,
@@ -29,8 +28,23 @@ import {
   type PlayerSimScratch,
   type WorldBounds,
 } from '../sim/movement.js';
-import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
+import {
+  applyPlatformCarry,
+  tickMovingPlatforms,
+  type PlatformDelta,
+  type PlatformMotionState,
+} from '../sim/moving-platforms.js';
+import { isPlayerHitByObstacle } from '../sim/collision.js';
 import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import {
+  effectiveWeaponCone,
+  isTargetHitByPellet,
+  pelletAimOffsets,
+  weaponPelletCount,
+  weaponPelletDamage,
+} from '../sim/weapon-combat.js';
+import { fetchTrustedLoadout } from '../trusted-loadout.js';
+import { applyAbilityStatsToPlayer, getMaxHealth, getMaxEnergyFor } from '../sim/ability-stats.js';
 import { assignCompetitiveColor } from '../lib/body-colors.js';
 import {
   authenticateJoin,
@@ -43,6 +57,7 @@ import {
   DISPLAY_COMPETITIVE_REWARDS,
   reportMatchResults,
 } from '../match-report.js';
+import { fetchActiveMapPayload } from '../active-map.js';
 
 const KP_DEFAULT = 1000;
 
@@ -135,6 +150,8 @@ export class CompetitiveRoom extends Room<RoomState> {
   private overtimeApplied = false;
   private pushPayloads: PushPayloadSim[] = [];
   private pushWinPending: 'team_a' | 'team_b' | null = null;
+  private platformMotion = new Map<string, PlatformMotionState>();
+  private matchElapsedMs = 0;
 
   private rankKey = 'open';
   private mmWaitMs = DEFAULT_MM_WAIT_MS;
@@ -151,6 +168,43 @@ export class CompetitiveRoom extends Room<RoomState> {
   private friendlyFire = false;
   private respawnInRound = false;
   private combatPhysOpts: MovementPhysicsOpts = {};
+  private shopItems: Array<{
+    id: string;
+    kind?: string;
+    damage?: number;
+    range?: number;
+    cooldownMs?: number;
+    coneRadians?: number;
+    shopPrice?: number;
+    textureUrl?: string;
+    modelUrl?: string;
+    fireMode?: string;
+    pellets?: number;
+    adsZoomFov?: number;
+    adsConeScale?: number;
+    hipfireConeScale?: number;
+    magSize?: number;
+    reserveAmmo?: number;
+    reloadMs?: number;
+    enabled?: boolean;
+    modes?: string[];
+  }> = [];
+  private shopPowerUps: Array<{
+    id: string;
+    shopPrice?: number;
+    effect?: string;
+    enabled?: boolean;
+    modes?: string[];
+  }> = [];
+  private shopSkins: Array<{
+    id: string;
+    shopPrice?: number;
+    textureUrl?: string;
+    enabled?: boolean;
+    modes?: string[];
+  }> = [];
+  private startingCredits = 500;
+  private creditsPerKill = 75;
 
   onCreate(options: JoinOptions = {}) {
     this.setState(new RoomState());
@@ -217,25 +271,133 @@ export class CompetitiveRoom extends Room<RoomState> {
     });
 
     this.onMessage('buyWeapon', (client, preset: {
+      itemId?: string;
       kind?: string;
       damage?: number;
       range?: number;
       cooldownMs?: number;
       coneRadians?: number;
     }) => {
-      // Only allowed during the buy phase (countdown with remaining time > roundCountdownMs).
       if (this.state.phase !== 'countdown') return;
-      const buyRemaining = this.state.countdownMs - this.roundCountdownMs;
+      const buyRemaining = this.matchStarted
+        ? this.state.countdownMs - this.roundCountdownMs
+        : this.state.countdownMs;
       if (buyRemaining <= 0) return;
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
-      const { sanitizeWeaponCombat } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
-      const sanitized = sanitizeWeaponCombat(preset);
-      player.weaponKind = sanitized.kind;
-      player.weaponDamage = sanitized.damage;
-      player.weaponRange = sanitized.range;
-      player.weaponCooldownMs = sanitized.cooldownMs;
-      player.weaponConeRadians = sanitized.coneRadians;
+
+      let combatRaw: Record<string, unknown> = { ...preset };
+      let price = 0;
+      let weaponId = typeof preset.itemId === 'string' ? preset.itemId : '';
+      let modelUrl = '';
+      if (this.shopItems.length > 0) {
+        const hit = weaponId
+          ? this.shopItems.find((it) => it.id === weaponId && it.enabled !== false)
+          : undefined;
+        if (!hit) return;
+        if (
+          Array.isArray(hit.modes) &&
+          hit.modes.length &&
+          !hit.modes.includes('competitive')
+        ) {
+          return;
+        }
+        price = Math.max(0, Number(hit.shopPrice) || 0);
+        if (price > 0 && player.credits < price) return;
+        combatRaw = {
+          kind: hit.kind,
+          damage: hit.damage,
+          range: hit.range,
+          cooldownMs: hit.cooldownMs,
+          coneRadians: hit.coneRadians,
+          fireMode: hit.fireMode,
+          pellets: hit.pellets,
+          adsZoomFov: hit.adsZoomFov,
+          adsConeScale: hit.adsConeScale,
+          hipfireConeScale: hit.hipfireConeScale,
+          magSize: hit.magSize,
+          reserveAmmo: hit.reserveAmmo,
+          reloadMs: hit.reloadMs,
+        };
+        weaponId = hit.id;
+        modelUrl = typeof hit.modelUrl === 'string' ? hit.modelUrl : '';
+      } else if (typeof (preset as { modelUrl?: string }).modelUrl === 'string') {
+        modelUrl = (preset as { modelUrl?: string }).modelUrl || '';
+      }
+
+      const {
+        sanitizeWeaponCombat,
+        applySanitizedWeaponToPlayer,
+      } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+      const sanitized = sanitizeWeaponCombat(combatRaw);
+      if (price > 0) player.credits = Math.max(0, player.credits - price);
+      applySanitizedWeaponToPlayer(player, sanitized, { weaponId, modelUrl });
+    });
+
+    this.onMessage('reload', (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || !player.isAlive) return;
+      const { tryStartReload } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+      tryStartReload(player, Date.now());
+    });
+
+    this.onMessage('buyPowerUp', (client, data: { powerUpId?: string }) => {
+      if (this.state.phase !== 'countdown') return;
+      const buyRemaining = this.matchStarted
+        ? this.state.countdownMs - this.roundCountdownMs
+        : this.state.countdownMs;
+      if (buyRemaining <= 0) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const id = typeof data?.powerUpId === 'string' ? data.powerUpId : '';
+      const hit = this.shopPowerUps.find((p) => p.id === id && p.enabled !== false);
+      if (!hit) return;
+      if (
+        Array.isArray(hit.modes) &&
+        hit.modes.length &&
+        !hit.modes.includes('competitive')
+      ) {
+        return;
+      }
+      const price = Math.max(0, Number(hit.shopPrice) || 0);
+      if (price > 0 && player.credits < price) return;
+      if (price > 0) player.credits = Math.max(0, player.credits - price);
+      const effect = String(hit.effect || hit.id);
+      if (effect === 'heal') {
+        player.health = Math.min(getMaxHealth(player), player.health + 50);
+      } else if (effect === 'shield') {
+        player.shieldHp = Math.min(100, (player.shieldHp || 0) + 50);
+      } else if (effect === 'energy' || effect === 'speed' || effect === 'super_jump') {
+        player.energy = 100;
+        if (effect !== 'energy') {
+          player.shieldHp = Math.min(100, (player.shieldHp || 0) + 15);
+        }
+      }
+    });
+
+    this.onMessage('buyWeaponSkin', (client, data: { skinId?: string }) => {
+      if (this.state.phase !== 'countdown') return;
+      const buyRemaining = this.matchStarted
+        ? this.state.countdownMs - this.roundCountdownMs
+        : this.state.countdownMs;
+      if (buyRemaining <= 0) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const id = typeof data?.skinId === 'string' ? data.skinId : '';
+      const hit = this.shopSkins.find((s) => s.id === id && s.enabled !== false);
+      if (!hit) return;
+      if (
+        Array.isArray(hit.modes) &&
+        hit.modes.length &&
+        !hit.modes.includes('competitive')
+      ) {
+        return;
+      }
+      const price = Math.max(0, Number(hit.shopPrice) || 0);
+      if (player.weaponSkinId === hit.id) return;
+      if (price > 0 && player.credits < price) return;
+      if (price > 0) player.credits = Math.max(0, player.credits - price);
+      player.weaponSkinId = hit.id;
     });
 
     this.onMessage('loadCustomMap', (client, data: Record<string, unknown>) => {
@@ -288,8 +450,48 @@ export class CompetitiveRoom extends Room<RoomState> {
         }
       }
 
+      const shopRaw = data?.shopSettings as {
+        items?: unknown[];
+        powerUps?: unknown[];
+        skins?: unknown[];
+        startingCredits?: number;
+        creditsPerKill?: number;
+      } | undefined;
+      if (shopRaw?.items && Array.isArray(shopRaw.items)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.shopItems = shopRaw.items.filter(
+          (it) =>
+            !!it && typeof it === 'object' && typeof (it as { id?: unknown }).id === 'string'
+        ) as any;
+      }
+      if (shopRaw?.powerUps && Array.isArray(shopRaw.powerUps)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.shopPowerUps = shopRaw.powerUps.filter(
+          (it) =>
+            !!it && typeof it === 'object' && typeof (it as { id?: unknown }).id === 'string'
+        ) as any;
+      }
+      if (shopRaw?.skins && Array.isArray(shopRaw.skins)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.shopSkins = shopRaw.skins.filter(
+          (it) =>
+            !!it && typeof it === 'object' && typeof (it as { id?: unknown }).id === 'string'
+        ) as any;
+      }
+      if (typeof shopRaw?.startingCredits === 'number' && Number.isFinite(shopRaw.startingCredits)) {
+        this.startingCredits = Math.max(0, shopRaw.startingCredits);
+      }
+      if (typeof shopRaw?.creditsPerKill === 'number' && Number.isFinite(shopRaw.creditsPerKill)) {
+        this.creditsPerKill = Math.max(0, shopRaw.creditsPerKill);
+      }
+      for (const p of this.state.players.values()) {
+        p.credits = this.startingCredits;
+      }
+
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(platforms));
+      this.platformMotion.clear();
+      this.matchElapsedMs = 0;
 
       while (this.state.obstacles.length > 0) this.state.obstacles.pop();
       const hazards = Array.isArray(data?.obstacles)
@@ -353,6 +555,71 @@ export class CompetitiveRoom extends Room<RoomState> {
       );
     });
 
+    void fetchActiveMapPayload('competitive').then((active) => {
+      if (!active || this.customMapLoaded) return;
+      const pads = active.payload.platforms as PlatformBlueprint[] | undefined;
+      if (!Array.isArray(pads) || pads.length === 0) return;
+      const data = active.payload;
+      while (this.state.platforms.length > 0) this.state.platforms.pop();
+      this.state.platforms.push(...createFromBlueprints(pads));
+      this.platformMotion.clear();
+      this.matchElapsedMs = 0;
+      while (this.state.obstacles.length > 0) this.state.obstacles.pop();
+      const hazards = Array.isArray(data.obstacles)
+        ? (data.obstacles as ObstacleBlueprint[])
+        : [];
+      if (hazards.length) {
+        this.state.obstacles.push(...createObstaclesFromBlueprints(hazards));
+      }
+      const teamA = data.teamASpawns as { x: number; y: number; z: number }[] | undefined;
+      const teamB = data.teamBSpawns as { x: number; y: number; z: number }[] | undefined;
+      if (Array.isArray(teamA) && teamA.length) this.teamASpawns = teamA.map((s) => ({ ...s }));
+      if (Array.isArray(teamB) && teamB.length) this.teamBSpawns = teamB.map((s) => ({ ...s }));
+      const payloads = data.pushPayloads as typeof this.pushPayloads | undefined;
+      this.pushPayloads = Array.isArray(payloads)
+        ? payloads.map((p) => ({
+            ...p,
+            t: typeof p.t === 'number' ? Math.min(1, Math.max(0, p.t)) : 0.5,
+            pushStrength: Math.max(0.5, p.pushStrength ?? 3),
+            pushRadius: Math.max(0.8, p.pushRadius ?? 1.8),
+            winEpsilon: Math.max(0.02, p.winEpsilon ?? 0.08),
+          }))
+        : [];
+      this.pushWinPending = null;
+      if (data.worldBounds) {
+        this.worldBounds = { ...(data.worldBounds as WorldBounds) };
+      }
+      const cs = data.combatSettings as Record<string, unknown> | undefined;
+      if (cs && typeof cs === 'object') {
+        this.combatPhysOpts = {
+          gravity: typeof cs.gravity === 'number' ? cs.gravity : undefined,
+          jumpVelocity: typeof cs.jumpVelocity === 'number' ? cs.jumpVelocity : undefined,
+          doubleJumpVelocity:
+            typeof cs.doubleJumpVelocity === 'number' ? cs.doubleJumpVelocity : undefined,
+          doubleJumpEnabled:
+            typeof cs.doubleJumpEnabled === 'boolean' ? cs.doubleJumpEnabled : undefined,
+          jumpCutMult: typeof cs.jumpCutMult === 'number' ? cs.jumpCutMult : undefined,
+          coyoteMs: typeof cs.coyoteMs === 'number' ? cs.coyoteMs : undefined,
+          jumpBufferMs: typeof cs.jumpBufferMs === 'number' ? cs.jumpBufferMs : undefined,
+          walkSpeed: typeof cs.walkSpeed === 'number' ? cs.walkSpeed : undefined,
+          sprintMult: typeof cs.sprintMult === 'number' ? cs.sprintMult : undefined,
+          crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
+          maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
+          apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+          wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
+          wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
+          wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
+          wallSlideGravMult:
+            typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
+        };
+      }
+      this.customMapLoaded = true;
+      this.assignTeamsAndSpawn();
+      console.log(
+        `[CompetitiveRoom] MAIN map loaded from server (${active.name}): ${pads.length} pads`
+      );
+    });
+
     this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
   }
 
@@ -360,7 +627,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     return authenticateJoin(options);
   }
 
-  onJoin(client: Client, options: JoinOptions) {
+  async onJoin(client: Client, options: JoinOptions) {
     const claims = claimsFromAuth(client.auth, options);
     const ranked = this.state.modeTag === 'competitive_ranked';
     const allowed = !!(
@@ -382,8 +649,11 @@ export class CompetitiveRoom extends Room<RoomState> {
       claims.username || `Player${client.sessionId.slice(0, 4)}`;
     player.avatarUrl = claims.avatarUrl || '';
     player.kp = claims.kp;
-    applyLoadoutToPlayer(player, options);
-    player.energy = MAX_ENERGY;
+    const trusted = await fetchTrustedLoadout(player.userId);
+    applyLoadoutToPlayer(player, trusted ?? options);
+    applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
+    player.health = getMaxHealth(player);
+    player.energy = getMaxEnergyFor(player);
 
     // Balance by current team sizes
     const aCount = Array.from(this.state.players.values()).filter((p) => p.role === 'team_a').length;
@@ -392,6 +662,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     player.bodyColorIndex = assignCompetitiveColor(player.role);
 
     this.applyTeamSpawn(player);
+    player.credits = this.startingCredits;
     this.state.players.set(client.sessionId, player);
     this.latestInputs.set(client.sessionId, defaultInput());
     this.simScratch.set(client.sessionId, createSimScratch());
@@ -475,24 +746,31 @@ export class CompetitiveRoom extends Room<RoomState> {
         break;
       case 'countdown':
         this.state.countdownMs -= dtMs;
+        this.state.buyPhaseMs = this.matchStarted
+          ? Math.max(0, this.state.countdownMs - this.roundCountdownMs)
+          : Math.max(0, this.state.countdownMs);
         if (this.state.countdownMs <= 0) {
           if (!this.matchStarted) this.startMatch();
           else this.startRound();
         }
         break;
       case 'playing':
+        this.state.buyPhaseMs = 0;
         if (this.betweenRounds) {
           this.betweenRoundMs -= dtMs;
           if (this.betweenRoundMs <= 0) {
             this.betweenRounds = false;
             this.state.phase = 'countdown';
-            this.state.countdownMs = this.roundCountdownMs;
+            // Include buy window on every round, matching Map Editor buyTimeSec.
+            this.state.countdownMs = this.roundCountdownMs + this.buyTimeMs;
+            this.grantBuyPhaseCredits();
           }
           break;
         }
         this.tickPlaying(dtMs);
         break;
       case 'results':
+        this.state.buyPhaseMs = 0;
         this.resultsElapsedMs += dtMs;
         if (this.resultsElapsedMs >= RESULTS_DISPLAY_MS) {
           this.matchStarted = false;
@@ -503,7 +781,7 @@ export class CompetitiveRoom extends Room<RoomState> {
           this.state.roundIndex = 0;
           this.state.rewardsReady = false;
           for (const player of this.state.players.values()) {
-            player.kills = 0;
+            player.kills = 0; player.deaths = 0;
             player.score = 0;
             player.distance = 0;
             player.xpEarned = 0;
@@ -525,7 +803,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.state.rewardsReady = false;
     this.assignTeamsAndSpawn();
     for (const player of this.state.players.values()) {
-      player.kills = 0;
+      player.kills = 0; player.deaths = 0;
       player.score = 0;
       player.distance = 0;
       player.xpEarned = 0;
@@ -534,6 +812,13 @@ export class CompetitiveRoom extends Room<RoomState> {
     }
     this.state.phase = 'countdown';
     this.state.countdownMs = this.roundCountdownMs + this.buyTimeMs;
+    this.grantBuyPhaseCredits();
+  }
+
+  private grantBuyPhaseCredits() {
+    for (const p of this.state.players.values()) {
+      p.credits = this.startingCredits;
+    }
   }
 
   private startRound() {
@@ -543,14 +828,16 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.pushWinPending = null;
     this.state.phase = 'playing';
     this.state.matchTimeRemainingMs = this.roundTimeMs;
+    this.matchElapsedMs = 0;
+    this.platformMotion.clear();
     // Reset payload to mid-rail each round.
     for (const p of this.pushPayloads) {
       p.t = 0.5;
     }
 
     Array.from(this.state.players.values()).forEach((player) => {
-      player.health = 100;
-      player.energy = MAX_ENERGY;
+      player.health = getMaxHealth(player);
+      player.energy = getMaxEnergyFor(player);
       player.isAlive = true;
       player.hasFinished = false;
       this.applyTeamSpawn(player);
@@ -561,7 +848,13 @@ export class CompetitiveRoom extends Room<RoomState> {
 
   private tickPlaying(dtMs: number) {
     this.state.matchTimeRemainingMs -= dtMs;
-    this.tickPlayers(dtMs);
+    this.matchElapsedMs += dtMs;
+    const platformDeltas = tickMovingPlatforms(
+      this.state.platforms,
+      this.platformMotion,
+      this.matchElapsedMs
+    );
+    this.tickPlayers(dtMs, platformDeltas);
     this.tickPushPayloads(dtMs / 1000);
 
     if (this.pushWinPending) {
@@ -715,6 +1008,7 @@ export class CompetitiveRoom extends Room<RoomState> {
         role: team,
         isAlive: p.isAlive,
         kills: p.kills,
+        deaths: p.deaths,
         score: p.score,
         opponentAvgKp: this.avgEnemyKp(team),
         roundsWon: team === 'team_a' ? this.state.scoreA : this.state.scoreB,
@@ -750,7 +1044,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     return Math.floor(this.maxRounds / 2) + 1;
   }
 
-  private tickPlayers(dtMs: number) {
+  private tickPlayers(dtMs: number, platformDeltas: PlatformDelta[] = []) {
     const dtSeconds = dtMs / 1000;
     const now = Date.now();
 
@@ -764,7 +1058,14 @@ export class CompetitiveRoom extends Room<RoomState> {
         this.simScratch.set(sessionId, scratch);
       }
 
+      applyPlatformCarry(player, scratch.supportPlatformId, platformDeltas);
+
       applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
+
+      {
+        const { finishReloadIfDue } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+        finishReloadIfDue(player, now);
+      }
 
       for (const obstacle of this.state.obstacles) {
         if (!isPlayerHitByObstacle(player, obstacle)) continue;
@@ -788,75 +1089,84 @@ export class CompetitiveRoom extends Room<RoomState> {
         const lastShot = this.lastShotAt.get(sessionId) ?? 0;
         const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
         if (now - lastShot >= cooldown) {
-          this.lastShotAt.set(sessionId, now);
-          this.resolvePvPShot(player);
+          const {
+            tryConsumeShotAmmo,
+          } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+          if (tryConsumeShotAmmo(player, now)) {
+            this.lastShotAt.set(sessionId, now);
+            this.resolvePvPShot(player, !!input.aimHeld);
+          }
         }
       }
     });
   }
 
-  private resolvePvPShot(shooter: PlayerState) {
+  private resolvePvPShot(shooter: PlayerState, aimHeld = false) {
     if (shooter.weaponKind === 'cosmetic') return;
     const range = shooter.weaponRange > 0 ? shooter.weaponRange : 14;
-    const damage = shooter.weaponDamage > 0 ? shooter.weaponDamage : 25;
-    const cone = shooter.weaponConeRadians > 0 ? shooter.weaponConeRadians : 0.18;
-    // Pick the CLOSEST valid target in the cone (matches HordeRoom's
-    // resolveSurvivorShot convention) — plain Map iteration order previously
-    // decided the winner when two enemies overlapped in the reticle, which
-    // in PvP with several players is common, not an edge case.
-    let closest: PlayerState | null = null;
-    let closestDistSq = Infinity;
-    for (const target of this.state.players.values()) {
-      if (!target.isAlive) continue;
-      // Skip teammates unless friendly fire is enabled.
-      if (target.role === shooter.role && !this.friendlyFire) continue;
-      if (target.sessionId === shooter.sessionId) continue;
-      if (
-        !isHitByShot(
-          shooter.x,
-          shooter.y,
-          shooter.aimAngle,
-          target.x,
-          target.y,
-          range,
-          cone,
-          {
-            shooterZ: shooter.z,
-            aimPitch: shooter.aimPitch,
-            targetZ: target.z,
-          }
-        )
-      ) {
-        continue;
+    const damage = weaponPelletDamage(shooter);
+    const cone = effectiveWeaponCone(shooter, aimHeld);
+    const pellets = weaponPelletCount(shooter);
+    const offsets = pelletAimOffsets(pellets, cone);
+
+    const dmgById = new Map<string, { target: PlayerState; dmg: number }>();
+    for (const off of offsets) {
+      let closest: PlayerState | null = null;
+      let closestDistSq = Infinity;
+      for (const target of this.state.players.values()) {
+        if (!target.isAlive) continue;
+        if (target.role === shooter.role && !this.friendlyFire) continue;
+        if (target.sessionId === shooter.sessionId) continue;
+        if (
+          !isTargetHitByPellet(shooter, target, range, cone, off.yaw, off.pitch)
+        ) {
+          continue;
+        }
+        const dx = target.x - shooter.x;
+        const dy = target.y - shooter.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq < closestDistSq) {
+          closestDistSq = distSq;
+          closest = target;
+        }
       }
-      const dx = target.x - shooter.x;
-      const dy = target.y - shooter.y;
-      const distSq = dx * dx + dy * dy;
-      if (distSq < closestDistSq) {
-        closestDistSq = distSq;
-        closest = target;
-      }
+      if (!closest) continue;
+      const prev = dmgById.get(closest.sessionId);
+      if (prev) prev.dmg += damage;
+      else dmgById.set(closest.sessionId, { target: closest, dmg: damage });
     }
-    if (closest) this.damagePlayer(closest, damage, shooter);
+
+    for (const { target, dmg } of dmgById.values()) {
+      this.damagePlayer(target, dmg, shooter);
+    }
   }
 
   private damagePlayer(player: PlayerState, amount: number, shooter?: PlayerState) {
     const wasAlive = player.isAlive && player.health > 0;
-    player.health = Math.max(0, player.health - amount);
+    let dmg = amount;
+    if (player.shieldHp > 0) {
+      const absorbed = Math.min(player.shieldHp, dmg);
+      player.shieldHp -= absorbed;
+      dmg -= absorbed;
+    }
+    if (dmg > 0) player.health = Math.max(0, player.health - dmg);
     if (player.health <= 0) {
+      if (wasAlive) player.deaths = (player.deaths || 0) + 1;
       if (this.respawnInRound) {
         // Respawn: send back to spawn point at full health after a brief moment.
-        player.health = 100;
+        player.health = getMaxHealth(player);
         this.applyTeamSpawn(player);
         if (wasAlive && shooter && shooter.sessionId !== player.sessionId) {
           shooter.kills += 1;
           shooter.score = shooter.kills;
+          shooter.credits = (shooter.credits || 0) + this.creditsPerKill;
         }
       } else {
         player.isAlive = false;
         if (wasAlive && shooter && shooter.sessionId !== player.sessionId) {
           shooter.kills += 1;
           shooter.score = shooter.kills;
+          shooter.credits = (shooter.credits || 0) + this.creditsPerKill;
         }
       }
     }

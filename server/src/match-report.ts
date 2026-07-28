@@ -16,6 +16,7 @@ export type MatchReportPlayer = {
   isAlive: boolean;
   hasFinished?: boolean;
   kills?: number;
+  deaths?: number;
   score?: number;
   distance?: number;
   wavesCleared?: number;
