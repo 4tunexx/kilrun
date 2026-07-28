@@ -111,7 +111,6 @@ export default function KilrunEngine({
   const joystickRef = useRef<DualJoystick | null>(null);
   const pausedRef = useRef(false);
   const gameMenuOpenRef = useRef(false);
-  gameMenuOpenRef.current = gameMenuOpen;
   const roomName: GameRoomName =
     mode === 'competitive'
       ? competitiveQueue === 'ranked'
@@ -150,6 +149,9 @@ export default function KilrunEngine({
   const [assetsReady, setAssetsReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
+  useEffect(() => {
+    gameMenuOpenRef.current = gameMenuOpen;
+  }, [gameMenuOpen]);
   const gameProgression = useGameProgression(joinOptions.userId);
   useEffect(() => {
     if (room.phase === 'results') gameProgression.refresh();
