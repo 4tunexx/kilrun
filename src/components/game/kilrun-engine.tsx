@@ -110,6 +110,8 @@ export default function KilrunEngine({
   const hostRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const pausedRef = useRef(false);
+  const gameMenuOpenRef = useRef(false);
+  gameMenuOpenRef.current = gameMenuOpen;
   const roomName: GameRoomName =
     mode === 'competitive'
       ? competitiveQueue === 'ranked'
@@ -750,6 +752,16 @@ export default function KilrunEngine({
           } else {
             localView?.playWeaponReloadClip();
           }
+        }
+        const abilityPulse =
+          inputManager.consumeAbilityPulse('hook') ??
+          inputManager.consumeAbilityPulse('berserk') ??
+          inputManager.consumeAbilityPulse('bullet') ??
+          inputManager.consumeAbilityPulse('thunder') ??
+          inputManager.consumeAbilityPulse('visibility') ??
+          inputManager.consumeAbilityPulse('fly');
+        if (abilityPulse && !gameMenuOpenRef.current && localSessionId && localState) {
+          connectionRef.current?.sendActivateAbility(abilityPulse);
         }
         const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
         const localWep = localSessionId ? playersRef.current.get(localSessionId) : undefined;

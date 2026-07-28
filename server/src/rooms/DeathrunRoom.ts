@@ -39,6 +39,13 @@ import {
 } from '../sim/moving-platforms.js';
 import { fetchTrustedLoadout } from '../trusted-loadout.js';
 import { applyAbilityStatsToPlayer, getMaxHealth, getMaxEnergyFor } from '../sim/ability-stats.js';
+import {
+  activateAbility,
+  applyAbilityLevelsToPlayer,
+  isBerserkActive,
+  tickActiveAbilityTimers,
+} from '../sim/active-abilities.js';
+import { getThunderStats } from '../../../shared/ability-progression.js';
 import { assignDeathrunColors, BODY_COLOR_NONE } from '../lib/body-colors.js';
 import {
   authenticateJoin,
@@ -223,6 +230,34 @@ export class DeathrunRoom extends Room<RoomState> {
       if (!player || !player.isAlive) return;
       const { tryStartReload } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
       tryStartReload(player, Date.now());
+    });
+
+    this.onMessage('activateAbility', (client, payload: { ability?: string } | undefined) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const now = Date.now();
+      if (!activateAbility(player, payload?.ability, now)) return;
+      if (payload?.ability === 'thunder') {
+        let thunderLevel = 0;
+        try {
+          thunderLevel = JSON.parse(player.abilityLevelsJson || '{}').thunder ?? 0;
+        } catch {
+          thunderLevel = 0;
+        }
+        const stats = getThunderStats(thunderLevel);
+        const radius = stats.radiusMeters || 0;
+        const damage = stats.damage || 0;
+        if (radius > 0 && damage > 0) {
+          for (const target of this.state.players.values()) {
+            if (target.sessionId === player.sessionId || !target.isAlive || target.hasFinished) continue;
+            const dx = target.x - player.x;
+            const dy = target.y - player.y;
+            if (Math.hypot(dx, dy) <= radius) {
+              this.damagePlayer(target, damage);
+            }
+          }
+        }
+      }
     });
 
     this.onMessage(
@@ -411,6 +446,7 @@ export class DeathrunRoom extends Room<RoomState> {
     const trusted = await fetchTrustedLoadout(player.userId);
     applyLoadoutToPlayer(player, trusted ?? options);
     applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
+    applyAbilityLevelsToPlayer(player, trusted?.abilityLevels ?? null);
     this.applySpawnPosition(player, this.state.players.size);
     player.health = getMaxHealth(player);
     player.energy = getMaxEnergyFor(player);
@@ -661,6 +697,7 @@ export class DeathrunRoom extends Room<RoomState> {
       }
 
       applyPlatformCarry(player, scratch.supportPlatformId, platformDeltas);
+      tickActiveAbilityTimers(player, now);
 
       applyMovement(
         player,
@@ -760,6 +797,7 @@ export class DeathrunRoom extends Room<RoomState> {
     if (trapper.weaponKind === 'cosmetic') return;
     const range = trapper.weaponRange > 0 ? trapper.weaponRange : 14;
     const damage = trapper.weaponDamage > 0 ? trapper.weaponDamage : 25;
+    const berserkDamage = Math.max(damage, 999);
     const cone = trapper.weaponConeRadians > 0 ? trapper.weaponConeRadians : 0.18;
     // Pick the CLOSEST target inside the cone, not just the first one found
     // in Map iteration order — otherwise a farther runner could "steal" a
@@ -785,7 +823,7 @@ export class DeathrunRoom extends Room<RoomState> {
         closest = target;
       }
     }
-    if (closest) this.damagePlayer(closest, damage);
+    if (closest) this.damagePlayer(closest, isBerserkActive(trapper, Date.now()) ? berserkDamage : damage);
   }
 
   private respawnAtCheckpoint(player: PlayerState) {
@@ -862,6 +900,9 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private damagePlayer(player: PlayerState, amount: number) {
+    if (isBerserkActive(player, Date.now())) {
+      return;
+    }
     const wasAlive = player.isAlive && player.health > 0;
     player.health = Math.max(0, player.health - amount);
     if (player.health <= 0) {

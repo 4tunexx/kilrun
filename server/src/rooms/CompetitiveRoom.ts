@@ -45,6 +45,13 @@ import {
 } from '../sim/weapon-combat.js';
 import { fetchTrustedLoadout } from '../trusted-loadout.js';
 import { applyAbilityStatsToPlayer, getMaxHealth, getMaxEnergyFor } from '../sim/ability-stats.js';
+import {
+  activateAbility,
+  applyAbilityLevelsToPlayer,
+  isBerserkActive,
+  tickActiveAbilityTimers,
+} from '../sim/active-abilities.js';
+import { getThunderStats } from '../../../shared/ability-progression.js';
 import { assignCompetitiveColor } from '../lib/body-colors.js';
 import {
   authenticateJoin,
@@ -339,6 +346,34 @@ export class CompetitiveRoom extends Room<RoomState> {
       if (!player || !player.isAlive) return;
       const { tryStartReload } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
       tryStartReload(player, Date.now());
+    });
+
+    this.onMessage('activateAbility', (client, payload: { ability?: string } | undefined) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const now = Date.now();
+      if (!activateAbility(player, payload?.ability, now)) return;
+      if (payload?.ability === 'thunder') {
+        let thunderLevel = 0;
+        try {
+          thunderLevel = JSON.parse(player.abilityLevelsJson || '{}').thunder ?? 0;
+        } catch {
+          thunderLevel = 0;
+        }
+        const stats = getThunderStats(thunderLevel);
+        const radius = stats.radiusMeters || 0;
+        const damage = stats.damage || 0;
+        if (radius > 0 && damage > 0) {
+          for (const target of this.state.players.values()) {
+            if (target.sessionId === player.sessionId || !target.isAlive || target.hasFinished) continue;
+            const dx = target.x - player.x;
+            const dy = target.y - player.y;
+            if (Math.hypot(dx, dy) <= radius) {
+              this.damagePlayer(target, damage, player);
+            }
+          }
+        }
+      }
     });
 
     this.onMessage('buyPowerUp', (client, data: { powerUpId?: string }) => {
@@ -652,6 +687,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     const trusted = await fetchTrustedLoadout(player.userId);
     applyLoadoutToPlayer(player, trusted ?? options);
     applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
+    applyAbilityLevelsToPlayer(player, trusted?.abilityLevels ?? null);
     player.health = getMaxHealth(player);
     player.energy = getMaxEnergyFor(player);
 
@@ -1059,9 +1095,8 @@ export class CompetitiveRoom extends Room<RoomState> {
       }
 
       applyPlatformCarry(player, scratch.supportPlatformId, platformDeltas);
-
+      tickActiveAbilityTimers(player, now);
       applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
-
       {
         const { finishReloadIfDue } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
         finishReloadIfDue(player, now);
@@ -1105,6 +1140,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     if (shooter.weaponKind === 'cosmetic') return;
     const range = shooter.weaponRange > 0 ? shooter.weaponRange : 14;
     const damage = weaponPelletDamage(shooter);
+    const berserkDamage = Math.max(damage, 999);
     const cone = effectiveWeaponCone(shooter, aimHeld);
     const pellets = weaponPelletCount(shooter);
     const offsets = pelletAimOffsets(pellets, cone);
@@ -1131,9 +1167,10 @@ export class CompetitiveRoom extends Room<RoomState> {
         }
       }
       if (!closest) continue;
+      const shotDamage = isBerserkActive(shooter, Date.now()) ? berserkDamage : damage;
       const prev = dmgById.get(closest.sessionId);
-      if (prev) prev.dmg += damage;
-      else dmgById.set(closest.sessionId, { target: closest, dmg: damage });
+      if (prev) prev.dmg += shotDamage;
+      else dmgById.set(closest.sessionId, { target: closest, dmg: shotDamage });
     }
 
     for (const { target, dmg } of dmgById.values()) {
@@ -1142,6 +1179,9 @@ export class CompetitiveRoom extends Room<RoomState> {
   }
 
   private damagePlayer(player: PlayerState, amount: number, shooter?: PlayerState) {
+    if (isBerserkActive(player, Date.now())) {
+      return;
+    }
     const wasAlive = player.isAlive && player.health > 0;
     let dmg = amount;
     if (player.shieldHp > 0) {

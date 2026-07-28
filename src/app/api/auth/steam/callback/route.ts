@@ -46,6 +46,16 @@ async function fetchSteamProfile(steamId: string) {
  * stays runtime-agnostic (no Node-only OpenID libraries).
  */
 export async function GET(req: NextRequest) {
+  try {
+    return handleSteamCallback(req);
+  } catch (error) {
+    console.error('[steam/callback] unhandled error', error);
+    const origin = req.nextUrl.origin;
+    return NextResponse.redirect(`${origin}/landing?error=steam_unexpected_error`);
+  }
+}
+
+async function handleSteamCallback(req: NextRequest) {
   // Same reasoning as `steam/route.ts`: derive everything from the real
   // request instead of `NEXTAUTH_URL`. This also fixes the actual reported
   // bug -- Auth.js's own cookie-name logic (`@auth/core`) decides the

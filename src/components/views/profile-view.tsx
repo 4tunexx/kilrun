@@ -15,6 +15,7 @@ import {
   MailX,
   Swords,
   Trophy,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -98,6 +99,7 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [cosmeticBusyId, setCosmeticBusyId] = useState<string | null>(null);
   const [deactivatingEmail, setDeactivatingEmail] = useState(false);
+  const [showInGameProgression, setShowInGameProgression] = useState(false);
   const { toast } = useToast();
   const isAdmin = user?.role === 'admin';
 
@@ -314,36 +316,61 @@ export default function ProfileView({ userId }: { userId: string }) {
         </TabsList>
 
         <TabsContent value="profile" className="mt-0 space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-              <CardContent className="pt-5 text-center">
-                <Zap className="w-5 h-5 mx-auto mb-1 text-primary" />
-                <p className="text-2xl font-black">{user?.xpProgress ?? 0}</p>
-                <p className="text-xs text-slate-400">Total XP</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-              <CardContent className="pt-5 text-center">
-                <Coins className="w-5 h-5 mx-auto mb-1 text-yellow-400" />
-                <p className="text-2xl font-black">{user?.vpCurrency ?? 0}</p>
-                <p className="text-xs text-slate-400">VP Balance</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-              <CardContent className="pt-5 text-center">
-                <ShoppingBag className="w-5 h-5 mx-auto mb-1 text-primary" />
-                <p className="text-2xl font-black">{activity?.totals.purchaseCount ?? 0}</p>
-                <p className="text-xs text-slate-400">Purchases</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-              <CardContent className="pt-5 text-center">
-                <MessageSquare className="w-5 h-5 mx-auto mb-1 text-primary" />
-                <p className="text-2xl font-black">{activity?.totals.forumPostCount ?? 0}</p>
-                <p className="text-xs text-slate-400">Forum Posts</p>
-              </CardContent>
-            </Card>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-slate-200">Progression</h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowInGameProgression(!showInGameProgression)}
+              className={`relative w-10 h-10 rounded-full p-0 flex items-center justify-center transition-all ${
+                showInGameProgression
+                  ? 'bg-orange-500/20 border border-orange-400/50 text-orange-300 hover:bg-orange-500/30'
+                  : 'bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 hover:bg-emerald-500/30'
+              }`}
+              title={showInGameProgression ? 'Show web stats' : 'Show in-game level'}
+            >
+              <ArrowRightLeft className="w-4 h-4" />
+              {!showInGameProgression && (
+                <div className="absolute inset-0 rounded-full border-2 border-emerald-400/50 animate-pulse" />
+              )}
+            </Button>
           </div>
+
+          {showInGameProgression ? (
+            <GameProgressionCard userId={userId} />
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+                <CardContent className="pt-5 text-center">
+                  <Zap className="w-5 h-5 mx-auto mb-1 text-primary" />
+                  <p className="text-2xl font-black">{user?.xpProgress ?? 0}</p>
+                  <p className="text-xs text-slate-400">Total XP</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+                <CardContent className="pt-5 text-center">
+                  <Coins className="w-5 h-5 mx-auto mb-1 text-yellow-400" />
+                  <p className="text-2xl font-black">{user?.vpCurrency ?? 0}</p>
+                  <p className="text-xs text-slate-400">VP Balance</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+                <CardContent className="pt-5 text-center">
+                  <ShoppingBag className="w-5 h-5 mx-auto mb-1 text-primary" />
+                  <p className="text-2xl font-black">{activity?.totals.purchaseCount ?? 0}</p>
+                  <p className="text-xs text-slate-400">Purchases</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+                <CardContent className="pt-5 text-center">
+                  <MessageSquare className="w-5 h-5 mx-auto mb-1 text-primary" />
+                  <p className="text-2xl font-black">{activity?.totals.forumPostCount ?? 0}</p>
+                  <p className="text-xs text-slate-400">Forum Posts</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
 
           <div className="grid gap-3 sm:grid-cols-3">
             <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">

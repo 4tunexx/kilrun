@@ -19,6 +19,7 @@ describe('match-loadout', () => {
     };
     const { equippedSkinsJson } = packMatchLoadout([hat]);
     const parsed = parseEquippedSkinsJson(equippedSkinsJson);
-    expect(parsed[0]?.textureUrl).toBeUndefined();
+    // Data URLs are replaced with shared pack atlas fallback to ensure matches render textured skins
+    expect(parsed[0]?.textureUrl).toBe('/game/skins/Textures.png');
   });
 });

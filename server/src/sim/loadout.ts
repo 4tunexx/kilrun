@@ -1,3 +1,5 @@
+import { isUnlimitedAmmoActive } from './active-abilities.js';
+
 /**
  * Sanitize match loadout (skins + weapon) for Colyseus join options / PlayerState.
  * Server-only — do not trust client damage/range without clamps.
@@ -142,6 +144,9 @@ export function tryStartReload(player: WeaponPlayerFields, now: number): boolean
 export function tryConsumeShotAmmo(player: WeaponPlayerFields, now: number): boolean {
   finishReloadIfDue(player, now);
   if ((player.reloadEndsAt ?? 0) > now) return false;
+  if (isUnlimitedAmmoActive(player as never, now)) {
+    return true;
+  }
   const mag = player.weaponMagSize ?? 0;
   if (mag <= 0) return true;
   if ((player.ammoInMag ?? 0) <= 0) return false;

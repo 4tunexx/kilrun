@@ -323,6 +323,10 @@ export class GameConnection {
     this.room?.send('reload', {});
   }
 
+  public sendActivateAbility(ability: string): void {
+    this.room?.send('activateAbility', { ability });
+  }
+
   /** Colyseus room id after a successful connect (for party queue sync). */
   public get roomId(): string | undefined {
     return this.room?.roomId;

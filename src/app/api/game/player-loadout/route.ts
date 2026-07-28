@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
       equippedSkinsJson,
       weaponCombat,
       abilityStatBonuses,
+      abilityLevels: parseAbilityLevels(user.gameAbilities),
     });
   } catch (err) {
     console.error('[api/game/player-loadout]', err);
