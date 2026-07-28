@@ -154,17 +154,6 @@ export function GameProgressionCard({ userId }: { userId: string }) {
                     
                     <p className="text-xs text-slate-300 leading-relaxed">{def.description}</p>
                     
-                    {def.effects && def.effects.length > 0 && (
-                      <div className="pt-2 border-t border-slate-700">
-                        <p className="text-xs font-semibold text-slate-400 mb-1">Effects:</p>
-                        <ul className="text-xs text-slate-300 space-y-0.5">
-                          {def.effects.map((effect, i) => (
-                            <li key={i}>• {effect}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    
                     {lvl < def.maxLevel && (
                       <div className="pt-2 border-t border-slate-700">
                         <p className="text-xs text-slate-400">

@@ -3906,7 +3906,7 @@ export function MapEditor({
                   onClick={() => armPlaceSpawn('spawn_team_b')}
                   title="Player B spawn (invisible)"
                 >
-                  <Flag className="w-4 h-4 text-orange-400" />
+                  <Flag className="w-4 h-4 text-red-500" />
                 </ToolBtn>
                 <ToolBtn
                   onClick={() => armPlaceEntity('hazard')}
