@@ -168,17 +168,17 @@ export function GameProgressionCard({ userId }: { userId: string }) {
                     {lvl < def.maxLevel && (
                       <div className="pt-2 border-t border-slate-700">
                         <p className="text-xs text-slate-400">
-                          Cost to upgrade: <span className="text-orange-300 font-bold">{def.costs[lvl] ?? '—'} XP</span>
+                          Cost to upgrade: <span className="text-orange-300 font-bold">{def.costForLevel(lvl)} XP</span>
                         </p>
                       </div>
                     )}
-                  </div>
-                </PopoverContent>
-              </Popover>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
-  );
+                 </div>
+               </PopoverContent>
+             </Popover>
+           );
+         })}
+       </div>
+     </CardContent>
+   </Card>
+ );
 }

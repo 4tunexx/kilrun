@@ -44,6 +44,7 @@ import BadgesView from '@/components/views/badges-view';
 import NotificationsView from '@/components/views/notifications-view';
 import MessagesView from '@/components/views/messages-view';
 import PublicProfileView from '@/components/views/public-profile-view';
+import { GameProgressionCompact } from '@/components/game-progression-compact';
 import FriendsList from '@/components/views/friends-list';
 import LobbyView from '@/components/views/lobby-view';
 import AdminView from '@/components/views/admin-view';
@@ -970,104 +971,6 @@ export default function GameHubInterface({
 
               {/* In-Game Abilities Collapsible */}
               <div className="w-full px-2 space-y-1">
-                <Collapsible>
-                  <CollapsibleTrigger asChild>
-                    <button className="w-full px-2 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-orange-300 hover:bg-orange-500/10 transition-colors flex items-center justify-between group">
-                      <span>Powers</span>
-                      <ChevronRight className="w-3 h-3 transition-transform group-data-[state=open]:rotate-90" />
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-2 space-y-1">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <HealthIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Health</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <SpeedIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Speed</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <JumpIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Jump</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <EnergyIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Energy</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <VisibilityIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Visibility</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <PunchIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Punch</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <FlyIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Fly</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <HookIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Hook</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <BerserkIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Berserk</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <BulletIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Bullet</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="w-full p-1.5 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-105 hover:bg-orange-500/10 shrink-0 group">
-                          <ThunderIcon className="w-5 h-5 text-orange-400/80 group-hover:text-orange-300" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Thunder</TooltipContent>
-                    </Tooltip>
-                  </CollapsibleContent>
-                </Collapsible>
               </div>
 
               <Dialog open={isVipDialogOpen} onOpenChange={setIsVipDialogOpen}>
@@ -1438,6 +1341,20 @@ export default function GameHubInterface({
                         {user.role} · Lv {level} · {xpIntoLevel.toLocaleString()}/
                         {xpForNextLevel.toLocaleString()} XP
                       </p>
+                      
+                      {/* In-Game Progression Card - Collapsible */}
+                      <Collapsible className="mt-4" suppressHydrationWarning>
+                        <CollapsibleTrigger asChild>
+                          <button className="w-full rounded-lg border border-slate-700/30 bg-slate-800/40 hover:bg-slate-800/60 px-3 py-2 text-left transition-colors flex items-center justify-between group">
+                            <span className="text-xs font-bold text-orange-300">In-Game Powers</span>
+                            <ChevronRight className="w-4 h-4 text-slate-400 transition-transform group-data-[state=open]:rotate-90" />
+                          </button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-2" suppressHydrationWarning>
+                          <GameProgressionCompact userId={user.id} />
+                        </CollapsibleContent>
+                      </Collapsible>
+                      
                       <button
                         type="button"
                         onClick={handleTogglePulsar}
