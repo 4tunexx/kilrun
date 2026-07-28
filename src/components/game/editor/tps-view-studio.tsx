@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
   Camera,
+  ClipboardPaste,
+  Copy,
   Crosshair,
   PersonStanding,
   RotateCcw,
@@ -17,6 +19,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 import { Crosshair as CrosshairHud } from '../ui/crosshair';
 import { MapPlayPreview } from './map-play-preview';
 import { updateFollowCamera } from '../renderer/three-world';
@@ -28,6 +31,11 @@ import {
   sanitizeTpsView,
   type TpsViewSettings,
 } from '../tps/tps-view-settings';
+
+/** Cross-map clipboard for TPS camera settings — copy in one mode's map
+ * editor (e.g. Deathrun), paste into another (e.g. Horde), then "Save to
+ * map" to persist it there. Plain localStorage, not tied to any one map. */
+const TPS_CLIPBOARD_KEY = 'kilrun.tpsView.clipboard.v1';
 import type { EditorEntity, MapDocument, PlayerAnimSlot } from './map-document';
 import {
   PLAYER_ANIM_SLOTS,
@@ -132,6 +140,38 @@ export function TpsViewStudio({
     });
     setDirty(true);
   }, []);
+
+  const { toast } = useToast();
+  const [hasClipboard, setHasClipboard] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setHasClipboard(!!window.localStorage.getItem(TPS_CLIPBOARD_KEY));
+  }, []);
+
+  const copySettings = () => {
+    try {
+      window.localStorage.setItem(TPS_CLIPBOARD_KEY, JSON.stringify(settings));
+      setHasClipboard(true);
+      toast({ title: 'Camera view settings copied', description: 'Switch maps/modes, then Paste + Save to map.' });
+    } catch {
+      toast({ title: 'Could not copy settings', variant: 'destructive' });
+    }
+  };
+
+  const pasteSettings = () => {
+    try {
+      const raw = window.localStorage.getItem(TPS_CLIPBOARD_KEY);
+      if (!raw) return;
+      const parsed = sanitizeTpsView(JSON.parse(raw));
+      setSettings(parsed);
+      setPitch(parsed.camera?.defaultPitch ?? DEFAULT_TPS_VIEW.camera.defaultPitch);
+      setDirty(true);
+      toast({ title: 'Camera view settings pasted', description: 'Click "Save to map" to keep it on this map.' });
+    } catch {
+      toast({ title: 'Could not read copied settings', variant: 'destructive' });
+    }
+  };
 
   const persistGlobal = () => {
     saveTpsViewSettings(settings);
@@ -863,6 +903,25 @@ export function TpsViewStudio({
               Load map override
             </Button>
           )}
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-8 text-[11px]"
+            onClick={copySettings}
+            title="Copy these camera view settings to paste into another map/mode"
+          >
+            <Copy className="w-3.5 h-3.5 mr-1" /> Copy
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-8 text-[11px]"
+            disabled={!hasClipboard}
+            onClick={pasteSettings}
+            title={hasClipboard ? 'Paste view settings copied from another map/mode' : 'Copy settings from a map first'}
+          >
+            <ClipboardPaste className="w-3.5 h-3.5 mr-1" /> Paste
+          </Button>
           {onPlayTest && (
             <Button
               size="sm"
