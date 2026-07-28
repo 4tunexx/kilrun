@@ -22,14 +22,12 @@ import {
   RotateCcw,
   Upload,
   Sword,
-  Crosshair,
   Eye,
   Move3d,
   Settings2,
   Zap,
   ShoppingCart,
   Film,
-  Target,
   ChevronDown,
   ChevronRight,
 } from 'lucide-react';
@@ -161,37 +159,9 @@ function Vec3Row({
   );
 }
 
-function Toggle({
-  label,
-  hint,
-  value,
-  onChange,
-}: {
-  label: string;
-  hint?: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="flex items-start gap-2 text-[10px] text-white/60 cursor-pointer">
-      <input
-        type="checkbox"
-        checked={value}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 accent-amber-400"
-      />
-      <span>
-        {label}
-        {hint && <span className="text-white/35 ml-1">— {hint}</span>}
-      </span>
-    </label>
-  );
-}
-
 // ── Main component ──────────────────────────────────────────────────────────
 
 export function WeaponEditor({
-  isMobile,
   mapDoc,
   onClose,
   onSaveToMap,

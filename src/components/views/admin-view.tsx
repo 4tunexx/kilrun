@@ -104,7 +104,6 @@ import { skuFromName } from '@/lib/banner';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
 import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
 
 const STORE_CATEGORIES = [
   'Perks',

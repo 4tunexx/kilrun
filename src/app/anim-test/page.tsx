@@ -329,7 +329,6 @@ function AnimUntangleStudio() {
       );
       camera.lookAt(c);
     };
-    st.current; // keep
     (st.current as { placeCamOrbit?: () => void }).placeCamOrbit = placeCamOrbit;
 
     mount.addEventListener('pointerdown', onDown);
