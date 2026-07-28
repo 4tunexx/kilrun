@@ -12,13 +12,14 @@ describe('match-loadout', () => {
     expect(weaponCombat.range).toBeGreaterThan(0);
   });
 
-  it('strips data-URL textures from sync payload', () => {
+  it('replaces data-URL textures with the shared pack atlas for sync (data: URLs cannot go over the network)', () => {
     const hat = {
       ...defaultAttachment('hat'),
       textureUrl: 'data:image/png;base64,AAAA',
     };
     const { equippedSkinsJson } = packMatchLoadout([hat]);
     const parsed = parseEquippedSkinsJson(equippedSkinsJson);
-    expect(parsed[0]?.textureUrl).toBeUndefined();
+    expect(parsed[0]?.textureUrl).toBe('/game/skins/Textures.png');
+    expect(parsed[0]?.textureUrl?.startsWith('data:')).toBe(false);
   });
 });

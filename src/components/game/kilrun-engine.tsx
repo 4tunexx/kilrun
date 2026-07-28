@@ -23,7 +23,7 @@ import {
   WORLD_HEIGHT,
 } from './utils/constants';
 import { HUD } from './ui/hud';
-import { GameMenu, useGameProgression } from './ui/game-menu';
+import { GameMenu, LevelUpPopup, useGameProgression } from './ui/game-menu';
 import { PauseMenu, useGameFullscreen } from './ui/pause-menu';
 import { LobbyOverlay } from './modes/deathrun/lobby-overlay';
 import { CountdownOverlay } from './modes/deathrun/countdown-overlay';
@@ -1085,6 +1085,13 @@ export default function KilrunEngine({
           error={gameProgression.error}
           onUpgrade={gameProgression.upgrade}
         />
+
+        {!paused && !editorOpen && (
+          <LevelUpPopup
+            event={gameProgression.levelUpEvent}
+            onDismiss={gameProgression.dismissLevelUp}
+          />
+        )}
 
         {!paused && !editorOpen && !gameMenuOpen && gameProgression.hasUnspentPoints && (
           <div className="absolute top-3 right-16 pointer-events-auto z-[200]">

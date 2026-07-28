@@ -59,7 +59,7 @@ import {
   unequipCosmeticSlot,
   updateProfileSettings,
 } from '@/lib/social-actions';
-import type { MatchStat, User as UserModel } from '@/generated/prisma';
+import type { User as UserModel } from '@/generated/prisma';
 import { BannerFill } from '@/components/banner-fill';
 import { normalizeBannerConfig } from '@/lib/banner';
 import {
@@ -79,7 +79,6 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [user, setUser] = useState<UserModel | null>(null);
   const [summary, setSummary] = useState<StatsSummary | null>(null);
   const [ranked, setRanked] = useState<RankedStatsSummary | null>(null);
-  const [history, setHistory] = useState<MatchStat[]>([]);
   const [modeBundle, setModeBundle] = useState<Awaited<
     ReturnType<typeof getModeStatsBundle>
   > | null>(null);
@@ -118,7 +117,7 @@ export default function ProfileView({ userId }: { userId: string }) {
       getMyProfileActivity(),
       getMyRankedStats(userId),
       getModeStatsBundle(userId),
-    ]).then(([u, s, h, inv, act, rk, modes]) => {
+    ]).then(([u, s, _h, inv, act, rk, modes]) => {
       if (!isMounted) return;
       setUser(u);
       setBio(u?.bio ?? '');
@@ -131,7 +130,6 @@ export default function ProfileView({ userId }: { userId: string }) {
         (u as { profileCommentsEnabled?: boolean } | null)?.profileCommentsEnabled !== false
       );
       setSummary(s);
-      setHistory(h);
       setInventory(inv);
       setActivity(act);
       setRanked(rk);

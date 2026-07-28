@@ -1779,27 +1779,27 @@ export function MapEditor({
               }`}
               onClick={() => {
                 if (id === 'tps') {
-                  tpsViewOpen ? closeStudioPanels() : openTpsViewStudio();
+                  if (tpsViewOpen) { closeStudioPanels(); } else { openTpsViewStudio(); }
                   return;
                 }
                 if (id === 'player') {
-                  playerStudioOpen ? closeStudioPanels() : openPlayerStudio();
+                  if (playerStudioOpen) { closeStudioPanels(); } else { openPlayerStudio(); }
                   return;
                 }
                 if (id === 'skins') {
-                  modelEditorOpen ? closeStudioPanels() : openModelEditor();
+                  if (modelEditorOpen) { closeStudioPanels(); } else { openModelEditor(); }
                   return;
                 }
                 if (id === 'weapon') {
-                  weaponEditorOpen ? closeStudioPanels() : openWeaponEditor();
+                  if (weaponEditorOpen) { closeStudioPanels(); } else { openWeaponEditor(); }
                   return;
                 }
                 if (id === 'combat') {
-                  combatEditorOpen ? closeStudioPanels() : openCombatEditor();
+                  if (combatEditorOpen) { closeStudioPanels(); } else { openCombatEditor(); }
                   return;
                 }
                 if (id === 'shop') {
-                  shopEditorOpen ? closeStudioPanels() : openShopEditor();
+                  if (shopEditorOpen) { closeStudioPanels(); } else { openShopEditor(); }
                   return;
                 }
                 selectLibraryTab(id);

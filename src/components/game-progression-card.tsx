@@ -76,16 +76,17 @@ export function GameProgressionCard({ userId }: { userId: string }) {
           {ABILITY_KEYS.map((key) => {
             const def = ABILITY_DEFINITIONS[key];
             const lvl = snap.abilities[key] ?? 0;
+            const locked = snap.level < def.unlockLevel;
             return (
               <div
                 key={key}
-                className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-2.5 flex items-center gap-2"
+                className={`rounded-lg border border-slate-700/40 bg-slate-900/40 p-2.5 flex items-center gap-2 ${locked ? 'opacity-50' : ''}`}
               >
                 <span className="text-lg leading-none">{def.icon}</span>
                 <div className="min-w-0">
                   <p className="text-[11px] font-bold text-white truncate">{def.name}</p>
                   <p className="text-[10px] font-bold text-slate-400">
-                    Lv {lvl}/{def.maxLevel}
+                    {locked ? `🔒 Lv ${def.unlockLevel}` : `Lv ${lvl}/${def.maxLevel}`}
                   </p>
                 </div>
               </div>
