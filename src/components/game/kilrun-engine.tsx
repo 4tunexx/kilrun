@@ -23,7 +23,8 @@ import {
   WORLD_HEIGHT,
 } from './utils/constants';
 import { HUD } from './ui/hud';
-import { GameMenu, useGameProgression } from './ui/game-menu';
+import { GameMenu, LevelUpPopup, useGameProgression } from './ui/game-menu';
+import { Scoreboard } from './ui/scoreboard';
 import { PauseMenu, useGameFullscreen } from './ui/pause-menu';
 import { LobbyOverlay } from './modes/deathrun/lobby-overlay';
 import { CountdownOverlay } from './modes/deathrun/countdown-overlay';
@@ -149,6 +150,7 @@ export default function KilrunEngine({
   const [assetsReady, setAssetsReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
+  const [scoreboardOpen, setScoreboardOpen] = useState(false);
   useEffect(() => {
     gameMenuOpenRef.current = gameMenuOpen;
   }, [gameMenuOpen]);
@@ -336,10 +338,10 @@ export default function KilrunEngine({
 
   useEffect(() => {
     pausedRef.current = paused || editorOpen;
-    if (paused || editorOpen) {
+    if (paused || editorOpen || gameMenuOpen || scoreboardOpen) {
       if (document.pointerLockElement) document.exitPointerLock?.();
     }
-  }, [paused, editorOpen]);
+  }, [paused, editorOpen, gameMenuOpen, scoreboardOpen]);
 
   useEffect(() => {
     const onTps = (ev: Event) => {
@@ -379,6 +381,27 @@ export default function KilrunEngine({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [editorOpen, paused]);
+
+  // Scoreboard: classic FPS hold-Tab pattern (show while held, hide on release).
+  useEffect(() => {
+    const onDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      if (editorOpen || paused || gameMenuOpen) return;
+      e.preventDefault();
+      setScoreboardOpen(true);
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      e.preventDefault();
+      setScoreboardOpen(false);
+    };
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+    };
+  }, [editorOpen, paused, gameMenuOpen]);
 
   useEffect(() => {
     if (!cloudReady) return;
@@ -1098,6 +1121,19 @@ export default function KilrunEngine({
           upgrading={gameProgression.upgrading}
           error={gameProgression.error}
           onUpgrade={gameProgression.upgrade}
+        />
+
+        {!paused && !editorOpen && (
+          <LevelUpPopup
+            event={gameProgression.levelUpEvent}
+            onDismiss={gameProgression.dismissLevelUp}
+          />
+        )}
+
+        <Scoreboard
+          open={scoreboardOpen && !paused && !editorOpen}
+          playersRef={playersRef}
+          localSessionIdRef={localSessionRef}
         />
 
         {!paused && !editorOpen && !gameMenuOpen && gameProgression.hasUnspentPoints && (

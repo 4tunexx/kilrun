@@ -47,6 +47,10 @@ export interface SimPad {
   width: number;
   depth: number;
   height?: number;
+  /** True analytic ramp support — dz per unit of local x/y (no rotYaw
+   * support client-side yet, matches unrotated ramp usage). 0/0 = flat. */
+  slopeGradX?: number;
+  slopeGradY?: number;
   kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor' | 'water' | 'sand';
   boost?: number;
   conveyorSpeed?: number;
@@ -185,7 +189,7 @@ function findSupport(
     const halfD = pad.depth / 2;
     if (x < pad.x - halfW - radius || x > pad.x + halfW + radius) continue;
     if (y < pad.y - halfD - radius || y > pad.y + halfD + radius) continue;
-    const topZ = pad.z;
+    const topZ = pad.z + (pad.slopeGradX || 0) * (x - pad.x) + (pad.slopeGradY || 0) * (y - pad.y);
     if (z < topZ - maxSnapDown || z > topZ + 0.55) continue;
     if (topZ <= z + 0.05) {
       if (!bestBelow || topZ > bestBelow.topZ) bestBelow = { pad, topZ };
@@ -367,7 +371,7 @@ export function stepPlatformer(
   // while already grounded; allow a larger snap only on fresh landings.
   if (grounded && support) {
     softGlueToSupport(body, support.topZ, dt, !wasGroundedLastTick);
-    scratch.coyoteMs = COYOTE_TIME_MS;
+    scratch.coyoteMs = COYOTE_MS;
     scratch.jumpCount = 0;
   } else {
     if (scratch.jumpCount === 0 && scratch.coyoteMs <= 0) {
@@ -511,7 +515,7 @@ export function stepPlatformer(
       support = post;
       softGlueToSupport(body, post.topZ, dt, false);
       body.isGrounded = true;
-      scratch.coyoteMs = COYOTE_TIME_MS;
+      scratch.coyoteMs = COYOTE_MS;
       scratch.jumpCount = 0;
     } else {
       body.isGrounded = false;
@@ -552,7 +556,7 @@ export function stepPlatformer(
       } else {
         body.vz = 0;
         body.isGrounded = true;
-        scratch.coyoteMs = COYOTE_TIME_MS;
+        scratch.coyoteMs = COYOTE_MS;
         scratch.jumpCount = 0;
         if (scratch.jumpBufferMs > 0 && body.energy >= JUMP_ENERGY * 0.2) {
           body.vz = JUMP_VELOCITY;

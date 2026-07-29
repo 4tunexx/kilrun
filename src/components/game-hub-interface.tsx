@@ -70,19 +70,6 @@ import { HubAnnouncementCarousel } from '@/components/hub-announcement-carousel'
 import { resolveHubBackground, resolveMarkLogo } from '@/lib/branding';
 import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
 import {
-  HealthIcon,
-  SpeedIcon,
-  JumpIcon,
-  EnergyIcon,
-  VisibilityIcon,
-  PunchIcon,
-  FlyIcon,
-  HookIcon,
-  BerserkIcon,
-  BulletIcon,
-  ThunderIcon,
-} from '@/components/ability-icons';
-import {
   HUB_NAV_CATALOG,
   defaultHubChrome,
   defaultHubNav,

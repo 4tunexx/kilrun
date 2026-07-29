@@ -9,11 +9,13 @@ import {
   ensurePlatformMotion,
   generateId,
   isHammerSolidEntity,
+  isInvisibleMarkerKind,
   resolveCollideMaterial,
 } from './map-document';
 import type { KilrunMode } from '@/lib/game-modes';
 import { normalizeKilrunMode } from '@/lib/game-modes';
 import { modelFootprint } from './prototype-catalog';
+import { LAND_STEP_CLIMB } from '@shared/sim-constants';
 
 const PREFAB_KEY = 'kilrun.prefabs.v1';
 export const ACTIVE_PLAY_MAP_KEY = 'kilrun.activePlayMapId.v1';
@@ -201,6 +203,10 @@ export interface SimPlatformBlueprint {
   entityId?: string;
   /** Yaw radians in sim XY — OBB colliders on the server. */
   rotYaw?: number;
+  /** True analytic ramp support — dz per unit of LOCAL x/y (post-rotYaw).
+   * 0/0 = flat. Lets one pad be a genuinely continuous sloped surface. */
+  slopeGradX?: number;
+  slopeGradY?: number;
   /** Moving platform (sim space): home = rest pose, amp = B-home. */
   motionPeriodMs?: number;
   motionPhaseMs?: number;
@@ -416,7 +422,6 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
  * instead of walking through a single thin top slab.
  */
 export function stairEntityToSimPads(stairs: EditorEntity, steps = 18): SimPlatformBlueprint[] {
-  const n = Math.max(3, Math.min(28, Math.round(steps)));
   const [sx, sy, sz] = stairs.position;
   const yaw = ((stairs.rotation?.[1] ?? 0) * Math.PI) / 180;
   const foot =
@@ -430,6 +435,17 @@ export function stairEntityToSimPads(stairs: EditorEntity, steps = 18): SimPlatf
   const run = Math.max(1.2, foot[2] * Math.abs(stairs.scale[2]));
   const rise = Math.max(0.6, foot[1] * Math.abs(stairs.scale[1]));
   const width = Math.max(0.8, foot[0] * Math.abs(stairs.scale[0]));
+  // Fixed step counts break on tall/steep stairs: e.g. 14 steps over a
+  // 12-unit rise is ~0.86 per step, above LAND_STEP_CLIMB (0.75) — the
+  // server can't smoothly climb/descend that seam. Scale up only when the
+  // requested/default count would leave steps too tall — a named "stairs"
+  // catalog prop is visually already discrete steps (not a smooth ramp), so
+  // there's no benefit to subdividing further than that once each step is
+  // already climbable in one motion; unlike rampEntityToSimPads (hand-tilted
+  // solids meant to look like a continuous slope), this doesn't need the
+  // extra visual-smoothness margin.
+  const targetStepRise = LAND_STEP_CLIMB * 0.6;
+  const n = Math.max(4, Math.min(64, Math.round(Math.max(steps, rise / targetStepRise))));
   const stepRun = run / n;
   const stepRise = rise / n;
   const mat = resolveCollideMaterial(stairs);
@@ -510,8 +526,7 @@ function isTiltedRampSolid(e: EditorEntity): boolean {
  * driven by the entity's ACTUAL rotation instead of requiring a specific
  * catalog model name, so any hand-tilted block works as a walkable ramp.
  */
-export function rampEntityToSimPads(e: EditorEntity, steps = 24): SimPlatformBlueprint[] {
-  const n = Math.max(4, Math.min(36, Math.round(steps)));
+export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBlueprint[] {
   const [ex, ey, ez] = e.position;
   const foot =
     e.collisionSize ??
@@ -535,47 +550,74 @@ export function rampEntityToSimPads(e: EditorEntity, steps = 24): SimPlatformBlu
   else if (mat === 'water') kind = 'water';
   else if (mat === 'sand') kind = 'sand';
 
-  const stepDepth = (halfZ * 2) / n;
-  const pads: SimPlatformBlueprint[] = [];
-  for (let i = 0; i < n; i++) {
-    const localZ = -halfZ + (i + 0.5) * stepDepth;
-    // Bounding box (in world/sim space) of this thin step's top face, from
-    // its 4 local corners rotated by the entity's full 3D rotation — this
-    // stays correct for any yaw+pitch+roll combination, not just yaw.
-    let minThreeX = Infinity;
-    let maxThreeX = -Infinity;
-    let minThreeZ = Infinity;
-    let maxThreeZ = -Infinity;
-    let sumThreeY = 0;
+  // A rigid box's top face stays perfectly flat no matter how it's rotated —
+  // approximating it with N discrete flat shelves (the old approach) always
+  // reads as walking up/down stairs no matter how thin the shelves get,
+  // since the player's height still snaps between a finite set of levels.
+  // Instead: fit the EXACT plane equation for the top face (3 points fully
+  // determine a plane) and hand the server one continuous sloped surface —
+  // mathematically zero stepping, not just less of it.
+  const [dx0, dy0, dz0] = rotateLocalXYZ([0, halfY, 0], rotDeg);
+  const [dx1, dy1, dz1] = rotateLocalXYZ([halfX, halfY, 0], rotDeg);
+  const [dx2, dy2, dz2] = rotateLocalXYZ([0, halfY, halfZ], rotDeg);
+  // Deltas from center, in world/three space.
+  const ax = dx1 - dx0, ay = dy1 - dy0, az = dz1 - dz0;
+  const bx = dx2 - dx0, by = dy2 - dy0, bz = dz2 - dz0;
+  const det = ax * bz - bx * az;
+  // dY/d(threeX) and dY/d(threeZ) solved from the 2x2 system; a near-zero
+  // det means the "top" face is actually vertical (this block is really a
+  // wall someone tilted almost 90°, not a walkable ramp) — treat as flat
+  // rather than divide by ~0.
+  const gThreeX = Math.abs(det) > 1e-6 ? (ay * bz - by * az) / det : 0;
+  const gThreeZ = Math.abs(det) > 1e-6 ? (ax * by - bx * ay) / det : 0;
+  // Sim convention: x=three.z, y=three.x, z(height)=three.y (see threeToSim).
+  const slopeGradX = gThreeZ;
+  const slopeGradY = gThreeX;
+
+  // Footprint: axis-aligned bounding box of all 8 corners (top+bottom),
+  // same technique already used elsewhere for rotated solids — a single
+  // honest AABB is fine for the walkable-region check, only the HEIGHT
+  // needs to be exact (handled above), not the footprint shape.
+  let minThreeX = Infinity, maxThreeX = -Infinity;
+  let minThreeZ = Infinity, maxThreeZ = -Infinity;
+  for (const sy of [-halfY, halfY]) {
     for (const sx of [-halfX, halfX]) {
-      for (const sz of [localZ - stepDepth / 2, localZ + stepDepth / 2]) {
-        const [rx, ry, rz] = rotateLocalXYZ([sx, halfY, sz], rotDeg);
-        const worldThreeX = ex + rx;
-        const worldThreeY = ey + ry;
-        const worldThreeZ = ez + rz;
-        minThreeX = Math.min(minThreeX, worldThreeX);
-        maxThreeX = Math.max(maxThreeX, worldThreeX);
-        minThreeZ = Math.min(minThreeZ, worldThreeZ);
-        maxThreeZ = Math.max(maxThreeZ, worldThreeZ);
-        sumThreeY += worldThreeY;
+      for (const sz of [-halfZ, halfZ]) {
+        const [rx, , rz] = rotateLocalXYZ([sx, sy, sz], rotDeg);
+        minThreeX = Math.min(minThreeX, ex + rx);
+        maxThreeX = Math.max(maxThreeX, ex + rx);
+        minThreeZ = Math.min(minThreeZ, ez + rz);
+        maxThreeZ = Math.max(maxThreeZ, ez + rz);
       }
     }
-    const centerThreeY = sumThreeY / 4;
-    // Sim convention: x=three.z, y=three.x, z(height)=three.y (see threeToSim).
-    pads.push({
+  }
+  const centerThreeY = ey + dy0;
+
+  return [
+    {
       x: (minThreeZ + maxThreeZ) / 2,
       y: (minThreeX + maxThreeX) / 2,
       z: centerThreeY,
       width: Math.max(0.4, maxThreeZ - minThreeZ),
       depth: Math.max(0.4, maxThreeX - minThreeX),
       kind,
-      height: Math.min(0.35, Math.max(0.18, halfY * 2 * 0.85)),
-    });
-  }
-  return pads;
+      // Thin/top-only: a walkable ramp shouldn't also act as a side wall
+      // (that check uses a flat vertical range, which would be wrong for
+      // a sloped surface) — same "thin pad" exemption already used for
+      // ordinary floor pads.
+      height: 0.3,
+      slopeGradX,
+      slopeGradY,
+    },
+  ];
 }
 
 function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
+  // Belt-and-suspenders: spawn cones / checkpoints / other invisible gizmo
+  // markers must NEVER produce collision, full stop — not conditional on
+  // which upstream filter path (entityExportsAsPlatform vs. the legacy
+  // no-explicit-platforms fallback) let this entity through to here.
+  if (isInvisibleMarkerKind(e.kind)) return [];
   if (resolveCollideMaterial(e) === 'walkthrough') return [];
   const model = e.model ?? '';
   if (model.includes('stair') || model.includes('ramp')) {
@@ -594,6 +636,13 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
     source = doc.entities.filter(
       (e) =>
         e.visible !== false &&
+        // Never let spawn cones / checkpoints / other invisible gizmo
+        // markers become solid collision through this loose fallback path
+        // — entityExportsAsPlatform already excludes them explicitly, but
+        // this heuristic (for legacy maps with no authored platforms) was
+        // never checking it, so a map with only a Start marker and no real
+        // floor placed yet would make the spawn cone itself solid.
+        !isInvisibleMarkerKind(e.kind) &&
         e.kind !== 'light' &&
         !!e.model &&
         resolveCollideMaterial(e) !== 'walkthrough' &&

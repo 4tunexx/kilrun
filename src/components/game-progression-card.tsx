@@ -119,21 +119,28 @@ export function GameProgressionCard({ userId }: { userId: string }) {
           {ABILITY_KEYS.map((key) => {
             const def = ABILITY_DEFINITIONS[key];
             const lvl = snap.abilities[key] ?? 0;
+            const locked = snap.level < def.unlockLevel;
             const IconComponent = ABILITY_ICON_MAP[key];
 
             return (
               <Popover key={key}>
                 <PopoverTrigger asChild>
-                  <button className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-2.5 flex items-center gap-2 hover:border-orange-400/50 hover:bg-slate-900/60 transition-all cursor-help text-left w-full">
+                  <button
+                    className={`rounded-lg border p-2.5 flex items-center gap-2 transition-all cursor-help text-left w-full ${
+                      locked
+                        ? 'border-slate-700/25 bg-slate-900/20 opacity-50'
+                        : 'border-slate-700/40 bg-slate-900/40 hover:border-orange-400/50 hover:bg-slate-900/60'
+                    }`}
+                  >
                     {IconComponent ? (
-                      <IconComponent className="w-5 h-5 flex-shrink-0 text-orange-400" />
+                      <IconComponent className={`w-5 h-5 flex-shrink-0 ${locked ? 'text-slate-500' : 'text-orange-400'}`} />
                     ) : (
                       <span className="text-lg leading-none">{def.icon}</span>
                     )}
                     <div className="min-w-0">
                       <p className="text-[11px] font-bold text-white truncate">{def.name}</p>
                       <p className="text-[10px] font-bold text-slate-400">
-                        Lv {lvl}/{def.maxLevel}
+                        {locked ? `🔒 Lv ${def.unlockLevel}` : `Lv ${lvl}/${def.maxLevel}`}
                       </p>
                     </div>
                   </button>
@@ -148,26 +155,28 @@ export function GameProgressionCard({ userId }: { userId: string }) {
                       )}
                       <div>
                         <p className="text-sm font-bold text-orange-300">{def.name}</p>
-                        <p className="text-xs text-slate-400">Level {lvl}/{def.maxLevel}</p>
+                        <p className="text-xs text-slate-400">
+                          {locked ? `Unlocks at level ${def.unlockLevel}` : `Level ${lvl}/${def.maxLevel}`}
+                        </p>
                       </div>
                     </div>
-                    
+
                     <p className="text-xs text-slate-300 leading-relaxed">{def.description}</p>
-                    
-                    {lvl < def.maxLevel && (
+
+                    {!locked && lvl < def.maxLevel && (
                       <div className="pt-2 border-t border-slate-700">
                         <p className="text-xs text-slate-400">
                           Cost to upgrade: <span className="text-orange-300 font-bold">{def.costForLevel(lvl)} XP</span>
                         </p>
                       </div>
                     )}
-                 </div>
-               </PopoverContent>
-             </Popover>
-           );
-         })}
-       </div>
-     </CardContent>
-   </Card>
- );
+                  </div>
+                </PopoverContent>
+              </Popover>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
 }

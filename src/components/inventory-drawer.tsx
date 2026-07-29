@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -568,7 +568,10 @@ export function InventoryDrawer({
     if (open) void reload();
   }, [open, reload]);
 
-  const pageIncludes = pageTabs.find((p) => p.id === pageTab)?.includes ?? [];
+  const pageIncludes = useMemo(
+    () => pageTabs.find((p) => p.id === pageTab)?.includes ?? [],
+    [pageTabs, pageTab]
+  );
   useEffect(() => {
     if (!pageTabs.some((t) => t.id === pageTab)) {
       setPageTab(pageTabs[0]?.id ?? 'skins');

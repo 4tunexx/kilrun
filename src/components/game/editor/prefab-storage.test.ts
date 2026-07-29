@@ -13,6 +13,7 @@ import {
   stripLegacyBakedStairPads,
 } from './prefab-storage';
 
+
 function baseDoc(entities: MapDocument['entities']): MapDocument {
   return {
     version: 1,
@@ -24,7 +25,7 @@ function baseDoc(entities: MapDocument['entities']): MapDocument {
 }
 
 describe('mapDocToSimPlatforms', () => {
-  it('exports a hand-tilted hammer solid as a walkable stepped ramp, not one flat pad', () => {
+  it('exports a hand-tilted hammer solid as one continuous sloped plane, not stepped shelves', () => {
     const doc = baseDoc([
       {
         id: 'ramp1',
@@ -47,24 +48,23 @@ describe('mapDocToSimPlatforms', () => {
       },
     ]);
     const pads = mapDocToSimPlatforms(doc);
-    // Should be subdivided into several steps, not a single AABB.
-    expect(pads.length).toBeGreaterThan(4);
-    for (const pad of pads) {
-      expect(pad.kind).toBe('solid');
-      expect(pad.height ?? 0).toBeGreaterThan(0);
-    }
-    // Steps should monotonically climb (or descend) along the ramp's run —
-    // i.e. genuinely sloped, not all sitting at the same flat height like
-    // the old single-AABB behavior would produce.
-    const heights = pads.map((p) => p.z);
-    const isMonotonic =
-      heights.every((h, i) => i === 0 || h >= heights[i - 1] - 1e-6) ||
-      heights.every((h, i) => i === 0 || h <= heights[i - 1] + 1e-6);
-    expect(isMonotonic).toBe(true);
-    const spread = Math.max(...heights) - Math.min(...heights);
-    // 8-long plank tilted 25° should climb roughly 8*sin(25°) ≈ 3.4 units —
-    // just sanity-checking it's a real slope, not a rounding artifact.
-    expect(spread).toBeGreaterThan(2);
+    // A rigid box's top face is always flat, no matter the rotation — a
+    // single pad with the correct slope gradient is mathematically exact,
+    // not an approximation, so this should be exactly one pad, not many
+    // discrete shelves (which always reads as stairs, however thin).
+    expect(pads.length).toBe(1);
+    const pad = pads[0];
+    expect(pad.kind).toBe('solid');
+    // Genuinely sloped, not flat: a real gradient in one axis.
+    const grad = Math.hypot(pad.slopeGradX ?? 0, pad.slopeGradY ?? 0);
+    expect(grad).toBeGreaterThan(0.3);
+    // 8-long plank tilted 25° should have height = z + grad*offset match a
+    // ~3.4-unit total rise (8*sin(25°)) across its run — sanity-check the
+    // magnitude is a real slope, not a rounding artifact or the wrong axis.
+    const totalRiseAcrossRun = grad * 8 * Math.cos((25 * Math.PI) / 180);
+    expect(totalRiseAcrossRun).toBeGreaterThan(2);
+    // Thin/top-only so it doesn't ALSO act as a sloped side-wall.
+    expect(pad.height ?? 1).toBeLessThanOrEqual(0.35);
   });
 
   it('leaves a slightly-off-axis flat solid alone (tolerance, not over-subdividing walls)', () => {
@@ -86,6 +86,109 @@ describe('mapDocToSimPlatforms', () => {
     ]);
     const pads = mapDocToSimPlatforms(doc);
     expect(pads.length).toBe(1);
+  });
+
+  it('never makes a lone spawn marker solid, even via the no-explicit-platforms fallback', () => {
+    // A brand-new map: just a Start marker, no floor/platform placed yet —
+    // matches how placeAt() actually creates a Start entity (no model set).
+    const doc = baseDoc([
+      {
+        id: 'start1',
+        name: 'Start',
+        kind: 'start',
+        layerId: 'l1',
+        position: [0, 1, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    // The fallback DOES still invent a small landing pad under the spawn
+    // point (so you don't fall through the void on a totally empty map) —
+    // that's fine and intended. What must NOT happen is the marker itself
+    // becoming a solid collision box.
+    for (const pad of pads) {
+      expect(pad.width).toBeLessThanOrEqual(6);
+      expect(pad.depth).toBeLessThanOrEqual(6);
+    }
+    expect(pads.length).toBeLessThanOrEqual(1);
+  });
+
+  it('never lets a spawn marker collide even if solid/collideMaterial got set on it some other way', () => {
+    // Defense in depth: whatever set these (a stray properties-panel toggle,
+    // a future upstream filter change, a different call path) — a marker
+    // kind must categorically never produce collision.
+    const doc = baseDoc([
+      {
+        id: 'start1',
+        name: 'Start',
+        kind: 'start',
+        model: 'floor_marker',
+        solid: true,
+        collideMaterial: 'solid',
+        layerId: 'l1',
+        position: [3, 1, 3],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+      // A real floor so the fallback heuristic doesn't even trigger.
+      {
+        id: 'floor1',
+        name: 'Floor',
+        kind: 'prop',
+        model: 'floor_basic',
+        collideMaterial: 'solid',
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [10, 1, 10],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    // Only the real floor should produce a pad — nothing at the marker's position.
+    for (const pad of pads) {
+      expect(Math.hypot(pad.y - 3, pad.x - 3)).toBeGreaterThan(2);
+    }
+  });
+
+  it('gives tall/steep ramps the same exact single-plane treatment, no scaling issue possible', () => {
+    // Old approach needed MORE steps as ramps got taller/steeper (a fixed
+    // step count breaks down eventually). The new approach doesn't scale
+    // with size at all — a rigid box's top face is always flat regardless
+    // of height or angle, so this should still be exactly 1 pad.
+    const tallRamp = baseDoc([
+      {
+        id: 'ramp-tall',
+        name: 'Tall Ramp',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        collisionSize: [4, 0.4, 20],
+        layerId: 'l1',
+        position: [0, 10, 0],
+        rotation: [60, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const tallPads = mapDocToSimPlatforms(tallRamp);
+    expect(tallPads.length).toBe(1);
+    const pad = tallPads[0];
+    // Verify the actual height formula (what the server/client sims use:
+    // topZ = pad.z + slopeGradX*(x - pad.x) + slopeGradY*(y - pad.y)) gives
+    // sane, continuously-varying values across the ramp's real footprint —
+    // sample a few points and confirm they differ smoothly, not in jumps.
+    const sampleHeights: number[] = [];
+    for (const t of [-0.4, -0.2, 0, 0.2, 0.4]) {
+      const sampleX = pad.x + t * (pad.width / 2);
+      const h = pad.z + (pad.slopeGradX ?? 0) * (sampleX - pad.x);
+      sampleHeights.push(h);
+    }
+    for (let i = 1; i < sampleHeights.length; i++) {
+      expect(sampleHeights[i]).not.toBeCloseTo(sampleHeights[i - 1], 5); // actually varies
+    }
+    expect(sampleHeights.every((h, i) => i === 0 || h !== sampleHeights[i - 1])).toBe(true);
   });
 
   it('exports floors and solid props with height', () => {
