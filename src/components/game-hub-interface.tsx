@@ -86,38 +86,14 @@ import {
 } from '@/components/ui/tooltip';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-              {/* In-Game Abilities Collapsible */}
-              <div className="w-full px-2 space-y-1">
-              </div>
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
-              <Dialog open={isVipDialogOpen} onOpenChange={setIsVipDialogOpen}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => setIsVipDialogOpen(true)}
-                      className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 shrink-0 group relative ${
-                        isVip
-                          ? 'bg-orange-500/20 text-orange-300 border border-orange-400/50 shadow-[0_0_12px_rgba(249,115,22,0.2)]'
-                          : 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 shadow-[0_0_10px_rgba(239,68,68,0.1)]'
-                      }`}
-                    >
-                      <Crown className="w-6 h-6 transition-transform group-hover:rotate-12" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    <p>{isVip ? 'VIP Active' : 'Unlock VIP'}</p>
-                  </TooltipContent>
-                </Tooltip>
-                <DialogContent className="bg-slate-900/60 backdrop-blur-md border-slate-700/30 text-white max-w-md mx-4">
-                  <DialogHeader>
-                    <DialogTitle className="text-2xl font-bold flex items-center gap-2">
-                      <Crown className="w-6 h-6 text-primary" />
-                      {isVip ? 'VIP Active' : 'Unlock VIP Access'}
-                    </DialogTitle>
-                    <DialogDescription className="text-slate-400">
-                      {isVip
-                        ? 'Your VIP perks are active across the hub.'
+// Types and interfaces
                         : `Spend ${VIP_UNLOCK_VP_COST} VP (balance: ${vpBalance}) for exclusive hub + future in-game perks.`}
                     </DialogDescription>
                   </DialogHeader>
