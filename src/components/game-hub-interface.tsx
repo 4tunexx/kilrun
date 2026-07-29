@@ -44,6 +44,31 @@ import BadgesView from '@/components/views/badges-view';
 import NotificationsView from '@/components/views/notifications-view';
 import MessagesView from '@/components/views/messages-view';
 import PublicProfileView from '@/components/views/public-profile-view';
+import { GameProgressionCompact } from '@/components/game-progression-compact';
+import FriendsList from '@/components/views/friends-list';
+import LobbyView from '@/components/views/lobby-view';
+import AdminView from '@/components/views/admin-view';
+import PremiumView from '@/components/views/premium-view';
+import type { KilrunMode, CompetitiveQueue } from '@/components/views/play-view';
+import { canAccessAdmin, VIP_UNLOCK_VP_COST, isPremiumActive } from '@/lib/roles';
+import { unlockVipWithVp } from '@/lib/social-actions';
+import { isPulsarActive, setPulsarActive } from '@/lib/pulsar-anticheat';
+import {
+  getLivePlayerState,
+  getSiteSettings,
+} from '@/lib/progression-actions';
+import { bootstrapHubOnce } from '@/lib/hub-bootstrap-client';
+import { getLevelProgress } from '@/lib/progression';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { ProfileNavigationProvider } from '@/components/providers/profile-navigation-context';
+import { InventoryDrawer } from '@/components/inventory-drawer';
+import { getRoleTextColorClass } from '@/lib/role-colors';
+import { PageBanner, PAGE_META } from '@/components/page-banner';
+import { HubHeaderToolbar } from '@/components/hub-header-toolbar';
+import { HubFooter } from '@/components/hub-footer';
+import { HubAnnouncementCarousel } from '@/components/hub-announcement-carousel';
+import { resolveHubBackground, resolveMarkLogo } from '@/lib/branding';
+import { onSiteSettingsUpdated } from '@/lib/site-branding-events';
 import {
   HealthIcon,
   SpeedIcon,
@@ -86,14 +111,896 @@ import {
 } from '@/components/ui/tooltip';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { EmailVerificationForm } from '@/components/email-verification-form';
 
-// Types and interfaces
+export interface SessionPlayer {
+  id: string;
+  steamId: string;
+  username: string;
+  avatarUrl: string;
+  vpCurrency: number;
+  xpProgress: number;
+  currentRank: string;
+  /** Killrun Points — competitive Elo. */
+  kp?: number;
+  role: string;
+  isVip: boolean;
+  isPremium?: boolean;
+  premiumExpiresAt?: string | null;
+  bio: string;
+  email: string | null;
+  emailVerified: boolean;
+  equippedFrameConfig?: unknown | null;
+  equippedNicknameConfig?: unknown | null;
+}
+
+const HUB_PAGE_ICONS: Record<HubPageId, LucideIcon> = {
+  home: Home,
+  play: Play,
+  missions: CheckSquare,
+  leaderboard: Trophy,
+  stats: BarChart3,
+  store: Store,
+  premium: Gem,
+  badges: Award,
+  community: Users,
+  guides: BookOpen,
+  support: HelpCircle,
+  profile: User,
+  notifications: Bell,
+  messages: Mail,
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const pageComponents: { [key: string]: React.ComponentType<any> } = {
+  home: HomeView,
+  store: StoreView,
+  community: CommunityView,
+  guides: GuidesView,
+  leaderboard: LeaderboardView,
+  support: SupportView,
+  profile: ProfileView,
+  play: PlayView,
+  missions: MissionsView,
+  stats: StatsView,
+  badges: BadgesView,
+  notifications: NotificationsView,
+  messages: MessagesView,
+  premium: PremiumView,
+  lobby: LobbyView,
+  admin: AdminView,
+  'public-profile': PublicProfileView,
+};
+
+const VIEWS_NEEDING_USER_ID = new Set([
+  'home',
+  'profile',
+  'stats',
+  'leaderboard',
+  'missions',
+  'messages',
+  'notifications',
+  'support',
+  'store',
+  'admin',
+  'badges',
+]);
+
+/** Branding / layout fields loaded on the server for first paint (no default-logo flash). */
+export type HubInitialSiteSettings = {
+  logoUrl?: string | null;
+  headerLogoUrl?: string | null;
+  headerLogoStyle?: string | null;
+  homeHeroImage?: string | null;
+  backgroundUrl?: string | null;
+  headerTitle?: string | null;
+  headerSubtitle?: string | null;
+  hubPagesJson?: string | null;
+  hubNavJson?: string | null;
+  hubChromeJson?: string | null;
+};
+
+export default function GameHubInterface({
+  user,
+  initialSiteSettings,
+}: {
+  user: SessionPlayer;
+  initialSiteSettings?: HubInitialSiteSettings | null;
+}) {
+  const isMobile = useIsMobile();
+  // Both rails stay collapsed until the player opens them (esp. important on mobile).
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isLeftMenuOpen, setIsLeftMenuOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState('home');
+  const [isVipDialogOpen, setIsVipDialogOpen] = useState(false);
+  const [pulsarOn, setPulsarOn] = useState(false);
+  const [pulsarBanner, setPulsarBanner] = useState(false);
+  const [isFriendsSheetOpen, setIsFriendsSheetOpen] = useState(false);
+  const [isInventoryOpen, setIsInventoryOpen] = useState(false);
+  const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
+  const [previousPage, setPreviousPage] = useState('home');
+  const [lobbyMode, setLobbyMode] = useState<KilrunMode | null>(null);
+  const [competitiveQueue, setCompetitiveQueue] = useState<CompetitiveQueue>('casual');
+  const [isCompetitiveDialogOpen, setIsCompetitiveDialogOpen] = useState(false);
+  const [pendingCompetitiveMode, setPendingCompetitiveMode] = useState<KilrunMode | null>(null);
+  const [vpBalance, setVpBalance] = useState(user.vpCurrency);
+  const [xpProgress, setXpProgress] = useState(user.xpProgress);
+  const [dailyDone, setDailyDone] = useState(0);
+  const [dailyTotal, setDailyTotal] = useState<number>(DAILY_MISSION_SEEDS.length);
+  const [currentRank, setCurrentRank] = useState(user.currentRank);
+  const [kp, setKp] = useState(user.kp ?? 1000);
+  const [emailVerified, setEmailVerified] = useState(user.emailVerified);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const [bgUrl, setBgUrl] = useState(() =>
+    resolveHubBackground(initialSiteSettings?.backgroundUrl)
+  );
+  /** Raw SiteSettings values — resolve*() only at render so admin always wins. */
+  const [logoUrl, setLogoUrl] = useState(() => initialSiteSettings?.logoUrl ?? '');
+  const [headerLogoUrl, setHeaderLogoUrl] = useState(
+    () => initialSiteSettings?.headerLogoUrl ?? ''
+  );
+  const [headerLogoStyle, setHeaderLogoStyle] = useState(
+    () => initialSiteSettings?.headerLogoStyle ?? ''
+  );
+  const [homeHeroImage, setHomeHeroImage] = useState(
+    () => initialSiteSettings?.homeHeroImage ?? ''
+  );
+  const [isVip, setIsVip] = useState(user.isVip);
+  const [isPremium, setIsPremium] = useState(
+    user.isPremium ??
+      isPremiumActive({ isVip: user.isVip, premiumExpiresAt: user.premiumExpiresAt })
+  );
+  const [premiumExpiresAt, setPremiumExpiresAt] = useState<string | null>(
+    user.premiumExpiresAt ?? null
+  );
+  const [rankedAccess, setRankedAccess] = useState(
+    !!(
+      user.isPremium ??
+      isPremiumActive({ isVip: user.isVip, premiumExpiresAt: user.premiumExpiresAt })
+    )
+  );
+  const [freeRankedWeek, setFreeRankedWeek] = useState(false);
+  const [peakRank, setPeakRank] = useState('Unranked');
+  const [peakKp, setPeakKp] = useState(user.kp ?? 1000);
+  const [equippedFrameConfig, setEquippedFrameConfig] = useState<unknown | null>(
+    user.equippedFrameConfig ?? null
+  );
+  const [equippedNicknameConfig, setEquippedNicknameConfig] = useState<unknown | null>(
+    user.equippedNicknameConfig ?? null
+  );
+  const [isEmailPromptOpen, setIsEmailPromptOpen] = useState(false);
+  const [homeTitle, setHomeTitle] = useState(
+    () => initialSiteSettings?.headerTitle?.trim() || PAGE_META.home.title
+  );
+  const [homeSubtitle, setHomeSubtitle] = useState(
+    () => initialSiteSettings?.headerSubtitle?.trim() || PAGE_META.home.subtitle
+  );
+  const [hubPages, setHubPages] = useState<HubPagesConfig>(() =>
+    initialSiteSettings?.hubPagesJson
+      ? parseHubPages(initialSiteSettings.hubPagesJson)
+      : defaultHubPages()
+  );
+  const [hubNav, setHubNav] = useState<HubNavLayout>(() =>
+    initialSiteSettings?.hubNavJson
+      ? parseHubNav(initialSiteSettings.hubNavJson)
+      : defaultHubNav()
+  );
+  const [hubChrome, setHubChrome] = useState<HubChromeConfig>(() =>
+    initialSiteSettings?.hubChromeJson
+      ? parseHubChrome(initialSiteSettings.hubChromeJson)
+      : defaultHubChrome()
+  );
+  const { toast } = useToast();
+
+  const showAdmin = canAccessAdmin(user.role);
+  const isStaff = showAdmin;
+
+  const applyLayoutFromSettings = (settings: {
+    hubPagesJson?: string | null;
+    hubNavJson?: string | null;
+    hubChromeJson?: string | null;
+  }) => {
+    if (settings.hubPagesJson !== undefined && settings.hubPagesJson !== null) {
+      setHubPages(parseHubPages(settings.hubPagesJson));
+    }
+    if (settings.hubNavJson !== undefined && settings.hubNavJson !== null) {
+      setHubNav(parseHubNav(settings.hubNavJson));
+    }
+    if (settings.hubChromeJson !== undefined && settings.hubChromeJson !== null) {
+      setHubChrome(parseHubChrome(settings.hubChromeJson));
+    }
+  };
+
+  const { level, xpIntoLevel, xpForNextLevel, percent: levelProgressPercent } =
+    getLevelProgress(xpProgress);
+
+  useEffect(() => {
+    // Keep rails closed whenever we cross into mobile widths.
+    if (isMobile) {
+      setIsMenuOpen(false);
+      setIsLeftMenuOpen(false);
+    }
+  }, [isMobile]);
+
+  /** On mobile, opening one rail closes the other (no room for both). On
+   * desktop/large screens they're independent — pulling one out shouldn't
+   * collapse the other. */
+  const toggleLeftMenu = () => {
+    setIsLeftMenuOpen((open) => {
+      const next = !open;
+      if (next && isMobile) setIsMenuOpen(false);
+      return next;
+    });
+  };
+
+  const toggleRightMenu = () => {
+    setIsMenuOpen((open) => {
+      const next = !open;
+      if (next && isMobile) setIsLeftMenuOpen(false);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    setPulsarOn(isPulsarActive());
+  }, []);
+
+  useEffect(() => {
+    if (currentPage === 'public-profile' && !viewingProfileUserId) {
+      navigate(previousPage === 'public-profile' ? 'home' : previousPage);
+    }
+    if (currentPage === 'lobby' && !lobbyMode) {
+      navigate('play');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, viewingProfileUserId, lobbyMode]);
+
+  // Refresh equipped cosmetics when opening the right profile rail
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    getLivePlayerState(user.id)
+      .then((live) => {
+        setVpBalance(live.vpCurrency);
+        setXpProgress(live.xpProgress);
+        setCurrentRank(live.currentRank);
+        if (typeof live.kp === 'number') setKp(live.kp);
+        setIsVip(live.isVip);
+        setIsPremium(!!live.isPremium);
+        setPremiumExpiresAt(live.premiumExpiresAt ?? null);
+        setRankedAccess(!!(live.rankedAccess ?? live.isPremium));
+        setFreeRankedWeek(!!live.freeRankedWeek);
+        if (typeof live.peakKp === 'number') setPeakKp(live.peakKp);
+        if (typeof live.peakRank === 'string') setPeakRank(live.peakRank);
+        setEmailVerified(live.emailVerified);
+      })
+      .catch(() => {});
+    getCurrentUserProfile()
+      .then((u) => {
+        setEquippedFrameConfig(u.equippedFrameConfig ?? null);
+        setEquippedNicknameConfig(u.equippedNicknameConfig ?? null);
+      })
+      .catch(() => {});
+  }, [isMenuOpen, user.id]);
+
+  useEffect(() => {
+    if (user.emailVerified) return;
+    const dismissed =
+      typeof window !== 'undefined' &&
+      sessionStorage.getItem('kilrun.emailPromptDismissed') === '1';
+    if (!dismissed) {
+      setIsEmailPromptOpen(true);
+    }
+  }, [user.emailVerified]);
+
+  // Bootstrap once; poll rail state slowly and only while the tab is visible.
+  useEffect(() => {
+    let cancelled = false;
+    let poll: ReturnType<typeof setInterval> | null = null;
+
+    const applyLive = (live: Awaited<ReturnType<typeof getLivePlayerState>>) => {
+      if (cancelled) return;
+      setXpProgress(live.xpProgress);
+      setVpBalance(live.vpCurrency);
+      setCurrentRank(live.currentRank);
+      if (typeof live.kp === 'number') setKp(live.kp);
+      setIsVip(live.isVip);
+      setIsPremium(!!live.isPremium);
+      setPremiumExpiresAt(live.premiumExpiresAt ?? null);
+      setRankedAccess(!!(live.rankedAccess ?? live.isPremium));
+      setFreeRankedWeek(!!live.freeRankedWeek);
+      if (typeof live.peakKp === 'number') setPeakKp(live.peakKp);
+      if (typeof live.peakRank === 'string') setPeakRank(live.peakRank);
+      setEmailVerified(live.emailVerified);
+      setUnreadCount(live.unreadNotifications);
+      if (typeof live.unreadMessages === 'number') {
+        setUnreadMessages(live.unreadMessages);
+      }
+      if (typeof live.dailyMissionsCompleted === 'number') {
+        setDailyDone(live.dailyMissionsCompleted);
+      }
+      if (typeof live.dailyMissionsTotal === 'number') {
+        setDailyTotal(live.dailyMissionsTotal);
+      }
+    };
+
+    (async () => {
+      try {
+        const [live, settings] = await Promise.all([
+          bootstrapHubOnce(),
+          getSiteSettings(),
+        ]);
+        if (cancelled) return;
+        applyLive(live);
+        setBgUrl(resolveHubBackground(settings.backgroundUrl));
+        setLogoUrl(settings.logoUrl ?? '');
+        setHeaderLogoUrl(settings.headerLogoUrl ?? '');
+        setHeaderLogoStyle(
+          (settings as { headerLogoStyle?: string }).headerLogoStyle ?? ''
+        );
+        setHomeHeroImage(settings.homeHeroImage ?? '');
+        if (settings.headerTitle) setHomeTitle(settings.headerTitle);
+        if (settings.headerSubtitle) setHomeSubtitle(settings.headerSubtitle);
+        applyLayoutFromSettings(settings as {
+          hubPagesJson?: string;
+          hubNavJson?: string;
+          hubChromeJson?: string;
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
+      getLivePlayerState(user.id).then(applyLive).catch(() => {});
+    };
+
+    poll = setInterval(tick, 30000);
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      if (poll) clearInterval(poll);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [user.id]);
+
+  // Admin "Save site settings" broadcasts — apply logos immediately (no reload).
+  useEffect(() => {
+    return onSiteSettingsUpdated((s) => {
+      if (s.backgroundUrl !== undefined) {
+        setBgUrl(resolveHubBackground(s.backgroundUrl));
+      }
+      if (s.logoUrl !== undefined) setLogoUrl(s.logoUrl ?? '');
+      if (s.headerLogoUrl !== undefined) setHeaderLogoUrl(s.headerLogoUrl ?? '');
+      if (s.headerLogoStyle !== undefined) {
+        setHeaderLogoStyle(s.headerLogoStyle ?? '');
+      }
+      if (s.homeHeroImage !== undefined) {
+        setHomeHeroImage(s.homeHeroImage ?? '');
+      }
+      if (s.headerTitle) setHomeTitle(s.headerTitle);
+      if (s.headerSubtitle) setHomeSubtitle(s.headerSubtitle);
+      applyLayoutFromSettings(s);
+    });
+  }, []);
+
+  const navigate = (page: string) => {
+    if (!isHubPageEnabled(hubPages, page, isStaff)) {
+      toast({
+        title: 'Page unavailable',
+        description: 'This section is temporarily disabled.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setCurrentPage(page);
+    if (isMobile) {
+      setIsMenuOpen(false);
+      setIsLeftMenuOpen(false);
+    }
+  };
+
+  const handleInvite = (name: string) => {
+    toast({
+      title: 'Invite Sent!',
+      description: `Your invitation has been sent to ${name}.`,
+    });
+  };
+
+  const handleViewProfile = (userId: string) => {
+    if (currentPage !== 'public-profile') {
+      setPreviousPage(currentPage);
+    }
+    setViewingProfileUserId(userId);
+    navigate('public-profile');
+  };
+
+  const handleBackFromProfile = () => {
+    navigate(previousPage === 'public-profile' ? 'home' : previousPage);
+  };
+
+  const handleMessage = (peerId?: string) => {
+    setIsFriendsSheetOpen(false);
+    navigate('messages');
+    if (peerId) {
+      // Messages view reads optional peer via sessionStorage for deep-link.
+      sessionStorage.setItem('kilrun.messagePeerId', peerId);
+    }
+  };
+
+  const handlePlay = (
+    mode: KilrunMode,
+    opts?: { competitiveQueue?: CompetitiveQueue }
+  ) => {
+    if (mode === 'competitive') {
+      if (!pulsarOn) {
+        toast({
+          title: 'Pulsar required',
+          description: 'Activate Pulsar anticheat in the right panel before Competitive.',
+          variant: 'destructive',
+        });
+        setIsMenuOpen(true);
+        return;
+      }
+      const queue = opts?.competitiveQueue ?? 'casual';
+      if (queue === 'ranked' && !rankedAccess) {
+        navigate('premium');
+        return;
+      }
+      setCompetitiveQueue(queue);
+      setPendingCompetitiveMode(mode);
+      setIsCompetitiveDialogOpen(true);
+    } else {
+      setCompetitiveQueue('casual');
+      setLobbyMode(mode);
+      navigate('lobby');
+    }
+  };
+
+  /** Party members following the leader — skip Competitive confirm dialog. */
+  const handlePartyFollow = (
+    mode: KilrunMode,
+    opts?: { competitiveQueue?: CompetitiveQueue }
+  ) => {
+    if (mode === 'competitive') {
+      if (!pulsarOn) {
+        toast({
+          title: 'Pulsar required',
+          description: 'Activate Pulsar anticheat before joining the party lobby.',
+          variant: 'destructive',
+        });
+        setIsMenuOpen(true);
+        return;
+      }
+      const queue = opts?.competitiveQueue ?? 'casual';
+      if (queue === 'ranked' && !rankedAccess) {
+        navigate('premium');
+        return;
+      }
+      setCompetitiveQueue(queue);
+      setLobbyMode(mode);
+      navigate('lobby');
+      return;
+    }
+    setCompetitiveQueue('casual');
+    setLobbyMode(mode);
+    navigate('lobby');
+  };
+
+  const handleAgreeAndPlay = () => {
+    if (!pulsarOn && pendingCompetitiveMode === 'competitive') {
+      toast({
+        title: 'Pulsar required',
+        description: 'Activate Pulsar anticheat before Competitive.',
+        variant: 'destructive',
+      });
+      setIsCompetitiveDialogOpen(false);
+      setPendingCompetitiveMode(null);
+      setIsMenuOpen(true);
+      return;
+    }
+    if (pendingCompetitiveMode) {
+      setLobbyMode(pendingCompetitiveMode);
+      navigate('lobby');
+    }
+    setIsCompetitiveDialogOpen(false);
+    setPendingCompetitiveMode(null);
+  };
+
+  const handleCancelLobby = () => {
+    setLobbyMode(null);
+    setCompetitiveQueue('casual');
+    navigate('play');
+  };
+
+  const handleLaunchGame = () => {
+    navigate('play');
+  };
+
+  const handleUnlockVip = async () => {
+    const result = await unlockVipWithVp();
+    if (!result.ok) {
+      toast({
+        title: 'Not enough VP',
+        description: `VIP costs ${VIP_UNLOCK_VP_COST} VP. Play matches to earn more.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsVip(true);
+    if (!result.already) {
+      setVpBalance((v) => v - VIP_UNLOCK_VP_COST);
+    }
+    setIsVipDialogOpen(false);
+    toast({ title: 'VIP unlocked', description: 'Welcome to VIP.' });
+  };
+
+  const handleTogglePulsar = () => {
+    const next = !pulsarOn;
+    setPulsarOn(next);
+    setPulsarActive(next);
+    if (next) {
+      setPulsarBanner(true);
+      window.setTimeout(() => setPulsarBanner(false), 2200);
+      toast({
+        title: 'Anticheat Online',
+        description: 'Pulsar is active on your session.',
+      });
+    } else {
+      toast({
+        title: 'Pulsar offline',
+        description: 'Anticheat deactivated.',
+      });
+    }
+  };
+
+  const handleLogout = () => {
+    signOut({ callbackUrl: '/landing' });
+  };
+
+  const leftNavItems = hubNav.left.filter(
+    (id) =>
+      id !== 'premium' && // Premium is the dedicated gold gem button (avoid duplicate)
+      (isStaff || hubPages[id] !== false)
+  );
+  const rightNavItems = hubNav.right.filter(
+    (id) => isStaff || hubPages[id] !== false
+  );
+
+  const renderContent = () => {
+    if (currentPage === 'admin' && !showAdmin) {
+      return (
+        <div className="p-6 text-center text-slate-300">
+          Staff access required.
+        </div>
+      );
+    }
+
+    if (!isHubPageEnabled(hubPages, currentPage, isStaff)) {
+      return (
+        <div className="p-10 text-center space-y-2">
+          <p className="text-xl font-bold text-white">Page unavailable</p>
+          <p className="text-slate-400 text-sm">
+            This section is temporarily disabled by an admin.
+          </p>
+          <Button className="mt-4" variant="outline" onClick={() => navigate('home')}>
+            Back to Home
+          </Button>
+        </div>
+      );
+    }
+
+    const PageComponent = pageComponents[currentPage];
+    if (PageComponent) {
+      let props: Record<string, unknown> = {};
+      if (currentPage === 'play') {
+        props.onPlay = handlePlay;
+        props.onPartyFollow = handlePartyFollow;
+        props.userId = user.id;
+        props.isPremium = isPremium;
+        props.rankedAccess = rankedAccess;
+        props.freeRankedWeek = freeRankedWeek;
+        props.pulsarOn = pulsarOn;
+        props.onOpenPremium = () => navigate('premium');
+        props.onOpenPulsar = () => setIsMenuOpen(true);
+      } else if (currentPage === 'premium') {
+        props.vpBalance = vpBalance;
+        props.isVip = isVip;
+        props.premiumExpiresAt = premiumExpiresAt;
+        props.currentRank = isPremium ? currentRank : undefined;
+        props.peakRank = peakRank;
+        props.kp = kp;
+        props.onPurchased = (next: { vpBalance: number; premiumExpiresAt: string }) => {
+          setVpBalance(next.vpBalance);
+          setPremiumExpiresAt(next.premiumExpiresAt);
+          setIsPremium(true);
+          setRankedAccess(true);
+          getLivePlayerState(user.id)
+            .then((live) => {
+              setCurrentRank(live.currentRank);
+              if (typeof live.kp === 'number') setKp(live.kp);
+              if (typeof live.peakRank === 'string') setPeakRank(live.peakRank);
+              if (typeof live.peakKp === 'number') setPeakKp(live.peakKp);
+            })
+            .catch(() => {});
+        };
+        props.onGoRanked = () =>
+          handlePlay('competitive', { competitiveQueue: 'ranked' });
+      } else if (currentPage === 'home') {
+        props.onLaunchGame = handleLaunchGame;
+        props.onNavigate = navigate;
+        props.vpCurrency = vpBalance;
+        // Pass raw SiteSettings values — HomeView resolves + re-fetches admin truth.
+        props.headerLogoUrl = headerLogoUrl;
+        props.headerLogoStyle = headerLogoStyle;
+        props.homeHeroImage = homeHeroImage;
+      } else if (currentPage === 'lobby' && lobbyMode) {
+        props = {
+          mode: lobbyMode,
+          onCancel: handleCancelLobby,
+          userId: user.id,
+          username: user.username,
+          avatarUrl: user.avatarUrl,
+          xpProgress,
+          isAdmin: user.role === 'admin',
+          kp,
+          isPremium,
+          rankedAccess,
+          competitiveQueue: lobbyMode === 'competitive' ? competitiveQueue : 'casual',
+        };
+      } else if (currentPage === 'messages') {
+        props.userId = user.id;
+      } else if (currentPage === 'admin') {
+        props.viewerRole = user.role;
+        props.viewerUsername = user.username;
+        props.viewerAvatarUrl = user.avatarUrl;
+      } else if (currentPage === 'public-profile') {
+        if (!viewingProfileUserId) {
+          return (
+            <div className="p-6 text-center text-slate-400 text-sm">
+              Profile unavailable.
+            </div>
+          );
+        }
+        props = {
+          userId: viewingProfileUserId,
+          onMessage: (peerId: string) => handleMessage(peerId),
+          onBack: handleBackFromProfile,
+        };
+      }
+
+      if (VIEWS_NEEDING_USER_ID.has(currentPage)) {
+        props.userId = user.id;
+      }
+      if (currentPage === 'store') {
+        props.username = user.username;
+        props.avatarUrl = user.avatarUrl;
+      }
+
+      if (currentPage === 'lobby' && !lobbyMode) {
+        return (
+          <PlayView
+            onPlay={handlePlay}
+            onPartyFollow={handlePartyFollow}
+            userId={user.id}
+            isPremium={isPremium}
+            rankedAccess={rankedAccess}
+            freeRankedWeek={freeRankedWeek}
+            pulsarOn={pulsarOn}
+            onOpenPremium={() => navigate('premium')}
+            onOpenPulsar={() => setIsMenuOpen(true)}
+          />
+        );
+      }
+
+      return <PageComponent {...props} />;
+    }
+    return (
+      <HomeView
+        onLaunchGame={handleLaunchGame}
+        onNavigate={navigate}
+        userId={user.id}
+        vpCurrency={vpBalance}
+        headerLogoUrl={headerLogoUrl}
+        headerLogoStyle={headerLogoStyle}
+        homeHeroImage={homeHeroImage}
+      />
+    );
+  };
+
+  const NavButton = ({
+    icon: Icon,
+    label,
+    page,
+    glow = false,
+  }: {
+    icon: LucideIcon;
+    label: string;
+    page: string;
+    glow?: boolean;
+  }) => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={() => navigate(page)}
+          className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 hover:bg-primary/20 shrink-0 group ${
+            currentPage === page || (page === 'play' && currentPage === 'lobby')
+              ? 'bg-primary/20 text-primary shadow-[0_0_15px_rgba(239,68,68,0.2)]'
+              : 'text-slate-400 hover:text-primary'
+          } ${glow ? 'bg-primary/10 text-primary border border-primary/20' : ''}`}
+        >
+          <Icon
+            className={`w-6 h-6 transition-colors duration-300 ${
+              currentPage === page ? 'text-primary' : 'group-hover:text-primary'
+            }`}
+          />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">
+        <p>{label}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+
+  // Fullscreen match: no hub rails / collapsible menus behind the game.
+  if (currentPage === 'lobby' && lobbyMode) {
+    return (
+      <ProfileNavigationProvider value={{ openProfile: handleViewProfile }}>
+        <LobbyView
+          mode={lobbyMode}
+          onCancel={handleCancelLobby}
+          userId={user.id}
+          username={user.username}
+          avatarUrl={user.avatarUrl}
+          xpProgress={xpProgress}
+          isAdmin={user.role === 'admin'}
+          kp={kp}
+          isPremium={isPremium}
+          rankedAccess={rankedAccess}
+          competitiveQueue={lobbyMode === 'competitive' ? competitiveQueue : 'casual'}
+        />
+      </ProfileNavigationProvider>
+    );
+  }
+
+  return (
+    <ProfileNavigationProvider value={{ openProfile: handleViewProfile }}>
+    <TooltipProvider>
+      <div className="min-h-[100dvh] text-white relative overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <div className="fixed inset-0 z-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={bgUrl}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-900/80 via-slate-800/70 to-slate-900/85" />
+        </div>
+
+        <div className="relative z-10 flex h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))]">
+          {/* Mobile backdrop — tap to dismiss any open sidebar */}
+          {isMobile && (isLeftMenuOpen || isMenuOpen) && (
+            <div
+              className="fixed inset-0 z-[40] bg-black/60"
+              onClick={() => { setIsMenuOpen(false); setIsLeftMenuOpen(false); }}
+            />
+          )}
+
+          {/* Left navigation rail */}
+          <div
+            className={`relative h-full transition-all duration-300 ease-in-out ${
+              isMobile ? 'w-0 shrink-0' : isLeftMenuOpen ? 'w-20 sm:w-24' : 'w-0'
+            }`}
+          >
+            <div
+              className={
+                isMobile
+                  ? `fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-[50] w-20 bg-slate-900/95 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 overflow-y-auto overflow-x-hidden overscroll-contain transition-all duration-300 ${
+                      isLeftMenuOpen
+                        ? 'translate-x-0 opacity-100'
+                        : '-translate-x-full opacity-0 pointer-events-none'
+                    }`
+                  : `w-20 sm:w-24 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 h-full overflow-y-auto overflow-x-hidden transition-opacity duration-300 ${
+                      isLeftMenuOpen ? 'opacity-100' : 'opacity-0'
+                    }`
+              }
+            >
+              <div
+                className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center mb-4 sm:mb-6 cursor-pointer transition shrink-0 hover:scale-110 active:scale-95 duration-300 overflow-hidden bg-transparent shadow-none hover:bg-white/5"
+                onClick={() => navigate('home')}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={resolveMarkLogo(logoUrl)}
+                  alt="Kilrun"
+                  className="w-full h-full object-contain p-0.5"
+                />
+              </div>
+
+              <NavButton icon={Home} label="Home" page="home" />
+              {leftNavItems
+                .filter((id) => id !== 'home')
+                .map((id) => {
+                  const meta = HUB_NAV_CATALOG.find((i) => i.id === id);
+                  const Icon = HUB_PAGE_ICONS[id];
+                  if (!meta || !Icon) return null;
+                  return (
+                    <NavButton key={id} icon={Icon} label={meta.label} page={id} />
+                  );
+                })}
+
+              <div className="my-2 w-3/4 h-px bg-slate-700/50 shrink-0" />
+
+              {/* In-Game Abilities Collapsible */}
+              <div className="w-full px-2 space-y-1">
+              </div>
+
+              <Dialog open={isVipDialogOpen} onOpenChange={setIsVipDialogOpen}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setIsVipDialogOpen(true)}
+                      className={`w-12 h-12 rounded-lg transition-all duration-300 flex items-center justify-center hover:scale-110 hover:-translate-y-1 shrink-0 group relative ${
+                        isVip
+                          ? 'bg-orange-500/20 text-orange-300 border border-orange-400/50 shadow-[0_0_12px_rgba(249,115,22,0.2)]'
+                          : 'bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 shadow-[0_0_10px_rgba(239,68,68,0.1)]'
+                      }`}
+                    >
+                      <Crown className="w-6 h-6 transition-transform group-hover:rotate-12" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    <p>{isVip ? 'VIP Active' : 'Unlock VIP'}</p>
+                  </TooltipContent>
+                </Tooltip>
+                <DialogContent className="bg-slate-900/60 backdrop-blur-md border-slate-700/30 text-white max-w-md mx-4">
+                  <DialogHeader>
+                    <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+                      <Crown className="w-6 h-6 text-primary" />
+                      {isVip ? 'VIP Active' : 'Unlock VIP Access'}
+                    </DialogTitle>
+                    <DialogDescription className="text-slate-400">
+                      {isVip
+                        ? 'Your VIP perks are active across the hub.'
                         : `Spend ${VIP_UNLOCK_VP_COST} VP (balance: ${vpBalance}) for exclusive hub + future in-game perks.`}
                     </DialogDescription>
                   </DialogHeader>
