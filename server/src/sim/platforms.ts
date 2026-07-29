@@ -25,6 +25,9 @@ export interface PlatformBlueprint {
   motionAmpZ?: number;
   /** Yaw in radians (sim XY). Enables OBB support/side collision. */
   rotYaw?: number;
+  /** True analytic ramp slope — see PlatformState.slopeGradX/Y. */
+  slopeGradX?: number;
+  slopeGradY?: number;
   entityId?: string;
 }
 
@@ -93,6 +96,8 @@ export function createFromBlueprints(blueprints: PlatformBlueprint[]): PlatformS
     platform.motionAmpY = ampY;
     platform.motionAmpZ = ampZ;
     platform.rotYaw = bp.rotYaw ?? 0;
+    platform.slopeGradX = bp.slopeGradX ?? 0;
+    platform.slopeGradY = bp.slopeGradY ?? 0;
     platform.entityId = bp.entityId ?? '';
     return platform;
   });
@@ -174,7 +179,11 @@ export function findSupportPlatform(
     const { lx, ly } = toPadLocal(x, y, platform.x, platform.y, platform.rotYaw || 0);
     if (lx < -halfW - radius || lx > halfW + radius) continue;
     if (ly < -halfD - radius || ly > halfD + radius) continue;
-    const topZ = platform.z;
+    // True continuous ramp support: dz per unit of local x/y, so standing
+    // height is mathematically exact everywhere on the surface instead of
+    // snapped to the nearest of many small flat shelves (which reads as
+    // "walking up/down stairs" no matter how many shelves you add).
+    const topZ = platform.z + (platform.slopeGradX || 0) * lx + (platform.slopeGradY || 0) * ly;
     if (z < topZ - maxSnapDown || z > topZ + 0.55) continue;
     if (topZ <= z + 0.05) {
       if (!bestBelow || topZ > bestBelow.topZ) bestBelow = { platform, topZ };

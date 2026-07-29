@@ -147,6 +147,14 @@ export class PlatformState extends Schema {
   @type('number') motionAmpZ = 0;
   /** Yaw rotation in radians (sim XY plane). Used for rotated pad colliders. */
   @type('number') rotYaw = 0;
+  /**
+   * True analytic ramp support: dz per unit of LOCAL x/y (post-rotYaw,
+   * relative to this pad's own center) — lets a single pad be a genuinely
+   * continuous sloped surface instead of one of many small flat shelves.
+   * 0/0 = flat (all existing pads; fully backward compatible).
+   */
+  @type('number') slopeGradX = 0;
+  @type('number') slopeGradY = 0;
   /** Editor entity id for client mesh sync (custom maps). */
   @type('string') entityId = '';
 }

@@ -203,6 +203,10 @@ export interface SimPlatformBlueprint {
   entityId?: string;
   /** Yaw radians in sim XY — OBB colliders on the server. */
   rotYaw?: number;
+  /** True analytic ramp support — dz per unit of LOCAL x/y (post-rotYaw).
+   * 0/0 = flat. Lets one pad be a genuinely continuous sloped surface. */
+  slopeGradX?: number;
+  slopeGradY?: number;
   /** Moving platform (sim space): home = rest pose, amp = B-home. */
   motionPeriodMs?: number;
   motionPhaseMs?: number;
@@ -522,7 +526,7 @@ function isTiltedRampSolid(e: EditorEntity): boolean {
  * driven by the entity's ACTUAL rotation instead of requiring a specific
  * catalog model name, so any hand-tilted block works as a walkable ramp.
  */
-export function rampEntityToSimPads(e: EditorEntity, steps = 24): SimPlatformBlueprint[] {
+export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBlueprint[] {
   const [ex, ey, ez] = e.position;
   const foot =
     e.collisionSize ??
@@ -546,61 +550,66 @@ export function rampEntityToSimPads(e: EditorEntity, steps = 24): SimPlatformBlu
   else if (mat === 'water') kind = 'water';
   else if (mat === 'sand') kind = 'sand';
 
-  // Two distinct concerns, both fixed by more/thinner steps:
-  // 1. Fixed step counts break on tall/steep ramps: e.g. 24 steps over a
-  //    20-unit rise is ~0.83 per step, above LAND_STEP_CLIMB (0.75) — the
-  //    server can't smoothly climb/descend that seam in one motion.
-  // 2. Even well under that tolerance, a ramp is approximated as a
-  //    staircase of small FLAT shelves, not a true continuous slope —
-  //    within any one shelf's footprint the player floats slightly above
-  //    the visual ramp mesh for the first half and sinks slightly below
-  //    it (legs clipping in) for the second half. Separate effect from
-  //    #1; needs steps thin enough to be visually imperceptible, not
-  //    just under the climb-tolerance.
-  const [, yAtLowEnd] = rotateLocalXYZ([0, halfY, -halfZ], rotDeg);
-  const [, yAtHighEnd] = rotateLocalXYZ([0, halfY, halfZ], rotDeg);
-  const totalRise = Math.abs(yAtHighEnd - yAtLowEnd);
-  const targetStepRise = Math.min(LAND_STEP_CLIMB * 0.6, 0.2);
-  const n = Math.max(4, Math.min(120, Math.round(Math.max(steps, totalRise / targetStepRise))));
+  // A rigid box's top face stays perfectly flat no matter how it's rotated —
+  // approximating it with N discrete flat shelves (the old approach) always
+  // reads as walking up/down stairs no matter how thin the shelves get,
+  // since the player's height still snaps between a finite set of levels.
+  // Instead: fit the EXACT plane equation for the top face (3 points fully
+  // determine a plane) and hand the server one continuous sloped surface —
+  // mathematically zero stepping, not just less of it.
+  const [dx0, dy0, dz0] = rotateLocalXYZ([0, halfY, 0], rotDeg);
+  const [dx1, dy1, dz1] = rotateLocalXYZ([halfX, halfY, 0], rotDeg);
+  const [dx2, dy2, dz2] = rotateLocalXYZ([0, halfY, halfZ], rotDeg);
+  // Deltas from center, in world/three space.
+  const ax = dx1 - dx0, ay = dy1 - dy0, az = dz1 - dz0;
+  const bx = dx2 - dx0, by = dy2 - dy0, bz = dz2 - dz0;
+  const det = ax * bz - bx * az;
+  // dY/d(threeX) and dY/d(threeZ) solved from the 2x2 system; a near-zero
+  // det means the "top" face is actually vertical (this block is really a
+  // wall someone tilted almost 90°, not a walkable ramp) — treat as flat
+  // rather than divide by ~0.
+  const gThreeX = Math.abs(det) > 1e-6 ? (ay * bz - by * az) / det : 0;
+  const gThreeZ = Math.abs(det) > 1e-6 ? (ax * by - bx * ay) / det : 0;
+  // Sim convention: x=three.z, y=three.x, z(height)=three.y (see threeToSim).
+  const slopeGradX = gThreeZ;
+  const slopeGradY = gThreeX;
 
-  const stepDepth = (halfZ * 2) / n;
-  const pads: SimPlatformBlueprint[] = [];
-  for (let i = 0; i < n; i++) {
-    const localZ = -halfZ + (i + 0.5) * stepDepth;
-    // Bounding box (in world/sim space) of this thin step's top face, from
-    // its 4 local corners rotated by the entity's full 3D rotation — this
-    // stays correct for any yaw+pitch+roll combination, not just yaw.
-    let minThreeX = Infinity;
-    let maxThreeX = -Infinity;
-    let minThreeZ = Infinity;
-    let maxThreeZ = -Infinity;
-    let sumThreeY = 0;
+  // Footprint: axis-aligned bounding box of all 8 corners (top+bottom),
+  // same technique already used elsewhere for rotated solids — a single
+  // honest AABB is fine for the walkable-region check, only the HEIGHT
+  // needs to be exact (handled above), not the footprint shape.
+  let minThreeX = Infinity, maxThreeX = -Infinity;
+  let minThreeZ = Infinity, maxThreeZ = -Infinity;
+  for (const sy of [-halfY, halfY]) {
     for (const sx of [-halfX, halfX]) {
-      for (const sz of [localZ - stepDepth / 2, localZ + stepDepth / 2]) {
-        const [rx, ry, rz] = rotateLocalXYZ([sx, halfY, sz], rotDeg);
-        const worldThreeX = ex + rx;
-        const worldThreeY = ey + ry;
-        const worldThreeZ = ez + rz;
-        minThreeX = Math.min(minThreeX, worldThreeX);
-        maxThreeX = Math.max(maxThreeX, worldThreeX);
-        minThreeZ = Math.min(minThreeZ, worldThreeZ);
-        maxThreeZ = Math.max(maxThreeZ, worldThreeZ);
-        sumThreeY += worldThreeY;
+      for (const sz of [-halfZ, halfZ]) {
+        const [rx, , rz] = rotateLocalXYZ([sx, sy, sz], rotDeg);
+        minThreeX = Math.min(minThreeX, ex + rx);
+        maxThreeX = Math.max(maxThreeX, ex + rx);
+        minThreeZ = Math.min(minThreeZ, ez + rz);
+        maxThreeZ = Math.max(maxThreeZ, ez + rz);
       }
     }
-    const centerThreeY = sumThreeY / 4;
-    // Sim convention: x=three.z, y=three.x, z(height)=three.y (see threeToSim).
-    pads.push({
+  }
+  const centerThreeY = ey + dy0;
+
+  return [
+    {
       x: (minThreeZ + maxThreeZ) / 2,
       y: (minThreeX + maxThreeX) / 2,
       z: centerThreeY,
       width: Math.max(0.4, maxThreeZ - minThreeZ),
       depth: Math.max(0.4, maxThreeX - minThreeX),
       kind,
-      height: Math.min(0.35, Math.max(0.18, halfY * 2 * 0.85)),
-    });
-  }
-  return pads;
+      // Thin/top-only: a walkable ramp shouldn't also act as a side wall
+      // (that check uses a flat vertical range, which would be wrong for
+      // a sloped surface) — same "thin pad" exemption already used for
+      // ordinary floor pads.
+      height: 0.3,
+      slopeGradX,
+      slopeGradY,
+    },
+  ];
 }
 
 function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
