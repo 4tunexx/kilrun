@@ -31,77 +31,6 @@ export class PlayerState extends Schema {
   @type('boolean') isGrounded = true;
   @type('boolean') isSprinting = false;
   @type('boolean') isReady = false;
-<<<<<<< HEAD
-=======
-  @type('boolean') isInvisible = false;
->>>>>>> origin/main
-  /** Last checkpoint touch (sim space). 0 = unset. */
-  @type('number') checkpointX = 0;
-  @type('number') checkpointY = 0;
-  @type('number') checkpointZ = 0;
-  @type('boolean') hasCheckpoint = false;
-  /** Competitive KP snapshot at join (optional). */
-  @type('number') kp = 1000;
-  /** Compact JSON of equipped SkinAttachment[] for remote cosmetics. */
-  @type('string') equippedSkinsJson = '[]';
-  /**
-   * Gameplay body color index (Body_001–008). -1 = no override.
-   * Deathrun trapper = 0 (Red); runners = unique 1–7; Horde unique;
-   * Competitive team_a = 0 (Red), team_b = 1 (Blue).
-   */
-  @type('number') bodyColorIndex = -1;
-  /** Authoritative weapon combat from equipped loadout (clamped on join). */
-  @type('string') weaponKind = 'hitscan';
-  @type('number') weaponRange = 14;
-  @type('number') weaponDamage = 25;
-  @type('number') weaponCooldownMs = 350;
-  @type('number') weaponConeRadians = 0.18;
-  /** auto | semi | bolt */
-  @type('string') weaponFireMode = 'semi';
-  /** Hitscan pellet count (shotgun). */
-  @type('number') weaponPellets = 1;
-  /** ADS FOV target for client zoom (0 = none). */
-  @type('number') weaponAdsZoomFov = 0;
-  @type('number') weaponAdsConeScale = 0.85;
-  @type('number') weaponHipfireConeScale = 1;
-  /** In-match shop credits (Horde / Competitive buy phase). */
-  @type('number') credits = 0;
-  /** Last purchased shop weapon id (for equipped highlight). */
-  @type('string') weaponId = '';
-  /** Equipped weapon skin id from map buy menu (looked up client-side for texture). */
-  @type('string') weaponSkinId = '';
-  /** Public weapon mesh URL for remote clients (catalog path; never a data: URL). */
-  @type('string') weaponModelUrl = '';
-  /** Mag capacity (0 = unlimited / melee). */
-  @type('number') weaponMagSize = 0;
-  @type('number') ammoInMag = 0;
-  @type('number') reserveAmmo = 0;
-  @type('number') weaponReloadMs = 0;
-  /** Timestamp ms when reload finishes (0 = not reloading). */
-  @type('number') reloadEndsAt = 0;
-  /** Temporary shield HP from power-up shop. */
-  @type('number') shieldHp = 0;
-  /** Per-match telemetry / server-authored rewards. */
-  @type('number') kills = 0;
-  @type('number') deaths = 0;
-  @type('number') score = 0;
-  @type('number') distance = 0;
-  @type('number') xpEarned = 0;
-  @type('number') vpEarned = 0;
-  @type('number') kpDelta = 0;
-  /**
-   * IN-GAME power upgrades (Health/Speed/Jump/Energy/Punch) fetched from the
-   * account's persisted ability levels at join — see
-   * shared/ability-progression.ts. Neutral defaults (0 bonus / 1x mult) if
-   * the trusted lookup fails, so gameplay is unaffected.
-   */
-  @type('number') abilityMaxHealthBonus = 0;
-  @type('number') abilitySpeedMult = 1;
-  @type('number') abilityJumpMult = 1;
-  @type('number') abilityMaxEnergyBonus = 0;
-  @type('number') abilityPunchDamageMult = 1;
-<<<<<<< HEAD
-=======
   @type('string') abilityLevelsJson = '{}';
   @type('number') abilityVisibilityEndsAt = 0;
   @type('number') abilityFlyEndsAt = 0;
@@ -109,7 +38,6 @@ export class PlayerState extends Schema {
   @type('number') abilityBerserkEndsAt = 0;
   @type('number') abilityBulletEndsAt = 0;
   @type('number') abilityThunderEndsAt = 0;
->>>>>>> origin/main
 }
 
 /** Solid walkable surface for the shared platformer physics. */

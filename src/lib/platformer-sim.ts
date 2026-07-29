@@ -367,12 +367,8 @@ export function stepPlatformer(
   // while already grounded; allow a larger snap only on fresh landings.
   if (grounded && support) {
     softGlueToSupport(body, support.topZ, dt, !wasGroundedLastTick);
-<<<<<<< HEAD
-    scratch.coyoteMs = COYOTE_MS;
-=======
     scratch.coyoteMs = COYOTE_TIME_MS;
     scratch.jumpCount = 0;
->>>>>>> origin/main
   } else {
     if (scratch.jumpCount === 0 && scratch.coyoteMs <= 0) {
       scratch.jumpCount = 1;
@@ -515,11 +511,7 @@ export function stepPlatformer(
       support = post;
       softGlueToSupport(body, post.topZ, dt, false);
       body.isGrounded = true;
-<<<<<<< HEAD
-      scratch.coyoteMs = COYOTE_MS;
-=======
       scratch.coyoteMs = COYOTE_TIME_MS;
->>>>>>> origin/main
       scratch.jumpCount = 0;
     } else {
       body.isGrounded = false;
@@ -560,11 +552,7 @@ export function stepPlatformer(
       } else {
         body.vz = 0;
         body.isGrounded = true;
-<<<<<<< HEAD
-        scratch.coyoteMs = COYOTE_MS;
-=======
         scratch.coyoteMs = COYOTE_TIME_MS;
->>>>>>> origin/main
         scratch.jumpCount = 0;
         if (scratch.jumpBufferMs > 0 && body.energy >= JUMP_ENERGY * 0.2) {
           body.vz = JUMP_VELOCITY;

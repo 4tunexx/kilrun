@@ -1779,29 +1779,6 @@ export function MapEditor({
               }`}
               onClick={() => {
                 if (id === 'tps') {
-<<<<<<< HEAD
-                  if (tpsViewOpen) { closeStudioPanels(); } else { openTpsViewStudio(); }
-                  return;
-                }
-                if (id === 'player') {
-                  if (playerStudioOpen) { closeStudioPanels(); } else { openPlayerStudio(); }
-                  return;
-                }
-                if (id === 'skins') {
-                  if (modelEditorOpen) { closeStudioPanels(); } else { openModelEditor(); }
-                  return;
-                }
-                if (id === 'weapon') {
-                  if (weaponEditorOpen) { closeStudioPanels(); } else { openWeaponEditor(); }
-                  return;
-                }
-                if (id === 'combat') {
-                  if (combatEditorOpen) { closeStudioPanels(); } else { openCombatEditor(); }
-                  return;
-                }
-                if (id === 'shop') {
-                  if (shopEditorOpen) { closeStudioPanels(); } else { openShopEditor(); }
-=======
                   tpsViewOpen ? closeStudioPanels() : openTpsViewStudio();
                   return;
                 }
@@ -1823,7 +1800,6 @@ export function MapEditor({
                 }
                 if (id === 'shop') {
                   shopEditorOpen ? closeStudioPanels() : openShopEditor();
->>>>>>> origin/main
                   return;
                 }
                 selectLibraryTab(id);
@@ -3930,11 +3906,7 @@ export function MapEditor({
                   onClick={() => armPlaceSpawn('spawn_team_b')}
                   title="Player B spawn (invisible)"
                 >
-<<<<<<< HEAD
-                  <Flag className="w-4 h-4 text-orange-400" />
-=======
                   <Flag className="w-4 h-4 text-red-500" />
->>>>>>> origin/main
                 </ToolBtn>
                 <ToolBtn
                   onClick={() => armPlaceEntity('hazard')}

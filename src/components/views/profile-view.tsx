@@ -15,59 +15,7 @@ import {
   MailX,
   Swords,
   Trophy,
-<<<<<<< HEAD
-=======
-  ArrowRightLeft,
->>>>>>> origin/main
-} from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { AvatarWithFrame } from '@/components/avatar-with-frame';
-import { NicknameEffectText } from '@/components/nickname-effect';
-import { getMatchStats, getModeStatsBundle, getMyRankedStats, getSessionUser, getStatsSummary, type RankedStatsSummary, type StatsSummary } from '@/lib/actions';
-import type { MatchHistoryRow, ModeStatsSummary } from '@/lib/mode-stats';
-import { RankLabel } from '@/components/ui/rank-badge';
-import {
-  deactivateOwnEmail,
-  equipInventoryItem,
-  getMyInventory,
-  getMyProfileActivity,
-  unequipCosmeticSlot,
-  updateProfileSettings,
-} from '@/lib/social-actions';
-<<<<<<< HEAD
-import type { User as UserModel } from '@/generated/prisma';
-=======
 import type { MatchStat, User as UserModel } from '@/generated/prisma';
->>>>>>> origin/main
 import { BannerFill } from '@/components/banner-fill';
 import { normalizeBannerConfig } from '@/lib/banner';
 import {
@@ -87,32 +35,7 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [user, setUser] = useState<UserModel | null>(null);
   const [summary, setSummary] = useState<StatsSummary | null>(null);
   const [ranked, setRanked] = useState<RankedStatsSummary | null>(null);
-<<<<<<< HEAD
-=======
-  const [history, setHistory] = useState<MatchStat[]>([]);
->>>>>>> origin/main
-  const [modeBundle, setModeBundle] = useState<Awaited<
-    ReturnType<typeof getModeStatsBundle>
-  > | null>(null);
-  const [inventory, setInventory] = useState<InventoryRow[]>([]);
-  const [activity, setActivity] = useState<ProfileActivity | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [bio, setBio] = useState('');
-  const [statusMessage, setStatusMessage] = useState('');
-  const [countryCode, setCountryCode] = useState('');
-  const [notifyPush, setNotifyPush] = useState(true);
-  const [notifyEmail, setNotifyEmail] = useState(true);
-  const [profilePrivate, setProfilePrivate] = useState(false);
-  const [profileCommentsEnabled, setProfileCommentsEnabled] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [prefsSaving, setPrefsSaving] = useState(false);
-  const [showEmailForm, setShowEmailForm] = useState(false);
-  const [cosmeticBusyId, setCosmeticBusyId] = useState<string | null>(null);
-  const [deactivatingEmail, setDeactivatingEmail] = useState(false);
-<<<<<<< HEAD
-=======
   const [showInGameProgression, setShowInGameProgression] = useState(false);
->>>>>>> origin/main
   const { toast } = useToast();
   const isAdmin = user?.role === 'admin';
 
@@ -133,11 +56,7 @@ export default function ProfileView({ userId }: { userId: string }) {
       getMyProfileActivity(),
       getMyRankedStats(userId),
       getModeStatsBundle(userId),
-<<<<<<< HEAD
-    ]).then(([u, s, _h, inv, act, rk, modes]) => {
-=======
     ]).then(([u, s, h, inv, act, rk, modes]) => {
->>>>>>> origin/main
       if (!isMounted) return;
       setUser(u);
       setBio(u?.bio ?? '');
@@ -150,225 +69,6 @@ export default function ProfileView({ userId }: { userId: string }) {
         (u as { profileCommentsEnabled?: boolean } | null)?.profileCommentsEnabled !== false
       );
       setSummary(s);
-<<<<<<< HEAD
-=======
-      setHistory(h);
->>>>>>> origin/main
-      setInventory(inv);
-      setActivity(act);
-      setRanked(rk);
-      setModeBundle(modes);
-      setIsLoading(false);
-      if (u && !u.emailVerified) setShowEmailForm(true);
-    }).catch(() => {
-      if (!isMounted) return;
-      setIsLoading(false);
-      toast({
-        title: 'Failed to load profile',
-        variant: 'destructive',
-      });
-    });
-    return () => {
-      isMounted = false;
-    };
-  }, [userId, toast]);
-
-  const banners = inventory.filter((i) => i.cosmeticSlot === 'banner');
-  const frames = inventory.filter((i) => i.cosmeticSlot === 'frame');
-  const nicknames = inventory.filter((i) => i.cosmeticSlot === 'nickname');
-  const equippedBanner = user?.equippedBannerConfig
-    ? normalizeBannerConfig(user.equippedBannerConfig)
-    : null;
-
-  const handleEquipCosmetic = async (item: InventoryRow) => {
-    setCosmeticBusyId(item.id);
-    try {
-      await equipInventoryItem(item.id);
-      toast({ title: `Equipped ${item.itemName}` });
-      reloadCosmetics();
-    } catch (e: unknown) {
-      toast({ title: e instanceof Error ? e.message : 'Could not equip', variant: 'destructive' });
-    } finally {
-      setCosmeticBusyId(null);
-    }
-  };
-
-  const handleUnequipSlot = async (slot: string, label: string) => {
-    setCosmeticBusyId(slot);
-    try {
-      await unequipCosmeticSlot(slot);
-      toast({ title: `${label} unequipped` });
-      reloadCosmetics();
-    } finally {
-      setCosmeticBusyId(null);
-    }
-  };
-
-  const savePublicProfile = async () => {
-    setSaving(true);
-    try {
-      const updated = await updateProfileSettings({
-        bio,
-        countryCode,
-        statusMessage,
-        profilePrivate,
-        profileCommentsEnabled,
-      });
-      setUser(updated);
-      setStatusMessage(updated.statusMessage ?? '');
-      setProfilePrivate(!!(updated as { profilePrivate?: boolean }).profilePrivate);
-      setProfileCommentsEnabled(
-        (updated as { profileCommentsEnabled?: boolean }).profileCommentsEnabled !== false
-      );
-      toast({ title: 'Profile saved' });
-    } catch {
-      toast({ title: 'Save failed', variant: 'destructive' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveNotificationPrefs = async (next: {
-    notifyPush?: boolean;
-    notifyEmail?: boolean;
-  }) => {
-    setPrefsSaving(true);
-    try {
-      const updated = await updateProfileSettings(next);
-      setUser(updated);
-      if (typeof next.notifyPush === 'boolean') setNotifyPush(next.notifyPush);
-      if (typeof next.notifyEmail === 'boolean') setNotifyEmail(next.notifyEmail);
-      toast({ title: 'Notification preferences saved' });
-    } catch {
-      toast({ title: 'Could not save preferences', variant: 'destructive' });
-    } finally {
-      setPrefsSaving(false);
-    }
-  };
-
-  return (
-    <div className="pb-6">
-      <div className="relative">
-        <ProfileHeroBanner
-          banner={equippedBanner}
-          topLeft={
-            <span
-              className={`rounded-md bg-black/45 px-2 py-1 text-xs sm:text-sm font-semibold capitalize backdrop-blur-sm border border-white/10 drop-shadow-md ${getRoleTextColorClass(
-                user?.role,
-                user?.isVip
-              )}`}
-            >
-              {user?.role ?? 'player'}
-              {user?.isVip ? ' · VIP' : ''}
-              {user?.createdAt
-                ? ` · Joined ${formatDistanceToNow(new Date(user.createdAt))} ago`
-                : ''}
-            </span>
-          }
-          avatar={
-            <AvatarWithFrame
-              src={user?.avatarUrl}
-              alt={user?.username ?? 'Player avatar'}
-              fallback={user?.username?.charAt(0) ?? '?'}
-              frameConfig={user?.equippedFrameConfig}
-            />
-          }
-          title={
-            <h1
-              className={`text-2xl sm:text-4xl md:text-5xl font-black truncate flex items-center gap-2 sm:gap-3 ${getRoleTextColorClass(
-                user?.role,
-                user?.isVip
-              )}`}
-            >
-              <NicknameEffectText
-                name={user?.username ?? 'Loading...'}
-                effect={user?.equippedNicknameConfig}
-                className="truncate"
-              />
-              {countryCode && (
-                <Image
-                  src={flagUrl(countryCode, 40)}
-                  alt={getCountryName(countryCode) ?? countryCode}
-                  width={28}
-                  height={21}
-                  className="rounded-sm shadow-md shrink-0"
-                  unoptimized
-                />
-              )}
-            </h1>
-          }
-          subtitle={
-            statusMessage ? (
-              <p className="text-sm sm:text-base text-slate-300 mt-1 line-clamp-2">
-                {statusMessage}
-              </p>
-            ) : undefined
-          }
-        />
-
-        <div className="px-4 sm:px-8 relative z-20">
-      <Tabs defaultValue="profile" className="w-full">
-        <TabsList className="w-full h-auto flex flex-wrap justify-start gap-1 bg-slate-800/60 p-1 mb-4">
-          <TabsTrigger value="profile" className="flex-none">
-            Profile
-          </TabsTrigger>
-          <TabsTrigger value="statistics" className="flex-none">
-            Statistics
-          </TabsTrigger>
-          <TabsTrigger value="ranked" className="flex-none">
-            Ranked
-          </TabsTrigger>
-          <TabsTrigger value="activity" className="flex-none">
-            Activity
-          </TabsTrigger>
-          <TabsTrigger value="match-history" className="flex-none">
-            Match History
-          </TabsTrigger>
-          <TabsTrigger value="showcase" className="flex-none">
-            Showcase
-          </TabsTrigger>
-          <TabsTrigger value="cosmetics" className="flex-none">
-            Cosmetics
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="flex-none">
-            Settings
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="profile" className="mt-0 space-y-4">
-<<<<<<< HEAD
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-              <CardContent className="pt-5 text-center">
-                <Zap className="w-5 h-5 mx-auto mb-1 text-primary" />
-                <p className="text-2xl font-black">{user?.xpProgress ?? 0}</p>
-                <p className="text-xs text-slate-400">Total XP</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-              <CardContent className="pt-5 text-center">
-                <Coins className="w-5 h-5 mx-auto mb-1 text-yellow-400" />
-                <p className="text-2xl font-black">{user?.vpCurrency ?? 0}</p>
-                <p className="text-xs text-slate-400">VP Balance</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-              <CardContent className="pt-5 text-center">
-                <ShoppingBag className="w-5 h-5 mx-auto mb-1 text-primary" />
-                <p className="text-2xl font-black">{activity?.totals.purchaseCount ?? 0}</p>
-                <p className="text-xs text-slate-400">Purchases</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-              <CardContent className="pt-5 text-center">
-                <MessageSquare className="w-5 h-5 mx-auto mb-1 text-primary" />
-                <p className="text-2xl font-black">{activity?.totals.forumPostCount ?? 0}</p>
-                <p className="text-xs text-slate-400">Forum Posts</p>
-              </CardContent>
-            </Card>
-          </div>
-
-=======
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-slate-200">Progression</h3>
             <Button
@@ -425,7 +125,6 @@ export default function ProfileView({ userId }: { userId: string }) {
           )}
 
 
->>>>>>> origin/main
           <div className="grid gap-3 sm:grid-cols-3">
             <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
               <CardContent className="pt-5 text-center">

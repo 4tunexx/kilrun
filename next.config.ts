@@ -14,11 +14,8 @@ const nextConfig: NextConfig = {
   },
   serverExternalPackages: ['@prisma/client', 'prisma'],
   webpack: (config, { isServer }) => {
-<<<<<<< HEAD
-=======
     // PrismaPlugin only needed for Webpack (not Turbopack)
     // Turbopack has native support for Prisma without plugin
->>>>>>> origin/main
     if (isServer) {
       config.plugins = [...config.plugins, new PrismaPlugin()];
     }

@@ -358,13 +358,7 @@ export class ThreeCharacter {
   public playWeaponFireClip() {
     const name = this.weaponClipNames.fire || 'fire';
     if (!this.playWeaponClip(name, false)) {
-<<<<<<< HEAD
-      if (!this.playWeaponClip('shoot', false)) {
-        this.playWeaponClip('attack', false);
-      }
-=======
       this.playWeaponClip('shoot', false) || this.playWeaponClip('attack', false);
->>>>>>> origin/main
     }
   }
 

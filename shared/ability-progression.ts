@@ -38,13 +38,6 @@ export interface AbilityDefinition {
   /** Emoji/icon glyph for compact UI. */
   icon: string;
   maxLevel: number;
-<<<<<<< HEAD
-  /** In-game account level required before ANY skill points can go into this
-   * ability. Health/Energy are core sustain stats and always available;
-   * everything else unlocks progressively so new players get a simple kit
-   * first and powers reveal themselves over time. */
-  unlockLevel: number;
-=======
 >>>>>>> origin/main
   /** Skill points required to go from `level` to `level + 1`. */
   costForLevel: (level: number) => number;
@@ -65,10 +58,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Increases maximum health.',
     icon: '❤️',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 1,
-=======
->>>>>>> origin/main
     costForLevel: flatCost(1),
     effectLabel: (level) => `+${level * 10} max HP`,
   },
@@ -78,10 +67,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Increases movement speed.',
     icon: '⚡',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 5,
-=======
->>>>>>> origin/main
     costForLevel: flatCost(1),
     effectLabel: (level) => `+${(level * 4).toFixed(0)}% move speed`,
   },
@@ -91,10 +76,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Increases jump height.',
     icon: '🦘',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 25,
-=======
->>>>>>> origin/main
     costForLevel: flatCost(1),
     effectLabel: (level) => `+${(level * 5).toFixed(0)}% jump height`,
   },
@@ -104,10 +85,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Increases maximum energy (sprint/abilities pool).',
     icon: '🔋',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 1,
-=======
->>>>>>> origin/main
     costForLevel: flatCost(1),
     effectLabel: (level) => `+${level * 10} max energy`,
   },
@@ -117,10 +94,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Turn invisible to enemies for a short duration.',
     icon: '👻',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 10,
-=======
->>>>>>> origin/main
     costForLevel: rampCost(1, 1),
     effectLabel: (level) => (level > 0 ? `${(2 + level * 0.8).toFixed(1)}s duration` : 'Locked'),
   },
@@ -130,10 +103,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Increases melee punch damage.',
     icon: '👊',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 15,
-=======
->>>>>>> origin/main
     costForLevel: flatCost(1),
     effectLabel: (level) => `+${level * 8}% punch damage`,
   },
@@ -143,10 +112,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Take to the air for a short duration.',
     icon: '🕊️',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 35,
-=======
->>>>>>> origin/main
     costForLevel: rampCost(1, 1),
     effectLabel: (level) => (level > 0 ? `${(1.5 + level * 0.7).toFixed(1)}s duration` : 'Locked'),
   },
@@ -156,10 +121,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Press H to fire a hook and pull yourself to a wall/object.',
     icon: '🪝',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 30,
-=======
->>>>>>> origin/main
     costForLevel: rampCost(1, 1),
     effectLabel: (level) =>
       level > 0
@@ -172,10 +133,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Grow huge, take no damage, and one-punch-KO enemies.',
     icon: '💢',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 40,
-=======
->>>>>>> origin/main
     costForLevel: rampCost(2, 1),
     effectLabel: (level) => (level > 0 ? `${(3 + level * 0.6).toFixed(1)}s duration` : 'Locked'),
   },
@@ -185,10 +142,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Fire without reloading or consuming ammo for a duration.',
     icon: '🔫',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 20,
-=======
->>>>>>> origin/main
     costForLevel: rampCost(1, 1),
     effectLabel: (level) => (level > 0 ? `${(3 + level * 0.6).toFixed(1)}s duration` : 'Locked'),
   },
@@ -198,10 +151,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
     description: 'Release a thunder bolt that damages nearby enemies.',
     icon: '⚡🌩️',
     maxLevel: MAX_ABILITY_LEVEL,
-<<<<<<< HEAD
-    unlockLevel: 45,
-=======
->>>>>>> origin/main
     costForLevel: rampCost(2, 1),
     effectLabel: (level) =>
       level > 0
@@ -223,7 +172,6 @@ export function getNewlyUnlockedAbilities(prevLevel: number, newLevel: number): 
 }
 
 =======
->>>>>>> origin/main
 export type AbilityLevels = Record<AbilityKey, number>;
 
 export function defaultAbilityLevels(): AbilityLevels {

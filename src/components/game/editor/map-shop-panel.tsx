@@ -86,14 +86,7 @@ export function MapShopPanel({
   React.useEffect(() => {
     setSettings(ensureShopSettings(mapDoc));
     setDirty(false);
-<<<<<<< HEAD
-    // Deliberately only these 3 fields, not the whole mapDoc object — mapDoc
-    // gets a new reference on every unrelated edit elsewhere in the map
-    // editor, and re-syncing on every one of those would wipe out unsaved
-    // local shop-panel edits. Same pattern used throughout map-editor.tsx.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-=======
->>>>>>> origin/main
+
   }, [mapDoc.name, mapDoc.shopSettings, mapDoc.weaponDef]);
 
   const patchItem = (id: string, partial: Partial<MapShopItem>) => {

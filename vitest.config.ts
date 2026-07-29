@@ -9,10 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-<<<<<<< HEAD
-      '@shared': path.resolve(__dirname, './shared'),
-=======
->>>>>>> origin/main
+
     },
   },
 });

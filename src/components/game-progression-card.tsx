@@ -7,101 +7,6 @@ import {
   ABILITY_DEFINITIONS,
 } from '@shared/ability-progression';
 import { getGameProgression, type GameProgressionSnapshot } from '@/lib/game-progression-actions';
-<<<<<<< HEAD
-=======
-import {
-  HealthIcon,
-  SpeedIcon,
-  JumpIcon,
-  EnergyIcon,
-  VisibilityIcon,
-  PunchIcon,
-  FlyIcon,
-  HookIcon,
-  BerserkIcon,
-  BulletIcon,
-  ThunderIcon,
-} from '@/components/ability-icons';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
-
-const ABILITY_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-  health: HealthIcon,
-  speed: SpeedIcon,
-  jump: JumpIcon,
-  energy: EnergyIcon,
-  visibility: VisibilityIcon,
-  punch: PunchIcon,
-  fly: FlyIcon,
-  hook: HookIcon,
-  berserk: BerserkIcon,
-  bullet: BulletIcon,
-  thunder: ThunderIcon,
-};
->>>>>>> origin/main
-
-/**
- * Read-only card for the in-game (match) level + power upgrades.
- * Separate from the website account level shown elsewhere on the profile —
- * upgrades can only be spent from the in-game menu (press M during a match).
- */
-export function GameProgressionCard({ userId }: { userId: string }) {
-  const [snap, setSnap] = useState<GameProgressionSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    getGameProgression(userId)
-      .then((res) => {
-        if (!cancelled) setSnap(res);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
-
-  if (loading) {
-    return (
-      <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-        <CardContent className="pt-5">
-          <p className="text-sm text-slate-400">Loading in-game stats…</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!snap) return null;
-
-  return (
-    <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-      <CardContent className="pt-5">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-<<<<<<< HEAD
-            <p className="text-[11px] font-bold tracking-widest text-amber-400/80 uppercase">
-              In-Game Level
-            </p>
-            <p className="text-3xl font-black text-white leading-none mt-1">{snap.level}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-[11px] font-bold tracking-widest text-sky-400/80 uppercase">
-              Skill Points
-            </p>
-            <p className="text-3xl font-black text-white leading-none mt-1">{snap.skillPoints}</p>
-          </div>
-        </div>
-
-        <div className="h-2 w-full rounded-full bg-black/30 overflow-hidden mb-1">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-amber-400 to-red-500"
-=======
             <p className="text-[11px] font-bold tracking-widest text-orange-400/80 uppercase">
               In-Game Level
             </p>
@@ -129,7 +34,6 @@ export function GameProgressionCard({ userId }: { userId: string }) {
         <div className="h-2 w-full rounded-full bg-black/30 overflow-hidden mb-1 relative">
           <div
             className="h-full rounded-full bg-gradient-to-r from-orange-400 to-red-500 animate-shimmer"
->>>>>>> origin/main
             style={{ width: `${Math.max(2, snap.percent)}%` }}
           />
         </div>
@@ -141,28 +45,6 @@ export function GameProgressionCard({ userId }: { userId: string }) {
           {ABILITY_KEYS.map((key) => {
             const def = ABILITY_DEFINITIONS[key];
             const lvl = snap.abilities[key] ?? 0;
-<<<<<<< HEAD
-            const locked = snap.level < def.unlockLevel;
-            return (
-              <div
-                key={key}
-                className={`rounded-lg border border-slate-700/40 bg-slate-900/40 p-2.5 flex items-center gap-2 ${locked ? 'opacity-50' : ''}`}
-              >
-                <span className="text-lg leading-none">{def.icon}</span>
-                <div className="min-w-0">
-                  <p className="text-[11px] font-bold text-white truncate">{def.name}</p>
-                  <p className="text-[10px] font-bold text-slate-400">
-                    {locked ? `🔒 Lv ${def.unlockLevel}` : `Lv ${lvl}/${def.maxLevel}`}
-                  </p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
-  );
-=======
             const IconComponent = ABILITY_ICON_MAP[key];
 
             return (
@@ -214,5 +96,4 @@ export function GameProgressionCard({ userId }: { userId: string }) {
      </CardContent>
    </Card>
  );
->>>>>>> origin/main
 }

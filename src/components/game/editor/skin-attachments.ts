@@ -725,11 +725,7 @@ export async function applySkinAttachments(
   const loadableBodies = bodyAtts.filter(
     (att) => !!resolveModelSrc(att.model, att.customModelUrl)
   );
-<<<<<<< HEAD
-  const bodySwapPending = loadableBodies.length > 0;
-=======
   let bodySwapPending = loadableBodies.length > 0;
->>>>>>> origin/main
   let bodySwapLoaded = false;
 
   for (const att of expanded) {
