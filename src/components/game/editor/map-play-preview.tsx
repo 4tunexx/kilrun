@@ -55,13 +55,9 @@ import {
   mapDocToSimTeleports,
   mapDocToWorldBounds,
   prepareDocForPlayTest,
-<<<<<<< HEAD
-} from './prefab-storage';
-=======
   getActivePlayMapIdForMode,
 } from './prefab-storage';
 import { loadMapPlayable } from './map-storage';
->>>>>>> origin/main
 import { loadPlayerAvatar, getMapPlayerAvatar, fitAvatarLikeEditor, avatarAuthoredScale } from './player-avatar';
 import { updateFollowCamera } from '../renderer/three-world';
 import { applySkinAttachments, tickSkinAttachments } from './skin-attachments';
@@ -221,16 +217,11 @@ export function MapPlayPreview({
   physOptsRef.current = physOpts;
   const resolvedTps = useMemo(() => {
     if (tpsViewOverride) return sanitizeTpsView(tpsViewOverride);
-<<<<<<< HEAD
-    return resolvePlatformTpsView({
-      modeMapOverride: doc.tpsView as TpsViewSettings | null | undefined,
-=======
     const deathrunId = getActivePlayMapIdForMode('deathrun');
     const deathrunDoc = deathrunId ? loadMapPlayable(deathrunId) : null;
     return resolvePlatformTpsView({
       modeMapOverride: doc.tpsView as TpsViewSettings | null | undefined,
       deathrunMapOverride: deathrunDoc?.tpsView ?? null,
->>>>>>> origin/main
     });
   }, [doc.tpsView, tpsViewOverride]);
   const tpsRef = useRef<TpsViewSettings>(resolvedTps);

@@ -232,6 +232,220 @@ export class DeathrunRoom extends Room<RoomState> {
       tryStartReload(player, Date.now());
     });
 
+    this.onMessage('activateAbility', (client, payload: { ability?: string } | undefined) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const now = Date.now();
+      if (!activateAbility(player, payload?.ability, now)) return;
+      if (payload?.ability === 'thunder') {
+        let thunderLevel = 0;
+        try {
+          thunderLevel = JSON.parse(player.abilityLevelsJson || '{}').thunder ?? 0;
+        } catch {
+          thunderLevel = 0;
+        }
+        const stats = getThunderStats(thunderLevel);
+        const radius = stats.radiusMeters || 0;
+        const damage = stats.damage || 0;
+        if (radius > 0 && damage > 0) {
+          for (const target of this.state.players.values()) {
+            if (target.sessionId === player.sessionId || !target.isAlive || target.hasFinished) continue;
+            const dx = target.x - player.x;
+            const dy = target.y - player.y;
+            if (Math.hypot(dx, dy) <= radius) {
+              this.damagePlayer(target, damage);
+            }
+          }
+        }
+      }
+    });
+
+    this.onMessage(
+      'loadCustomMap',
+      (
+        client,
+        data: {
+          platforms?: PlatformBlueprint[];
+          obstacles?: ObstacleBlueprint[];
+          finishes?: FinishZone[];
+          buttons?: ButtonZone[];
+          actions?: ActionZone[];
+          teleports?: TeleportZone[];
+          spawn?: SpawnPoint;
+          playerSpawns?: SpawnPoint[];
+          trapperSpawn?: SpawnPoint;
+          worldBounds?: WorldBounds;
+          modeSettings?: Record<string, unknown>;
+          combatSettings?: Record<string, unknown>;
+        }
+      ) => {
+        if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
+        // First push: any client may apply the cloud Active map (all clients fetch the same doc).
+        // After that: only host/admin can replace (anti-grief).
+        const isStaffOrHost =
+          this.adminSessions.has(client.sessionId) ||
+          client.sessionId === this.hostSessionId;
+        if (this.customMapLoaded && !isStaffOrHost) {
+          console.warn(
+            `[DeathrunRoom] loadCustomMap rejected for ${client.sessionId} (map already loaded; not host/admin)`
+          );
+          return;
+        }
+        this.bootstrapCustomMap(data, `client:${client.sessionId}`);
+      }
+    );
+
+    void fetchActiveMapPayload('deathrun').then((active) => {
+      if (!active || this.customMapLoaded) return;
+      this.bootstrapCustomMap(
+        active.payload as Parameters<DeathrunRoom['bootstrapCustomMap']>[0],
+        `server:${active.name}`
+      );
+    });
+
+    this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
+  }
+
+  /** Apply MAIN map payload from server fetch or client push (shared body). */
+  private bootstrapCustomMap(
+    data: {
+      platforms?: PlatformBlueprint[];
+      obstacles?: ObstacleBlueprint[];
+      finishes?: FinishZone[];
+      buttons?: ButtonZone[];
+      actions?: ActionZone[];
+      teleports?: TeleportZone[];
+      spawn?: SpawnPoint;
+      playerSpawns?: SpawnPoint[];
+      trapperSpawn?: SpawnPoint;
+      worldBounds?: WorldBounds;
+      modeSettings?: Record<string, unknown>;
+      combatSettings?: Record<string, unknown>;
+    },
+    source = 'client'
+  ) {
+    const platforms = data?.platforms;
+    if (!Array.isArray(platforms) || platforms.length === 0) return;
+    if (this.customMapLoaded && source.startsWith('server:')) return;
+
+    while (this.state.platforms.length > 0) this.state.platforms.pop();
+    this.state.platforms.push(...createFromBlueprints(platforms));
+
+    while (this.state.obstacles.length > 0) this.state.obstacles.pop();
+    const hazards = Array.isArray(data?.obstacles) ? data.obstacles : [];
+    if (hazards.length > 0) {
+      this.state.obstacles.push(...createObstaclesFromBlueprints(hazards));
+    }
+    this.obstacleTimers = this.state.obstacles.map(() => 0);
+    this.buttonArmRemaining.clear();
+    this.customMapLoaded = true;
+    this.platformMotion.clear();
+    this.matchElapsedMs = 0;
+
+    const settings = (data.modeSettings?.deathrun ?? data.modeSettings) as
+      | Record<string, unknown>
+      | undefined;
+    if (settings && typeof settings === 'object') {
+      if (typeof settings.warmupSec === 'number') {
+        this.lobbyCountdownMs = Math.max(0, settings.warmupSec) * 1000;
+      }
+      if (typeof settings.roundTimeSec === 'number') {
+        this.matchDurationMs = Math.max(30, settings.roundTimeSec) * 1000;
+      }
+      if (typeof settings.maxRunners === 'number') {
+        this.maxRunners = Math.max(1, Math.min(8, Math.floor(settings.maxRunners)));
+        this.maxClients = this.maxRunners;
+      }
+      if (typeof settings.trapperEnabled === 'boolean') {
+        this.trapperEnabled = settings.trapperEnabled;
+      }
+      if (typeof settings.livesPerRunner === 'number' && Number.isFinite(settings.livesPerRunner)) {
+        this.livesPerRunner = Math.max(0, Math.floor(settings.livesPerRunner));
+      }
+      if (typeof settings.trapCooldownSec === 'number' && Number.isFinite(settings.trapCooldownSec)) {
+        this.trapCooldownSec = Math.max(1, settings.trapCooldownSec);
+      }
+      if (typeof settings.checkpointRespawn === 'boolean') {
+        this.checkpointRespawn = settings.checkpointRespawn;
+      }
+    }
+
+    const cs = data?.combatSettings;
+    if (cs && typeof cs === 'object') {
+      this.combatPhysOpts = {
+        gravity: typeof cs.gravity === 'number' ? cs.gravity : undefined,
+        jumpVelocity: typeof cs.jumpVelocity === 'number' ? cs.jumpVelocity : undefined,
+        doubleJumpVelocity: typeof cs.doubleJumpVelocity === 'number' ? cs.doubleJumpVelocity : undefined,
+        doubleJumpEnabled: typeof cs.doubleJumpEnabled === 'boolean' ? cs.doubleJumpEnabled : undefined,
+        jumpCutMult: typeof cs.jumpCutMult === 'number' ? cs.jumpCutMult : undefined,
+        coyoteMs: typeof cs.coyoteMs === 'number' ? cs.coyoteMs : undefined,
+        jumpBufferMs: typeof cs.jumpBufferMs === 'number' ? cs.jumpBufferMs : undefined,
+        walkSpeed: typeof cs.walkSpeed === 'number' ? cs.walkSpeed : undefined,
+        sprintMult: typeof cs.sprintMult === 'number' ? cs.sprintMult : undefined,
+        crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
+        maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
+        apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+        wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
+        wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
+        wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
+        wallSlideGravMult: typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
+      };
+    }
+
+    this.customFinishes = Array.isArray(data?.finishes) ? data.finishes : [];
+    this.customButtons = Array.isArray(data?.buttons) ? data.buttons : [];
+    this.customActions = Array.isArray(data.actions) ? data.actions : [];
+    this.customTeleports = Array.isArray(data?.teleports) ? data.teleports : [];
+    if (Array.isArray(data.playerSpawns) && data.playerSpawns.length) {
+      this.customRunnerSpawns = data.playerSpawns.map((s) => ({ ...s })).slice(0, this.maxRunners);
+    } else if (data.spawn) {
+      this.customRunnerSpawns = [{ ...data.spawn }];
+    }
+    if (data.trapperSpawn) this.customTrapperSpawn = { ...data.trapperSpawn };
+    if (data.worldBounds) {
+      this.worldBounds = { ...data.worldBounds };
+    } else {
+      this.worldBounds = { ...DEFAULT_WORLD_BOUNDS };
+    }
+
+    this.state.courseStartX = this.customRunnerSpawns[0]?.x ?? SPAWN_X;
+    if (this.customFinishes.length > 0) {
+      this.state.courseFinishX = this.customFinishes[this.customFinishes.length - 1].x;
+    } else {
+      let maxX = this.state.courseStartX + 10;
+      for (const p of this.state.platforms) maxX = Math.max(maxX, p.x);
+      this.state.courseFinishX = maxX;
+    }
+
+    Array.from(this.state.players.values()).forEach((player, index) => {
+      player.hasCheckpoint = false;
+      this.applySpawnPosition(player, index);
+      player.vz = 0;
+    });
+
+    console.log(
+      `[DeathrunRoom] MAIN map loaded (${source}): ${platforms.length} platforms, ${hazards.length} hazards`
+    );
+  }
+
+  onAuth(_client: Client, options: JoinOptions): GameJoinClaims {
+    return authenticateJoin(options);
+  }
+
+  async onJoin(client: Client, options: JoinOptions) {
+    const claims = claimsFromAuth(client.auth, options);
+    if (!this.hostSessionId) this.hostSessionId = client.sessionId;
+    if (claims.isAdmin) this.adminSessions.add(client.sessionId);
+
+    const player = new PlayerState();
+    player.sessionId = client.sessionId;
+    player.userId = claims.userId || client.sessionId;
+    player.username =
+      claims.username || `Player${client.sessionId.slice(0, 4)}`;
+    player.avatarUrl = claims.avatarUrl || '';
+    const trusted = await fetchTrustedLoadout(player.userId);
+    applyLoadoutToPlayer(player, trusted ?? options);
+    applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
     applyAbilityLevelsToPlayer(player, trusted?.abilityLevels ?? null);
     this.applySpawnPosition(player, this.state.players.size);
     player.health = getMaxHealth(player);
@@ -483,6 +697,106 @@ export class DeathrunRoom extends Room<RoomState> {
       }
 
       applyPlatformCarry(player, scratch.supportPlatformId, platformDeltas);
+      tickActiveAbilityTimers(player, now);
+
+      applyMovement(
+        player,
+        input,
+        dtSeconds,
+        this.state.platforms,
+        scratch,
+        this.worldBounds,
+        this.combatPhysOpts
+      );
+
+      {
+        const { finishReloadIfDue } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+        finishReloadIfDue(player, now);
+      }
+
+      if (player.role === 'runner' && player.isAlive && !player.hasFinished) {
+        player.distance = Math.max(
+          player.distance,
+          Math.floor(Math.max(0, player.x - this.state.courseStartX))
+        );
+        for (const obstacle of this.state.obstacles) {
+          if (!isPlayerHitByObstacle(player, obstacle)) continue;
+          const hitKey = `${sessionId}:${obstacle.id}`;
+          const lastHit = this.lastObstacleHitAt.get(hitKey) ?? 0;
+          const cooldown =
+            obstacle.alwaysActive && obstacle.intervalMs > 0
+              ? obstacle.intervalMs
+              : OBSTACLE_HIT_COOLDOWN_MS;
+          if (now - lastHit < cooldown) continue;
+          this.lastObstacleHitAt.set(hitKey, now);
+          const amount =
+            obstacle.damage > 0 ? obstacle.damage : OBSTACLE_DAMAGE;
+          this.damagePlayer(player, amount);
+        }
+
+        // Checkpoint touch → save respawn
+        for (const platform of this.state.platforms) {
+          if (platform.kind !== 'checkpoint') continue;
+          const halfW = platform.width / 2 + PLAYER_RADIUS;
+          const halfD = platform.depth / 2 + PLAYER_RADIUS;
+          if (
+            Math.abs(player.x - platform.x) <= halfW &&
+            Math.abs(player.y - platform.y) <= halfD &&
+            player.z >= platform.z - 0.4 &&
+            player.z <= platform.z + 0.6
+          ) {
+            player.hasCheckpoint = true;
+            player.checkpointX = platform.x;
+            player.checkpointY = platform.y;
+            player.checkpointZ = platform.z;
+          }
+        }
+
+        if (this.isTouchingFinish(player)) {
+          player.hasFinished = true;
+        }
+
+        if (input.interactPressed) this.tryPressButtons(player, sessionId, now);
+        this.tryTriggerActions(player, sessionId, now, input.interactPressed);
+        this.tryTeleport(player, sessionId, now);
+      }
+
+      if (player.isAlive && player.z < VOID_Z) {
+        if (this.checkpointRespawn && player.hasCheckpoint) {
+          this.respawnAtCheckpoint(player);
+          // Consume a life if finite lives are configured.
+          if (this.livesPerRunner > 0) {
+            player.score = Math.max(0, player.score - 1);
+          }
+        } else {
+          if (player.isAlive) player.deaths = (player.deaths || 0) + 1;
+          player.health = 0;
+          player.isAlive = false;
+        }
+      }
+
+      if (player.role === 'trapper' && player.isAlive && input.shootPressed) {
+        if (player.weaponKind !== 'cosmetic') {
+          const lastShot = this.lastShotAt.get(sessionId) ?? 0;
+          const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
+          if (now - lastShot >= cooldown) {
+            const {
+              tryConsumeShotAmmo,
+            } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
+            if (tryConsumeShotAmmo(player, now)) {
+              this.lastShotAt.set(sessionId, now);
+              this.resolveTrapperShot(player);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  private resolveTrapperShot(trapper: PlayerState) {
+    if (trapper.weaponKind === 'cosmetic') return;
+    const range = trapper.weaponRange > 0 ? trapper.weaponRange : 14;
+    const damage = trapper.weaponDamage > 0 ? trapper.weaponDamage : 25;
     const berserkDamage = Math.max(damage, 999);
     const cone = trapper.weaponConeRadians > 0 ? trapper.weaponConeRadians : 0.18;
     // Pick the CLOSEST target inside the cone, not just the first one found

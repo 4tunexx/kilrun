@@ -17,6 +17,117 @@ export class InputManager {
   public joystick: DualJoystick;
 
   private lastAimAngle = 0;
+  private abilityWasDown = new Map<string, boolean>();
+
+  constructor(element: HTMLElement, private isMobile: boolean) {
+    this.keyboard = new KeyboardHandler();
+    // Bind mouse to the canvas host so free-look + pointer-lock work without RMB
+    this.mouse = new MouseHandler(isMobile ? window : element);
+    this.joystick = new DualJoystick(element);
+  }
+
+  public getMoveVector(): Vector2 {
+    if (this.isMobile) return this.joystick.getMoveVector();
+    return this.keyboard.getAxis();
+  }
+
+  /** `playerScreenPos` is only used on desktop, where aim = direction from the player's sprite to the cursor. */
+  public getAimAngle(playerScreenPos: Vector2): number {
+    if (this.isMobile) {
+      const aim = this.joystick.getAimVector();
+      if (aim.x !== 0 || aim.y !== 0) {
+        this.lastAimAngle = Math.atan2(aim.y, aim.x);
+      }
+      return this.lastAimAngle;
+    }
+
+    const cursor = this.mouse.getPosition();
+    this.lastAimAngle = Math.atan2(cursor.y - playerScreenPos.y, cursor.x - playerScreenPos.x);
+    return this.lastAimAngle;
+  }
+
+  public isShootPressed(): boolean {
+    return this.isMobile ? this.joystick.consumeShootPulse() : this.mouse.isFiring();
+  }
+
+  public isCrouchPressed(): boolean {
+    return (
+      this.keyboard.isPressed('control') ||
+      this.keyboard.isPressed('c')
+    );
+  }
+
+  public isInteractPressed(): boolean {
+    return this.keyboard.isPressed('e') || this.joystick.isActionHeld();
+  }
+
+  public consumeInteractPulse(): boolean {
+    return this.joystick.consumeActionPulse();
+  }
+
+  public isJumpPressed(): boolean {
+    return this.keyboard.isPressed(' ') || this.joystick.isJumpHeld();
+  }
+
+  public isSprintPressed(): boolean {
+    return this.keyboard.isPressed('shift') || this.joystick.isSprintHeld();
+  }
+
+  public isAttackPressed(): boolean {
+    return this.isMobile
+      ? this.joystick.consumeAttackPulse() || this.joystick.consumeShootPulse()
+      : this.mouse.isFiring() || this.joystick.consumeAttackPulse();
+  }
+
+  /**
+   * Optional keyboard camera turn. E is reserved for Interact — do not yaw with E.
+   * Primary look is mouse; Q is an accessibility fallback only.
+   */
+  public getCameraTurnIntent(): number {
+    let turn = 0;
+    if (this.keyboard.isPressed('q')) turn -= 1;
+    return turn;
+  }
+
+  public consumeMouseLookDeltaX(): number {
+    return this.mouse.consumeLookDeltaX();
+  }
+
+  public consumeMouseLookDeltaY(): number {
+    return this.mouse.consumeLookDeltaY();
+  }
+
+  /**
+   * GTA-style aim focus: hold RMB (desktop) or right look-stick (mobile).
+   * While aiming: body faces camera, WASD strafes, crosshair on.
+   * Released: free orbit look, body faces walk direction.
+   */
+  public isAimHeld(): boolean {
+    if (this.isMobile) return this.joystick.isAiming();
+    return this.mouse.isRightHeld();
+  }
+
+  /** Reload (R). Edge-triggered via consumeReloadPulse preferred. */
+  public isReloadPressed(): boolean {
+    return this.keyboard.isPressed('r');
+  }
+
+  private reloadWasDown = false;
+  public consumeReloadPulse(): boolean {
+    const down = this.isReloadPressed();
+    const edge = down && !this.reloadWasDown;
+    this.reloadWasDown = down;
+    return edge;
+  }
+
+  /** @deprecated Use isAimHeld — kept for callers that gated mobile crosshair. */
+  public isAiming(): boolean {
+    return this.isAimHeld();
+  }
+
+  public isCameraLookHeld(): boolean {
+    return true;
+  }
 
   public consumeAbilityPulse(ability: 'hook' | 'berserk' | 'bullet' | 'thunder' | 'visibility' | 'fly'): string | null {
     const key = this.getAbilityKey(ability);
