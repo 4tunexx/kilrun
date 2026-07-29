@@ -20,6 +20,10 @@ export async function fetchTrustedLoadout(userId: string): Promise<{
     maxEnergyBonus?: number;
     punchDamageMultiplier?: number;
   };
+<<<<<<< HEAD
+=======
+  abilityLevels?: Record<string, number>;
+>>>>>>> origin/main
 } | null> {
   const base = resolveWebAppUrl();
   const secret = (process.env.GAME_SERVER_ADMIN_SECRET || '').trim();
@@ -45,12 +49,20 @@ export async function fetchTrustedLoadout(userId: string): Promise<{
         maxEnergyBonus?: number;
         punchDamageMultiplier?: number;
       };
+<<<<<<< HEAD
+=======
+      abilityLevels?: Record<string, number>;
+>>>>>>> origin/main
     };
     if (!data?.ok) return null;
     return {
       equippedSkinsJson: data.equippedSkinsJson,
       weaponCombat: data.weaponCombat,
       abilityStatBonuses: data.abilityStatBonuses,
+<<<<<<< HEAD
+=======
+      abilityLevels: data.abilityLevels,
+>>>>>>> origin/main
     };
   } catch {
     return null;

@@ -2225,7 +2225,11 @@ function createEmptyCompetitiveMap(name: string): MapDocument {
     position: pos,
     rotation: [0, team === 'a' ? 0 : 180, 0],
     scale: [1, 1, 1],
+<<<<<<< HEAD
     color: team === 'a' ? '#38bdf8' : '#f97316',
+=======
+    color: team === 'a' ? '#38bdf8' : '#ef4444',
+>>>>>>> origin/main
     animation: defaultAnimation(),
   });
   return {

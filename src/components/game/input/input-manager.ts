@@ -17,6 +17,10 @@ export class InputManager {
   public joystick: DualJoystick;
 
   private lastAimAngle = 0;
+<<<<<<< HEAD
+=======
+  private abilityWasDown = new Map<string, boolean>();
+>>>>>>> origin/main
 
   constructor(element: HTMLElement, private isMobile: boolean) {
     this.keyboard = new KeyboardHandler();
@@ -127,4 +131,37 @@ export class InputManager {
   public isCameraLookHeld(): boolean {
     return true;
   }
+<<<<<<< HEAD
+=======
+
+  public consumeAbilityPulse(ability: 'hook' | 'berserk' | 'bullet' | 'thunder' | 'visibility' | 'fly'): string | null {
+    const key = this.getAbilityKey(ability);
+    const down = this.keyboard.isPressed(key);
+    const wasDown = this.abilityWasDown.get(ability) ?? false;
+    this.abilityWasDown.set(ability, down);
+
+    if (!down || wasDown) {
+      return null;
+    }
+
+    return ability;
+  }
+
+  private getAbilityKey(ability: 'hook' | 'berserk' | 'bullet' | 'thunder' | 'visibility' | 'fly'): string {
+    switch (ability) {
+      case 'hook':
+        return 'h';
+      case 'berserk':
+        return 'b';
+      case 'bullet':
+        return 'u';
+      case 'thunder':
+        return 't';
+      case 'visibility':
+        return 'z';
+      case 'fly':
+        return 'x';
+    }
+  }
+>>>>>>> origin/main
 }

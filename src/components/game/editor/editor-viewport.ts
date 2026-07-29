@@ -1359,7 +1359,11 @@ export function createEditorViewport(
               : ent.kind === 'spawn_team_a'
                 ? '#38bdf8'
                 : ent.kind === 'spawn_team_b'
+<<<<<<< HEAD
                   ? '#f97316'
+=======
+                  ? '#ef4444'
+>>>>>>> origin/main
                   : ent.kind === 'health_floor'
                     ? '#34d399'
                     : ent.kind === 'revive_pad'
@@ -1706,7 +1710,11 @@ export function createEditorViewport(
                     : kind === 'spawn_team_a'
                       ? '#38bdf8'
                       : kind === 'spawn_team_b'
+<<<<<<< HEAD
                         ? '#f97316'
+=======
+                        ? '#ef4444'
+>>>>>>> origin/main
                         : kind === 'health_floor'
                           ? '#34d399'
                           : kind === 'revive_pad'

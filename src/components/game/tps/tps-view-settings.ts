@@ -1,8 +1,13 @@
 /**
  * Global 3rd-person view tuning — camera boom, crosshair, player framing.
  * Stored in localStorage so Play Test + live matches share one feel.
+<<<<<<< HEAD
  * Maps may embed `MapDocument.tpsView`. Deathrun MAIN map settings win for
  * every game mode (Horde / Competitive / Deathrun) when present.
+=======
+ * Each mode (Deathrun / Horde / Competitive) can have its own `MapDocument.tpsView`,
+ * which overrides the global settings for that mode only.
+>>>>>>> origin/main
  */
 
 export const TPS_VIEW_STORAGE_KEY = 'kilrun.tpsView.v1';
@@ -166,16 +171,37 @@ export function resolveTpsView(mapOverride?: unknown | null): TpsViewSettings {
 }
 
 /**
+<<<<<<< HEAD
  * Platform-wide camera for any match mode. Each mode uses its OWN map's
  * tpsView if authored, falling back to the global default otherwise —
  * independent per mode (Deathrun/Horde/Competitive can each have their own
  * camera feel; that's the whole point of being able to copy one mode's
  * settings and paste them into another instead of them all being forced
  * to match Deathrun's).
+=======
+ * Platform-wide camera for any match mode.
+ * Respects per-mode map settings first (Horde/Competitive/Deathrun), falls back to global localStorage.
+>>>>>>> origin/main
  */
 export function resolvePlatformTpsView(opts?: {
   /** Active map for the mode being played (Horde / Comp / Deathrun). */
   modeMapOverride?: unknown | null;
+<<<<<<< HEAD
 }): TpsViewSettings {
   return resolveTpsView(opts?.modeMapOverride ?? null);
+=======
+  /** Deathrun MAIN map `tpsView` — used only if no mode-specific setting. */
+  deathrunMapOverride?: unknown | null;
+}): TpsViewSettings {
+  // Priority: current mode's map settings > Deathrun MAIN > global localStorage
+  const modeOverride = opts?.modeMapOverride;
+  if (modeOverride && typeof modeOverride === 'object') {
+    return sanitizeTpsView(modeOverride);
+  }
+  const deathrun = opts?.deathrunMapOverride;
+  if (deathrun && typeof deathrun === 'object') {
+    return sanitizeTpsView(deathrun);
+  }
+  return loadTpsViewSettings();
+>>>>>>> origin/main
 }

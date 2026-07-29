@@ -37,6 +37,10 @@ import {
 } from './constants.js';
 import { findSupportPlatform, resolveSolidCollisions } from './platforms.js';
 import { getMaxEnergyFor } from './ability-stats.js';
+<<<<<<< HEAD
+=======
+import { isFlyActive } from './active-abilities.js';
+>>>>>>> origin/main
 
 export interface PlayerInput {
   moveX: number; // -1..1, camera-relative forward/back intent (world X after client rotates)
@@ -272,6 +276,7 @@ export function applyMovement(
   let grounded = !!support && player.vz <= 0.2;
   player.isGrounded = grounded;
 
+<<<<<<< HEAD
   // Soft ground glue: stepped ramp pads change topZ in small increments.
   // Hard-assigning player.z each tick (or absorbing the full delta in one
   // frame) made walking ramps feel like a bumpy road; the client camera
@@ -301,6 +306,47 @@ export function applyMovement(
       scratch.jumpCount = 1;
     }
     scratch.coyoteMs = Math.max(0, scratch.coyoteMs - dtSeconds * 1000);
+=======
+  const flyActive = isFlyActive(player, Date.now());
+  if (flyActive) {
+    player.isGrounded = false;
+    player.vz = 0;
+    player.z += (input.jumpPressed ? 1.4 : input.crouch ? -1.4 : 0) * dtSeconds;
+    scratch.coyoteMs = 0;
+    scratch.jumpCount = 0;
+    scratch.jumpBufferMs = 0;
+  } else {
+    // Soft ground glue: stepped ramp pads change topZ in small increments.
+    // Hard-assigning player.z each tick (or absorbing the full delta in one
+    // frame) made walking ramps feel like a bumpy road; the client camera
+    // amplified those hops. Rate-limit while already grounded; allow a larger
+    // snap only on fresh landings.
+    if (grounded && support) {
+      const delta = support.topZ - player.z;
+      if (!wasGroundedLastTick) {
+        if (delta > 0) player.z += Math.min(delta, LAND_STEP_CLIMB);
+        else if (delta < 0) player.z += Math.max(delta, -LAND_STEP_DESCEND);
+        else player.z = support.topZ;
+      } else {
+        const maxStep = Math.max(GROUND_FOLLOW_SPEED * Math.max(dtSeconds, 1 / 240), 0.002);
+        if (Math.abs(delta) <= 0.0015) {
+          player.z = support.topZ;
+        } else if (delta > 0) {
+          player.z += Math.min(delta, Math.min(maxStep, LAND_STEP_CLIMB));
+        } else {
+          player.z += Math.max(delta, -Math.min(maxStep, LAND_STEP_DESCEND));
+        }
+      }
+      player.vz = 0;
+      scratch.coyoteMs = effCoyoteMs;
+      scratch.jumpCount = 0;
+    } else {
+      if (scratch.jumpCount === 0 && scratch.coyoteMs <= 0) {
+        scratch.jumpCount = 1;
+      }
+      scratch.coyoteMs = Math.max(0, scratch.coyoteMs - dtSeconds * 1000);
+    }
+>>>>>>> origin/main
   }
 
   // Jump pads: launch as soon as we would be standing on them.

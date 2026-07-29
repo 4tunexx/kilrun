@@ -110,11 +110,14 @@ export async function upgradeGameAbility(
   const currentLevel = levels[ability];
   if (currentLevel >= def.maxLevel) throw new Error('Ability already at max level');
 
+<<<<<<< HEAD
   const accountLevel = getGameLevelProgress(user.gameXp ?? 0).level;
   if (accountLevel < def.unlockLevel) {
     throw new Error(`${def.name} unlocks at level ${def.unlockLevel}`);
   }
 
+=======
+>>>>>>> origin/main
   const cost = def.costForLevel(currentLevel);
   const skillPoints = Math.max(0, user.gameSkillPoints ?? 0);
   if (skillPoints < cost) throw new Error('Not enough Skill Points');

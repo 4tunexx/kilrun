@@ -6,8 +6,11 @@ import { Button } from '@/components/ui/button';
 import {
   ABILITY_KEYS,
   ABILITY_DEFINITIONS,
+<<<<<<< HEAD
   getNewlyUnlockedAbilities,
   type AbilityDefinition,
+=======
+>>>>>>> origin/main
   type AbilityKey,
 } from '@shared/ability-progression';
 import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
@@ -49,6 +52,7 @@ export function GameMenu({
   const skillPoints = progression?.skillPoints ?? 0;
 
   return (
+<<<<<<< HEAD
     <div className="absolute inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-md pointer-events-auto p-4">
       <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.09] to-white/[0.02] backdrop-blur-2xl shadow-2xl shadow-black/50">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-gradient-to-b from-[#0f1724]/95 to-[#0f1724]/80 backdrop-blur-xl px-6 py-4">
@@ -58,6 +62,17 @@ export function GameMenu({
               <img src={avatarUrl} alt={username} className="w-11 h-11 rounded-full object-cover border-2 border-white/20 shadow-lg" />
             ) : (
               <div className="w-11 h-11 rounded-full bg-white/10 border-2 border-white/20" />
+=======
+    <div className="absolute inset-0 z-[260] flex items-center justify-center bg-black/75 backdrop-blur-sm pointer-events-auto p-4">
+      <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/15 bg-[#0f1724]/95 shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-[#0f1724]/95 px-6 py-4">
+          <div className="flex items-center gap-3">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt={username} className="w-11 h-11 rounded-full object-cover border-2 border-white/15" />
+            ) : (
+              <div className="w-11 h-11 rounded-full bg-white/10 border-2 border-white/15" />
+>>>>>>> origin/main
             )}
             <div>
               <p className="text-white font-black text-lg leading-tight">{username}</p>
@@ -101,6 +116,7 @@ export function GameMenu({
             const lvl = progression?.abilities?.[key] ?? 0;
             const atMax = lvl >= def.maxLevel;
             const cost = def.costForLevel(lvl);
+<<<<<<< HEAD
             const locked = level < def.unlockLevel;
             const canAfford = !locked && !atMax && skillPoints >= cost;
             return (
@@ -117,6 +133,14 @@ export function GameMenu({
                     🔒 Level {def.unlockLevel}
                   </div>
                 )}
+=======
+            const canAfford = !atMax && skillPoints >= cost;
+            return (
+              <div
+                key={key}
+                className="relative rounded-xl border border-white/10 bg-white/5 p-4 flex flex-col gap-2"
+              >
+>>>>>>> origin/main
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-xl leading-none">{def.icon}</span>
@@ -141,15 +165,24 @@ export function GameMenu({
                 </div>
                 <p className="text-[11px] text-white/50">{def.description}</p>
                 <div className="flex items-center justify-between mt-1">
+<<<<<<< HEAD
                   <p className="text-[12px] font-bold text-sky-300">
                     {locked ? `🔒 Unlocks at Level ${def.unlockLevel}` : def.effectLabel(lvl)}
                   </p>
                   {!locked && !atMax && (
+=======
+                  <p className="text-[12px] font-bold text-sky-300">{def.effectLabel(lvl)}</p>
+                  {!atMax && (
+>>>>>>> origin/main
                     <p className="text-[10px] font-bold text-white/35">
                       Next: {cost} SP
                     </p>
                   )}
+<<<<<<< HEAD
                   {!locked && atMax && <p className="text-[10px] font-black text-amber-300">MAX</p>}
+=======
+                  {atMax && <p className="text-[10px] font-black text-amber-300">MAX</p>}
+>>>>>>> origin/main
                 </div>
                 <div className="h-1.5 w-full rounded-full bg-black/40 overflow-hidden mt-1">
                   <div
@@ -173,6 +206,7 @@ export function GameMenu({
 }
 
 /**
+<<<<<<< HEAD
  * Nice popup shown when the player's in-game level just went up — lists any
  * abilities that just became unlockable in that jump (e.g. hit level 10,
  * "Invisibility" is now spendable).
@@ -227,6 +261,8 @@ export function LevelUpPopup({
 }
 
 /**
+=======
+>>>>>>> origin/main
  * Hook that owns fetching/upgrading in-game progression for the local
  * player, plus whether a "+" level-up indicator should show on the HUD.
  */
@@ -235,6 +271,7 @@ export function useGameProgression(userId: string | null | undefined) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [upgrading, setUpgrading] = useState<AbilityKey | null>(null);
+<<<<<<< HEAD
   const [levelUpEvent, setLevelUpEvent] = useState<{
     fromLevel: number;
     toLevel: number;
@@ -260,11 +297,16 @@ export function useGameProgression(userId: string | null | undefined) {
     [userId]
   );
 
+=======
+  const [, startTransition] = useTransition();
+
+>>>>>>> origin/main
   const refresh = React.useCallback(() => {
     if (!userId) return;
     setLoading(true);
     import('@/lib/game-progression-actions')
       .then(({ getGameProgression }) => getGameProgression(userId))
+<<<<<<< HEAD
       .then((snap) => {
         setProgression(snap);
         checkLevelUp(snap);
@@ -272,6 +314,12 @@ export function useGameProgression(userId: string | null | undefined) {
       .catch(() => setError('Could not load progression'))
       .finally(() => setLoading(false));
   }, [userId, checkLevelUp]);
+=======
+      .then((snap) => setProgression(snap))
+      .catch(() => setError('Could not load progression'))
+      .finally(() => setLoading(false));
+  }, [userId]);
+>>>>>>> origin/main
 
   useEffect(() => {
     refresh();
@@ -284,10 +332,14 @@ export function useGameProgression(userId: string | null | undefined) {
     startTransition(() => {
       import('@/lib/game-progression-actions')
         .then(({ upgradeGameAbility }) => upgradeGameAbility(userId, ability))
+<<<<<<< HEAD
         .then((snap) => {
           setProgression(snap);
           checkLevelUp(snap);
         })
+=======
+        .then((snap) => setProgression(snap))
+>>>>>>> origin/main
         .catch((err) => setError(err instanceof Error ? err.message : 'Upgrade failed'))
         .finally(() => setUpgrading(null));
     });
@@ -295,6 +347,7 @@ export function useGameProgression(userId: string | null | undefined) {
 
   const hasUnspentPoints = (progression?.skillPoints ?? 0) > 0;
 
+<<<<<<< HEAD
   return {
     progression,
     loading,
@@ -306,4 +359,7 @@ export function useGameProgression(userId: string | null | undefined) {
     levelUpEvent,
     dismissLevelUp: () => setLevelUpEvent(null),
   };
+=======
+  return { progression, loading, error, upgrading, refresh, upgrade, hasUnspentPoints };
+>>>>>>> origin/main
 }

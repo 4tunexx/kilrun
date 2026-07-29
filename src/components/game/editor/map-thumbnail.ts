@@ -74,6 +74,7 @@ export async function renderMapThumbnail(
 
     let mesh: THREE.Mesh;
     if (isSpawn) {
+<<<<<<< HEAD
       mesh = new THREE.Mesh(
         ent.kind === 'finish' ? box : sphere,
         new THREE.MeshStandardMaterial({
@@ -89,6 +90,37 @@ export async function renderMapThumbnail(
               : ent.kind === 'spawn_trapper'
                 ? '#7f1d1d'
                 : '#14532d',
+=======
+      const spawnColor =
+        ent.kind === 'finish'
+          ? '#fbbf24'
+          : ent.kind === 'spawn_trapper'
+            ? '#ef4444'
+            : ent.kind === 'spawn_monster'
+              ? '#e11d48'
+              : ent.kind === 'spawn_team_a'
+                ? '#38bdf8'
+                : ent.kind === 'spawn_team_b'
+                  ? '#ef4444'
+                  : '#22c55e';
+      const spawnEmissive =
+        ent.kind === 'finish'
+          ? '#b45309'
+          : ent.kind === 'spawn_trapper'
+            ? '#7f1d1d'
+            : ent.kind === 'spawn_monster'
+              ? '#7f1d1d'
+              : ent.kind === 'spawn_team_a'
+                ? '#0c4a6e'
+                : ent.kind === 'spawn_team_b'
+                  ? '#7f1d1d'
+                  : '#14532d';
+      mesh = new THREE.Mesh(
+        ent.kind === 'finish' ? box : sphere,
+        new THREE.MeshStandardMaterial({
+          color: spawnColor,
+          emissive: spawnEmissive,
+>>>>>>> origin/main
           emissiveIntensity: 0.35,
         })
       );

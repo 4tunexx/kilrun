@@ -31,6 +31,10 @@ export class PlayerState extends Schema {
   @type('boolean') isGrounded = true;
   @type('boolean') isSprinting = false;
   @type('boolean') isReady = false;
+<<<<<<< HEAD
+=======
+  @type('boolean') isInvisible = false;
+>>>>>>> origin/main
   /** Last checkpoint touch (sim space). 0 = unset. */
   @type('number') checkpointX = 0;
   @type('number') checkpointY = 0;
@@ -96,6 +100,16 @@ export class PlayerState extends Schema {
   @type('number') abilityJumpMult = 1;
   @type('number') abilityMaxEnergyBonus = 0;
   @type('number') abilityPunchDamageMult = 1;
+<<<<<<< HEAD
+=======
+  @type('string') abilityLevelsJson = '{}';
+  @type('number') abilityVisibilityEndsAt = 0;
+  @type('number') abilityFlyEndsAt = 0;
+  @type('number') abilityHookEndsAt = 0;
+  @type('number') abilityBerserkEndsAt = 0;
+  @type('number') abilityBulletEndsAt = 0;
+  @type('number') abilityThunderEndsAt = 0;
+>>>>>>> origin/main
 }
 
 /** Solid walkable surface for the shared platformer physics. */

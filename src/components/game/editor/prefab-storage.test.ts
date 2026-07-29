@@ -88,6 +88,7 @@ describe('mapDocToSimPlatforms', () => {
     expect(pads.length).toBe(1);
   });
 
+<<<<<<< HEAD
   it('never makes a lone spawn marker solid, even via the no-explicit-platforms fallback', () => {
     // A brand-new map: just a Start marker, no floor/platform placed yet —
     // matches how placeAt() actually creates a Start entity (no model set).
@@ -151,6 +152,8 @@ describe('mapDocToSimPlatforms', () => {
     }
   });
 
+=======
+>>>>>>> origin/main
   it('exports floors and solid props with height', () => {
     const doc = baseDoc([
       {

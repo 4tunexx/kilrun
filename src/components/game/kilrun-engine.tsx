@@ -23,8 +23,12 @@ import {
   WORLD_HEIGHT,
 } from './utils/constants';
 import { HUD } from './ui/hud';
+<<<<<<< HEAD
 import { GameMenu, LevelUpPopup, useGameProgression } from './ui/game-menu';
 import { Scoreboard } from './ui/scoreboard';
+=======
+import { GameMenu, useGameProgression } from './ui/game-menu';
+>>>>>>> origin/main
 import { PauseMenu, useGameFullscreen } from './ui/pause-menu';
 import { LobbyOverlay } from './modes/deathrun/lobby-overlay';
 import { CountdownOverlay } from './modes/deathrun/countdown-overlay';
@@ -111,6 +115,10 @@ export default function KilrunEngine({
   const hostRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const pausedRef = useRef(false);
+<<<<<<< HEAD
+=======
+  const gameMenuOpenRef = useRef(false);
+>>>>>>> origin/main
   const roomName: GameRoomName =
     mode === 'competitive'
       ? competitiveQueue === 'ranked'
@@ -149,7 +157,13 @@ export default function KilrunEngine({
   const [assetsReady, setAssetsReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
+<<<<<<< HEAD
   const [scoreboardOpen, setScoreboardOpen] = useState(false);
+=======
+  useEffect(() => {
+    gameMenuOpenRef.current = gameMenuOpen;
+  }, [gameMenuOpen]);
+>>>>>>> origin/main
   const gameProgression = useGameProgression(joinOptions.userId);
   useEffect(() => {
     if (room.phase === 'results') gameProgression.refresh();
@@ -208,6 +222,10 @@ export default function KilrunEngine({
 
         const applied = resolvePlatformTpsView({
           modeMapOverride: cloud?.document?.tpsView ?? null,
+<<<<<<< HEAD
+=======
+          deathrunMapOverride: deathrunTpsRef.current,
+>>>>>>> origin/main
         });
         tpsRef.current = applied;
         setTpsHud(applied);
@@ -218,6 +236,10 @@ export default function KilrunEngine({
         const localDeathrun = localDeathrunId ? loadMapPlayable(localDeathrunId) : null;
         deathrunTpsRef.current = localDeathrun?.tpsView ?? null;
         const applied = resolvePlatformTpsView({
+<<<<<<< HEAD
+=======
+          deathrunMapOverride: deathrunTpsRef.current,
+>>>>>>> origin/main
         });
         tpsRef.current = applied;
         setTpsHud(applied);
@@ -332,10 +354,17 @@ export default function KilrunEngine({
 
   useEffect(() => {
     pausedRef.current = paused || editorOpen;
+<<<<<<< HEAD
     if (paused || editorOpen || gameMenuOpen || scoreboardOpen) {
       if (document.pointerLockElement) document.exitPointerLock?.();
     }
   }, [paused, editorOpen, gameMenuOpen, scoreboardOpen]);
+=======
+    if (paused || editorOpen) {
+      if (document.pointerLockElement) document.exitPointerLock?.();
+    }
+  }, [paused, editorOpen]);
+>>>>>>> origin/main
 
   useEffect(() => {
     const onTps = (ev: Event) => {
@@ -344,6 +373,10 @@ export default function KilrunEngine({
       // Live editor saves still apply, but Deathrun MAIN map override stays on top.
       const clean = resolvePlatformTpsView({
         modeMapOverride: detail,
+<<<<<<< HEAD
+=======
+        deathrunMapOverride: deathrunTpsRef.current,
+>>>>>>> origin/main
       });
       tpsRef.current = clean;
       setTpsHud(clean);
@@ -375,6 +408,7 @@ export default function KilrunEngine({
     return () => window.removeEventListener('keydown', onKey);
   }, [editorOpen, paused]);
 
+<<<<<<< HEAD
   // Scoreboard: classic FPS hold-Tab pattern (show while held, hide on release).
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
@@ -396,6 +430,8 @@ export default function KilrunEngine({
     };
   }, [editorOpen, paused, gameMenuOpen]);
 
+=======
+>>>>>>> origin/main
   useEffect(() => {
     if (!cloudReady) return;
     const hostElement = hostRef.current;
@@ -458,6 +494,10 @@ export default function KilrunEngine({
         }
         const applied = resolvePlatformTpsView({
           modeMapOverride: playDoc.tpsView ?? null,
+<<<<<<< HEAD
+=======
+          deathrunMapOverride: deathrunTpsRef.current,
+>>>>>>> origin/main
         });
         tpsRef.current = applied;
         setTpsHud(applied);
@@ -770,6 +810,19 @@ export default function KilrunEngine({
             localView?.playWeaponReloadClip();
           }
         }
+<<<<<<< HEAD
+=======
+        const abilityPulse =
+          inputManager.consumeAbilityPulse('hook') ??
+          inputManager.consumeAbilityPulse('berserk') ??
+          inputManager.consumeAbilityPulse('bullet') ??
+          inputManager.consumeAbilityPulse('thunder') ??
+          inputManager.consumeAbilityPulse('visibility') ??
+          inputManager.consumeAbilityPulse('fly');
+        if (abilityPulse && !gameMenuOpenRef.current && localSessionId && localState) {
+          connectionRef.current?.sendActivateAbility(abilityPulse);
+        }
+>>>>>>> origin/main
         const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
         const localWep = localSessionId ? playersRef.current.get(localSessionId) : undefined;
         const fireMode = (localWep?.weaponFireMode || 'semi') as string;
@@ -1105,6 +1158,7 @@ export default function KilrunEngine({
           onUpgrade={gameProgression.upgrade}
         />
 
+<<<<<<< HEAD
         {!paused && !editorOpen && (
           <LevelUpPopup
             event={gameProgression.levelUpEvent}
@@ -1118,6 +1172,8 @@ export default function KilrunEngine({
           localSessionIdRef={localSessionRef}
         />
 
+=======
+>>>>>>> origin/main
         {!paused && !editorOpen && !gameMenuOpen && gameProgression.hasUnspentPoints && (
           <div className="absolute top-3 right-16 pointer-events-auto z-[200]">
             <button
