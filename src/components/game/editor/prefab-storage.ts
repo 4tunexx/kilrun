@@ -431,11 +431,15 @@ export function stairEntityToSimPads(stairs: EditorEntity, steps = 18): SimPlatf
   const run = Math.max(1.2, foot[2] * Math.abs(stairs.scale[2]));
   const rise = Math.max(0.6, foot[1] * Math.abs(stairs.scale[1]));
   const width = Math.max(0.8, foot[0] * Math.abs(stairs.scale[0]));
-  // Fixed step counts break on tall/steep ramps: e.g. 14 steps over a 12-unit
-  // rise is ~0.86 per step, above LAND_STEP_CLIMB (0.75) — the server can't
-  // smoothly climb that seam, so the player visibly catches/bounces on it.
-  // Scale steps to the actual rise (with margin under the tolerance) instead
-  // of trusting a fixed count to be enough for whatever size prop this is.
+  // Fixed step counts break on tall/steep stairs: e.g. 14 steps over a
+  // 12-unit rise is ~0.86 per step, above LAND_STEP_CLIMB (0.75) — the
+  // server can't smoothly climb/descend that seam. Scale up only when the
+  // requested/default count would leave steps too tall — a named "stairs"
+  // catalog prop is visually already discrete steps (not a smooth ramp), so
+  // there's no benefit to subdividing further than that once each step is
+  // already climbable in one motion; unlike rampEntityToSimPads (hand-tilted
+  // solids meant to look like a continuous slope), this doesn't need the
+  // extra visual-smoothness margin.
   const targetStepRise = LAND_STEP_CLIMB * 0.6;
   const n = Math.max(4, Math.min(64, Math.round(Math.max(steps, rise / targetStepRise))));
   const stepRun = run / n;
@@ -542,18 +546,22 @@ export function rampEntityToSimPads(e: EditorEntity, steps = 24): SimPlatformBlu
   else if (mat === 'water') kind = 'water';
   else if (mat === 'sand') kind = 'sand';
 
-  // Fixed step counts break on tall/steep ramps: e.g. 24 steps over a
-  // 20-unit rise is ~0.83 per step, above LAND_STEP_CLIMB (0.75) — the
-  // server can't smoothly climb that seam, so the player visibly
-  // catches/bounces walking up (or down) it. Scale steps to the ramp's
-  // ACTUAL rise (from its true end-to-end height, not just its run
-  // length) instead of trusting a fixed count to be enough for whatever
-  // size/angle this particular block is.
+  // Two distinct concerns, both fixed by more/thinner steps:
+  // 1. Fixed step counts break on tall/steep ramps: e.g. 24 steps over a
+  //    20-unit rise is ~0.83 per step, above LAND_STEP_CLIMB (0.75) — the
+  //    server can't smoothly climb/descend that seam in one motion.
+  // 2. Even well under that tolerance, a ramp is approximated as a
+  //    staircase of small FLAT shelves, not a true continuous slope —
+  //    within any one shelf's footprint the player floats slightly above
+  //    the visual ramp mesh for the first half and sinks slightly below
+  //    it (legs clipping in) for the second half. Separate effect from
+  //    #1; needs steps thin enough to be visually imperceptible, not
+  //    just under the climb-tolerance.
   const [, yAtLowEnd] = rotateLocalXYZ([0, halfY, -halfZ], rotDeg);
   const [, yAtHighEnd] = rotateLocalXYZ([0, halfY, halfZ], rotDeg);
   const totalRise = Math.abs(yAtHighEnd - yAtLowEnd);
-  const targetStepRise = LAND_STEP_CLIMB * 0.6;
-  const n = Math.max(4, Math.min(64, Math.round(Math.max(steps, totalRise / targetStepRise))));
+  const targetStepRise = Math.min(LAND_STEP_CLIMB * 0.6, 0.2);
+  const n = Math.max(4, Math.min(120, Math.round(Math.max(steps, totalRise / targetStepRise))));
 
   const stepDepth = (halfZ * 2) / n;
   const pads: SimPlatformBlueprint[] = [];
