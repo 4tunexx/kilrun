@@ -88,6 +88,69 @@ describe('mapDocToSimPlatforms', () => {
     expect(pads.length).toBe(1);
   });
 
+  it('never makes a lone spawn marker solid, even via the no-explicit-platforms fallback', () => {
+    // A brand-new map: just a Start marker, no floor/platform placed yet —
+    // matches how placeAt() actually creates a Start entity (no model set).
+    const doc = baseDoc([
+      {
+        id: 'start1',
+        name: 'Start',
+        kind: 'start',
+        layerId: 'l1',
+        position: [0, 1, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    // The fallback DOES still invent a small landing pad under the spawn
+    // point (so you don't fall through the void on a totally empty map) —
+    // that's fine and intended. What must NOT happen is the marker itself
+    // becoming a solid collision box.
+    for (const pad of pads) {
+      expect(pad.width).toBeLessThanOrEqual(6);
+      expect(pad.depth).toBeLessThanOrEqual(6);
+    }
+    expect(pads.length).toBeLessThanOrEqual(1);
+  });
+
+  it('never lets a spawn marker collide even if solid/collideMaterial got set on it some other way', () => {
+    // Defense in depth: whatever set these (a stray properties-panel toggle,
+    // a future upstream filter change, a different call path) — a marker
+    // kind must categorically never produce collision.
+    const doc = baseDoc([
+      {
+        id: 'start1',
+        name: 'Start',
+        kind: 'start',
+        model: 'floor_marker',
+        solid: true,
+        collideMaterial: 'solid',
+        layerId: 'l1',
+        position: [3, 1, 3],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+      // A real floor so the fallback heuristic doesn't even trigger.
+      {
+        id: 'floor1',
+        name: 'Floor',
+        kind: 'prop',
+        model: 'floor_basic',
+        collideMaterial: 'solid',
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [10, 1, 10],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    // Only the real floor should produce a pad — nothing at the marker's position.
+    for (const pad of pads) {
+      expect(Math.hypot(pad.y - 3, pad.x - 3)).toBeGreaterThan(2);
+    }
+  });
+
   it('exports floors and solid props with height', () => {
     const doc = baseDoc([
       {

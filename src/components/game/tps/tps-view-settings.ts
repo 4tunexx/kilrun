@@ -166,18 +166,16 @@ export function resolveTpsView(mapOverride?: unknown | null): TpsViewSettings {
 }
 
 /**
- * Platform-wide camera for any match mode.
- * Deathrun MAIN map 3rd View overrides all other modes when authored.
+ * Platform-wide camera for any match mode. Each mode uses its OWN map's
+ * tpsView if authored, falling back to the global default otherwise —
+ * independent per mode (Deathrun/Horde/Competitive can each have their own
+ * camera feel; that's the whole point of being able to copy one mode's
+ * settings and paste them into another instead of them all being forced
+ * to match Deathrun's).
  */
 export function resolvePlatformTpsView(opts?: {
   /** Active map for the mode being played (Horde / Comp / Deathrun). */
   modeMapOverride?: unknown | null;
-  /** Deathrun MAIN map `tpsView` — wins over mode + global when set. */
-  deathrunMapOverride?: unknown | null;
 }): TpsViewSettings {
-  const deathrun = opts?.deathrunMapOverride;
-  if (deathrun && typeof deathrun === 'object') {
-    return sanitizeTpsView(deathrun);
-  }
   return resolveTpsView(opts?.modeMapOverride ?? null);
 }

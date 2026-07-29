@@ -49,15 +49,15 @@ export function GameMenu({
   const skillPoints = progression?.skillPoints ?? 0;
 
   return (
-    <div className="absolute inset-0 z-[260] flex items-center justify-center bg-black/75 backdrop-blur-sm pointer-events-auto p-4">
-      <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/15 bg-[#0f1724]/95 shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-[#0f1724]/95 px-6 py-4">
+    <div className="absolute inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-md pointer-events-auto p-4">
+      <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.09] to-white/[0.02] backdrop-blur-2xl shadow-2xl shadow-black/50">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-gradient-to-b from-[#0f1724]/95 to-[#0f1724]/80 backdrop-blur-xl px-6 py-4">
           <div className="flex items-center gap-3">
             {avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={avatarUrl} alt={username} className="w-11 h-11 rounded-full object-cover border-2 border-white/15" />
+              <img src={avatarUrl} alt={username} className="w-11 h-11 rounded-full object-cover border-2 border-white/20 shadow-lg" />
             ) : (
-              <div className="w-11 h-11 rounded-full bg-white/10 border-2 border-white/15" />
+              <div className="w-11 h-11 rounded-full bg-white/10 border-2 border-white/20" />
             )}
             <div>
               <p className="text-white font-black text-lg leading-tight">{username}</p>
@@ -109,7 +109,7 @@ export function GameMenu({
                 className={`relative rounded-xl border p-4 flex flex-col gap-2 transition ${
                   locked
                     ? 'border-white/5 bg-white/[0.02] opacity-60'
-                    : 'border-white/10 bg-white/5'
+                    : 'border-white/10 bg-gradient-to-b from-white/[0.07] to-white/[0.015] hover:border-white/20'
                 }`}
               >
                 {locked && (
@@ -187,7 +187,7 @@ export function LevelUpPopup({
   if (!event) return null;
   return (
     <div className="absolute inset-0 z-[270] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto p-4">
-      <div className="w-full max-w-md rounded-2xl border border-amber-400/30 bg-gradient-to-b from-[#1a1408] to-[#0f1724] shadow-2xl overflow-hidden">
+      <div className="w-full max-w-md rounded-2xl border border-amber-400/25 bg-gradient-to-b from-white/[0.09] to-white/[0.02] backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden">
         <div className="flex flex-col items-center gap-2 px-6 pt-8 pb-6 text-center">
           <Sparkles className="w-9 h-9 text-amber-300" />
           <p className="text-2xl font-black text-white">Level Up!</p>

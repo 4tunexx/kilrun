@@ -9,6 +9,7 @@ import {
   ensurePlatformMotion,
   generateId,
   isHammerSolidEntity,
+  isInvisibleMarkerKind,
   resolveCollideMaterial,
 } from './map-document';
 import type { KilrunMode } from '@/lib/game-modes';
@@ -576,6 +577,11 @@ export function rampEntityToSimPads(e: EditorEntity, steps = 24): SimPlatformBlu
 }
 
 function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
+  // Belt-and-suspenders: spawn cones / checkpoints / other invisible gizmo
+  // markers must NEVER produce collision, full stop — not conditional on
+  // which upstream filter path (entityExportsAsPlatform vs. the legacy
+  // no-explicit-platforms fallback) let this entity through to here.
+  if (isInvisibleMarkerKind(e.kind)) return [];
   if (resolveCollideMaterial(e) === 'walkthrough') return [];
   const model = e.model ?? '';
   if (model.includes('stair') || model.includes('ramp')) {
@@ -594,6 +600,13 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
     source = doc.entities.filter(
       (e) =>
         e.visible !== false &&
+        // Never let spawn cones / checkpoints / other invisible gizmo
+        // markers become solid collision through this loose fallback path
+        // — entityExportsAsPlatform already excludes them explicitly, but
+        // this heuristic (for legacy maps with no authored platforms) was
+        // never checking it, so a map with only a Start marker and no real
+        // floor placed yet would make the spawn cone itself solid.
+        !isInvisibleMarkerKind(e.kind) &&
         e.kind !== 'light' &&
         !!e.model &&
         resolveCollideMaterial(e) !== 'walkthrough' &&
