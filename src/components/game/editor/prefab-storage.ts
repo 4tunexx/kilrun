@@ -15,6 +15,7 @@ import {
 import type { KilrunMode } from '@/lib/game-modes';
 import { normalizeKilrunMode } from '@/lib/game-modes';
 import { modelFootprint } from './prototype-catalog';
+import { LAND_STEP_CLIMB } from '@shared/sim-constants';
 
 const PREFAB_KEY = 'kilrun.prefabs.v1';
 export const ACTIVE_PLAY_MAP_KEY = 'kilrun.activePlayMapId.v1';
@@ -417,7 +418,6 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
  * instead of walking through a single thin top slab.
  */
 export function stairEntityToSimPads(stairs: EditorEntity, steps = 18): SimPlatformBlueprint[] {
-  const n = Math.max(3, Math.min(28, Math.round(steps)));
   const [sx, sy, sz] = stairs.position;
   const yaw = ((stairs.rotation?.[1] ?? 0) * Math.PI) / 180;
   const foot =
@@ -431,6 +431,13 @@ export function stairEntityToSimPads(stairs: EditorEntity, steps = 18): SimPlatf
   const run = Math.max(1.2, foot[2] * Math.abs(stairs.scale[2]));
   const rise = Math.max(0.6, foot[1] * Math.abs(stairs.scale[1]));
   const width = Math.max(0.8, foot[0] * Math.abs(stairs.scale[0]));
+  // Fixed step counts break on tall/steep ramps: e.g. 14 steps over a 12-unit
+  // rise is ~0.86 per step, above LAND_STEP_CLIMB (0.75) — the server can't
+  // smoothly climb that seam, so the player visibly catches/bounces on it.
+  // Scale steps to the actual rise (with margin under the tolerance) instead
+  // of trusting a fixed count to be enough for whatever size prop this is.
+  const targetStepRise = LAND_STEP_CLIMB * 0.6;
+  const n = Math.max(4, Math.min(64, Math.round(Math.max(steps, rise / targetStepRise))));
   const stepRun = run / n;
   const stepRise = rise / n;
   const mat = resolveCollideMaterial(stairs);
@@ -512,7 +519,6 @@ function isTiltedRampSolid(e: EditorEntity): boolean {
  * catalog model name, so any hand-tilted block works as a walkable ramp.
  */
 export function rampEntityToSimPads(e: EditorEntity, steps = 24): SimPlatformBlueprint[] {
-  const n = Math.max(4, Math.min(36, Math.round(steps)));
   const [ex, ey, ez] = e.position;
   const foot =
     e.collisionSize ??
@@ -535,6 +541,19 @@ export function rampEntityToSimPads(e: EditorEntity, steps = 24): SimPlatformBlu
   if (mat === 'ice') kind = 'ice';
   else if (mat === 'water') kind = 'water';
   else if (mat === 'sand') kind = 'sand';
+
+  // Fixed step counts break on tall/steep ramps: e.g. 24 steps over a
+  // 20-unit rise is ~0.83 per step, above LAND_STEP_CLIMB (0.75) — the
+  // server can't smoothly climb that seam, so the player visibly
+  // catches/bounces walking up (or down) it. Scale steps to the ramp's
+  // ACTUAL rise (from its true end-to-end height, not just its run
+  // length) instead of trusting a fixed count to be enough for whatever
+  // size/angle this particular block is.
+  const [, yAtLowEnd] = rotateLocalXYZ([0, halfY, -halfZ], rotDeg);
+  const [, yAtHighEnd] = rotateLocalXYZ([0, halfY, halfZ], rotDeg);
+  const totalRise = Math.abs(yAtHighEnd - yAtLowEnd);
+  const targetStepRise = LAND_STEP_CLIMB * 0.6;
+  const n = Math.max(4, Math.min(64, Math.round(Math.max(steps, totalRise / targetStepRise))));
 
   const stepDepth = (halfZ * 2) / n;
   const pads: SimPlatformBlueprint[] = [];

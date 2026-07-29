@@ -13,6 +13,8 @@ import {
   stripLegacyBakedStairPads,
 } from './prefab-storage';
 
+import { LAND_STEP_CLIMB } from '@shared/sim-constants';
+
 function baseDoc(entities: MapDocument['entities']): MapDocument {
   return {
     version: 1,
@@ -148,6 +150,56 @@ describe('mapDocToSimPlatforms', () => {
     // Only the real floor should produce a pad — nothing at the marker's position.
     for (const pad of pads) {
       expect(Math.hypot(pad.y - 3, pad.x - 3)).toBeGreaterThan(2);
+    }
+  });
+
+  it('scales tilted-ramp step count to the actual rise, so tall ramps stay climbable', () => {
+    // A short, shallow ramp: fixed 24 steps is already plenty here — this
+    // just confirms the adaptive logic doesn't over-subdivide small ramps.
+    const shortRamp = baseDoc([
+      {
+        id: 'ramp-short',
+        name: 'Short Ramp',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        collisionSize: [4, 0.4, 6],
+        layerId: 'l1',
+        position: [0, 1, 0],
+        rotation: [20, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const shortPads = mapDocToSimPlatforms(shortRamp);
+    expect(shortPads.length).toBeLessThan(40);
+
+    // A TALL, steep ramp (e.g. spanning several floors): with a fixed step
+    // count this used to produce steps taller than LAND_STEP_CLIMB, which
+    // the server can't smoothly climb — the player would visibly
+    // catch/bounce on each seam instead of walking up smoothly.
+    const tallRamp = baseDoc([
+      {
+        id: 'ramp-tall',
+        name: 'Tall Ramp',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        collisionSize: [4, 0.4, 20],
+        layerId: 'l1',
+        position: [0, 10, 0],
+        rotation: [60, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const tallPads = mapDocToSimPlatforms(tallRamp);
+    expect(tallPads.length).toBeGreaterThan(24); // more than the old fixed count
+    const heights = tallPads.map((p) => p.z).sort((a, b) => a - b);
+    for (let i = 1; i < heights.length; i++) {
+      expect(heights[i] - heights[i - 1]).toBeLessThan(LAND_STEP_CLIMB);
     }
   });
 
