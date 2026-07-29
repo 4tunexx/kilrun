@@ -64,6 +64,7 @@ import {
   Sword,
   Swords,
   ShoppingCart,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -154,6 +155,7 @@ import { ModelSkinEditor } from './model-skin-editor';
 import { TpsViewStudio } from './tps-view-studio';
 import { WeaponEditor } from './weapon-editor';
 import { CombatEditor } from './combat-editor';
+import { PowerEditor } from './power-editor';
 import { MapShopPanel } from './map-shop-panel';
 import { ensureMapPlayerEntity } from './player-avatar';
 import type { TpsViewSettings } from '../tps/tps-view-settings';
@@ -161,6 +163,7 @@ import { sanitizeTpsView } from '../tps/tps-view-settings';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { adminUpsertStoreItem } from '@/lib/social-actions';
 import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
+import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
 import { publishCloudMap } from '@/lib/game-map-actions';
 import type { MapShopSettings } from './map-document';
 import {
@@ -206,6 +209,7 @@ type SidebarTab =
   | 'skins'
   | 'weapon'
   | 'combat'
+  | 'powers'
   | 'shop';
 
 const STUDIO_SIDEBAR_TABS: SidebarTab[] = [
@@ -214,6 +218,7 @@ const STUDIO_SIDEBAR_TABS: SidebarTab[] = [
   'skins',
   'weapon',
   'combat',
+  'powers',
   'shop',
 ];
 
@@ -255,6 +260,13 @@ export function MapEditor({
   }));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<SidebarTab>('assets');
+
+  // Hydrate admin-tunable global weapon catalog stats from the DB once per
+  // editor session, so Weapon Editor defaults / shop presets reflect the
+  // latest admin-tuned numbers. Safe no-op on any network/DB failure.
+  useEffect(() => {
+    void hydrateWeaponCatalogFromApi();
+  }, []);
   /** Active placeable model (kept while in Select so Brush can resume). */
   const [brush, setBrush] = useState<string | null>('floor-square');
   /** Select = pick objects; Brush = paint/place. Defaults to Select so clicks don't stack. */
@@ -371,6 +383,7 @@ export function MapEditor({
   const modelEditorOpen = tab === 'skins';
   const weaponEditorOpen = tab === 'weapon';
   const combatEditorOpen = tab === 'combat';
+  const powersEditorOpen = tab === 'powers';
   const shopEditorOpen = tab === 'shop';
   const anyStudioOpen = isStudioSidebarTab(tab);
   const [mapListTick, setMapListTick] = useState(0);
@@ -946,6 +959,13 @@ export function MapEditor({
   };
 
   const patchSelected = (patch: Partial<EditorEntity>) => {
+    // Property-panel edits (material, solid toggle, animation, hazard config, etc.)
+    // go through here for the single-selection case — this was not calling
+    // scheduleHistory(), so Ctrl+Z silently skipped nearly every panel edit and
+    // only caught viewport drag/move/rotate/scale mutations. Anchor the
+    // pre-edit state like every other mutator does.
+    scheduleHistory();
+    setDirty(true);
     apiRef.current?.updateSelected(patch);
     setDoc((d) => ({
       ...d,
@@ -1176,6 +1196,14 @@ export function MapEditor({
     setToolsOpen(false);
   };
 
+  const openPowersEditor = () => {
+    setTab('powers');
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(true);
+    setToolsOpen(false);
+  };
+
   const saveShopSettings = (settings: MapShopSettings) => {
     scheduleHistory();
     setDirty(true);
@@ -1310,8 +1338,8 @@ export function MapEditor({
       title: '3rd View saved to map',
       description:
         gameMode === 'deathrun'
-          ? 'Deathrun MAIN 3rd View overrides camera for all game modes.'
-          : 'Saved on this map. Deathrun MAIN 3rd View still wins in live matches when set.',
+          ? 'Deathrun MAIN 3rd View is used as the fallback camera for any mode that has not saved its own.'
+          : 'Saved on this map — this camera now wins for this mode in live matches. Remember to press Save (top toolbar) to publish it, or it stays a local draft.',
     });
   };
 
@@ -1765,6 +1793,7 @@ export function MapEditor({
               ['skins', Shirt, 'Model Editor'],
               ['weapon', Sword, 'Weapon Editor'],
               ['combat', Swords, 'Combat Editor'],
+              ['powers', Sparkles, 'Power Editor'],
               ['shop', ShoppingCart, 'Buy Menu'],
               ['settings', Settings2, 'Settings'],
               ['help', HelpCircle, 'Help'],
@@ -1796,6 +1825,10 @@ export function MapEditor({
                 }
                 if (id === 'combat') {
                   if (combatEditorOpen) { closeStudioPanels(); } else { openCombatEditor(); }
+                  return;
+                }
+                if (id === 'powers') {
+                  if (powersEditorOpen) { closeStudioPanels(); } else { openPowersEditor(); }
                   return;
                 }
                 if (id === 'shop') {
@@ -1962,6 +1995,11 @@ export function MapEditor({
                 onClose={closeStudioPanels}
                 onSaveToMap={saveCombatSettings}
               />
+            </div>
+          )}
+          {tab === 'powers' && (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <PowerEditor embedded onClose={closeStudioPanels} />
             </div>
           )}
           {tab === 'shop' && (

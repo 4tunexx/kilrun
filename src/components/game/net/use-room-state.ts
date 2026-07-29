@@ -38,6 +38,9 @@ export function useRoomState(
   const [localPlayer, setLocalPlayer] = useState<NetPlayerState | null>(null);
   const [playerCount, setPlayerCount] = useState(0);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [connectionState, setConnectionState] = useState<
+    'connected' | 'reconnecting' | 'lost'
+  >('connected');
 
   useEffect(() => {
     if (!joinOptions) return;
@@ -87,6 +90,17 @@ export function useRoomState(
         rendererCallbacksRef.current.onPlatformRemove?.(index);
       },
       onRoomChange: (r) => setRoom(r),
+      onConnectionState: (state) => {
+        if (disposed) return;
+        setConnectionState(state);
+        if (state === 'lost') {
+          setConnectionError(
+            'Lost connection to the game server and could not reconnect. Check that the realtime server is deployed and NEXT_PUBLIC_GAME_SERVER_URL is set correctly.'
+          );
+        } else if (state === 'connected') {
+          setConnectionError(null);
+        }
+      },
     };
 
     connection.connect(roomName, joinOptions, callbacks).catch((err) => {
@@ -111,5 +125,6 @@ export function useRoomState(
     localPlayer,
     playerCount,
     connectionError,
+    connectionState,
   };
 }

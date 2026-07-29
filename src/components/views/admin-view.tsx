@@ -59,6 +59,8 @@ import { AdminAssetBrowser } from '@/components/views/admin/admin-asset-browser'
 import { AdminShopItemsPanel } from '@/components/views/admin/admin-shop-items-panel';
 import { AdminRequirementTypesPanel } from '@/components/views/admin/admin-requirement-types-panel';
 import { AdminInventoryPanel } from '@/components/views/admin/admin-inventory-panel';
+import { AdminWeaponCatalogPanel } from '@/components/views/admin/admin-weapon-catalog-panel';
+import { AdminGameBalancePanel } from '@/components/views/admin/admin-game-balance-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -130,6 +132,8 @@ const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   premium: { label: 'Premium', icon: <Gem className="h-3.5 w-3.5 text-amber-300 fill-amber-400/30" /> },
   ranks: { label: 'Ranks', icon: <Trophy className="h-3.5 w-3.5" /> },
   maps: { label: 'Map Editor', icon: <MapIcon className="h-3.5 w-3.5" /> },
+  weapons: { label: 'Weapons', icon: <Target className="h-3.5 w-3.5" /> },
+  balance: { label: 'Game Balance', icon: <Flame className="h-3.5 w-3.5" /> },
   content: { label: 'Content', icon: <FileText className="h-3.5 w-3.5" /> },
 };
 
@@ -152,6 +156,8 @@ const ADMIN_TABS = [
   'premium',
   'ranks',
   'maps',
+  'weapons',
+  'balance',
   'content',
 ] as const;
 
@@ -2266,6 +2272,18 @@ export default function AdminView({
         {isAdmin && (
           <TabsContent value="maps" className="mt-4">
             <AdminMapEditorPanel />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="weapons" className="mt-4">
+            <AdminWeaponCatalogPanel />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="balance" className="mt-4">
+            <AdminGameBalancePanel />
           </TabsContent>
         )}
 

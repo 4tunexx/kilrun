@@ -12,11 +12,13 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@/generated/prisma';
 import { writeAuditLog } from '@/lib/audit';
+import { STATIC_FALLBACK_POWERS } from '../../shared/power-definitions';
+import { STATIC_FALLBACK_WEAPONS } from '@/lib/weapon-catalog';
 
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-26-gamemap-prefab';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-29-weapons-rewards-tps-admin-controls';
 
 async function requireAdmin() {
   const session = await auth();
@@ -308,6 +310,144 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`GameMap/GamePrefab verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — GameMap/GamePrefab not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify + seed: PowerDefinition (skill-tree Powers editor)
+  try {
+    const before = await prisma.powerDefinition.count();
+    steps.push(`PowerDefinition collection verified (count=${before})`);
+
+    // Idempotent: only CREATES the 11 core powers if missing (e.g. first sync
+    // after this deploy, or a fresh Mongo). Never overwrites an admin's
+    // already-tuned numbers — matches prisma/seed.ts's upsert behavior.
+    let created = 0;
+    for (const power of STATIC_FALLBACK_POWERS) {
+      const existing = await prisma.powerDefinition.findUnique({ where: { key: power.key } });
+      if (existing) continue;
+      await prisma.powerDefinition.create({
+        data: {
+          key: power.key,
+          name: power.name,
+          description: power.description,
+          icon: power.icon,
+          maxLevel: power.maxLevel,
+          unlockLevel: power.unlockLevel,
+          prerequisitesJson: JSON.stringify(power.prerequisites),
+          costJson: JSON.stringify(power.cost),
+          effectType: power.effectType,
+          effectParamsJson: JSON.stringify(power.effectParams),
+          isCore: true,
+          sortOrder: power.sortOrder,
+        },
+      });
+      created += 1;
+    }
+    steps.push(
+      created > 0
+        ? `Seeded ${created} core Power(s) that were missing`
+        : 'All core Powers already present (no seeding needed)'
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`PowerDefinition verify/seed failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — PowerDefinition not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify + seed: WeaponDefinition (global weapon catalog admin panel)
+  try {
+    const before = await prisma.weaponDefinition.count();
+    steps.push(`WeaponDefinition collection verified (count=${before})`);
+
+    // Idempotent: only CREATES the 8 core catalog weapons if missing (e.g.
+    // first sync after this deploy, or a fresh Mongo). Never overwrites an
+    // admin's already-tuned stats — matches PowerDefinition's seed behavior.
+    let created = 0;
+    for (const weapon of STATIC_FALLBACK_WEAPONS) {
+      const existing = await prisma.weaponDefinition.findUnique({ where: { key: weapon.id } });
+      if (existing) continue;
+      await prisma.weaponDefinition.create({
+        data: {
+          key: weapon.id,
+          label: weapon.label,
+          modelUrl: weapon.modelUrl,
+          kind: weapon.kind,
+          combatJson: JSON.stringify(weapon.combat),
+          modesJson: JSON.stringify(weapon.modes),
+          gripHint: weapon.gripHint,
+          unlockMetric: weapon.unlockMetric ?? null,
+          unlockAmount:
+            typeof weapon.unlockAmount === 'number' ? weapon.unlockAmount : null,
+          isCore: true,
+          sortOrder: weapon.sortOrder ?? 0,
+        },
+      });
+      created += 1;
+    }
+    steps.push(
+      created > 0
+        ? `Seeded ${created} core Weapon(s) that were missing`
+        : 'All core Weapons already present (no seeding needed)'
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`WeaponDefinition verify/seed failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — WeaponDefinition not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify: SiteSettings.matchRewardsConfigJson (admin Game Balance editor)
+  try {
+    const settings = await prisma.siteSettings.findUnique({
+      where: { singletonKey: 'default' },
+    });
+    const raw =
+      (settings as { matchRewardsConfigJson?: string } | null)?.matchRewardsConfigJson ?? '{}';
+    if (settings) {
+      await prisma.siteSettings.update({
+        where: { singletonKey: 'default' },
+        data: { matchRewardsConfigJson: raw },
+      });
+    } else {
+      await prisma.siteSettings.create({
+        data: { singletonKey: 'default', matchRewardsConfigJson: '{}' },
+      });
+    }
+    steps.push('matchRewardsConfigJson field verified (read/write OK)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`matchRewardsConfigJson verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — SiteSettings.matchRewardsConfigJson not writable. (${msg})`
+    );
+  }
+
+  // Runtime verify: SiteSettings.defaultTpsViewJson (admin global TPS camera default)
+  try {
+    const settings = await prisma.siteSettings.findUnique({
+      where: { singletonKey: 'default' },
+    });
+    const raw =
+      (settings as { defaultTpsViewJson?: string } | null)?.defaultTpsViewJson ?? '{}';
+    if (settings) {
+      await prisma.siteSettings.update({
+        where: { singletonKey: 'default' },
+        data: { defaultTpsViewJson: raw },
+      });
+    } else {
+      await prisma.siteSettings.create({
+        data: { singletonKey: 'default', defaultTpsViewJson: '{}' },
+      });
+    }
+    steps.push('defaultTpsViewJson field verified (read/write OK)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`defaultTpsViewJson verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — SiteSettings.defaultTpsViewJson not writable. (${msg})`
     );
   }
 

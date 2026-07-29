@@ -92,8 +92,71 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
 
-export function sanitizeTpsView(raw: unknown): TpsViewSettings {
-  const base = structuredClone(DEFAULT_TPS_VIEW);
+// ---------------------------------------------------------------------------
+// Admin-tunable GLOBAL default (SiteSettings.defaultTpsViewJson) — a DB-backed
+// override for the hardcoded `DEFAULT_TPS_VIEW` safety net below. Mutated in
+// place by `applyDynamicDefaultTpsView()` (called once the admin config has
+// loaded), mirroring the Powers/Weapons dynamic-definition pattern elsewhere
+// in the codebase. Full precedence chain, highest wins:
+//   per-map tpsView > Deathrun MAIN fallback > this DB global default >
+//   hardcoded DEFAULT_TPS_VIEW > (per-browser localStorage still applies
+//   ABOVE the DB default whenever the player has set one — see
+//   `loadTpsViewSettings()` below; that's an intentionally separate,
+//   lower-priority personal override, not part of this admin chain).
+// ---------------------------------------------------------------------------
+
+let dynamicDefaultTpsView: TpsViewSettings | null = null;
+
+/** Hot-swap the effective baseline default (called after loading from the
+ * admin-editable SiteSettings.defaultTpsViewJson config). */
+export function applyDynamicDefaultTpsView(raw: unknown): void {
+  if (!raw || typeof raw !== 'object' || Object.keys(raw as object).length === 0) return;
+  dynamicDefaultTpsView = sanitizeTpsViewAgainst(raw, DEFAULT_TPS_VIEW);
+}
+
+export function resetToStaticDefaultTpsView(): void {
+  dynamicDefaultTpsView = null;
+}
+
+/** The baseline used to fill in missing fields — the admin-set DB default if
+ * loaded, else the hardcoded safety net. Never throws. */
+function currentDefaultBase(): TpsViewSettings {
+  return dynamicDefaultTpsView ?? DEFAULT_TPS_VIEW;
+}
+
+export function getEffectiveDefaultTpsView(): TpsViewSettings {
+  return structuredClone(currentDefaultBase());
+}
+
+let tpsDefaultHydrated = false;
+
+/**
+ * Client-side bridge: fetch the admin-tunable global TPS default (public
+ * server action read, no auth) and hot-swap `currentDefaultBase()`. Safe to
+ * call from any client component (game boot) — silently keeps the hardcoded
+ * `DEFAULT_TPS_VIEW` on any network/DB failure. Idempotent per page load.
+ * Returns true if a new dynamic default was actually applied.
+ */
+export async function hydrateDefaultTpsViewFromApi(): Promise<boolean> {
+  if (tpsDefaultHydrated) return false;
+  try {
+    const { getSiteSettings } = await import('@/lib/progression-actions');
+    const settings = await getSiteSettings();
+    const raw = (settings as { defaultTpsViewJson?: string })?.defaultTpsViewJson ?? '{}';
+    const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
+    if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+      applyDynamicDefaultTpsView(parsed);
+      tpsDefaultHydrated = true;
+      return true;
+    }
+  } catch {
+    // Keep the hardcoded DEFAULT_TPS_VIEW — never let this break gameplay.
+  }
+  return false;
+}
+
+function sanitizeTpsViewAgainst(raw: unknown, baseSettings: TpsViewSettings): TpsViewSettings {
+  const base = structuredClone(baseSettings);
   if (!raw || typeof raw !== 'object') return base;
   const o = raw as Partial<TpsViewSettings>;
   const cam = (o.camera ?? {}) as Partial<TpsCameraSettings>;
@@ -133,14 +196,23 @@ export function sanitizeTpsView(raw: unknown): TpsViewSettings {
   };
 }
 
+/** Sanitize an arbitrary (possibly partial) settings object against the
+ * CURRENT effective baseline — the admin-set DB default if loaded, else the
+ * hardcoded `DEFAULT_TPS_VIEW`. Missing fields fall back to that baseline,
+ * so per-map records authored before the DB default existed still pick up
+ * the platform default for anything they didn't explicitly override. */
+export function sanitizeTpsView(raw: unknown): TpsViewSettings {
+  return sanitizeTpsViewAgainst(raw, currentDefaultBase());
+}
+
 export function loadTpsViewSettings(): TpsViewSettings {
-  if (typeof window === 'undefined') return structuredClone(DEFAULT_TPS_VIEW);
+  if (typeof window === 'undefined') return getEffectiveDefaultTpsView();
   try {
     const raw = localStorage.getItem(TPS_VIEW_STORAGE_KEY);
-    if (!raw) return structuredClone(DEFAULT_TPS_VIEW);
+    if (!raw) return getEffectiveDefaultTpsView();
     return sanitizeTpsView(JSON.parse(raw));
   } catch {
-    return structuredClone(DEFAULT_TPS_VIEW);
+    return getEffectiveDefaultTpsView();
   }
 }
 

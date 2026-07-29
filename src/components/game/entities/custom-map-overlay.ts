@@ -4,7 +4,12 @@ import { HAMMER_SOLID_MODEL, isHammerSolidEntity, isInvisibleMarkerKind } from '
 import { loadAnimatedPrefab, resolveModelSrc } from '../editor/model-scan';
 import { AnimationDirector } from '../editor/animation-director';
 import { applyTextureToObject, plantLocalFeet, resolveEntityTextureRepeat } from '../editor/editor-mesh';
-import { applyEntityOpacity, makeAuthoredLight, makeGameplayFallback } from '../editor/map-scene-visuals';
+import {
+  applyEntityOpacity,
+  makeAuthoredLight,
+  makeGameplayFallback,
+  shouldUseGameplayFallback,
+} from '../editor/map-scene-visuals';
 import { makeHammerSolidObject, type HammerPrimitive } from '../editor/hammer-shapes';
 import { ensurePlatformMotion } from '../editor/map-document';
 import { movingPlatformU } from '../../../../shared/moving-platform';
@@ -47,6 +52,24 @@ function makeHammerSolid(ent: EditorEntity): THREE.Object3D {
   const size = ent.collisionSize ?? [2, 0.25, 2];
   const shape = (ent.primitive as HammerPrimitive) || 'box';
   return makeHammerSolidObject(shape, size, ent.color || '#64748b');
+}
+
+/**
+ * Last-resort visible placeholder — used whenever an entity has no kind-specific
+ * fallback mesh (makeGameplayFallback returns null) but still needs SOME visual,
+ * e.g. a generic solid prop with no model. Mirrors the editor Play Test's own
+ * `placeholderForEntity` so live matches never render a real collider as a
+ * completely invisible block (see `entityToCollisionPads` / `entityExportsAsPlatform`
+ * — collision does not require a model, so an invisible mesh here would still be solid).
+ */
+function makeGenericBoxPlaceholder(ent: EditorEntity): THREE.Object3D {
+  const size = ent.collisionSize ?? [1, 1, 1];
+  const box = new THREE.Mesh(
+    new THREE.BoxGeometry(Math.max(0.2, size[0]), Math.max(0.2, size[1]), Math.max(0.2, size[2])),
+    new THREE.MeshStandardMaterial({ color: ent.color ? new THREE.Color(ent.color) : 0x888888 })
+  );
+  box.position.y = Math.max(0.2, size[1]) * 0.5;
+  return box;
 }
 
 /**
@@ -108,10 +131,19 @@ export class CustomMapOverlay {
           clips = loaded.clips;
           applyEntTexture(obj, ent, doc);
         } else {
+          // Even with no model assigned, an entity authored as solid collision
+          // (mapDocToSimPlatforms / entityExportsAsPlatform don't require a
+          // model) must still get SOME visible mesh, or it becomes an
+          // invisible-but-solid block players get stuck on in a real match.
           const fallback = makeGameplayFallback(ent);
-          if (!fallback) continue;
-          obj = fallback;
-          applyEntTexture(obj, ent, doc);
+          if (!fallback) {
+            if (!shouldUseGameplayFallback(ent, 'missing-model')) continue;
+            obj = makeGenericBoxPlaceholder(ent);
+            applyEntTexture(obj, ent, doc);
+          } else {
+            obj = fallback;
+            applyEntTexture(obj, ent, doc);
+          }
         }
 
         obj.position.set(...ent.position);
@@ -141,6 +173,29 @@ export class CustomMapOverlay {
         }
       } catch (err) {
         console.warn('[CustomMapOverlay] skip', ent.name, err);
+        // A GLB fetch failure (e.g. 404) must not leave a solid entity totally
+        // invisible — same class of bug as a modelless solid prop above.
+        if (!shouldUseGameplayFallback(ent, 'load-failed')) continue;
+        try {
+          const placeholder = makeGameplayFallback(ent) ?? makeGenericBoxPlaceholder(ent);
+          applyEntTexture(placeholder, ent, doc);
+          placeholder.position.set(...ent.position);
+          placeholder.rotation.set(
+            THREE.MathUtils.degToRad(ent.rotation[0]),
+            THREE.MathUtils.degToRad(ent.rotation[1]),
+            THREE.MathUtils.degToRad(ent.rotation[2])
+          );
+          placeholder.scale.set(...ent.scale);
+          applyEntityOpacity(placeholder, ent.opacity);
+          placeholder.userData.entityId = ent.id;
+          placeholder.userData.editorEntity = ent;
+          this.root.add(placeholder);
+          this.entityRoots.set(ent.id, placeholder);
+          this.restPositions.set(ent.id, new THREE.Vector3(...ent.position));
+          this.director.register(ent.id, placeholder, []);
+        } catch (fallbackErr) {
+          console.warn('[CustomMapOverlay] fallback placeholder failed', ent.name, fallbackErr);
+        }
       }
     }
 

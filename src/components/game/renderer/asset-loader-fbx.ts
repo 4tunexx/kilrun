@@ -156,10 +156,31 @@ export function loadFbxModel(
       // of different models can never race on which one's resolved source
       // is "current".
       const source = await resolveTextureSource(url);
+      // Basename of the FBX itself (no extension) — used below to catch
+      // "self-referencing" embedded texture names (e.g. an FBX literally named
+      // Body_Blue_001.fbx whose embedded material points at "Body_Blue_001.png").
+      // That's a distinct case from the generic "Textures.png" reference this
+      // file was originally written to redirect: it isn't caught by
+      // isGenericTexturesReference() at all, so when no sibling PNG of that
+      // exact name exists (source.kind !== 'sibling'), the raw self-named
+      // reference was passed straight through to FBXLoader, 404'd, and left
+      // the mesh with a broken/blank map (flat single-color body in prod).
+      const fbxBase = url
+        .replace(/\\/g, '/')
+        .split('/')
+        .pop()!
+        .replace(/\.fbx(\?.*)?$/i, '')
+        .toLowerCase();
       const manager = new THREE.LoadingManager();
       manager.setURLModifier((texUrl) => {
         const cleaned = texUrl.replace(/\\/g, '/').split('?')[0]!;
-        if (isGenericTexturesReference(texUrl)) return source.path;
+        const texBase = (cleaned.split('/').pop() ?? '')
+          .replace(/\.(png|jpe?g|tga|bmp)$/i, '')
+          .toLowerCase();
+        const isSelfReference = texBase !== '' && texBase === fbxBase;
+        if (isGenericTexturesReference(texUrl) || (isSelfReference && source.kind !== 'sibling')) {
+          return source.path;
+        }
         if (cleaned.toLowerCase().includes('/game/skins/')) return cleaned;
         return texUrl;
       });

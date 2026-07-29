@@ -1,11 +1,7 @@
 import type { PlayerState } from '../schema/RoomState.js';
 import {
-  getBerserkDurationMs,
-  getFlyDurationMs,
-  getHookStats,
-  getThunderStats,
-  getUnlimitedAmmoDurationMs,
-  getVisibilityDurationMs,
+  getTimedBuffStatsByKey,
+  getBurstEffectStatsByKey,
   parseAbilityLevels,
   type AbilityLevels,
 } from '../../../shared/ability-progression.js';
@@ -28,61 +24,56 @@ export function getPlayerAbilityLevels(player: PlayerState): AbilityLevels {
   }
 }
 
+/**
+ * Generic activation: dispatches on the power's EFFECT TEMPLATE (timed_buff
+ * buffKind / burst_effect kind), not the literal ability key. This means a
+ * brand-new custom power created in the Power Editor that reuses one of
+ * these templates (e.g. "Ghost Step" wrapping invisibility with different
+ * numbers) activates for real in matches, exactly like the original 6.
+ */
 export function activateAbility(player: PlayerState, abilityKey: string | null | undefined, now: number): boolean {
   if (!player.isAlive || player.hasFinished) return false;
+  if (!abilityKey) return false;
 
   const levels = getPlayerAbilityLevels(player);
-  const normalized = abilityKey as ActiveAbilityKey | null | undefined;
-  if (normalized === 'visibility') {
-    const level = levels.visibility;
-    const duration = getVisibilityDurationMs(level);
-    if (!duration) return false;
-    player.abilityVisibilityEndsAt = now + duration;
-    player.isInvisible = true;
-    return true;
+  const level = levels[abilityKey] ?? 0;
+  if (level <= 0) return false;
+
+  const timedBuff = getTimedBuffStatsByKey(abilityKey, level);
+  if (timedBuff.buffKind) {
+    if (!timedBuff.durationMs) return false;
+    switch (timedBuff.buffKind) {
+      case 'invisibility':
+        player.abilityVisibilityEndsAt = now + timedBuff.durationMs;
+        player.isInvisible = true;
+        return true;
+      case 'fly':
+        player.abilityFlyEndsAt = now + timedBuff.durationMs;
+        return true;
+      case 'berserk':
+        player.abilityBerserkEndsAt = now + timedBuff.durationMs;
+        return true;
+      case 'unlimited_ammo':
+        player.abilityBulletEndsAt = now + timedBuff.durationMs;
+        return true;
+      default:
+        return false;
+    }
   }
 
-  if (normalized === 'fly') {
-    const level = levels.fly;
-    const duration = getFlyDurationMs(level);
-    if (!duration) return false;
-    player.abilityFlyEndsAt = now + duration;
-    return true;
-  }
-
-  if (normalized === 'hook') {
-    const level = levels.hook;
-    const stats = getHookStats(level);
-    if (!stats.rangeMeters || !stats.pullDurationMs) return false;
-    player.abilityHookEndsAt = now + stats.pullDurationMs;
-    const pushX = Math.cos(player.aimAngle || 0) * stats.rangeMeters;
-    const pushY = Math.sin(player.aimAngle || 0) * stats.rangeMeters;
+  const burst = getBurstEffectStatsByKey(abilityKey, level);
+  if (burst.kind === 'range_pull') {
+    if (!burst.rangeMeters || !burst.pullDurationMs) return false;
+    player.abilityHookEndsAt = now + burst.pullDurationMs;
+    const pushX = Math.cos(player.aimAngle || 0) * burst.rangeMeters;
+    const pushY = Math.sin(player.aimAngle || 0) * burst.rangeMeters;
     player.x += pushX;
     player.y += pushY;
     player.vz = Math.max(player.vz, 0.35);
     return true;
   }
-
-  if (normalized === 'berserk') {
-    const level = levels.berserk;
-    const duration = getBerserkDurationMs(level);
-    if (!duration) return false;
-    player.abilityBerserkEndsAt = now + duration;
-    return true;
-  }
-
-  if (normalized === 'bullet') {
-    const level = levels.bullet;
-    const duration = getUnlimitedAmmoDurationMs(level);
-    if (!duration) return false;
-    player.abilityBulletEndsAt = now + duration;
-    return true;
-  }
-
-  if (normalized === 'thunder') {
-    const level = levels.thunder;
-    const stats = getThunderStats(level);
-    if (!stats.radiusMeters || !stats.damage) return false;
+  if (burst.kind === 'radius_damage') {
+    if (!burst.radiusMeters || !burst.damage) return false;
     player.abilityThunderEndsAt = now + 250;
     return true;
   }

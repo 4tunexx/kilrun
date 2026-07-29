@@ -17,7 +17,9 @@ export type CatalogWeaponId =
   | 'sniper_rifle_001';
 
 export type CatalogWeaponDef = {
-  id: CatalogWeaponId;
+  /** Stable slug. The original 8 use CatalogWeaponId; admin-created custom
+   * weapon definitions may use any alphanumeric/underscore key. */
+  id: string;
   /** Shop / editor label */
   label: string;
   /** Public URL for the GLB */
@@ -35,11 +37,21 @@ export type CatalogWeaponDef = {
    */
   unlockMetric?: string;
   unlockAmount?: number;
+  /** True for the original 8 — deletable=false, only tunable, in the admin API/editor. */
+  isCore?: boolean;
+  sortOrder?: number;
 };
 
 const W = (file: CatalogWeaponId) => `/game/weapons/${file}.glb`;
 
-export const CATALOG_WEAPONS: CatalogWeaponDef[] = [
+/**
+ * The original 8 hardcoded catalog weapons, losslessly kept as the safe
+ * static fallback used whenever nothing dynamic has loaded yet (SSR without
+ * DB access, DB unreachable, pre-migration state, etc). See
+ * `applyDynamicWeaponDefinitions` below — mirrors the Powers/skill-tree
+ * pattern in shared/power-definitions.ts.
+ */
+export const STATIC_FALLBACK_WEAPONS: CatalogWeaponDef[] = [
   {
     id: 'pistol_001',
     label: 'Pistol',
@@ -209,6 +221,76 @@ export const CATALOG_WEAPONS: CatalogWeaponDef[] = [
     gripHint: 'Right hand — blade forward',
   },
 ];
+
+STATIC_FALLBACK_WEAPONS.forEach((w, i) => {
+  w.isCore = true;
+  w.sortOrder = i;
+});
+
+// ---------------------------------------------------------------------------
+// Live "active" list — mutated IN PLACE (same array object/reference) by
+// `applyDynamicWeaponDefinitions()`, so every existing module that already
+// does `import { CATALOG_WEAPONS } from '@/lib/weapon-catalog'` and reads it
+// at call time (resolveCatalogCombat, defaultShopItems, the Weapon Editor's
+// model picker, etc.) automatically picks up admin-tuned stats the moment
+// they're loaded — no call-site changes needed anywhere else in the codebase.
+// Starts as a fresh copy of the static fallback so mutating it never
+// corrupts STATIC_FALLBACK_WEAPONS itself.
+// ---------------------------------------------------------------------------
+
+export const CATALOG_WEAPONS: CatalogWeaponDef[] = STATIC_FALLBACK_WEAPONS.map((w) => ({
+  ...w,
+  combat: { ...w.combat },
+  modes: [...w.modes],
+}));
+
+/** Replace the active weapon list (called after loading from Prisma / HTTP).
+ * Always guarantees the original 8 core ids are present (falls back to the
+ * static definition for any core id missing from `records`) so a bad or
+ * partial dynamic payload can never brick weapon combat / the in-match shop. */
+export function applyDynamicWeaponDefinitions(records: CatalogWeaponDef[]): void {
+  if (!Array.isArray(records) || records.length === 0) return;
+  const byId = new Map(records.map((r) => [r.id, r]));
+  for (const fallback of STATIC_FALLBACK_WEAPONS) {
+    if (!byId.has(fallback.id)) byId.set(fallback.id, fallback);
+  }
+  const merged = Array.from(byId.values()).sort(
+    (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
+  );
+  CATALOG_WEAPONS.length = 0;
+  CATALOG_WEAPONS.push(...merged);
+}
+
+export function resetToStaticWeaponDefinitions(): void {
+  CATALOG_WEAPONS.length = 0;
+  CATALOG_WEAPONS.push(
+    ...STATIC_FALLBACK_WEAPONS.map((w) => ({ ...w, combat: { ...w.combat }, modes: [...w.modes] }))
+  );
+}
+
+let weaponCatalogHydrated = false;
+
+/**
+ * Client-side bridge: fetch the persisted `WeaponDefinition` rows (public GET,
+ * no auth) and hot-swap the active `CATALOG_WEAPONS` singleton. Safe to call
+ * from any client component (game boot, map editor) — silently keeps the
+ * hardcoded static catalog on any network/DB failure. Idempotent per page
+ * load (only hydrates once) so it's cheap to call from multiple mount points.
+ */
+export async function hydrateWeaponCatalogFromApi(): Promise<void> {
+  if (weaponCatalogHydrated) return;
+  try {
+    const res = await fetch('/api/game/weapon-definitions', { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data?.weapons) && data.weapons.length > 0) {
+      applyDynamicWeaponDefinitions(data.weapons);
+      weaponCatalogHydrated = true;
+    }
+  } catch {
+    // Keep the hardcoded static catalog — never let this break gameplay.
+  }
+}
 
 export function catalogWeaponUrl(id: string): string | null {
   const hit = CATALOG_WEAPONS.find((w) => w.id === id || w.modelUrl.endsWith(`/${id}.glb`));

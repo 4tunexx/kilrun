@@ -5,6 +5,7 @@ import { flattenEquippedSkinsMap } from '@/lib/player-skins';
 import { resolveWeaponCombat, findWeaponAttachment } from '@/lib/weapons';
 import { compactSkinsForMatch } from '@/lib/match-loadout';
 import { getAbilityStatBonuses, parseAbilityLevels } from '@shared/ability-progression';
+import { loadPowerDefinitions } from '@/lib/power-definitions';
 
 export const runtime = 'nodejs';
 
@@ -36,6 +37,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // Load data-driven power definitions (tuned/custom) so a stat_bonus
+    // power's numbers actually affect the bonuses computed below — with a
+    // safe static fallback baked into the shared module if this fails.
+    await loadPowerDefinitions().catch(() => null);
+
     const user = await prisma.user.findFirst({
       where: { OR: [{ id: userId }, { steamId: userId }] },
       select: { id: true, equippedSkins: true, gameAbilities: true },

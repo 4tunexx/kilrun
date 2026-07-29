@@ -38,8 +38,11 @@ import {
   loadTpsViewSettings,
   mouseSensRadians,
   resolvePlatformTpsView,
+  hydrateDefaultTpsViewFromApi,
+  TPS_VIEW_STORAGE_KEY,
   type TpsViewSettings,
 } from './tps/tps-view-settings';
+import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
 import dynamic from 'next/dynamic';
 import {
   findWeaponAttachment,
@@ -128,6 +131,7 @@ export default function KilrunEngine({
     localPlayer,
     playerCount,
     connectionError,
+    connectionState,
   } = useRoomState(joinOptions, roomName);
 
   useEffect(() => {
@@ -165,6 +169,24 @@ export default function KilrunEngine({
   const [tpsHud, setTpsHud] = useState<TpsViewSettings>(() => loadTpsViewSettings());
   const tpsRef = useRef(tpsHud);
   tpsRef.current = tpsHud;
+
+  // Hydrate admin-tunable global weapon stats + camera default from the DB
+  // once per page load. Both are safe no-ops on any network/DB failure — the
+  // hardcoded static catalog / DEFAULT_TPS_VIEW keep working either way.
+  useEffect(() => {
+    hydrateWeaponCatalogFromApi();
+    hydrateDefaultTpsViewFromApi().then((changed) => {
+      if (
+        changed &&
+        typeof window !== 'undefined' &&
+        !window.localStorage.getItem(TPS_VIEW_STORAGE_KEY)
+      ) {
+        // Only refresh the HUD default if the player hasn't set their own
+        // per-browser camera preference (that always takes priority).
+        setTpsHud(loadTpsViewSettings());
+      }
+    });
+  }, []);
   const { toggle: toggleFullscreen } = useGameFullscreen(rootRef, true);
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
@@ -942,7 +964,7 @@ export default function KilrunEngine({
             <HUD
               player={localPlayer}
               room={room}
-              xpProgress={xpProgress}
+              gameProgress={gameProgression.progression}
               runnersLeft={runnersLeft}
               weaponKind={resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind}
             />
@@ -1121,6 +1143,7 @@ export default function KilrunEngine({
           upgrading={gameProgression.upgrading}
           error={gameProgression.error}
           onUpgrade={gameProgression.upgrade}
+          powers={gameProgression.powers}
         />
 
         {!paused && !editorOpen && (
@@ -1194,6 +1217,14 @@ export default function KilrunEngine({
             >
               <X className="w-5 h-5" />
             </Button>
+          </div>
+        )}
+
+        {!connectionError && connectionState === 'reconnecting' && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[250] pointer-events-none">
+            <div className="bg-amber-500/90 text-slate-950 text-sm font-bold px-4 py-1.5 rounded-full shadow-lg">
+              Reconnecting to game server…
+            </div>
           </div>
         )}
       </MobilePlayGate>

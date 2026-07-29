@@ -104,12 +104,22 @@ export async function publishCloudMap(input: {
     });
   }
 
+  // IMPORTANT: `setActive: false` means "don't explicitly activate this save" —
+  // it must NEVER deactivate a map that is already the live Active map for its
+  // mode. Only `setActive: true` may change active status (and it deactivates
+  // any previous Active map for the mode above). A routine editor "Save"
+  // passes `setActive: false` and previously stomped `isActive` back to false
+  // even for the currently-Active map, silently un-publishing it from live
+  // matches on every save — that was the regression. Preserve existing
+  // isActive unless the caller explicitly asked to activate.
+  const resolvedIsActive = input.setActive === true ? true : Boolean(existing?.isActive);
+
   const data = {
     name: input.name.trim() || 'Untitled map',
     mode,
     documentJson,
     ...(thumbnailUrl !== undefined ? { thumbnailUrl } : {}),
-    isActive: Boolean(input.setActive) || Boolean(existing?.isActive && input.setActive !== false),
+    isActive: resolvedIsActive,
     createdById: staff.id,
     localId: input.localId ?? existing?.localId ?? null,
   };
@@ -119,7 +129,7 @@ export async function publishCloudMap(input: {
         where: { id: existing.id },
         data: {
           ...data,
-          isActive: input.setActive === undefined ? existing.isActive : Boolean(input.setActive),
+          isActive: resolvedIsActive,
         },
       })
     : await prisma.gameMap.create({

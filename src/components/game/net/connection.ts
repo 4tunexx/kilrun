@@ -66,6 +66,13 @@ export interface RoomCallbacks {
   onPlatformChange?: (platform: NetPlatformState, index: number) => void;
   onPlatformRemove?: (index: number) => void;
   onRoomChange?: (room: NetRoomState) => void;
+  /**
+   * Fired whenever the underlying WebSocket connection state changes.
+   * 'reconnecting' means the socket dropped and GameConnection is attempting
+   * to recover automatically; 'lost' means all reconnect attempts failed and
+   * the caller should surface an error / stop sending input.
+   */
+  onConnectionState?: (state: 'connected' | 'reconnecting' | 'lost') => void;
 }
 
 function resolveGameServerUrl(): string {
@@ -88,11 +95,24 @@ function warnMissingGameServerUrlOnce() {
   );
 }
 
+/** Colyseus close code used when the client leaves on purpose (tab close, unmount, etc). */
+const CONSENTED_CLOSE_CODE = 4000;
+/** How many automatic reconnect attempts before giving up and reporting 'lost'. */
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY_MS = 800;
+
 export class GameConnection {
   private client: Client;
   private room: Room | null = null;
   private mmTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  private lastJoin: {
+    roomName: GameRoomName;
+    options: JoinOptions;
+    callbacks: RoomCallbacks;
+  } | null = null;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(endpoint: string = resolveGameServerUrl()) {
     this.client = new Client(endpoint);
@@ -102,12 +122,23 @@ export class GameConnection {
     return this.room?.sessionId;
   }
 
+  /** True only when the underlying WebSocket is actually open — safe to send on. */
+  public get isOpen(): boolean {
+    return Boolean(this.room?.connection?.isOpen);
+  }
+
   public async connect(
     roomName: GameRoomName,
     options: JoinOptions,
     callbacks: RoomCallbacks
   ): Promise<void> {
     this.disposed = false;
+    this.lastJoin = { roomName, options, callbacks };
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     const isRanked = roomName === 'competitive_ranked';
     const preferredKey =
       options.rankKey && options.rankKey !== 'open' ? options.rankKey : null;
@@ -121,6 +152,7 @@ export class GameConnection {
         rankKey: preferredKey ?? 'open',
       });
       this.bindRoom(callbacks);
+      callbacks.onConnectionState?.('connected');
       return;
     }
 
@@ -129,12 +161,68 @@ export class GameConnection {
       rankKey: preferredKey ?? 'open',
     });
     this.bindRoom(callbacks);
+    callbacks.onConnectionState?.('connected');
 
     if (isRanked && preferredKey) {
       this.mmTimer = setTimeout(() => {
         void this.maybeFallbackToOpenLobby(roomName, options, callbacks, minSame);
       }, waitSec * 1000);
     }
+  }
+
+  /**
+   * Called when the room's WebSocket closes unexpectedly (server restart, load
+   * balancer dropping an idle/misrouted connection, network blip, etc). Without
+   * this, `sendInput` would keep calling `.send()` on a dead socket forever —
+   * which is exactly the "WebSocket is already in CLOSING or CLOSED state"
+   * console flood this was written to fix. Retries a few times with backoff,
+   * then gives up and reports 'lost' so the UI can stop pretending input works.
+   */
+  private scheduleReconnect(code: number) {
+    if (this.disposed || !this.lastJoin) return;
+    if (code === CONSENTED_CLOSE_CODE) return; // we left on purpose
+    const { roomName, options, callbacks } = this.lastJoin;
+
+    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      callbacks.onConnectionState?.('lost');
+      return;
+    }
+    this.reconnectAttempts += 1;
+    callbacks.onConnectionState?.('reconnecting');
+
+    const delay = RECONNECT_BASE_DELAY_MS * Math.pow(1.6, this.reconnectAttempts - 1);
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      if (this.disposed) return;
+      // Prefer Colyseus's native seamless reconnect (keeps the same session)
+      // when we have a token for it; otherwise fall back to a fresh join.
+      const token = this.room?.reconnectionToken;
+      const { joinByRoomId: _joinByRoomId, ...joinPayload } = options;
+      const attempt = token
+        ? this.client.reconnect(token).then((room) => {
+            this.room = room;
+            this.bindRoom(callbacks);
+          })
+        : this.client
+            .joinOrCreate(roomName, {
+              ...joinPayload,
+              rankKey:
+                options.rankKey && options.rankKey !== 'open' ? options.rankKey : 'open',
+            })
+            .then((room) => {
+              this.room = room;
+              this.bindRoom(callbacks);
+            });
+
+      attempt
+        .then(() => {
+          this.reconnectAttempts = 0;
+          callbacks.onConnectionState?.('connected');
+        })
+        .catch(() => {
+          this.scheduleReconnect(code);
+        });
+    }, delay);
   }
 
   /** Join an existing room by id (party follow). */
@@ -188,6 +276,17 @@ export class GameConnection {
 
   private bindRoom(callbacks: RoomCallbacks) {
     if (!this.room) return;
+    // A dropped/killed WebSocket surfaces here as onLeave (with a non-consented
+    // close code) — reconnect automatically instead of leaving `sendInput`
+    // hammering a closed socket every frame.
+    this.room.onLeave((code: number) => {
+      if (this.disposed) return;
+      this.scheduleReconnect(code);
+    });
+    this.room.onError((code: number) => {
+      if (this.disposed) return;
+      console.warn('[kilrun] game room error', code);
+    });
     const state = this.room.state as never;
     const $ = getStateCallbacks(this.room) as <T>(instance: T) => never;
     const proxy = $(state) as unknown as {
@@ -278,13 +377,30 @@ export class GameConnection {
     emitRoomChange();
   }
 
+  /**
+   * Guarded send: no-ops (instead of throwing / spamming console) when the
+   * room isn't joined or the underlying socket isn't OPEN. Every public
+   * send* method below routes through this — this is the fix for the
+   * "WebSocket is already in CLOSING or CLOSED state" flood, which happened
+   * because `room.send()` was called unconditionally every network tick
+   * even after the socket had died.
+   */
+  private safeSend(type: string, payload: unknown): void {
+    if (!this.room || !this.isOpen) return;
+    try {
+      this.room.send(type, payload);
+    } catch (err) {
+      console.warn('[kilrun] send failed', type, err);
+    }
+  }
+
   public sendInput(input: PlayerInputMessage): void {
-    this.room?.send('input', input);
+    this.safeSend('input', input);
   }
 
   /** Admin-only: start matchmaking countdown even with 1 player (competitive / horde / deathrun). */
   public sendForceStart(): void {
-    this.room?.send('forceStart', {});
+    this.safeSend('forceStart', {});
   }
 
   /**
@@ -308,23 +424,23 @@ export class GameConnection {
     reloadMs?: number;
     modelUrl?: string;
   }): void {
-    this.room?.send('buyWeapon', weaponPreset);
+    this.safeSend('buyWeapon', weaponPreset);
   }
 
   public sendBuyPowerUp(powerUpId: string): void {
-    this.room?.send('buyPowerUp', { powerUpId });
+    this.safeSend('buyPowerUp', { powerUpId });
   }
 
   public sendBuyWeaponSkin(skinId: string): void {
-    this.room?.send('buyWeaponSkin', { skinId });
+    this.safeSend('buyWeaponSkin', { skinId });
   }
 
   public sendReload(): void {
-    this.room?.send('reload', {});
+    this.safeSend('reload', {});
   }
 
   public sendActivateAbility(ability: string): void {
-    this.room?.send('activateAbility', { ability });
+    this.safeSend('activateAbility', { ability });
   }
 
   /** Colyseus room id after a successful connect (for party queue sync). */
@@ -493,16 +609,23 @@ export class GameConnection {
     combatSettings?: Record<string, unknown>;
     shopSettings?: Record<string, unknown>;
   }): void {
-    this.room?.send('loadCustomMap', payload);
+    this.safeSend('loadCustomMap', payload);
   }
 
   public disconnect(): void {
     this.disposed = true;
+    this.lastJoin = null;
     if (this.mmTimer) {
       clearTimeout(this.mmTimer);
       this.mmTimer = null;
     }
-    this.room?.leave();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.isOpen) {
+      this.room?.leave();
+    }
     this.room = null;
   }
 }

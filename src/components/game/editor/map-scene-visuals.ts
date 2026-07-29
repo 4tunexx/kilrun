@@ -487,6 +487,13 @@ export function shouldUseGameplayFallback(
   if (ent.kind === 'door' || ent.kind === 'spinner' || ent.kind === 'push_rail' || ent.kind === 'push_block') {
     return true;
   }
+  // An entity authored as solid collision must NEVER end up invisible,
+  // regardless of kind or why its mesh didn't render (missing model field vs.
+  // a GLB fetch that 404'd). entityExportsAsPlatform / mapDocToSimPlatforms
+  // don't require a model to produce a real collider, so a modelless "solid"
+  // prop was previously falling through to `return false` here — invisible
+  // AND fully solid, i.e. exactly the "stuck on an invisible block" bug.
+  if (ent.collideMaterial === 'solid' || ent.solid === true) return true;
   if (reason === 'load-failed') {
     return ent.kind === 'prop' || ent.kind === 'trap';
   }

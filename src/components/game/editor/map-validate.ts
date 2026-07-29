@@ -217,6 +217,26 @@ function pushCreatorEngineChecks(doc: MapDocument, issues: MapValidationIssue[])
       message: 'All build levels are hidden — show at least one before playtesting.',
     });
   }
+
+  // "Invisible wall" trap: an entity authored as solid collision (collideMaterial
+  // 'solid' or solid === true) with no model/customModelUrl assigned. The
+  // runtime falls back to a plain gray placeholder box for these (see
+  // shouldUseGameplayFallback in map-scene-visuals.ts), but that's a cosmetic
+  // band-aid — warn the author here so it gets caught before publish instead
+  // of discovered as an unexpected box in a live match.
+  const invisibleSolids = ents.filter(
+    (e) =>
+      e.visible !== false &&
+      (e.collideMaterial === 'solid' || e.solid === true) &&
+      !e.model &&
+      !e.customModelUrl
+  );
+  if (invisibleSolids.length > 0) {
+    issues.push({
+      level: 'warn',
+      message: `${invisibleSolids.length} solid entity(ies) have no model assigned — they'll render as a plain gray placeholder box in-game (e.g. “${invisibleSolids[0].name || invisibleSolids[0].kind}”). Assign a model or texture.`,
+    });
+  }
 }
 
 export function formatValidationSummary(issues: MapValidationIssue[]): string {

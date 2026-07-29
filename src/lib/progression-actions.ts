@@ -1344,6 +1344,16 @@ export async function getSiteSettings() {
             (settings as { inventoryConfigJson?: string }).inventoryConfigJson ??
             '{}'
         ),
+        matchRewardsConfigJson: String(
+          doc.matchRewardsConfigJson ??
+            (settings as { matchRewardsConfigJson?: string }).matchRewardsConfigJson ??
+            '{}'
+        ),
+        defaultTpsViewJson: String(
+          doc.defaultTpsViewJson ??
+            (settings as { defaultTpsViewJson?: string }).defaultTpsViewJson ??
+            '{}'
+        ),
       };
     }
   } catch {
@@ -1376,6 +1386,12 @@ export async function getSiteSettings() {
     inventoryConfigJson: String(
       (settings as { inventoryConfigJson?: string }).inventoryConfigJson ?? '{}'
     ),
+    matchRewardsConfigJson: String(
+      (settings as { matchRewardsConfigJson?: string }).matchRewardsConfigJson ?? '{}'
+    ),
+    defaultTpsViewJson: String(
+      (settings as { defaultTpsViewJson?: string }).defaultTpsViewJson ?? '{}'
+    ),
   };
 }
 
@@ -1399,6 +1415,8 @@ export async function updateSiteSettings(data: {
   premiumConfigJson?: string;
   rankConfigJson?: string;
   inventoryConfigJson?: string;
+  matchRewardsConfigJson?: string;
+  defaultTpsViewJson?: string;
 }) {
   const staff = await requireStaff();
   await getSiteSettings();
@@ -1424,6 +1442,10 @@ export async function updateSiteSettings(data: {
   const { serializeInventoryConfig, parseInventoryConfig } = await import(
     '@/lib/inventory-config'
   );
+  const { serializeMatchRewardsConfig, parseMatchRewardsConfig } = await import(
+    '@/lib/match-rewards-config'
+  );
+  const { sanitizeTpsView } = await import('@/components/game/tps/tps-view-settings');
   const payload: Record<string, string | boolean | Date | null> = {};
 
   if (typeof data.logoUrl === 'string') {
@@ -1505,6 +1527,26 @@ export async function updateSiteSettings(data: {
     payload.inventoryConfigJson = serializeInventoryConfig(
       parseInventoryConfig(data.inventoryConfigJson)
     );
+  }
+  if (typeof data.matchRewardsConfigJson === 'string') {
+    payload.matchRewardsConfigJson = serializeMatchRewardsConfig(
+      parseMatchRewardsConfig(data.matchRewardsConfigJson)
+    );
+  }
+  if (typeof data.defaultTpsViewJson === 'string') {
+    // Empty string / '{}' means "clear the global default, use hardcoded
+    // DEFAULT_TPS_VIEW" — don't force-fill every field with sanitize()'s
+    // defaults in that case, just store an empty object.
+    const trimmed = data.defaultTpsViewJson.trim();
+    if (!trimmed || trimmed === '{}') {
+      payload.defaultTpsViewJson = '{}';
+    } else {
+      try {
+        payload.defaultTpsViewJson = JSON.stringify(sanitizeTpsView(JSON.parse(trimmed)));
+      } catch {
+        payload.defaultTpsViewJson = '{}';
+      }
+    }
   }
 
   let saved;

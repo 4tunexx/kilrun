@@ -1869,6 +1869,9 @@ export async function adminGetUserDetail(userId: string) {
       createdAt: true,
       loginStreak: true,
       reputation: true,
+      gameXp: true,
+      gameSkillPoints: true,
+      gameAbilities: true,
     },
   });
   if (!user) throw new Error('User not found');

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Package, ShoppingBag, Trophy, Target } from 'lucide-react';
+import { Loader2, Package, ShoppingBag, Trophy, Target, Sparkles } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
@@ -9,11 +9,19 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { adminGetUserDetail } from '@/lib/social-actions';
+import {
+  adminGrantGameXp,
+  adminAdjustGameSkillPoints,
+  adminResetGameAbilities,
+} from '@/lib/game-progression-actions';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import { getLevelFromXp } from '@/lib/progression';
+import { getGameLevelProgress, parseAbilityLevels } from '@shared/ability-progression';
+import { useToast } from '@/hooks/use-toast';
 
 type Detail = Awaited<ReturnType<typeof adminGetUserDetail>>;
 
@@ -28,6 +36,15 @@ export function AdminUserDetailSheet({
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const reloadDetail = () => {
+    if (!userId) return Promise.resolve();
+    return adminGetUserDetail(userId)
+      .then((d) => setDetail(d))
+      .catch(() => setDetail(null));
+  };
 
   useEffect(() => {
     if (!open || !userId) return;
@@ -50,6 +67,31 @@ export function AdminUserDetailSheet({
 
   const u = detail?.user;
   const level = u ? getLevelFromXp(u.xpProgress) : 0;
+  const gameUser = u as (typeof u & {
+    gameXp?: number;
+    gameSkillPoints?: number;
+    gameAbilities?: unknown;
+  }) | undefined;
+  const gameProgress = gameUser ? getGameLevelProgress(gameUser.gameXp ?? 0) : null;
+  const abilityLevels = gameUser ? parseAbilityLevels(gameUser.gameAbilities) : null;
+  const abilitiesLeveled = abilityLevels
+    ? Object.values(abilityLevels).filter((lvl) => (lvl ?? 0) > 0).length
+    : 0;
+
+  const runGameAction = async (key: string, action: () => Promise<unknown>) => {
+    setBusyKey(key);
+    try {
+      await action();
+      await reloadDetail();
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Something went wrong',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -119,6 +161,9 @@ export function AdminUserDetailSheet({
                 </TabsTrigger>
                 <TabsTrigger value="missions" className="text-xs">
                   Missions
+                </TabsTrigger>
+                <TabsTrigger value="game" className="text-xs">
+                  Game
                 </TabsTrigger>
               </TabsList>
 
@@ -236,6 +281,94 @@ export function AdminUserDetailSheet({
                       </p>
                     </div>
                   ))
+                )}
+              </TabsContent>
+
+              <TabsContent value="game" className="mt-3 space-y-3">
+                {gameUser && gameProgress ? (
+                  <>
+                    <div className="rounded-md border border-slate-700/40 bg-slate-800/40 px-3 py-2 space-y-1">
+                      <p className="text-sm font-medium flex items-center gap-1">
+                        <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
+                        In-game level {gameProgress.level}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {gameUser.gameXp ?? 0} game XP · {gameUser.gameSkillPoints ?? 0} unspent
+                        Skill Points · {abilitiesLeveled} power(s) leveled
+                      </p>
+                      <p className="text-[10px] text-slate-600">
+                        Separate from the website account level/XP shown above.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyKey === 'grant-xp'}
+                        onClick={() => {
+                          const raw = window.prompt('Grant in-game XP (negative to remove):', '500');
+                          const amount = Number(raw);
+                          if (!raw || !Number.isFinite(amount) || amount === 0) return;
+                          void runGameAction('grant-xp', () =>
+                            adminGrantGameXp(userId!, Math.trunc(amount))
+                          );
+                        }}
+                      >
+                        {busyKey === 'grant-xp' && (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                        )}
+                        Grant/remove game XP
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyKey === 'grant-sp'}
+                        onClick={() => {
+                          const raw = window.prompt(
+                            'Grant Skill Points (negative to remove):',
+                            '1'
+                          );
+                          const amount = Number(raw);
+                          if (!raw || !Number.isFinite(amount) || amount === 0) return;
+                          void runGameAction('grant-sp', () =>
+                            adminAdjustGameSkillPoints(userId!, Math.trunc(amount))
+                          );
+                        }}
+                      >
+                        {busyKey === 'grant-sp' && (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                        )}
+                        Grant/remove Skill Points
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={busyKey === 'reset-abilities'}
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              'Reset every power/ability level for this player and refund their full Skill Point pool?'
+                            )
+                          ) {
+                            return;
+                          }
+                          void runGameAction('reset-abilities', () =>
+                            adminResetGameAbilities(userId!)
+                          );
+                        }}
+                      >
+                        {busyKey === 'reset-abilities' && (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                        )}
+                        Respec (reset abilities)
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-500 py-6 text-center">
+                    No in-game progression data.
+                  </p>
                 )}
               </TabsContent>
             </Tabs>

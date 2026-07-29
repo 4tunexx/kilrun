@@ -4,177 +4,110 @@
  *
  * This system tracks a player's in-match power progression: kills/wins earn
  * "game XP", leveling up grants Skill Points, and Skill Points are spent
- * upgrading powers (Health, Speed, Jump, Energy, Visibility, Punch, Fly,
- * Hook, Berserk, Bullet, Thunder) from the in-game menu (press M).
+ * upgrading powers from the in-game menu (press M).
  *
- * Single source of truth so the Next.js app (menu UI, profile pages,
- * server actions) and the Colyseus game server (applying the actual
- * gameplay effects) never drift out of sync.
+ * As of the Power Editor feature, the actual power definitions (name, icon,
+ * cost curve, effect magnitude, prerequisites, skill-tree gating) are
+ * data-driven and persisted via the Prisma `PowerDefinition` model — see
+ * `shared/power-definitions.ts` for the generic engine. This file is now a
+ * thin backward-compatible shim: `ABILITY_DEFINITIONS` / `ABILITY_KEYS` are
+ * mutable singletons that `applyDynamicPowerDefinitions()` (re-exported from
+ * `power-definitions.ts`) hot-swaps in place once dynamic data has loaded,
+ * so every existing import of this module keeps working unchanged. Until
+ * then (or if the DB is unreachable), they hold the original 11 hardcoded
+ * abilities as a safe static fallback.
  */
 
-export type AbilityKey =
-  | 'health'
-  | 'speed'
-  | 'jump'
-  | 'energy'
-  | 'visibility'
-  | 'punch'
-  | 'fly'
-  | 'hook'
-  | 'berserk'
-  | 'bullet'
-  | 'thunder';
+import {
+  applyDynamicPowerDefinitions as _applyDynamicPowerDefinitions,
+  costForLevelFormula,
+  effectLabelGeneric,
+  getActivePowerDefinitions,
+  getBerserkDurationMs,
+  getFlyDurationMs,
+  getHookStats,
+  getThunderStats,
+  getUnlimitedAmmoDurationMs,
+  getVisibilityDurationMs,
+  computeAbilityStatBonuses,
+  type GenericAbilityStatBonuses,
+  type PowerDefinitionRecord,
+} from './power-definitions';
 
-export interface AbilityLevelEffect {
-  level: number;
-  /** Short human-readable summary of what this level grants. */
-  label: string;
+export {
+  costForLevelFormula,
+  effectLabelGeneric,
+  getActivePowerDefinitions,
+  getPowerDefinitionByKey,
+  getTimedBuffStatsByKey,
+  getBurstEffectStatsByKey,
+  STATIC_FALLBACK_POWERS,
+  type PowerDefinitionRecord,
+  type PowerEffectType,
+  type PowerPrerequisite,
+  type CostFormula,
+  type StatBonusParams,
+  type TimedBuffParams,
+  type BurstEffectParams,
+} from './power-definitions';
+
+/** Re-exported so callers don't need to import from two modules. Hot-swaps
+ * `ABILITY_DEFINITIONS`/`ABILITY_KEYS` below as a side effect. */
+export function applyDynamicPowerDefinitions(records: PowerDefinitionRecord[]): void {
+  _applyDynamicPowerDefinitions(records);
+  rebuildLegacyShim();
 }
+
+/** Any power key — core (health/speed/.../thunder) or a custom power created
+ * in the editor. Loosened from the old fixed 11-value union so newly
+ * created powers type-check everywhere without further edits. */
+export type AbilityKey = string;
 
 export interface AbilityDefinition {
   key: AbilityKey;
   name: string;
   description: string;
-  /** Emoji/icon glyph for compact UI. */
   icon: string;
   maxLevel: number;
-  /** In-game account level required before ANY skill points can go into this
-   * ability. Health/Energy are core sustain stats and always available;
-   * everything else unlocks progressively so new players get a simple kit
-   * first and powers reveal themselves over time. */
   unlockLevel: number;
-  /** Skill points required to go from `level` to `level + 1`. */
+  /** Skill-tree prerequisites: [{key, level}, ...] — empty for no gating. */
+  prerequisites: { key: string; level: number }[];
   costForLevel: (level: number) => number;
-  /** Human-readable effect summary at a given level (0 = not unlocked). */
   effectLabel: (level: number) => string;
 }
 
-const flatCost = (points: number) => (_level: number) => points;
-const rampCost = (base: number, step: number) => (level: number) =>
-  base + step * level;
-
 export const MAX_ABILITY_LEVEL = 10;
 
-export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
-  health: {
-    key: 'health',
-    name: 'Health',
-    description: 'Increases maximum health.',
-    icon: '❤️',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 1,
-    costForLevel: flatCost(1),
-    effectLabel: (level) => `+${level * 10} max HP`,
-  },
-  speed: {
-    key: 'speed',
-    name: 'Speed',
-    description: 'Increases movement speed.',
-    icon: '⚡',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 5,
-    costForLevel: flatCost(1),
-    effectLabel: (level) => `+${(level * 4).toFixed(0)}% move speed`,
-  },
-  jump: {
-    key: 'jump',
-    name: 'Jump',
-    description: 'Increases jump height.',
-    icon: '🦘',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 25,
-    costForLevel: flatCost(1),
-    effectLabel: (level) => `+${(level * 5).toFixed(0)}% jump height`,
-  },
-  energy: {
-    key: 'energy',
-    name: 'Energy',
-    description: 'Increases maximum energy (sprint/abilities pool).',
-    icon: '🔋',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 1,
-    costForLevel: flatCost(1),
-    effectLabel: (level) => `+${level * 10} max energy`,
-  },
-  visibility: {
-    key: 'visibility',
-    name: 'Invisibility',
-    description: 'Turn invisible to enemies for a short duration.',
-    icon: '👻',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 10,
-    costForLevel: rampCost(1, 1),
-    effectLabel: (level) => (level > 0 ? `${(2 + level * 0.8).toFixed(1)}s duration` : 'Locked'),
-  },
-  punch: {
-    key: 'punch',
-    name: 'Punch Damage',
-    description: 'Increases melee punch damage.',
-    icon: '👊',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 15,
-    costForLevel: flatCost(1),
-    effectLabel: (level) => `+${level * 8}% punch damage`,
-  },
-  fly: {
-    key: 'fly',
-    name: 'Fly',
-    description: 'Take to the air for a short duration.',
-    icon: '🕊️',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 35,
-    costForLevel: rampCost(1, 1),
-    effectLabel: (level) => (level > 0 ? `${(1.5 + level * 0.7).toFixed(1)}s duration` : 'Locked'),
-  },
-  hook: {
-    key: 'hook',
-    name: 'Grapple Hook',
-    description: 'Press H to fire a hook and pull yourself to a wall/object.',
-    icon: '🪝',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 30,
-    costForLevel: rampCost(1, 1),
-    effectLabel: (level) =>
-      level > 0
-        ? `${(8 + level * 1.5).toFixed(1)}m range · ${(0.4 + level * 0.05).toFixed(2)}s pull`
-        : 'Locked',
-  },
-  berserk: {
-    key: 'berserk',
-    name: 'Berserk',
-    description: 'Grow huge, take no damage, and one-punch-KO enemies.',
-    icon: '💢',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 40,
-    costForLevel: rampCost(2, 1),
-    effectLabel: (level) => (level > 0 ? `${(3 + level * 0.6).toFixed(1)}s duration` : 'Locked'),
-  },
-  bullet: {
-    key: 'bullet',
-    name: 'Unlimited Ammo',
-    description: 'Fire without reloading or consuming ammo for a duration.',
-    icon: '🔫',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 20,
-    costForLevel: rampCost(1, 1),
-    effectLabel: (level) => (level > 0 ? `${(3 + level * 0.6).toFixed(1)}s duration` : 'Locked'),
-  },
-  thunder: {
-    key: 'thunder',
-    name: 'Thunder Bolt',
-    description: 'Release a thunder bolt that damages nearby enemies.',
-    icon: '⚡🌩️',
-    maxLevel: MAX_ABILITY_LEVEL,
-    unlockLevel: 45,
-    costForLevel: rampCost(2, 1),
-    effectLabel: (level) =>
-      level > 0
-        ? `${(3 + level * 0.5).toFixed(1)}m radius · ${20 + level * 8} dmg`
-        : 'Locked',
-  },
-};
+/** Mutable singleton — same object reference forever; properties are
+ * added/removed in place by `rebuildLegacyShim()` so existing
+ * `import { ABILITY_DEFINITIONS }` call sites see live updates. */
+export const ABILITY_DEFINITIONS: Record<string, AbilityDefinition> = {};
+/** Mutable singleton array — same reference forever, contents replaced via splice. */
+export const ABILITY_KEYS: AbilityKey[] = [];
 
-export const ABILITY_KEYS = Object.keys(ABILITY_DEFINITIONS) as AbilityKey[];
+function toLegacyDefinition(rec: PowerDefinitionRecord): AbilityDefinition {
+  return {
+    key: rec.key,
+    name: rec.name,
+    description: rec.description,
+    icon: rec.icon,
+    maxLevel: rec.maxLevel,
+    unlockLevel: rec.unlockLevel,
+    prerequisites: rec.prerequisites ?? [],
+    costForLevel: (level: number) => costForLevelFormula(rec.cost, level),
+    effectLabel: (level: number) => effectLabelGeneric(rec, level),
+  };
+}
+
+function rebuildLegacyShim(): void {
+  for (const k of Object.keys(ABILITY_DEFINITIONS)) delete ABILITY_DEFINITIONS[k];
+  ABILITY_KEYS.length = 0;
+  for (const rec of getActivePowerDefinitions()) {
+    ABILITY_KEYS.push(rec.key);
+    ABILITY_DEFINITIONS[rec.key] = toLegacyDefinition(rec);
+  }
+}
+rebuildLegacyShim();
 
 /** Abilities whose unlockLevel falls in `(prevLevel, newLevel]` — used to
  * show "you just unlocked X" in a level-up popup. Empty if nothing new. */
@@ -185,10 +118,10 @@ export function getNewlyUnlockedAbilities(prevLevel: number, newLevel: number): 
   );
 }
 
-export type AbilityLevels = Record<AbilityKey, number>;
+export type AbilityLevels = Record<string, number>;
 
 export function defaultAbilityLevels(): AbilityLevels {
-  const out = {} as AbilityLevels;
+  const out: AbilityLevels = {};
   for (const key of ABILITY_KEYS) out[key] = 0;
   return out;
 }
@@ -203,6 +136,14 @@ export function parseAbilityLevels(raw: unknown): AbilityLevels {
         out[key] = Math.max(0, Math.min(ABILITY_DEFINITIONS[key].maxLevel, Math.floor(value)));
       }
     }
+    // Preserve levels for keys not in the currently-loaded active list (e.g.
+    // a custom power that failed to load this request) rather than dropping
+    // the player's progress silently.
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (!(key in out) && typeof value === 'number' && Number.isFinite(value)) {
+        out[key] = Math.max(0, Math.floor(value));
+      }
+    }
   }
   return out;
 }
@@ -212,11 +153,17 @@ export function totalSpentSkillPoints(levels: AbilityLevels): number {
   let spent = 0;
   for (const key of ABILITY_KEYS) {
     const def = ABILITY_DEFINITIONS[key];
-    for (let lvl = 0; lvl < levels[key]; lvl++) {
+    for (let lvl = 0; lvl < (levels[key] ?? 0); lvl++) {
       spent += def.costForLevel(lvl);
     }
   }
   return spent;
+}
+
+/** Is `prerequisites` satisfied given the player's current levels? */
+export function arePrerequisitesMet(def: AbilityDefinition, levels: AbilityLevels): boolean {
+  if (!def.prerequisites?.length) return true;
+  return def.prerequisites.every((p) => (levels[p.key] ?? 0) >= p.level);
 }
 
 // ---------------------------------------------------------------------------
@@ -271,58 +218,30 @@ export function skillPointsForLevel(level: number): number {
 
 // ---------------------------------------------------------------------------
 // Live gameplay stat bonuses derived from ability levels (consumed by the
-// Colyseus room sim when spawning/updating a player).
+// Colyseus room sim when spawning/updating a player). Signature unchanged
+// from the original hardcoded version; math is now generic/data-driven.
 // ---------------------------------------------------------------------------
 
 export interface AbilityStatBonuses {
-  /** Additive bonus to max health. */
   maxHealthBonus: number;
-  /** Multiplier applied to move speed (1 = no change). */
   speedMultiplier: number;
-  /** Multiplier applied to jump velocity (1 = no change). */
   jumpMultiplier: number;
-  /** Additive bonus to max energy. */
   maxEnergyBonus: number;
-  /** Multiplier applied to melee punch damage (1 = no change). */
   punchDamageMultiplier: number;
+  reloadSpeedMultiplier?: number;
+  fallDamageReduction?: number;
 }
 
 export function getAbilityStatBonuses(levels: AbilityLevels): AbilityStatBonuses {
-  return {
-    maxHealthBonus: levels.health * 10,
-    speedMultiplier: 1 + levels.speed * 0.04,
-    jumpMultiplier: 1 + levels.jump * 0.05,
-    maxEnergyBonus: levels.energy * 10,
-    punchDamageMultiplier: 1 + levels.punch * 0.08,
-  };
+  const bonuses: GenericAbilityStatBonuses = computeAbilityStatBonuses(levels);
+  return bonuses;
 }
 
-export function getVisibilityDurationMs(level: number): number {
-  return level > 0 ? Math.round((2 + level * 0.8) * 1000) : 0;
-}
-
-export function getFlyDurationMs(level: number): number {
-  return level > 0 ? Math.round((1.5 + level * 0.7) * 1000) : 0;
-}
-
-export function getHookStats(level: number): { rangeMeters: number; pullDurationMs: number } {
-  return {
-    rangeMeters: level > 0 ? 8 + level * 1.5 : 0,
-    pullDurationMs: level > 0 ? Math.round((0.4 + level * 0.05) * 1000) : 0,
-  };
-}
-
-export function getBerserkDurationMs(level: number): number {
-  return level > 0 ? Math.round((3 + level * 0.6) * 1000) : 0;
-}
-
-export function getUnlimitedAmmoDurationMs(level: number): number {
-  return level > 0 ? Math.round((3 + level * 0.6) * 1000) : 0;
-}
-
-export function getThunderStats(level: number): { radiusMeters: number; damage: number } {
-  return {
-    radiusMeters: level > 0 ? 3 + level * 0.5 : 0,
-    damage: level > 0 ? 20 + level * 8 : 0,
-  };
-}
+export {
+  getVisibilityDurationMs,
+  getFlyDurationMs,
+  getHookStats,
+  getBerserkDurationMs,
+  getUnlimitedAmmoDurationMs,
+  getThunderStats,
+};

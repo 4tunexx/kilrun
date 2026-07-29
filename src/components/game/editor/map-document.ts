@@ -321,8 +321,19 @@ export interface PlayerAuthoredClip {
 export function suggestPlayerBindings(clips: string[]): PlayerAnimBindings {
   if (!clips.length) return {};
   const lower = clips.map((c) => ({ c, l: c.toLowerCase() }));
-  const find = (...keys: string[]) =>
-    lower.find((x) => keys.some((k) => x.l.includes(k)))?.c;
+  // Pack clips like "Death_1_(idle)" contain "idle" as a substring and can
+  // sit before the real "Idle" clip — without this exclusion every other
+  // slot (idle/walk/run/...) can accidentally bind to a death pose. Only the
+  // 'die' lookup itself should ever match a death/dead-labeled clip.
+  const DEATH_MARKERS = ['death', 'dead'];
+  const find = (...keys: string[]) => {
+    const searchingDeath = keys.some((k) => DEATH_MARKERS.includes(k) || k === 'die');
+    return lower.find(
+      (x) =>
+        (searchingDeath || !DEATH_MARKERS.some((marker) => x.l.includes(marker))) &&
+        keys.some((k) => x.l.includes(k))
+    )?.c;
+  };
   const idle = find('idle', 'stand', 'breath') ?? clips[0];
   const walk = find('walk', 'walking') ?? find('run') ?? clips[1] ?? clips[0];
   return {

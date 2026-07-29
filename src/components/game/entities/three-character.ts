@@ -14,10 +14,25 @@ import type { SkinAttachment } from '@/lib/player-skins';
 import { BODY_COLOR_NONE } from '@/lib/body-colors';
 import { applyTeamTint } from '@/lib/premium-skin-config';
 
+/**
+ * Clip names like the Characters_7 pack's "Death_1_(idle)" contain the
+ * substring "idle" — a naive `.includes('idle')` match picks that death pose
+ * as the standing-idle clip whenever it appears before the real "Idle" clip
+ * in the array (exactly what happens for any mode/map whose player entity
+ * has no explicitly authored `playerAnims`, e.g. Competitive). Skip
+ * death/dead-labeled clips for every slot except the actual 'die' lookup.
+ */
+const DEATH_CLIP_MARKERS = ['death', 'dead'];
+
 function pickClip(clips: THREE.AnimationClip[], patterns: string[]): THREE.AnimationClip | null {
   const lower = clips.map((c) => ({ clip: c, name: c.name.toLowerCase() }));
+  const searchingDeath = patterns.some((p) => DEATH_CLIP_MARKERS.includes(p) || p === 'die');
   for (const pattern of patterns) {
-    const hit = lower.find((c) => c.name.includes(pattern));
+    const hit = lower.find(
+      (c) =>
+        c.name.includes(pattern) &&
+        (searchingDeath || !DEATH_CLIP_MARKERS.some((marker) => c.name.includes(marker)))
+    );
     if (hit) return hit.clip;
   }
   return null;

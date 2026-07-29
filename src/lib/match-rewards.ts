@@ -9,45 +9,65 @@ import {
   applyKpDelta,
   grantXp,
   processMatchProgression,
+  getSiteSettings,
 } from '@/lib/progression-actions';
 import { runAsTrustedServer } from '@/lib/trusted-server';
 import { grantGameXp } from '@/lib/game-progression-actions';
+import {
+  DEFAULT_MATCH_REWARDS_CONFIG,
+  parseMatchRewardsConfig,
+  type MatchRewardsConfig,
+} from '@/lib/match-rewards-config';
+
+/**
+ * Admin-tunable reward economy (SiteSettings.matchRewardsConfigJson), cached
+ * briefly so per-match award processing doesn't hit Mongo twice for the same
+ * settings row. ALWAYS falls back to the hardcoded `DEFAULT_MATCH_REWARDS_CONFIG`
+ * on any error — a missing/corrupt config must never crash match-result
+ * processing (players still need their XP/VP/KP awarded).
+ */
+let rewardsConfigCache: { at: number; cfg: MatchRewardsConfig } | null = null;
+const REWARDS_CONFIG_CACHE_TTL_MS = 15_000;
+
+async function getActiveMatchRewardsConfig(): Promise<MatchRewardsConfig> {
+  const now = Date.now();
+  if (rewardsConfigCache && now - rewardsConfigCache.at < REWARDS_CONFIG_CACHE_TTL_MS) {
+    return rewardsConfigCache.cfg;
+  }
+  try {
+    const settings = await getSiteSettings();
+    const cfg = parseMatchRewardsConfig(
+      (settings as { matchRewardsConfigJson?: string }).matchRewardsConfigJson ?? '{}'
+    );
+    rewardsConfigCache = { at: now, cfg };
+    return cfg;
+  } catch (err) {
+    console.error('[match-rewards] config load failed, using hardcoded defaults:', err);
+    return DEFAULT_MATCH_REWARDS_CONFIG;
+  }
+}
 
 /**
  * IN-GAME XP (separate from website `xpEarned`/`xpProgress`) — kills matter
  * more here since it's a combat power-progression system, not the website
  * leveling curve.
  */
-function computeInGameXp(base: { xp: number; kills?: number; wavesCleared?: number }): number {
-  const killBonus = Math.min(200, (base.kills ?? 0) * 6);
-  const waveBonus = Math.min(120, (base.wavesCleared ?? 0) * 5);
-  return Math.round(base.xp * 0.6 + killBonus + waveBonus);
+function computeInGameXp(
+  base: { xp: number; kills?: number; wavesCleared?: number },
+  cfg: MatchRewardsConfig
+): number {
+  const killBonus = Math.min(cfg.killXpCap, (base.kills ?? 0) * cfg.killXpPerKill);
+  const waveBonus = Math.min(cfg.waveXpCap, (base.wavesCleared ?? 0) * cfg.waveXpPerWave);
+  return Math.round(base.xp * cfg.inGameXpBaseMultiplier + killBonus + waveBonus);
 }
 
-export const DEATHRUN_REWARDS: Record<
-  'win' | 'loss' | 'survived' | 'eliminated',
-  { xp: number; vp: number }
-> = {
-  win: { xp: 150, vp: 40 },
-  survived: { xp: 90, vp: 20 },
-  loss: { xp: 40, vp: 10 },
-  eliminated: { xp: 25, vp: 5 },
-};
-
-export const HORDE_REWARDS: Record<
-  'win' | 'loss' | 'survived' | 'eliminated',
-  { xp: number; vp: number }
-> = {
-  win: { xp: 160, vp: 45 },
-  survived: { xp: 110, vp: 30 },
-  loss: { xp: 45, vp: 12 },
-  eliminated: { xp: 30, vp: 8 },
-};
-
-export const COMPETITIVE_REWARDS = {
-  win: { xp: 140, vp: 35 },
-  loss: { xp: 50, vp: 12 },
-} as const;
+/** Hardcoded fallback tables — kept exported for backward compat; the live
+ * numbers actually used at runtime come from `getActiveMatchRewardsConfig()`
+ * (DB-backed, admin-tunable via the Game Balance panel), falling back to
+ * these exact same values whenever the DB is unreachable or unseeded. */
+export const DEATHRUN_REWARDS = DEFAULT_MATCH_REWARDS_CONFIG.deathrun;
+export const HORDE_REWARDS = DEFAULT_MATCH_REWARDS_CONFIG.horde;
+export const COMPETITIVE_REWARDS = DEFAULT_MATCH_REWARDS_CONFIG.competitive;
 
 export type MatchRewardOutcome = 'win' | 'loss' | 'survived' | 'eliminated';
 
@@ -141,8 +161,9 @@ async function applyDeathrunPlayer(
   const existing = await findMatchResultByMatchId(player.userId, matchId);
   if (existing) return awardFromExisting(player.userId, existing);
 
+  const cfg = await getActiveMatchRewardsConfig();
   const outcome = player.outcome;
-  const reward = DEATHRUN_REWARDS[outcome] ?? DEATHRUN_REWARDS.loss;
+  const reward = cfg.deathrun[outcome] ?? cfg.deathrun.loss;
   const score = clampNonNegInt(player.score, 1_000_000);
   const distance = clampNonNegInt(player.distance, 100_000);
   const kills = clampNonNegInt(player.kills, 100);
@@ -177,7 +198,7 @@ async function applyDeathrunPlayer(
   });
 
   await grantXp(player.userId, reward.xp, 'Deathrun match');
-  await grantGameXp(player.userId, computeInGameXp({ xp: reward.xp, kills }));
+  await grantGameXp(player.userId, computeInGameXp({ xp: reward.xp, kills }, cfg));
   await processMatchProgression({
     userId: player.userId,
     mode: 'deathrun',
@@ -213,12 +234,13 @@ async function applyHordePlayer(
   const existing = await findMatchResultByMatchId(player.userId, matchId);
   if (existing) return awardFromExisting(player.userId, existing);
 
+  const cfg = await getActiveMatchRewardsConfig();
   const outcome = player.outcome;
-  const reward = HORDE_REWARDS[outcome] ?? HORDE_REWARDS.loss;
+  const reward = cfg.horde[outcome] ?? cfg.horde.loss;
   const wavesCleared = clampNonNegInt(player.wavesCleared, 50);
   const kills = clampNonNegInt(player.kills, 500);
   const deaths = clampNonNegInt(player.deaths, 50);
-  const bonusXp = Math.min(80, wavesCleared * 4);
+  const bonusXp = Math.min(cfg.hordeWaveBonusCap, wavesCleared * cfg.hordeWaveBonusPerWave);
   const xpEarned = reward.xp + bonusXp;
 
   await prisma.matchResult.create({
@@ -241,7 +263,7 @@ async function applyHordePlayer(
   });
 
   await grantXp(player.userId, xpEarned, 'Horde match');
-  await grantGameXp(player.userId, computeInGameXp({ xp: xpEarned, kills, wavesCleared }));
+  await grantGameXp(player.userId, computeInGameXp({ xp: xpEarned, kills, wavesCleared }, cfg));
   await processMatchProgression({
     userId: player.userId,
     mode: 'horde',
@@ -332,7 +354,8 @@ async function applyCompetitivePlayer(
         })
       : 0;
 
-  const reward = COMPETITIVE_REWARDS[outcome];
+  const cfg = await getActiveMatchRewardsConfig();
+  const reward = cfg.competitive[outcome];
   const modeTag = queue === 'ranked' ? 'competitive_ranked' : 'competitive';
   const team =
     player.role === 'team_b' || player.role === 'team_a' ? player.role : 'team_a';
@@ -374,7 +397,7 @@ async function applyCompetitivePlayer(
     reward.xp,
     queue === 'ranked' ? 'Competitive Ranked' : 'Competitive Casual'
   );
-  await grantGameXp(player.userId, computeInGameXp({ xp: reward.xp, kills }));
+  await grantGameXp(player.userId, computeInGameXp({ xp: reward.xp, kills }, cfg));
 
   let nextKp = playerKp;
   let rank = user.currentRank || getRankForKp(playerKp);

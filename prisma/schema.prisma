@@ -338,6 +338,11 @@ model SiteSettings {
   inventoryConfigJson String @default("{}")
   /// JSON: custom/edited requirement metrics + shop unlock channels — see requirement-catalog.ts.
   requirementCatalogJson String @default("{}")
+  /// JSON: admin-tunable match reward tables + XP bonus formula constants — see match-rewards-config.ts.
+  matchRewardsConfigJson String @default("{}")
+  /// JSON: admin-tunable global TPS camera/crosshair/player-view default — see tps-view-settings.ts.
+  /// Empty = use the hardcoded DEFAULT_TPS_VIEW. Never overrides a per-map `tpsView`.
+  defaultTpsViewJson String @default("{}")
 }
 
 model GlobalChatMessage {
@@ -636,6 +641,76 @@ model MapGhostRun {
 
   @@unique([mapId, userId])
   @@index([mapId, finishMs])
+}
+
+/// Data-driven "Power" (in-game ability) definition — replaces the old
+/// hardcoded ABILITY_DEFINITIONS object in shared/ability-progression.ts.
+/// The original 11 abilities are seeded with isCore=true (see
+/// scripts/seed-power-definitions.ts) so they can be tuned but not deleted.
+/// See shared/power-definitions.ts for the generic effect-template engine
+/// that interprets `costJson` / `effectParamsJson` at runtime (client,
+/// Next.js server, and the Colyseus game server all consume the same shape).
+model PowerDefinition {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// Stable slug used as the key in User.gameAbilities JSON (e.g. "health").
+  key         String   @unique
+  name        String
+  description String
+  /// Emoji/icon glyph for compact UI.
+  icon        String   @default("✨")
+  maxLevel    Int      @default(10)
+  /// Flat in-game account level required before ANY skill points can go in.
+  unlockLevel Int      @default(1)
+  /// Skill-tree gating: JSON array of { key, level } — every listed power
+  /// must be at least at `level` before this power can be leveled at all.
+  prerequisitesJson String @default("[]")
+  /// JSON CostFormula: { type: 'flat', base } | { type: 'ramp', base, step }.
+  costJson    String   @default("{\"type\":\"flat\",\"base\":1}")
+  /// stat_bonus | timed_buff | burst_effect — see shared/power-definitions.ts.
+  effectType  String   @default("stat_bonus")
+  /// JSON matching the shape for `effectType` (StatBonusParams / TimedBuffParams / BurstEffectParams).
+  effectParamsJson String @default("{\"bonuses\":[]}")
+  /// True for the original 11 — deletable=false in the API/editor, only tunable.
+  isCore      Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([sortOrder])
+  @@index([isCore])
+}
+
+/// Data-driven GLOBAL weapon catalog definition — replaces the hardcoded
+/// CATALOG_WEAPONS array in src/lib/weapon-catalog.ts. The original 8 catalog
+/// weapons are seeded with isCore=true (see prisma/seed.ts) so they can be
+/// tuned but not deleted. Per-map `MapDocument.weaponDef` overrides still
+/// layer on top of whatever this table resolves to at runtime (global
+/// default -> per-map override -> in-match runtime), same precedence as before.
+model WeaponDefinition {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// Stable slug matching a CatalogWeaponId string (e.g. "pistol_001").
+  key         String   @unique
+  label       String
+  modelUrl    String
+  /// melee | hitscan | cosmetic — see src/lib/weapons.ts WeaponCombatKind.
+  kind        String   @default("hitscan")
+  /// JSON Partial<WeaponCombatConfig>: damage, range, cooldownMs, fireMode, magSize, reserveAmmo, ...
+  combatJson  String   @default("{}")
+  /// JSON array of 'horde' | 'competitive' — which shop modes show this weapon.
+  modesJson   String   @default("[\"horde\",\"competitive\"]")
+  /// Hint for grip attach in the Weapon Editor 3D preview.
+  gripHint    String   @default("")
+  /// Optional platform requirement (metric from requirement-types) to buy in-match.
+  unlockMetric String?
+  unlockAmount Int?
+  /// True for the original 8 catalog weapons — deletable=false, only tunable, in the editor/API.
+  isCore      Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([sortOrder])
+  @@index([isCore])
 }
 
 /// Lightweight Faceit-style party for shared queue (invite code + room sync).

@@ -45,7 +45,7 @@ import {
   isBerserkActive,
   tickActiveAbilityTimers,
 } from '../sim/active-abilities.js';
-import { getThunderStats } from '../../../shared/ability-progression.js';
+import { getBurstEffectStatsByKey } from '../../../shared/ability-progression.js';
 import { assignDeathrunColors, BODY_COLOR_NONE } from '../lib/body-colors.js';
 import {
   authenticateJoin,
@@ -59,6 +59,7 @@ import {
   reportMatchResults,
 } from '../match-report.js';
 import { fetchActiveMapPayload } from '../active-map.js';
+import { ensurePowerDefinitionsLoaded } from '../power-defs.js';
 
 interface JoinOptions {
   token?: string;
@@ -237,16 +238,16 @@ export class DeathrunRoom extends Room<RoomState> {
       if (!player) return;
       const now = Date.now();
       if (!activateAbility(player, payload?.ability, now)) return;
-      if (payload?.ability === 'thunder') {
-        let thunderLevel = 0;
+      if (payload?.ability) {
+        let level = 0;
         try {
-          thunderLevel = JSON.parse(player.abilityLevelsJson || '{}').thunder ?? 0;
+          level = JSON.parse(player.abilityLevelsJson || '{}')[payload.ability] ?? 0;
         } catch {
-          thunderLevel = 0;
+          level = 0;
         }
-        const stats = getThunderStats(thunderLevel);
-        const radius = stats.radiusMeters || 0;
-        const damage = stats.damage || 0;
+        const stats = getBurstEffectStatsByKey(payload.ability, level);
+        const radius = stats.kind === 'radius_damage' ? stats.radiusMeters || 0 : 0;
+        const damage = stats.kind === 'radius_damage' ? stats.damage || 0 : 0;
         if (radius > 0 && damage > 0) {
           for (const target of this.state.players.values()) {
             if (target.sessionId === player.sessionId || !target.isAlive || target.hasFinished) continue;
@@ -294,6 +295,8 @@ export class DeathrunRoom extends Room<RoomState> {
         this.bootstrapCustomMap(data, `client:${client.sessionId}`);
       }
     );
+
+    void ensurePowerDefinitionsLoaded();
 
     void fetchActiveMapPayload('deathrun').then((active) => {
       if (!active || this.customMapLoaded) return;

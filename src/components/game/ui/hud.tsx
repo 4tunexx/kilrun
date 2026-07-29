@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { NetPlayerState, NetRoomState } from '../net/types';
-import { getLevelFromXp, getLevelProgress } from '@/lib/progression';
 import { RunnerHud } from '../modes/deathrun/runner-hud';
 import type { WeaponCombatKind } from '@/lib/weapons';
+import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
 
 function formatClock(ms: number): string {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
@@ -172,14 +172,22 @@ function ChargeBar({
 export const HUD: React.FC<{
   player: NetPlayerState;
   room: NetRoomState;
-  xpProgress?: number;
+  /** In-game match progression (separate system from the website account
+   * level/XP) — may be null while it's still loading. */
+  gameProgress?: GameProgressionSnapshot | null;
   runnersLeft?: number;
   /** Loadout weapon combat kind (from equipped skins). */
   weaponKind?: WeaponCombatKind | null;
-}> = ({ player, room, xpProgress = 0, runnersLeft = 1, weaponKind = null }) => {
+}> = ({ player, room, gameProgress = null, runnersLeft = 1, weaponKind = null }) => {
   const isTrapper = player.role === 'trapper';
-  const level = getLevelFromXp(xpProgress);
-  const levelProg = useMemo(() => getLevelProgress(xpProgress), [xpProgress]);
+  const level = gameProgress?.level ?? 1;
+  const percent = gameProgress
+    ? gameProgress.percent ??
+      (gameProgress.xpForNextLevel > 0
+        ? Math.max(0, Math.min(100, (gameProgress.xpIntoLevel / gameProgress.xpForNextLevel) * 100))
+        : 0)
+    : 0;
+  const levelProg = { percent };
   const hp = Math.round(player.health);
   const energy = Math.round(player.energy ?? 100);
 
