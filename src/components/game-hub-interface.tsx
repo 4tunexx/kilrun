@@ -44,6 +44,7 @@ import BadgesView from '@/components/views/badges-view';
 import NotificationsView from '@/components/views/notifications-view';
 import MessagesView from '@/components/views/messages-view';
 import PublicProfileView from '@/components/views/public-profile-view';
+import {
   HealthIcon,
   SpeedIcon,
   JumpIcon,

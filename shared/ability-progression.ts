@@ -160,17 +160,6 @@ export const ABILITY_DEFINITIONS: Record<AbilityKey, AbilityDefinition> = {
 
 export const ABILITY_KEYS = Object.keys(ABILITY_DEFINITIONS) as AbilityKey[];
 
-<<<<<<< HEAD
-/** Abilities whose unlockLevel falls in `(prevLevel, newLevel]` — used to
- * show "you just unlocked X" in a level-up popup. Empty if nothing new. */
-export function getNewlyUnlockedAbilities(prevLevel: number, newLevel: number): AbilityDefinition[] {
-  if (newLevel <= prevLevel) return [];
-  return ABILITY_KEYS.map((k) => ABILITY_DEFINITIONS[k]).filter(
-    (def) => def.unlockLevel > prevLevel && def.unlockLevel <= newLevel
-  );
-}
-
-=======
 export type AbilityLevels = Record<AbilityKey, number>;
 
 export function defaultAbilityLevels(): AbilityLevels {
