@@ -38,7 +38,6 @@ export interface AbilityDefinition {
   /** Emoji/icon glyph for compact UI. */
   icon: string;
   maxLevel: number;
->>>>>>> origin/main
   /** Skill points required to go from `level` to `level + 1`. */
   costForLevel: (level: number) => number;
   /** Human-readable effect summary at a given level (0 = not unlocked). */
