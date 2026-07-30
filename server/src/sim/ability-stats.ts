@@ -5,12 +5,12 @@ const BASE_MAX_HEALTH = 100;
 
 /** Effective max health for this player, including the Health power upgrade. */
 export function getMaxHealth(player: PlayerState): number {
-  return BASE_MAX_HEALTH + (player.abilityMaxHealthBonus || 0);
+  return BASE_MAX_HEALTH + (player.ability.maxHealthBonus || 0);
 }
 
 /** Effective max energy for this player, including the Energy power upgrade. */
 export function getMaxEnergyFor(player: PlayerState): number {
-  return MAX_ENERGY + (player.abilityMaxEnergyBonus || 0);
+  return MAX_ENERGY + (player.ability.maxEnergyBonus || 0);
 }
 
 export interface TrustedAbilityStatBonuses {
@@ -26,9 +26,9 @@ export function applyAbilityStatsToPlayer(
   player: PlayerState,
   bonuses: TrustedAbilityStatBonuses | null | undefined
 ): void {
-  player.abilityMaxHealthBonus = bonuses?.maxHealthBonus ?? 0;
-  player.abilitySpeedMult = bonuses?.speedMultiplier ?? 1;
-  player.abilityJumpMult = bonuses?.jumpMultiplier ?? 1;
-  player.abilityMaxEnergyBonus = bonuses?.maxEnergyBonus ?? 0;
-  player.abilityPunchDamageMult = bonuses?.punchDamageMultiplier ?? 1;
+  player.ability.maxHealthBonus = bonuses?.maxHealthBonus ?? 0;
+  player.ability.speedMult = bonuses?.speedMultiplier ?? 1;
+  player.ability.jumpMult = bonuses?.jumpMultiplier ?? 1;
+  player.ability.maxEnergyBonus = bonuses?.maxEnergyBonus ?? 0;
+  player.ability.punchDamageMult = bonuses?.punchDamageMultiplier ?? 1;
 }

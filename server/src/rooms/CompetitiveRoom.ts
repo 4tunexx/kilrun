@@ -359,7 +359,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       if (payload?.ability) {
         let level = 0;
         try {
-          level = JSON.parse(player.abilityLevelsJson || '{}')[payload.ability] ?? 0;
+          level = JSON.parse(player.ability.levelsJson || '{}')[payload.ability] ?? 0;
         } catch {
           level = 0;
         }

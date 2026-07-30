@@ -22,7 +22,7 @@ export function weaponPelletCount(player: PlayerState): number {
 export function weaponPelletDamage(player: PlayerState): number {
   const base = player.weaponDamage > 0 ? player.weaponDamage : 25;
   if (player.weaponKind === 'melee') {
-    return base * (player.abilityPunchDamageMult || 1);
+    return base * (player.ability.punchDamageMult || 1);
   }
   return base;
 }

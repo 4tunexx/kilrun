@@ -173,14 +173,14 @@ export function applyMovement(
 
   // Resolve per-map overrides over base constants.
   const effGravity = physOpts?.gravity ?? GRAVITY;
-  const effJumpVel = (physOpts?.jumpVelocity ?? JUMP_VELOCITY) * (player.abilityJumpMult || 1);
+  const effJumpVel = (physOpts?.jumpVelocity ?? JUMP_VELOCITY) * (player.ability.jumpMult || 1);
   const effDoubleJumpVel =
-    (physOpts?.doubleJumpVelocity ?? DOUBLE_JUMP_VELOCITY) * (player.abilityJumpMult || 1);
+    (physOpts?.doubleJumpVelocity ?? DOUBLE_JUMP_VELOCITY) * (player.ability.jumpMult || 1);
   const effDoubleJumpEnabled = physOpts?.doubleJumpEnabled ?? true;
   const effJumpCut = physOpts?.jumpCutMult ?? JUMP_CUT_MULTIPLIER;
   const effCoyoteMs = physOpts?.coyoteMs ?? COYOTE_TIME_MS;
   const effJumpBufferMs = physOpts?.jumpBufferMs ?? JUMP_BUFFER_MS;
-  const effWalkSpeed = (physOpts?.walkSpeed ?? MAX_GROUND_SPEED) * (player.abilitySpeedMult || 1);
+  const effWalkSpeed = (physOpts?.walkSpeed ?? MAX_GROUND_SPEED) * (player.ability.speedMult || 1);
   const effSprintMult = physOpts?.sprintMult ?? SPRINT_MULTIPLIER;
   const effCrouchMult = physOpts?.crouchMult ?? CROUCH_SPEED_MULTIPLIER;
   const effMaxFall = physOpts?.maxFallSpeed ?? MAX_FALL_SPEED;

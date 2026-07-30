@@ -4,6 +4,31 @@ export type PlayerRole = 'trapper' | 'runner' | 'survivor' | 'team_a' | 'team_b'
 export type MatchPhase = 'lobby' | 'countdown' | 'playing' | 'results';
 export type MatchOutcome = 'win' | 'loss' | 'survived' | 'eliminated';
 
+/**
+ * IN-GAME power upgrades (Health/Speed/Jump/Energy/Punch) fetched from the
+ * account's persisted ability levels at join — see
+ * shared/ability-progression.ts. Neutral defaults (0 bonus / 1x mult) if
+ * the trusted lookup fails, so gameplay is unaffected.
+ *
+ * Nested in its own Schema class (not flattened onto PlayerState) because
+ * Colyseus schema instances are hard-capped at 64 @type() fields each —
+ * the limit is per-class, so this sub-object gets its own budget.
+ */
+export class AbilityLoadoutState extends Schema {
+  @type('number') maxHealthBonus = 0;
+  @type('number') speedMult = 1;
+  @type('number') jumpMult = 1;
+  @type('number') maxEnergyBonus = 0;
+  @type('number') punchDamageMult = 1;
+  @type('string') levelsJson = '{}';
+  @type('number') visibilityEndsAt = 0;
+  @type('number') flyEndsAt = 0;
+  @type('number') hookEndsAt = 0;
+  @type('number') berserkEndsAt = 0;
+  @type('number') bulletEndsAt = 0;
+  @type('number') thunderEndsAt = 0;
+}
+
 /** A single networked player -- position/aim are authoritative (server-simulated). */
 export class PlayerState extends Schema {
   @type('string') sessionId = '';
@@ -91,19 +116,12 @@ export class PlayerState extends Schema {
    * account's persisted ability levels at join — see
    * shared/ability-progression.ts. Neutral defaults (0 bonus / 1x mult) if
    * the trusted lookup fails, so gameplay is unaffected.
+   *
+   * Nested in its own Schema class (not flattened onto PlayerState) because
+   * Colyseus schema instances are hard-capped at 64 @type() fields each —
+   * the limit is per-class, so this sub-object gets its own budget.
    */
-  @type('number') abilityMaxHealthBonus = 0;
-  @type('number') abilitySpeedMult = 1;
-  @type('number') abilityJumpMult = 1;
-  @type('number') abilityMaxEnergyBonus = 0;
-  @type('number') abilityPunchDamageMult = 1;
-  @type('string') abilityLevelsJson = '{}';
-  @type('number') abilityVisibilityEndsAt = 0;
-  @type('number') abilityFlyEndsAt = 0;
-  @type('number') abilityHookEndsAt = 0;
-  @type('number') abilityBerserkEndsAt = 0;
-  @type('number') abilityBulletEndsAt = 0;
-  @type('number') abilityThunderEndsAt = 0;
+  @type(AbilityLoadoutState) ability = new AbilityLoadoutState();
 }
 
 /** Solid walkable surface for the shared platformer physics. */

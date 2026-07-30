@@ -32,7 +32,7 @@ import {
   computeAbilityStatBonuses,
   type GenericAbilityStatBonuses,
   type PowerDefinitionRecord,
-} from './power-definitions';
+} from './power-definitions.js';
 
 export {
   costForLevelFormula,
@@ -49,7 +49,7 @@ export {
   type StatBonusParams,
   type TimedBuffParams,
   type BurstEffectParams,
-} from './power-definitions';
+} from './power-definitions.js';
 
 /** Re-exported so callers don't need to import from two modules. Hot-swaps
  * `ABILITY_DEFINITIONS`/`ABILITY_KEYS` below as a side effect. */

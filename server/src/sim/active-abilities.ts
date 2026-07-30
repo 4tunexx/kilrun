@@ -12,12 +12,12 @@ export function applyAbilityLevelsToPlayer(
   player: PlayerState,
   levels: AbilityLevels | Record<string, number> | null | undefined
 ): void {
-  player.abilityLevelsJson = JSON.stringify(parseAbilityLevels(levels ?? null));
+  player.ability.levelsJson = JSON.stringify(parseAbilityLevels(levels ?? null));
 }
 
 export function getPlayerAbilityLevels(player: PlayerState): AbilityLevels {
   try {
-    const parsed = JSON.parse(player.abilityLevelsJson || '{}');
+    const parsed = JSON.parse(player.ability.levelsJson || '{}');
     return parseAbilityLevels(parsed);
   } catch {
     return parseAbilityLevels({});
@@ -44,17 +44,17 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
     if (!timedBuff.durationMs) return false;
     switch (timedBuff.buffKind) {
       case 'invisibility':
-        player.abilityVisibilityEndsAt = now + timedBuff.durationMs;
+        player.ability.visibilityEndsAt = now + timedBuff.durationMs;
         player.isInvisible = true;
         return true;
       case 'fly':
-        player.abilityFlyEndsAt = now + timedBuff.durationMs;
+        player.ability.flyEndsAt = now + timedBuff.durationMs;
         return true;
       case 'berserk':
-        player.abilityBerserkEndsAt = now + timedBuff.durationMs;
+        player.ability.berserkEndsAt = now + timedBuff.durationMs;
         return true;
       case 'unlimited_ammo':
-        player.abilityBulletEndsAt = now + timedBuff.durationMs;
+        player.ability.bulletEndsAt = now + timedBuff.durationMs;
         return true;
       default:
         return false;
@@ -64,7 +64,7 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
   const burst = getBurstEffectStatsByKey(abilityKey, level);
   if (burst.kind === 'range_pull') {
     if (!burst.rangeMeters || !burst.pullDurationMs) return false;
-    player.abilityHookEndsAt = now + burst.pullDurationMs;
+    player.ability.hookEndsAt = now + burst.pullDurationMs;
     const pushX = Math.cos(player.aimAngle || 0) * burst.rangeMeters;
     const pushY = Math.sin(player.aimAngle || 0) * burst.rangeMeters;
     player.x += pushX;
@@ -74,7 +74,7 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
   }
   if (burst.kind === 'radius_damage') {
     if (!burst.radiusMeters || !burst.damage) return false;
-    player.abilityThunderEndsAt = now + 250;
+    player.ability.thunderEndsAt = now + 250;
     return true;
   }
 
@@ -82,39 +82,39 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
 }
 
 export function tickActiveAbilityTimers(player: PlayerState, now: number): void {
-  if (player.abilityVisibilityEndsAt > 0 && now >= player.abilityVisibilityEndsAt) {
-    player.abilityVisibilityEndsAt = 0;
+  if (player.ability.visibilityEndsAt > 0 && now >= player.ability.visibilityEndsAt) {
+    player.ability.visibilityEndsAt = 0;
     player.isInvisible = false;
   }
-  if (player.abilityFlyEndsAt > 0 && now >= player.abilityFlyEndsAt) {
-    player.abilityFlyEndsAt = 0;
+  if (player.ability.flyEndsAt > 0 && now >= player.ability.flyEndsAt) {
+    player.ability.flyEndsAt = 0;
   }
-  if (player.abilityHookEndsAt > 0 && now >= player.abilityHookEndsAt) {
-    player.abilityHookEndsAt = 0;
+  if (player.ability.hookEndsAt > 0 && now >= player.ability.hookEndsAt) {
+    player.ability.hookEndsAt = 0;
   }
-  if (player.abilityBerserkEndsAt > 0 && now >= player.abilityBerserkEndsAt) {
-    player.abilityBerserkEndsAt = 0;
+  if (player.ability.berserkEndsAt > 0 && now >= player.ability.berserkEndsAt) {
+    player.ability.berserkEndsAt = 0;
   }
-  if (player.abilityBulletEndsAt > 0 && now >= player.abilityBulletEndsAt) {
-    player.abilityBulletEndsAt = 0;
+  if (player.ability.bulletEndsAt > 0 && now >= player.ability.bulletEndsAt) {
+    player.ability.bulletEndsAt = 0;
   }
-  if (player.abilityThunderEndsAt > 0 && now >= player.abilityThunderEndsAt) {
-    player.abilityThunderEndsAt = 0;
+  if (player.ability.thunderEndsAt > 0 && now >= player.ability.thunderEndsAt) {
+    player.ability.thunderEndsAt = 0;
   }
 }
 
 export function isUnlimitedAmmoActive(player: PlayerState, now: number): boolean {
-  return player.abilityBulletEndsAt > 0 && now < player.abilityBulletEndsAt;
+  return player.ability.bulletEndsAt > 0 && now < player.ability.bulletEndsAt;
 }
 
 export function isBerserkActive(player: PlayerState, now: number): boolean {
-  return player.abilityBerserkEndsAt > 0 && now < player.abilityBerserkEndsAt;
+  return player.ability.berserkEndsAt > 0 && now < player.ability.berserkEndsAt;
 }
 
 export function isFlyActive(player: PlayerState, now: number): boolean {
-  return player.abilityFlyEndsAt > 0 && now < player.abilityFlyEndsAt;
+  return player.ability.flyEndsAt > 0 && now < player.ability.flyEndsAt;
 }
 
 export function isInvisibleActive(player: PlayerState, now: number): boolean {
-  return player.abilityVisibilityEndsAt > 0 && now < player.abilityVisibilityEndsAt;
+  return player.ability.visibilityEndsAt > 0 && now < player.ability.visibilityEndsAt;
 }
