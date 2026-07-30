@@ -65,6 +65,8 @@ import {
   Swords,
   ShoppingCart,
   Sparkles,
+  Scissors,
+  Combine,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -191,6 +193,7 @@ import {
   type PrefabStamp,
 } from './prefab-storage';
 import { formatValidationSummary, validateMapForPublish } from './map-validate';
+import { isCsgDeleteResult, isCsgEligible, subtractEntities, unionEntities } from './csg-tools';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
@@ -322,6 +325,7 @@ export function MapEditor({
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [csgBusy, setCsgBusy] = useState(false);
   const [prefabs, setPrefabs] = useState<PrefabStamp[]>([]);
   const [cloudPrefabs, setCloudPrefabs] = useState<
     Array<{
@@ -1024,6 +1028,156 @@ export function MapEditor({
       return next;
     });
     toast({ title: 'Ungrouped', description: 'Objects are independent again.' });
+  };
+
+  /** First selected = stays (base), last shift-clicked = cut off (cutter). */
+  const runCsgSubtract = async () => {
+    if (selectedIds.length !== 2) {
+      toast({
+        title: 'Select exactly 2 objects',
+        description: 'Click the object that stays, then shift+click the one to cut off, then Subtract.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const base = doc.entities.find((e) => e.id === selectedIds[0]);
+    const cutter = doc.entities.find((e) => e.id === selectedIds[1]);
+    if (!base || !cutter) return;
+    if (!isCsgEligible(base) || !isCsgEligible(cutter)) {
+      toast({
+        title: 'Not supported',
+        description: 'Subtract works on Hammer solids (Box, Cylinder, Wedge, …) and prior merge results.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setCsgBusy(true);
+    try {
+      const result = await subtractEntities(base, cutter);
+      if ('error' in result) {
+        toast({ title: 'Subtract failed', description: result.error, variant: 'destructive' });
+        return;
+      }
+      scheduleHistory();
+      const deleted = isCsgDeleteResult(result);
+      setDoc((d) => {
+        let entities = d.entities.filter((e) => e.id !== cutter.id);
+        entities = deleted
+          ? entities.filter((e) => e.id !== base.id)
+          : entities.map((e) =>
+              e.id === base.id
+                ? {
+                    ...e,
+                    model: undefined,
+                    primitive: undefined,
+                    customModelUrl: result.customModelUrl,
+                    position: result.position,
+                    rotation: result.rotation,
+                    scale: result.scale,
+                    collisionSize: result.collisionSize,
+                    csgPads: result.csgPads,
+                    csgOp: result.csgOp,
+                    csgWarning: result.warning,
+                    solid: true,
+                    collideMaterial: 'solid' as const,
+                  }
+                : e
+            );
+        const next = { ...d, entities };
+        apiRef.current?.setDoc(next);
+        return next;
+      });
+      const nextSelected = deleted ? null : base.id;
+      setSelectedIds([]);
+      setSelectedId(nextSelected);
+      apiRef.current?.setSelectedId(nextSelected);
+      if (deleted) {
+        toast({ title: 'Object removed', description: 'The cutter fully covered the base — nothing left.' });
+      } else if (result.warning) {
+        toast({ title: 'Subtract applied', description: result.warning });
+      } else {
+        toast({ title: 'Subtract applied', description: 'Collision matches the cut exactly.' });
+      }
+    } catch (err) {
+      toast({
+        title: 'Subtract failed',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setCsgBusy(false);
+    }
+  };
+
+  /** Merge 2+ selected objects into one visual + collision piece. */
+  const runCsgUnion = async () => {
+    if (selectedIds.length < 2) {
+      toast({
+        title: 'Select 2+ objects',
+        description: 'Shift+click multiple Hammer solids, then Union.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const sources = selectedIds
+      .map((id) => doc.entities.find((e) => e.id === id))
+      .filter((e): e is EditorEntity => !!e);
+    if (sources.length !== selectedIds.length || sources.some((e) => !isCsgEligible(e))) {
+      toast({
+        title: 'Not supported',
+        description: 'Union works on Hammer solids (Box, Cylinder, Wedge, …) and prior merge results.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setCsgBusy(true);
+    try {
+      const result = await unionEntities(sources);
+      if ('error' in result || isCsgDeleteResult(result)) {
+        toast({
+          title: 'Union failed',
+          description: 'error' in result ? result.error : 'Unexpected result.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      const newId = generateId('csg');
+      scheduleHistory();
+      setDoc((d) => {
+        const entities = d.entities.filter((e) => !selectedIds.includes(e.id));
+        const merged: EditorEntity = {
+          id: newId,
+          name: 'Union',
+          kind: 'prop',
+          layerId: sources[0].layerId,
+          position: result.position,
+          rotation: result.rotation,
+          scale: result.scale,
+          color: sources[0].color,
+          customModelUrl: result.customModelUrl,
+          collisionSize: result.collisionSize,
+          csgPads: result.csgPads,
+          csgOp: result.csgOp,
+          solid: true,
+          collideMaterial: 'solid',
+        };
+        const next = { ...d, entities: [...entities, merged] };
+        apiRef.current?.setDoc(next);
+        return next;
+      });
+      setSelectedIds([]);
+      setSelectedId(newId);
+      apiRef.current?.setSelectedId(newId);
+      toast({ title: 'Combined', description: `${sources.length} objects merged into one.` });
+    } catch (err) {
+      toast({
+        title: 'Union failed',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setCsgBusy(false);
+    }
   };
 
   const selectionIds = useMemo(() => {
@@ -4156,7 +4310,31 @@ export function MapEditor({
                     <Unlink2 className="w-3.5 h-3.5" />
                     Ungroup
                   </button>
+                  <button
+                    type="button"
+                    onClick={runCsgSubtract}
+                    disabled={csgBusy || selectedIds.length !== 2}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2 py-1.5 text-xs text-rose-100 disabled:opacity-35"
+                    title="Cut the 2nd (shift-clicked) object out of the 1st"
+                  >
+                    <Scissors className="w-3.5 h-3.5" />
+                    Subtract
+                  </button>
+                  <button
+                    type="button"
+                    onClick={runCsgUnion}
+                    disabled={csgBusy || selectedIds.length < 2}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2 py-1.5 text-xs text-violet-100 disabled:opacity-35"
+                    title="Merge selected objects into one solid piece"
+                  >
+                    <Combine className="w-3.5 h-3.5" />
+                    Union
+                  </button>
                 </div>
+                <p className="text-[10px] text-white/40 leading-snug">
+                  Subtract / Union: Hammer solids only (Box, Cylinder, Wedge, …). Select order
+                  matters for Subtract — first stays, second (shift+click) is cut off.
+                </p>
                 {(selected.locked || isEntityEditLocked(selected, doc.layers)) && (
                   <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 flex items-start gap-2">
                     <Lock className="w-3.5 h-3.5 text-amber-300 mt-0.5 shrink-0" />
@@ -4178,6 +4356,15 @@ export function MapEditor({
                           Unlock object
                         </button>
                       )}
+                    </div>
+                  </div>
+                )}
+                {selected.csgWarning && (
+                  <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 flex items-start gap-2">
+                    <Scissors className="w-3.5 h-3.5 text-amber-300 mt-0.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold text-amber-200">Collision approximated</p>
+                      <p className="text-[10px] text-white/55 mt-0.5">{selected.csgWarning}</p>
                     </div>
                   </div>
                 )}

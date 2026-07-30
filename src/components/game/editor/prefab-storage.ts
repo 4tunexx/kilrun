@@ -612,6 +612,50 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
   ];
 }
 
+/**
+ * Baked Subtract/Union result — pads are pre-computed local boxes (see
+ * `EditorEntity.csgPads`), not re-derived from the mesh at runtime (this
+ * project has no general triangle-mesh collision solver).
+ */
+function csgEntityToSimPads(e: EditorEntity): SimPlatformBlueprint[] {
+  const pads = e.csgPads ?? [];
+  if (!pads.length) return [];
+  const [ex, ey, ez] = e.position;
+  const baseYaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
+  const sx = Math.abs(e.scale[0]);
+  const sy = Math.abs(e.scale[1]);
+  const sz = Math.abs(e.scale[2]);
+  const mat = resolveCollideMaterial(e);
+  let kind: SimPlatformKind = 'solid';
+  if (mat === 'ice') kind = 'ice';
+  else if (mat === 'water') kind = 'water';
+  else if (mat === 'sand') kind = 'sand';
+  const cos = Math.cos(baseYaw);
+  const sin = Math.sin(baseYaw);
+  return pads.map((p) => {
+    const lcx = p.cx * sx;
+    const lcy = p.cy * sy;
+    const lcz = p.cz * sz;
+    const wx = ex + (lcx * cos + lcz * sin);
+    const wz = ez + (-lcx * sin + lcz * cos);
+    const wy = ey + lcy;
+    const hx = Math.max(0.05, p.hx * sx);
+    const hy = Math.max(0.06, p.hy * sy);
+    const hz = Math.max(0.05, p.hz * sz);
+    return {
+      x: wz,
+      y: wx,
+      z: wy + hy,
+      width: hz * 2,
+      depth: hx * 2,
+      height: hy * 2,
+      kind,
+      rotYaw: baseYaw + (p.yaw ?? 0),
+      entityId: e.id,
+    };
+  });
+}
+
 function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
   // Belt-and-suspenders: spawn cones / checkpoints / other invisible gizmo
   // markers must NEVER produce collision, full stop — not conditional on
@@ -619,6 +663,7 @@ function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
   // no-explicit-platforms fallback) let this entity through to here.
   if (isInvisibleMarkerKind(e.kind)) return [];
   if (resolveCollideMaterial(e) === 'walkthrough') return [];
+  if (e.csgOp && e.csgPads) return csgEntityToSimPads(e);
   const model = e.model ?? '';
   if (model.includes('stair') || model.includes('ramp')) {
     return stairEntityToSimPads(e, 14);

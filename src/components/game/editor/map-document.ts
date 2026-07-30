@@ -597,6 +597,17 @@ export function ensurePushBlock(ent: EditorEntity): EntityPushBlock {
 }
 
 
+/** A single baked collision box from the Subtract/Union tool — see `EditorEntity.csgPads`. */
+export interface CsgLocalPad {
+  cx: number;
+  cy: number;
+  cz: number;
+  hx: number;
+  hy: number;
+  hz: number;
+  yaw?: number;
+}
+
 export interface EditorEntity {
   id: string;
   name: string;
@@ -646,6 +657,19 @@ export interface EditorEntity {
    * `[sizeX, sizeY, sizeZ]` in local units before entity.scale.
    */
   collisionSize?: [number, number, number];
+  /**
+   * Baked result of a Subtract/Union (CSG) tool run — a real geometry (GLB in
+   * `customModelUrl`) plus pre-computed collision boxes so the carved/merged
+   * shape collides exactly like it looks, without re-deriving CSG at runtime.
+   * `csgPads` are in local three-space (world units at entity.scale === 1),
+   * relative to this entity's own position; `yaw` on each pad is *additional*
+   * rotation beyond entity.rotation[1] (0 for Subtract's axis-aligned slabs,
+   * the source's own absolute yaw for Union members).
+   */
+  csgOp?: 'subtract' | 'union';
+  csgPads?: CsgLocalPad[];
+  /** Set when collision could only be approximated (e.g. non-aligned Subtract). */
+  csgWarning?: string;
   animation?: EntityAnimation;
   /** Only for kind === 'player' */
   playerAnims?: PlayerAnimBindings;
