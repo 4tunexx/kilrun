@@ -96,12 +96,33 @@ function getSharedAtlasTexture(): THREE.Texture {
   return _sharedAtlasTexture;
 }
 
+/** Ensure all textures have correct color space (fixes black/washed-out skins). */
+function fixTextureColorSpaces(group: THREE.Object3D) {
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) {
+      const std = m as THREE.MeshStandardMaterial;
+      const MAP_SLOTS = ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'] as const;
+      for (const slot of MAP_SLOTS) {
+        const tex = std[slot] as THREE.Texture | null | undefined;
+        if (tex && tex.colorSpace !== THREE.SRGBColorSpace) {
+          tex.colorSpace = THREE.SRGBColorSpace;
+        }
+      }
+    }
+  });
+}
+
 /** Safety net: if the texture we picked (sibling or folder atlas) still
  * fails to actually load at runtime for any reason, swap to the global
  * atlas rather than leaving the material untextured/black. */
 function installTextureFallback(group: THREE.Object3D, chosenPath: string) {
   if (chosenPath === SHARED_SKIN_ATLAS) return;
   const MAP_SLOTS = ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'] as const;
+  let fallbackCount = 0;
   group.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
@@ -117,18 +138,24 @@ function installTextureFallback(group: THREE.Object3D, chosenPath: string) {
           try {
             (std as unknown as Record<string, THREE.Texture>)[slot] = getSharedAtlasTexture();
             std.needsUpdate = true;
+            fallbackCount++;
+            console.warn(`[fbx-fallback] swapped ${slot} to global atlas (failed: ${chosenPath})`);
           } catch {
             /* ignore */
           }
         };
         if (img && typeof img.complete === 'boolean' && img.complete) {
-          if (!img.naturalWidth || img.naturalWidth === 0) swapToShared();
+          if (!img.naturalWidth || img.naturalWidth === 0) {
+            console.warn(`[fbx-fallback] detected 404 in ${slot} (chosen: ${chosenPath})`);
+            swapToShared();
+          }
         } else if (img && typeof img.addEventListener === 'function') {
           img.addEventListener('error', swapToShared, { once: true });
         }
       }
     }
   });
+  if (fallbackCount > 0) console.log(`[fbx-fallback] total swaps: ${fallbackCount}`);
 }
 
 const cache = new Map<string, Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] }>>();
@@ -199,7 +226,9 @@ export function loadFbxModel(
                   obj.receiveShadow = true;
                 }
               });
+              fixTextureColorSpaces(group);
               installTextureFallback(group, source.path);
+              console.log(`[fbx] loaded ${url} (texture source: ${source.kind} → ${source.path})`);
               resolve({
                 scene: group,
                 animations: group.animations ?? [],
