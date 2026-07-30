@@ -305,6 +305,28 @@ export function extractWeaponFromSkinsJson(skinsJson: string): SanitizedWeapon {
   }
 }
 
+/**
+ * Competitive disallows body-replacement cosmetics (the `body` / `fullbody`
+ * slots — a solid color/mesh swap or a full costume) so Team A/B colors stay
+ * readable and fair; small accessories (hat/hair/glasses/torso "jacket"/
+ * pants/boots/gloves/etc.) are still allowed, matching every other mode.
+ */
+function stripBodyReplacementSkins(skinsJson: string): string {
+  try {
+    const parsed: unknown = JSON.parse(skinsJson);
+    if (!Array.isArray(parsed)) return '[]';
+    const filtered = parsed.filter((att) => {
+      if (!att || typeof att !== 'object') return false;
+      const slot = (att as { slot?: string; equipSlot?: string }).slot;
+      const equipSlot = (att as { equipSlot?: string }).equipSlot;
+      return slot !== 'body' && slot !== 'fullbody' && equipSlot !== 'fullbody';
+    });
+    return JSON.stringify(filtered);
+  } catch {
+    return '[]';
+  }
+}
+
 export function applyLoadoutToPlayer(
   player: {
     equippedSkinsJson: string;
@@ -319,14 +341,18 @@ export function applyLoadoutToPlayer(
     weaponAdsConeScale?: number;
     weaponHipfireConeScale?: number;
   },
-  options: { equippedSkinsJson?: string; weaponCombat?: unknown }
+  options: { equippedSkinsJson?: string; weaponCombat?: unknown },
+  opts?: { allowBodySkins?: boolean }
 ) {
-  const skinsJson =
+  let skinsJson =
     typeof options.equippedSkinsJson === 'string' && options.equippedSkinsJson
       ? options.equippedSkinsJson.length > MAX_SKIN_JSON_CHARS
         ? '[]'
         : options.equippedSkinsJson
       : '[]';
+  if (opts?.allowBodySkins === false) {
+    skinsJson = stripBodyReplacementSkins(skinsJson);
+  }
   player.equippedSkinsJson = skinsJson;
   const weapon =
     options.weaponCombat !== undefined

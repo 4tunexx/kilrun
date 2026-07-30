@@ -690,7 +690,9 @@ export class CompetitiveRoom extends Room<RoomState> {
     player.avatarUrl = claims.avatarUrl || '';
     player.kp = claims.kp;
     const trusted = await fetchTrustedLoadout(player.userId);
-    applyLoadoutToPlayer(player, trusted ?? options);
+    // Competitive disallows body-replacement cosmetics (body/fullbody slots)
+    // so Team A/B colors stay readable — small accessories still allowed.
+    applyLoadoutToPlayer(player, trusted ?? options, { allowBodySkins: false });
     applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
     applyAbilityLevelsToPlayer(player, trusted?.abilityLevels ?? null);
     player.health = getMaxHealth(player);
