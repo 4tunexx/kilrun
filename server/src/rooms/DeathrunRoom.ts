@@ -65,6 +65,7 @@ import {
 } from '../match-report.js';
 import { fetchActiveMapPayload } from '../active-map.js';
 import { ensurePowerDefinitionsLoaded } from '../power-defs.js';
+import { detectStaffMention, reportChatFlag, sanitizeChatText } from '../lib/chat.js';
 
 interface JoinOptions {
   token?: string;
@@ -166,6 +167,7 @@ export class DeathrunRoom extends Room<RoomState> {
   /** First joiner — may load MAIN map; admins always may. */
   private hostSessionId: string | null = null;
   private adminSessions = new Set<string>();
+  private lastChatAt = new Map<string, number>();
   private matchDurationMs = MATCH_DURATION_MS;
   private lobbyCountdownMs = LOBBY_COUNTDOWN_MS;
   private trapperEnabled = true;
@@ -236,6 +238,54 @@ export class DeathrunRoom extends Room<RoomState> {
       if (!player || !player.isAlive) return;
       tryStartReload(player, Date.now());
     });
+
+    this.onMessage(
+      'chat',
+      (client, payload: { text?: string; scope?: 'all' | 'team' } | undefined) => {
+        const player = this.state.players.get(client.sessionId);
+        if (!player) return;
+        const text = sanitizeChatText(payload?.text);
+        if (!text) return;
+        const now = Date.now();
+        const last = this.lastChatAt.get(client.sessionId) ?? 0;
+        if (now - last < 1200) return;
+        this.lastChatAt.set(client.sessionId, now);
+
+        const scope: 'all' | 'team' = payload?.scope === 'team' ? 'team' : 'all';
+        const msg = {
+          sessionId: client.sessionId,
+          username: player.username,
+          text,
+          scope,
+          at: now,
+        };
+
+        if (scope === 'team') {
+          // Deathrun "team" = same role (runners together); a solo trapper
+          // only reaches themselves — acceptable, there's no one else on
+          // their side to hear it anyway.
+          for (const [sid, target] of this.state.players) {
+            if (target.role === player.role) {
+              this.clients.getById(sid)?.send('chat', msg);
+            }
+          }
+        } else {
+          this.broadcast('chat', msg);
+        }
+
+        const mention = detectStaffMention(text);
+        if (mention) {
+          void reportChatFlag({
+            mode: 'deathrun',
+            roomId: this.roomId,
+            username: player.username,
+            userId: player.userId,
+            text,
+            mention,
+          });
+        }
+      }
+    );
 
     this.onMessage('activateAbility', (client, payload: { ability?: string } | undefined) => {
       const player = this.state.players.get(client.sessionId);
@@ -472,6 +522,7 @@ export class DeathrunRoom extends Room<RoomState> {
     this.lastObstacleHitAt.delete(client.sessionId);
     this.lastShotAt.delete(client.sessionId);
     this.adminSessions.delete(client.sessionId);
+    this.lastChatAt.delete(client.sessionId);
     if (this.hostSessionId === client.sessionId) {
       this.hostSessionId = this.state.players.keys().next().value ?? null;
     }

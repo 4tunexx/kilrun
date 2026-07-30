@@ -74,6 +74,7 @@ import {
 } from '../match-report.js';
 import { fetchActiveMapPayload } from '../active-map.js';
 import { ensurePowerDefinitionsLoaded } from '../power-defs.js';
+import { detectStaffMention, reportChatFlag, sanitizeChatText } from '../lib/chat.js';
 
 interface JoinOptions {
   token?: string;
@@ -184,6 +185,7 @@ export class HordeRoom extends Room<RoomState> {
   private hostSessionId: string | null = null;
   private customMapLoaded = false;
   private adminSessions = new Set<string>();
+  private lastChatAt = new Map<string, number>();
 
   private playerSpawns: SpawnPoint[] = [];
   private monsterSpawnPoints: MonsterSpawnBlueprint[] = [];
@@ -356,6 +358,44 @@ export class HordeRoom extends Room<RoomState> {
       if (!player || !player.isAlive) return;
       tryStartReload(player, Date.now());
     });
+
+    this.onMessage(
+      'chat',
+      (client, payload: { text?: string; scope?: 'all' | 'team' } | undefined) => {
+        const player = this.state.players.get(client.sessionId);
+        if (!player) return;
+        const text = sanitizeChatText(payload?.text);
+        if (!text) return;
+        const now = Date.now();
+        const last = this.lastChatAt.get(client.sessionId) ?? 0;
+        if (now - last < 1200) return;
+        this.lastChatAt.set(client.sessionId, now);
+
+        // Horde is co-op — everyone is on the same side, so "team" scope is
+        // functionally identical to "all" here. Still honor the field the
+        // client sent for a consistent message shape across modes.
+        const scope: 'all' | 'team' = payload?.scope === 'team' ? 'team' : 'all';
+        this.broadcast('chat', {
+          sessionId: client.sessionId,
+          username: player.username,
+          text,
+          scope,
+          at: now,
+        });
+
+        const mention = detectStaffMention(text);
+        if (mention) {
+          void reportChatFlag({
+            mode: 'horde',
+            roomId: this.roomId,
+            username: player.username,
+            userId: player.userId,
+            text,
+            mention,
+          });
+        }
+      }
+    );
 
     this.onMessage('activateAbility', (client, payload: { ability?: string } | undefined) => {
       const player = this.state.players.get(client.sessionId);
@@ -699,6 +739,7 @@ export class HordeRoom extends Room<RoomState> {
     this.lastObstacleHitAt.delete(client.sessionId);
     this.lastShotAt.delete(client.sessionId);
     this.adminSessions.delete(client.sessionId);
+    this.lastChatAt.delete(client.sessionId);
     if (this.hostSessionId === client.sessionId) {
       this.hostSessionId = this.state.players.keys().next().value ?? null;
     }

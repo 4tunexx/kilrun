@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRoomState } from './net/use-room-state';
 import type { JoinOptions } from './net/connection';
-import type { NetObstacleState, NetPlatformState, PlayerInputMessage } from './net/types';
+import type { ChatMessage, NetObstacleState, NetPlatformState, PlayerInputMessage } from './net/types';
 import { InputManager } from './input/input-manager';
 import type { DualJoystick } from './input/dual-joystick';
 import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
@@ -34,6 +34,7 @@ import { WeaponShop, type WeaponPreset, mapShopItemsToPresets, mapPowerUpsToPres
 import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
 import { Crosshair } from './ui/crosshair';
+import { LiveChatOverlay } from './ui/live-chat-overlay';
 import {
   loadTpsViewSettings,
   mouseSensRadians,
@@ -133,6 +134,20 @@ export default function KilrunEngine({
     connectionError,
     connectionState,
   } = useRoomState(joinOptions, roomName);
+
+  const sendChatToRoom = useCallback(
+    (text: string, scope: 'all' | 'team') => {
+      connectionRef.current?.sendChat(text, scope);
+    },
+    [connectionRef]
+  );
+
+  const registerOnChat = useCallback(
+    (cb: (msg: ChatMessage) => void) => {
+      connectionRef.current?.onChat(cb);
+    },
+    [connectionRef]
+  );
 
   useEffect(() => {
     if (!onRoomConnected) return;
@@ -1129,6 +1144,11 @@ export default function KilrunEngine({
                 }}
               />
             )}
+            <LiveChatOverlay
+              registerOnChat={registerOnChat}
+              sendChat={sendChatToRoom}
+              disabled={gameMenuOpen}
+            />
           </>
         )}
 

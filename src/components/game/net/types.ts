@@ -158,3 +158,13 @@ export interface PlayerInputMessage {
   /** Foundry melee speed_mod 0.5 while swing is active. */
   meleeActive?: boolean;
 }
+
+/** Broadcast in-match chat message (server/src/lib/chat.ts). */
+export interface ChatMessage {
+  sessionId: string;
+  username: string;
+  text: string;
+  scope: 'all' | 'team';
+  /** Server Date.now() at send time. */
+  at: number;
+}

@@ -1,5 +1,6 @@
 import { Client, Room, getStateCallbacks } from 'colyseus.js';
 import type {
+  ChatMessage,
   NetObstacleState,
   NetPlatformKind,
   NetPlatformState,
@@ -441,6 +442,15 @@ export class GameConnection {
 
   public sendActivateAbility(ability: string): void {
     this.safeSend('activateAbility', { ability });
+  }
+
+  public sendChat(text: string, scope: 'all' | 'team'): void {
+    this.safeSend('chat', { text, scope });
+  }
+
+  /** Subscribe to broadcast in-match chat. Room teardown clears listeners itself. */
+  public onChat(callback: (msg: ChatMessage) => void): void {
+    this.room?.onMessage('chat', callback);
   }
 
   /** Colyseus room id after a successful connect (for party queue sync). */
