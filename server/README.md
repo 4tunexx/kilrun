@@ -66,6 +66,20 @@ Expose internal port `2567` with TCP/HTTP+TLS handlers (see Dockerfile `EXPOSE 2
 2. Set the same env vars as above.
 3. Use `wss://<railway-domain>` on the Next.js app.
 
+### Option D: Render
+
+1. New + → Web Service → connect the GitHub repo.
+2. **Root Directory** `server`, **Build Command** `npm install && npm run build`,
+   **Start Command** `npm start`, **Health Check Path** `/healthz`.
+3. Environment tab → set `CLIENT_ORIGIN`, `WEB_APP_URL`, `GAME_SERVER_ADMIN_SECRET`,
+   `GAME_JOIN_TOKEN_SECRET` (Render's "Add from .env" accepts a pasted block).
+   `PORT` is auto-injected by Render — nothing to set, the server already reads it.
+4. Public URL is `https://<service>.onrender.com` → use `wss://<service>.onrender.com`
+   as `NEXT_PUBLIC_GAME_SERVER_URL` on Vercel.
+5. **Free plan spins down after 15 min idle** (~30-50s cold start on the next
+   connection) — if players see intermittent join failures/timeouts after a
+   quiet period, that's why. Upgrade to Starter to keep it always-on.
+
 ### Environment variables
 
 | Variable | Required | Description |
