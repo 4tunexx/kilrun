@@ -504,7 +504,18 @@ export class ThreeCharacter {
         // Remotes: softer interpolate for lag smoothing.
         const sharpness = this.isLocal ? 28 : 14;
         const alpha = 1 - Math.pow(0.001, dt * sharpness);
-        this.displayPos.lerp(this.targetPos, alpha);
+        // Height (Three Y == sim z) gets its own, much sharper snap while
+        // grounded: the server already computes an exact continuous ramp
+        // height every tick (toThree maps sim z -> Three Y), but lerping it
+        // at the same soft rate as horizontal lag-hiding meant the display
+        // height visibly lagged behind the true ramp surface while walking
+        // uphill — legs sinking into the ramp mesh. Ungrounded (falling/
+        // jumping) keeps the normal rate so jumps still look smooth.
+        const vertSharpness = player.isGrounded ? 40 : sharpness;
+        const vertAlpha = 1 - Math.pow(0.001, dt * vertSharpness);
+        this.displayPos.x += (this.targetPos.x - this.displayPos.x) * alpha;
+        this.displayPos.z += (this.targetPos.z - this.displayPos.z) * alpha;
+        this.displayPos.y += (this.targetPos.y - this.displayPos.y) * vertAlpha;
       }
       const dx = this.targetPos.x - this.displayPos.x;
       const dz = this.targetPos.z - this.displayPos.z;
@@ -577,7 +588,15 @@ export class ThreeCharacter {
 
     const wishFwd = moveWish?.fwd ?? 0;
     const wishStrafe = moveWish?.strafe ?? 0;
-    const moving = Math.abs(wishFwd) + Math.abs(wishStrafe) > 0.05;
+    // Remote players never receive moveWish (kilrun-engine.tsx only builds
+    // it from local input), so wishFwd/wishStrafe are always 0 for them —
+    // without the speed fallback, every remote player was permanently
+    // stuck in the idle pose while their (correctly interpolated) position
+    // visibly moved: legs never stepped, body just glided — "sliding."
+    // this.speed is derived from actual displayPos/targetPos motion, so it
+    // reflects real movement regardless of whether moveWish was supplied.
+    const moving =
+      Math.abs(wishFwd) + Math.abs(wishStrafe) > 0.05 || (!this.isLocal && this.speed > 0.35);
 
     // Use EXACT state machine copied from animation-director.ts →
     // updatePlayer() so Live matches behave 1:1 with Play Test.

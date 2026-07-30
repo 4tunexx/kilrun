@@ -355,7 +355,11 @@ export default function HomeView({
               ) : (
                 <>
                   <div className="min-h-[14rem] flex-1 overflow-y-auto space-y-2 rounded-lg bg-slate-900/40 p-3 border border-slate-700/40">
-                    {chat.length === 0 ? (
+                    {isLoading ? (
+                      <div className="flex items-center justify-center text-slate-400 text-sm py-8">
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...
+                      </div>
+                    ) : chat.length === 0 ? (
                       <p className="text-slate-500 text-sm text-center py-8">
                         No messages yet — say hello!
                       </p>
@@ -520,27 +524,35 @@ export default function HomeView({
               </p>
             </CardHeader>
             <CardContent className="space-y-2">
-              {mainMissions.slice(0, 4).map((m) => (
-                <div
-                  key={m.id}
-                  className="flex justify-between text-sm gap-2"
-                >
-                  <span
-                    className={
-                      m.isCompleted
-                        ? 'line-through text-slate-500 truncate'
-                        : 'truncate'
-                    }
-                  >
-                    {m.title}
-                  </span>
-                  <span className="text-xs text-slate-500 shrink-0">
-                    {m.currentCount}/{m.targetCount}
-                  </span>
+              {isLoading ? (
+                <div className="flex items-center text-slate-400 text-sm py-2">
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...
                 </div>
-              ))}
-              {mainMissions.length === 0 && (
-                <p className="text-sm text-slate-500">No main missions yet.</p>
+              ) : (
+                <>
+                  {mainMissions.slice(0, 4).map((m) => (
+                    <div
+                      key={m.id}
+                      className="flex justify-between text-sm gap-2"
+                    >
+                      <span
+                        className={
+                          m.isCompleted
+                            ? 'line-through text-slate-500 truncate'
+                            : 'truncate'
+                        }
+                      >
+                        {m.title}
+                      </span>
+                      <span className="text-xs text-slate-500 shrink-0">
+                        {m.currentCount}/{m.targetCount}
+                      </span>
+                    </div>
+                  ))}
+                  {mainMissions.length === 0 && (
+                    <p className="text-sm text-slate-500">No main missions yet.</p>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -562,7 +574,11 @@ export default function HomeView({
               </div>
             </CardHeader>
             <CardContent className="space-y-2">
-              {forumTopics.length === 0 ? (
+              {isLoading ? (
+                <div className="flex items-center text-slate-400 text-sm py-2">
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...
+                </div>
+              ) : forumTopics.length === 0 ? (
                 <p className="text-sm text-slate-500">No topics yet.</p>
               ) : (
                 forumTopics.map((t) => (

@@ -127,7 +127,11 @@ export async function joinPartyByCode(rawCode: string): Promise<PartyDto> {
   }
 
   const party = await prisma.party.findUnique({ where: { code } });
-  if (!party) throw new Error('Party not found');
+  if (!party) {
+    throw new Error(
+      'This party no longer exists — the leader left and the party was disbanded.'
+    );
+  }
   if (party.memberIds.length >= MAX_PARTY_SIZE) throw new Error('Party is full');
   if (party.memberIds.includes(user.id)) return toDto(party, user.id);
 

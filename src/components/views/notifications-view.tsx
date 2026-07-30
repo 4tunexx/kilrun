@@ -133,13 +133,21 @@ export default function NotificationsView() {
                             description: `You’re in party ${code}. Open Play to queue.`,
                           });
                         } catch (e: unknown) {
-                          toast({
-                            title:
-                              e instanceof Error
-                                ? e.message
-                                : 'Could not join party',
-                            variant: 'destructive',
-                          });
+                          const message =
+                            e instanceof Error ? e.message : 'Could not join party';
+                          toast({ title: message, variant: 'destructive' });
+                          // Party is confirmed gone (leader left and it was
+                          // disbanded) — remove the stale invite instead of
+                          // leaving a dead "Accept" button the user can keep
+                          // clicking into the same error forever.
+                          if (message.includes('no longer exists')) {
+                            try {
+                              await deleteNotification(n.id);
+                              setItems((prev) => prev.filter((x) => x.id !== n.id));
+                            } catch {
+                              /* best-effort cleanup */
+                            }
+                          }
                         } finally {
                           setBusy(null);
                         }
