@@ -295,6 +295,10 @@ export function MapEditor({
   const [activeLayerId, setActiveLayerId] = useState(starter.doc.layers[0]?.id ?? '');
   const [freeFly, setFreeFly] = useState(false);
   const [playTest, setPlayTest] = useState(false);
+  const [playTestRole, setPlayTestRole] = useState<
+    'runner' | 'trapper' | 'team_a' | 'team_b' | undefined
+  >(undefined);
+  const [playTestRolePrompt, setPlayTestRolePrompt] = useState(false);
   const [customTextures, setCustomTextures] = useState<CustomTexture[]>([]);
   const [snapY, setSnapY] = useState(false);
   const [scaleFromSide, setScaleFromSide] = useState(() => {
@@ -1358,6 +1362,7 @@ export function MapEditor({
   const exitPlayTest = () => {
     setPlayTest(false);
     setPlayTpsOverride(null);
+    setPlayTestRole(undefined);
     // Keep editor host mounted — resume WebGL and restore camera (fixes blank screen)
     requestAnimationFrame(() => {
       apiRef.current?.setPaused(false);
@@ -1650,7 +1655,16 @@ export function MapEditor({
         <Button
           size="sm"
           className="ml-2 bg-emerald-600 hover:bg-emerald-500 text-white shrink-0"
-          onClick={() => startPlay()}
+          onClick={() => {
+            // Deathrun/Competitive have distinct spawn roles worth testing
+            // from both sides; Horde has no role split, so start directly.
+            if (gameMode === 'deathrun' || gameMode === 'competitive') {
+              setPlayTestRolePrompt(true);
+            } else {
+              setPlayTestRole(undefined);
+              startPlay();
+            }
+          }}
         >
           <Play className="w-4 h-4 mr-1" /> Play Test
         </Button>
@@ -6019,6 +6033,80 @@ export function MapEditor({
 
         </div>
       </div>
+      {playTestRolePrompt && (
+        <div className="fixed inset-0 z-[10060] bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-full max-w-sm space-y-3">
+            <p className="text-sm font-semibold text-slate-100">
+              Test as which player?
+            </p>
+            <p className="text-xs text-slate-400">
+              Spawns you at that role&apos;s placed spawn point (falls back to the
+              default spawn if none is placed yet).
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              {gameMode === 'deathrun' ? (
+                <>
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                    onClick={() => {
+                      setPlayTestRole('runner');
+                      setPlayTestRolePrompt(false);
+                      startPlay();
+                    }}
+                  >
+                    Runner
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-rose-600 hover:bg-rose-500 text-white"
+                    onClick={() => {
+                      setPlayTestRole('trapper');
+                      setPlayTestRolePrompt(false);
+                      startPlay();
+                    }}
+                  >
+                    Trapper
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    size="sm"
+                    className="bg-rose-600 hover:bg-rose-500 text-white"
+                    onClick={() => {
+                      setPlayTestRole('team_a');
+                      setPlayTestRolePrompt(false);
+                      startPlay();
+                    }}
+                  >
+                    Team A
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-500 text-white"
+                    onClick={() => {
+                      setPlayTestRole('team_b');
+                      setPlayTestRolePrompt(false);
+                      startPlay();
+                    }}
+                  >
+                    Team B
+                  </Button>
+                </>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-full text-slate-400"
+              onClick={() => setPlayTestRolePrompt(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
       {playTest && (
         <div className="fixed inset-0 z-[10050]">
           <MapPlayPreview
@@ -6026,6 +6114,7 @@ export function MapEditor({
             mapId={mapId}
             tpsViewOverride={playTpsOverride}
             onClose={exitPlayTest}
+            playTestRole={playTestRole}
           />
         </div>
       )}

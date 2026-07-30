@@ -906,9 +906,16 @@ export function mapDocSpawnPoints(doc: MapDocument) {
     doc.entities.find((e) => e.kind === 'spawn_runner') ??
     doc.entities.find((e) => e.kind === 'player');
   const trapper = doc.entities.find((e) => e.kind === 'spawn_trapper');
+  const teamA = doc.entities.find((e) => e.kind === 'spawn_team_a');
+  const teamB = doc.entities.find((e) => e.kind === 'spawn_team_b');
   const toSim = (e?: EditorEntity) =>
     e ? { x: e.position[2], y: e.position[0], z: e.position[1] } : null;
-  return { runner: toSim(runner), trapper: toSim(trapper) };
+  return {
+    runner: toSim(runner),
+    trapper: toSim(trapper),
+    teamA: toSim(teamA),
+    teamB: toSim(teamB),
+  };
 }
 
 /**

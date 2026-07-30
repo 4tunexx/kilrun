@@ -177,6 +177,7 @@ export function MapPlayPreview({
   tpsViewOverride,
   previewSkins = true,
   mapId,
+  playTestRole,
 }: {
   doc: MapDocument;
   onClose?: () => void;
@@ -185,6 +186,9 @@ export function MapPlayPreview({
   previewSkins?: boolean;
   /** Stable id for ghost WR (local or cloud map id). */
   mapId?: string;
+  /** Which spawn to test from — Deathrun runner/trapper, Competitive team A/B.
+   * Falls back to the runner/default spawn when omitted (Horde has no roles). */
+  playTestRole?: 'runner' | 'trapper' | 'team_a' | 'team_b';
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
@@ -283,7 +287,18 @@ export function MapPlayPreview({
     const hazards = mapDocToSimHazards(playDoc);
     const teleports = mapDocToSimTeleports(playDoc);
     const bounds = mapDocToWorldBounds(playDoc, pads, finishes);
-    const spawn = mapDocSpawnPoints(playDoc).runner;
+    const spawnPoints = mapDocSpawnPoints(playDoc);
+    const roleSpawn =
+      playTestRole === 'trapper'
+        ? spawnPoints.trapper
+        : playTestRole === 'team_a'
+          ? spawnPoints.teamA
+          : playTestRole === 'team_b'
+            ? spawnPoints.teamB
+            : null;
+    // Fall back to the runner/default spawn if the chosen role has no
+    // dedicated spawn placed on this map yet — never a hard failure.
+    const spawn = roleSpawn ?? spawnPoints.runner;
     const teleportCooldownUntil = new Map<string, number>();
     const hazardPulseUntil = new Map<string, number>();
     const hazardNextToggle = new Map<string, number>();
@@ -1038,7 +1053,7 @@ export function MapPlayPreview({
       renderer.dispose();
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
     };
-  }, [doc, previewSkins, embedded, mapId]);
+  }, [doc, previewSkins, embedded, mapId, playTestRole]);
 
   return (
     <div className={`${embedded ? 'absolute inset-0 z-0' : 'fixed inset-0 z-[9999]'} bg-black flex flex-col`}>
