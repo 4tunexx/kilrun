@@ -103,7 +103,7 @@ interface KilrunEngineProps {
 export default function KilrunEngine({
   joinOptions,
   onExit,
-  xpProgress = 0,
+  xpProgress: _xpProgress = 0,
   isAdmin = false,
   equippedSkins = null,
   mode = 'deathrun',

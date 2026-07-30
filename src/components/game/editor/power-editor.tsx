@@ -322,7 +322,7 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
         <div className="w-[340px] shrink-0 border-l border-white/10 overflow-y-auto p-4 space-y-3">
           {!draft ? (
             <p className="text-[11px] text-white/40">
-              Select a power to tune it, or click "New Power" to create a custom one using a generic effect
+              Select a power to tune it, or click &ldquo;New Power&rdquo; to create a custom one using a generic effect
               template.
             </p>
           ) : (

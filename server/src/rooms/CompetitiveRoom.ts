@@ -35,7 +35,14 @@ import {
   type PlatformMotionState,
 } from '../sim/moving-platforms.js';
 import { isPlayerHitByObstacle } from '../sim/collision.js';
-import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import {
+  applyLoadoutToPlayer,
+  sanitizeWeaponCombat,
+  applySanitizedWeaponToPlayer,
+  tryStartReload,
+  finishReloadIfDue,
+  tryConsumeShotAmmo,
+} from '../sim/loadout.js';
 import {
   effectiveWeaponCone,
   isTargetHitByPellet,
@@ -333,10 +340,6 @@ export class CompetitiveRoom extends Room<RoomState> {
         modelUrl = (preset as { modelUrl?: string }).modelUrl || '';
       }
 
-      const {
-        sanitizeWeaponCombat,
-        applySanitizedWeaponToPlayer,
-      } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
       const sanitized = sanitizeWeaponCombat(combatRaw);
       if (price > 0) player.credits = Math.max(0, player.credits - price);
       applySanitizedWeaponToPlayer(player, sanitized, { weaponId, modelUrl });
@@ -345,7 +348,6 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.onMessage('reload', (client) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || !player.isAlive) return;
-      const { tryStartReload } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
       tryStartReload(player, Date.now());
     });
 
@@ -1100,10 +1102,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       applyPlatformCarry(player, scratch.supportPlatformId, platformDeltas);
       tickActiveAbilityTimers(player, now);
       applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
-      {
-        const { finishReloadIfDue } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
-        finishReloadIfDue(player, now);
-      }
+      finishReloadIfDue(player, now);
 
       for (const obstacle of this.state.obstacles) {
         if (!isPlayerHitByObstacle(player, obstacle)) continue;
@@ -1127,9 +1126,6 @@ export class CompetitiveRoom extends Room<RoomState> {
         const lastShot = this.lastShotAt.get(sessionId) ?? 0;
         const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
         if (now - lastShot >= cooldown) {
-          const {
-            tryConsumeShotAmmo,
-          } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
           if (tryConsumeShotAmmo(player, now)) {
             this.lastShotAt.set(sessionId, now);
             this.resolvePvPShot(player, !!input.aimHeld);
