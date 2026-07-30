@@ -32,7 +32,12 @@ import {
   type WorldBounds,
 } from '../sim/movement.js';
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
-import { applyLoadoutToPlayer } from '../sim/loadout.js';
+import {
+  applyLoadoutToPlayer,
+  tryStartReload,
+  finishReloadIfDue,
+  tryConsumeShotAmmo,
+} from '../sim/loadout.js';
 import {
   applyPlatformCarry,
   tickMovingPlatforms,
@@ -229,7 +234,6 @@ export class DeathrunRoom extends Room<RoomState> {
     this.onMessage('reload', (client) => {
       const player = this.state.players.get(client.sessionId);
       if (!player || !player.isAlive) return;
-      const { tryStartReload } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
       tryStartReload(player, Date.now());
     });
 
@@ -712,10 +716,7 @@ export class DeathrunRoom extends Room<RoomState> {
         this.combatPhysOpts
       );
 
-      {
-        const { finishReloadIfDue } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
-        finishReloadIfDue(player, now);
-      }
+      finishReloadIfDue(player, now);
 
       if (player.role === 'runner' && player.isAlive && !player.hasFinished) {
         player.distance = Math.max(
@@ -783,9 +784,6 @@ export class DeathrunRoom extends Room<RoomState> {
           const lastShot = this.lastShotAt.get(sessionId) ?? 0;
           const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
           if (now - lastShot >= cooldown) {
-            const {
-              tryConsumeShotAmmo,
-            } = require('../sim/loadout.js') as typeof import('../sim/loadout.js');
             if (tryConsumeShotAmmo(player, now)) {
               this.lastShotAt.set(sessionId, now);
               this.resolveTrapperShot(player);
