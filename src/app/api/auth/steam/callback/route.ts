@@ -6,6 +6,7 @@ import {
 } from '@/lib/prisma';
 import { steamIdsPromotedToAdmin } from '@/lib/roles';
 import { runAsTrustedServer } from '@/lib/trusted-server';
+import { getSiteSecretValue } from '@/lib/site-secrets';
 
 const STEAM_OPENID_URL = 'https://steamcommunity.com/openid/login';
 const STEAM_CLAIMED_ID_REGEX = /^https:\/\/steamcommunity\.com\/openid\/id\/(\d+)$/;
@@ -23,7 +24,7 @@ function normalizeReturnTo(value: string): string | null {
 }
 
 async function fetchSteamProfile(steamId: string) {
-  const apiKey = process.env.STEAM_API_KEY;
+  const apiKey = await getSiteSecretValue('STEAM_API_KEY');
   if (!apiKey) return null;
 
   try {

@@ -28,6 +28,7 @@ import {
   Package,
   ListChecks,
   Radio,
+  KeyRound,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -63,6 +64,7 @@ import { AdminInventoryPanel } from '@/components/views/admin/admin-inventory-pa
 import { AdminWeaponCatalogPanel } from '@/components/views/admin/admin-weapon-catalog-panel';
 import { AdminGameBalancePanel } from '@/components/views/admin/admin-game-balance-panel';
 import { AdminLiveMatchesPanel } from '@/components/views/admin/admin-live-matches-panel';
+import { AdminSecretsVaultPanel } from '@/components/views/admin/admin-secrets-vault-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -119,6 +121,7 @@ const STORE_CATEGORIES = [
 const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   dashboard: { label: 'Dashboard', icon: <LayoutDashboard className="h-3.5 w-3.5" /> },
   live: { label: 'Live', icon: <Radio className="h-3.5 w-3.5" /> },
+  secrets: { label: 'Secrets', icon: <KeyRound className="h-3.5 w-3.5" /> },
   site: { label: 'Site', icon: <Settings2 className="h-3.5 w-3.5" /> },
   users: { label: 'Users', icon: <Users className="h-3.5 w-3.5" /> },
   moderation: { label: 'Moderation', icon: <Shield className="h-3.5 w-3.5" /> },
@@ -144,6 +147,7 @@ const MODERATOR_TABS = ['dashboard', 'users', 'moderation', 'audit', 'support'] 
 const ADMIN_TABS = [
   'dashboard',
   'live',
+  'secrets',
   'site',
   'users',
   'moderation',
@@ -399,6 +403,12 @@ export default function AdminView({
         {isAdmin && (
           <TabsContent value="live" className="mt-4">
             <AdminLiveMatchesPanel />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="secrets" className="mt-4">
+            <AdminSecretsVaultPanel />
           </TabsContent>
         )}
 

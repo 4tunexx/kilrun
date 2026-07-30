@@ -3,6 +3,7 @@
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
+import { getSiteSecretValue } from '@/lib/site-secrets';
 
 async function requireStaff() {
   const session = await auth();
@@ -33,8 +34,8 @@ export type LiveMatch = {
  * than factored out since it's a two-line conversion and this file already
  * mirrors that one's overall shape.
  */
-function resolveGameServerHttpUrl(path: string): { url: string } | { error: string } {
-  const wsUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || '';
+async function resolveGameServerHttpUrl(path: string): Promise<{ url: string } | { error: string }> {
+  const wsUrl = (await getSiteSecretValue('NEXT_PUBLIC_GAME_SERVER_URL')) || '';
   if (!wsUrl) return { error: 'NEXT_PUBLIC_GAME_SERVER_URL is not set' };
   try {
     const u = new URL(wsUrl);
@@ -53,10 +54,10 @@ async function callGameServer(
   method: 'GET' | 'POST',
   body?: Record<string, unknown>
 ): Promise<{ ok: boolean; error?: string; data?: unknown }> {
-  const secret = process.env.GAME_SERVER_ADMIN_SECRET || '';
+  const secret = (await getSiteSecretValue('GAME_SERVER_ADMIN_SECRET')) || '';
   if (!secret) return { ok: false, error: 'GAME_SERVER_ADMIN_SECRET is not set on the web app' };
 
-  const resolved = resolveGameServerHttpUrl(path);
+  const resolved = await resolveGameServerHttpUrl(path);
   if ('error' in resolved) return { ok: false, error: resolved.error };
 
   try {

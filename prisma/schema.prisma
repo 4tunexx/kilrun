@@ -571,6 +571,36 @@ model AuditLog {
   @@index([action])
 }
 
+/// Admin-managed runtime secrets ("env vars from the website"). Values are
+/// AES-256-GCM encrypted with SITE_SECRETS_ENCRYPTION_KEY before storage —
+/// never written or read as plaintext. See src/lib/secrets-crypto.ts and
+/// src/lib/site-secrets.ts.
+model SiteSecret {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  key                String   @unique
+  /// base64(iv[12] + authTag[16] + ciphertext) from secrets-crypto.ts.
+  valueEncrypted     String
+  updatedAt          DateTime @updatedAt
+  updatedByUserId    String?  @db.ObjectId
+  updatedByUsername  String?
+}
+
+/// Step-up ("vault") credentials gating the admin Secrets tab — separate
+/// from the Steam login itself, since Steam OpenID has no password to
+/// reuse. One row per admin user.
+model AdminVault {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String   @unique @db.ObjectId
+  /// scrypt "saltHex:hashHex" — a dedicated vault password, never the
+  /// (nonexistent) account login password.
+  passwordHash String?
+  /// JSON array of registered WebAuthn passkeys (Face ID / Windows Hello /
+  /// fingerprint): [{ credentialId, publicKey, counter, transports, label, createdAt }].
+  passkeys     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 /// A single player's +1/-1 reputation vote on another player. Unique per
 /// (voter, target) pair so a player can change their vote but not spam it.
 model ReputationVote {

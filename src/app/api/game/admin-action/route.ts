@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { isAdminRole, isStaff } from '@/lib/roles';
+import { getSiteSecretValue } from '@/lib/site-secrets';
 
 export const runtime = 'nodejs';
 
@@ -33,7 +34,7 @@ type Body = {
 };
 
 export async function POST(req: NextRequest) {
-  const expected = process.env.GAME_SERVER_ADMIN_SECRET || '';
+  const expected = (await getSiteSecretValue('GAME_SERVER_ADMIN_SECRET')) || '';
   if (!expected) {
     return NextResponse.json(
       { ok: false, error: 'GAME_SERVER_ADMIN_SECRET is not configured' },

@@ -3,6 +3,7 @@
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
+import { getSiteSecretValue } from '@/lib/site-secrets';
 
 async function requireStaff() {
   const session = await auth();
@@ -163,12 +164,12 @@ export async function adminGetDashboardOverview(): Promise<AdminDashboardOvervie
     mongoDetail = 'Ping failed';
   }
 
-  const gameServerUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || '';
+  const gameServerUrl = (await getSiteSecretValue('NEXT_PUBLIC_GAME_SERVER_URL')) || '';
   const clerkOk = Boolean(
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY
   );
   const blobOk = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-  const authOk = Boolean(process.env.AUTH_SECRET && process.env.STEAM_API_KEY);
+  const authOk = Boolean(process.env.AUTH_SECRET && (await getSiteSecretValue('STEAM_API_KEY')));
 
   const gameDisabled = Boolean(settings?.gameDisabled);
   const chatEnabled = settings?.chatEnabled !== false;
@@ -312,7 +313,7 @@ export async function adminRestartColyseus(): Promise<{
     throw new Error('Admin only');
   }
 
-  const secret = process.env.GAME_SERVER_ADMIN_SECRET || '';
+  const secret = (await getSiteSecretValue('GAME_SERVER_ADMIN_SECRET')) || '';
   if (!secret) {
     return {
       ok: false,
@@ -320,7 +321,7 @@ export async function adminRestartColyseus(): Promise<{
     };
   }
 
-  const wsUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || '';
+  const wsUrl = (await getSiteSecretValue('NEXT_PUBLIC_GAME_SERVER_URL')) || '';
   if (!wsUrl) {
     return {
       ok: false,

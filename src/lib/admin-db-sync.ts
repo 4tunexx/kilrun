@@ -18,7 +18,7 @@ import { STATIC_FALLBACK_WEAPONS } from '@/lib/weapon-catalog';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-29-weapons-rewards-tps-admin-controls';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-30-site-secrets-vault';
 
 async function requireAdmin() {
   const session = await auth();
@@ -287,6 +287,20 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`Party verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — Party model not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify: SiteSecret + AdminVault (admin Secrets vault)
+  try {
+    await prisma.siteSecret.count();
+    steps.push('SiteSecret collection verified (count OK)');
+    await prisma.adminVault.count();
+    steps.push('AdminVault collection verified (count OK)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`Secrets vault verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — SiteSecret/AdminVault not available. Run db push. (${msg})`
     );
   }
 

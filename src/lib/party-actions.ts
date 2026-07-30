@@ -2,6 +2,7 @@
 
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import { getSiteSecretValue } from '@/lib/site-secrets';
 
 const PARTY_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_PARTY_SIZE = 4;
@@ -334,7 +335,7 @@ async function fetchSteamFriendSteamIds(steamId: string): Promise<{
   /** true when STEAM_API_KEY is missing */
   noApiKey: boolean;
 }> {
-  const apiKey = process.env.STEAM_API_KEY;
+  const apiKey = await getSiteSecretValue('STEAM_API_KEY');
   if (!apiKey) {
     return { ids: new Set(), privateOrDenied: false, noApiKey: true };
   }

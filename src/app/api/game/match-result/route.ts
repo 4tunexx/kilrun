@@ -6,6 +6,7 @@ import {
   type MatchRewardMode,
   type ServerMatchPlayerInput,
 } from '@/lib/match-rewards';
+import { getSiteSecretValue } from '@/lib/site-secrets';
 
 export const runtime = 'nodejs';
 
@@ -54,7 +55,7 @@ const MODES = new Set<MatchRewardMode>([
 ]);
 
 export async function POST(req: NextRequest) {
-  const expected = process.env.GAME_SERVER_ADMIN_SECRET || '';
+  const expected = (await getSiteSecretValue('GAME_SERVER_ADMIN_SECRET')) || '';
   if (!expected) {
     return NextResponse.json(
       { ok: false, error: 'GAME_SERVER_ADMIN_SECRET is not configured' },

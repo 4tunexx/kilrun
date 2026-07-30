@@ -6,6 +6,7 @@ import { resolveWeaponCombat, findWeaponAttachment } from '@/lib/weapons';
 import { compactSkinsForMatch } from '@/lib/match-loadout';
 import { getAbilityStatBonuses, parseAbilityLevels } from '@shared/ability-progression';
 import { loadPowerDefinitions } from '@/lib/power-definitions';
+import { getSiteSecretValue } from '@/lib/site-secrets';
 
 export const runtime = 'nodejs';
 
@@ -22,7 +23,7 @@ function secretsEqual(provided: string, expected: string): boolean {
  * Query: ?userId=
  */
 export async function GET(req: NextRequest) {
-  const expected = process.env.GAME_SERVER_ADMIN_SECRET || '';
+  const expected = (await getSiteSecretValue('GAME_SERVER_ADMIN_SECRET')) || '';
   if (!expected) {
     return NextResponse.json({ ok: false, error: 'Not configured' }, { status: 503 });
   }
