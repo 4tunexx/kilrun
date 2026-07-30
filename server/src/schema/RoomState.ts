@@ -234,4 +234,12 @@ export class RoomState extends Schema {
   @type('string') matchId = '';
   /** True once server (or local display) awards are written onto players. */
   @type('boolean') rewardsReady = false;
+  /** Admin froze the match — clients stop local prediction, show a hold overlay. */
+  @type('boolean') adminPaused = false;
+  /** Match ended via admin cancel, not a real conclusion — no rewards granted. */
+  @type('boolean') wasCancelled = false;
+  /** Last admin broadcast (empty = none this match). Client shows it once and clears its own copy. */
+  @type('string') adminMessage = '';
+  /** Increments each time adminMessage is set, so the client can detect a repeat message. */
+  @type('number') adminMessageSeq = 0;
 }

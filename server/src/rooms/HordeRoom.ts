@@ -837,6 +837,7 @@ export class HordeRoom extends Room<RoomState> {
   }
 
   private update(dtMs: number) {
+    if (this.state.adminPaused) return;
     switch (this.state.phase) {
       case 'lobby':
         if (this.state.players.size >= HORDE_MIN_PLAYERS_TO_START) {
@@ -1316,6 +1317,32 @@ export class HordeRoom extends Room<RoomState> {
       player.isAlive = false;
       if (wasAlive) player.deaths = (player.deaths || 0) + 1;
     }
+  }
+
+  /**
+   * Admin dashboard control surface — called via matchMaker.getLocalRoomById()
+   * from the /admin/live-matches HTTP routes (server/src/index.ts).
+   */
+  public adminPause(): void {
+    this.state.adminPaused = true;
+  }
+
+  public adminResume(): void {
+    this.state.adminPaused = false;
+  }
+
+  public adminCancelMatch(): void {
+    if (this.state.phase === 'results') return;
+    this.state.adminPaused = false;
+    this.state.phase = 'results';
+    this.state.wasCancelled = true;
+    this.clearMonsters();
+    // No reportRewards() — admin-cancelled, not a real conclusion.
+  }
+
+  public adminBroadcastMessage(text: string): void {
+    this.state.adminMessage = text;
+    this.state.adminMessageSeq += 1;
   }
 
   private endMatch(winnerRole: 'survivor' | 'horde') {

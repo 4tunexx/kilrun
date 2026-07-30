@@ -352,6 +352,10 @@ export class GameConnection {
         buyPhaseMs: (s as { buyPhaseMs?: number }).buyPhaseMs ?? 0,
         matchId: s.matchId,
         rewardsReady: s.rewardsReady,
+        adminPaused: s.adminPaused,
+        wasCancelled: s.wasCancelled,
+        adminMessage: s.adminMessage,
+        adminMessageSeq: s.adminMessageSeq,
       });
     };
     [
@@ -372,6 +376,10 @@ export class GameConnection {
       'buyPhaseMs',
       'matchId',
       'rewardsReady',
+      'adminPaused',
+      'wasCancelled',
+      'adminMessage',
+      'adminMessageSeq',
     ].forEach((field) => {
       proxy.listen(field, emitRoomChange);
     });

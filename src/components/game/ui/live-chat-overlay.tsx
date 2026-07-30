@@ -10,6 +10,8 @@ interface FeedItem extends ChatMessage {
   /** Local dedupe key — server `at` alone can collide across senders. */
   id: string;
   expiresAt: number;
+  /** Rendered from RoomState.adminMessage, not the peer-to-peer chat channel. */
+  isAdminBroadcast?: boolean;
 }
 
 /**
@@ -24,13 +26,17 @@ export const LiveChatOverlay: React.FC<{
   sendChat: (text: string, scope: 'all' | 'team') => void;
   /** Suppress the global Enter-to-open listener (e.g. menu/pause/editor open). */
   disabled?: boolean;
-}> = ({ registerOnChat, sendChat, disabled = false }) => {
+  /** RoomState.adminMessage / adminMessageSeq — an admin's Live-dashboard broadcast. */
+  adminMessage?: string;
+  adminMessageSeq?: number;
+}> = ({ registerOnChat, sendChat, disabled = false, adminMessage, adminMessageSeq }) => {
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState<'all' | 'team'>('all');
   const [draft, setDraft] = useState('');
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const idCounter = useRef(0);
+  const lastAdminSeqRef = useRef(0);
 
   useEffect(() => {
     registerOnChat((msg) => {
@@ -43,6 +49,26 @@ export const LiveChatOverlay: React.FC<{
       setFeed((prev) => [...prev.slice(-(MAX_VISIBLE - 1)), item]);
     });
   }, [registerOnChat]);
+
+  // Admin dashboard broadcast — a distinct channel from peer chat (RoomState,
+  // not the 'chat' message type), shown the same way but styled and never
+  // subject to mute/rate-limit since it's staff-issued.
+  useEffect(() => {
+    if (!adminMessage || !adminMessageSeq || adminMessageSeq <= lastAdminSeqRef.current) return;
+    lastAdminSeqRef.current = adminMessageSeq;
+    idCounter.current += 1;
+    const item: FeedItem = {
+      sessionId: 'admin',
+      username: 'Admin',
+      text: adminMessage,
+      scope: 'all',
+      at: Date.now(),
+      id: `admin-${adminMessageSeq}-${idCounter.current}`,
+      expiresAt: performance.now() + FADE_MS * 1.5,
+      isAdminBroadcast: true,
+    };
+    setFeed((prev) => [...prev.slice(-(MAX_VISIBLE - 1)), item]);
+  }, [adminMessage, adminMessageSeq]);
 
   // Sweep expired messages out of the feed.
   useEffect(() => {
@@ -101,18 +127,27 @@ export const LiveChatOverlay: React.FC<{
   return (
     <div className="absolute top-4 left-4 z-[110] w-[min(360px,80vw)] pointer-events-none select-none">
       <div className="space-y-1 mb-1">
-        {feed.map((m) => (
-          <div
-            key={m.id}
-            className="text-sm text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] leading-snug"
-          >
-            {m.scope === 'team' && (
-              <span className="text-emerald-400 font-semibold">[Team] </span>
-            )}
-            <span className="font-semibold">{m.username}: </span>
-            <span className="text-white/90">{m.text}</span>
-          </div>
-        ))}
+        {feed.map((m) =>
+          m.isAdminBroadcast ? (
+            <div
+              key={m.id}
+              className="text-sm bg-rose-600/90 text-white rounded px-2 py-1 font-semibold drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] leading-snug"
+            >
+              Admin: {m.text}
+            </div>
+          ) : (
+            <div
+              key={m.id}
+              className="text-sm text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] leading-snug"
+            >
+              {m.scope === 'team' && (
+                <span className="text-emerald-400 font-semibold">[Team] </span>
+              )}
+              <span className="font-semibold">{m.username}: </span>
+              <span className="text-white/90">{m.text}</span>
+            </div>
+          )
+        )}
       </div>
       {open && (
         <div className="pointer-events-auto flex items-center gap-2 bg-black/70 rounded-md px-2 py-1.5 border border-white/20">

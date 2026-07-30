@@ -856,6 +856,7 @@ export class CompetitiveRoom extends Room<RoomState> {
   }
 
   private update(dtMs: number) {
+    if (this.state.adminPaused) return;
     switch (this.state.phase) {
       case 'lobby':
         this.lobbyElapsedMs += dtMs;
@@ -1091,6 +1092,34 @@ export class CompetitiveRoom extends Room<RoomState> {
     if (bTotal > 0 && bAlive === 0) {
       this.endRound('team_a');
     }
+  }
+
+  /**
+   * Admin dashboard control surface — called via matchMaker.getLocalRoomById()
+   * from the /admin/live-matches HTTP routes (server/src/index.ts).
+   */
+  public adminPause(): void {
+    this.state.adminPaused = true;
+  }
+
+  public adminResume(): void {
+    this.state.adminPaused = false;
+  }
+
+  public adminCancelMatch(): void {
+    if (this.state.phase === 'results') return;
+    this.state.adminPaused = false;
+    this.state.phase = 'results';
+    this.state.wasCancelled = true;
+    this.matchStarted = false;
+    // No reportRewards() — admin-cancelled, not a real conclusion. Also
+    // means no KP is touched — critical for Ranked, where a bogus loss
+    // would otherwise cost players Elo they didn't actually lose.
+  }
+
+  public adminBroadcastMessage(text: string): void {
+    this.state.adminMessage = text;
+    this.state.adminMessageSeq += 1;
   }
 
   private endRound(winner: 'team_a' | 'team_b') {

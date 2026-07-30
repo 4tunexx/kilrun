@@ -626,6 +626,7 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private update(dtMs: number) {
+    if (this.state.adminPaused) return;
     switch (this.state.phase) {
       case 'lobby':
         this.tickLobby();
@@ -1022,6 +1023,35 @@ export class DeathrunRoom extends Room<RoomState> {
       }
       player.isAlive = false;
     }
+  }
+
+  /**
+   * Admin dashboard control surface — called via matchMaker.getLocalRoomById()
+   * from the /admin/live-matches HTTP routes (server/src/index.ts), not a
+   * Colyseus onMessage. There's no in-room client for these; the acting
+   * admin is on the website, not necessarily connected to this match.
+   */
+  public adminPause(): void {
+    this.state.adminPaused = true;
+  }
+
+  public adminResume(): void {
+    this.state.adminPaused = false;
+  }
+
+  public adminCancelMatch(): void {
+    if (this.state.phase === 'results') return;
+    this.state.adminPaused = false;
+    this.state.phase = 'results';
+    this.state.wasCancelled = true;
+    // No reportRewards() call — an admin-cancelled match never completed
+    // organically, so no rewards are granted (players keep xpEarned/vpEarned
+    // at their default 0).
+  }
+
+  public adminBroadcastMessage(text: string): void {
+    this.state.adminMessage = text;
+    this.state.adminMessageSeq += 1;
   }
 
   private endRound(winnerRole: 'trapper' | 'runner') {

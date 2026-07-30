@@ -140,6 +140,14 @@ export interface NetRoomState {
   matchId?: string;
   /** True once Colyseus applied awards (or local display fallback). */
   rewardsReady?: boolean;
+  /** Admin froze the match via the website Live dashboard. */
+  adminPaused?: boolean;
+  /** Match ended via admin cancel, not a real conclusion — no rewards granted. */
+  wasCancelled?: boolean;
+  /** Last admin broadcast message (empty = none this match). */
+  adminMessage?: string;
+  /** Increments each time adminMessage is set — detects a repeat of the same text. */
+  adminMessageSeq?: number;
 }
 
 export interface PlayerInputMessage {

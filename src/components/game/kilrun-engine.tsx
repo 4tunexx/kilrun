@@ -1146,6 +1146,17 @@ export default function KilrunEngine({
           )
         )}
 
+        {room.phase === 'playing' && room.adminPaused && (
+          <div className="absolute inset-0 z-[400] flex items-center justify-center bg-black/60 pointer-events-none">
+            <div className="text-center">
+              <p className="text-3xl font-black text-white tracking-wide drop-shadow-lg">
+                MATCH PAUSED
+              </p>
+              <p className="text-sm text-white/70 mt-1">An admin has paused this match.</p>
+            </div>
+          </div>
+        )}
+
         <JoystickOverlay joystickRef={joystickRef} enabled={isMobile && !paused} />
         <MobileActionButtons
           joystickRef={joystickRef}
@@ -1168,6 +1179,8 @@ export default function KilrunEngine({
               registerOnChat={registerOnChat}
               sendChat={sendChatToRoom}
               disabled={gameMenuOpen || adminPanelOpen}
+              adminMessage={room.adminMessage}
+              adminMessageSeq={room.adminMessageSeq}
             />
           </>
         )}

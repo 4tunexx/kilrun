@@ -2,12 +2,22 @@ import http from 'http';
 import { timingSafeEqual } from 'crypto';
 import express from 'express';
 import cors from 'cors';
-import { Server } from 'colyseus';
+import { Server, matchMaker } from 'colyseus';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { monitor } from '@colyseus/monitor';
 import { DeathrunRoom } from './rooms/DeathrunRoom.js';
 import { HordeRoom } from './rooms/HordeRoom.js';
 import { CompetitiveRoom } from './rooms/CompetitiveRoom.js';
+
+/** The 3 room classes all expose this same admin control surface (kept as
+ * plain duck-typing rather than a shared base class, matching how the rest
+ * of the room code is structured — each room stays independently readable). */
+interface AdminControllableRoom {
+  adminPause(): void;
+  adminResume(): void;
+  adminCancelMatch(): void;
+  adminBroadcastMessage(text: string): void;
+}
 
 const PORT = Number(process.env.PORT ?? 2567);
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*';
@@ -58,6 +68,124 @@ app.post('/admin/restart', (req, res) => {
     console.log('[game-server] admin restart requested — exiting');
     process.exit(0);
   }, 250);
+});
+
+/** Shared secret check for the /admin/live-matches routes below. */
+function requireAdminSecret(req: express.Request, res: express.Response): boolean {
+  const secret = process.env.GAME_SERVER_ADMIN_SECRET || '';
+  const provided =
+    (typeof req.headers['x-admin-secret'] === 'string'
+      ? req.headers['x-admin-secret']
+      : '') || (typeof req.body?.secret === 'string' ? req.body.secret : '');
+  if (!secret) {
+    res.status(503).json({
+      ok: false,
+      error: 'GAME_SERVER_ADMIN_SECRET is not configured on the game server',
+    });
+    return false;
+  }
+  if (!provided || !secretsEqual(provided, secret)) {
+    res.status(401).json({ ok: false, error: 'Unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Live match visibility + control for the website's Admin -> Live tab.
+ * Single-process deployment (see server/README.md) — matchMaker.query()
+ * and getLocalRoomById() both operate on this same process's in-memory
+ * rooms, no cross-process presence/remoteRoomCall needed.
+ */
+app.get('/admin/live-matches', async (req, res) => {
+  if (!requireAdminSecret(req, res)) return;
+  const cached = await matchMaker.query({});
+  const matches = cached.map((c) => {
+    const room = matchMaker.getLocalRoomById(c.roomId) as unknown as
+      | (AdminControllableRoom & {
+          state?: {
+            phase?: string;
+            modeTag?: string;
+            adminPaused?: boolean;
+            players?: Map<string, { username?: string; role?: string }>;
+          };
+        })
+      | undefined;
+    const state = room?.state;
+    const players = state?.players
+      ? Array.from(state.players.values()).map((p) => ({
+          username: p.username ?? 'Player',
+          role: p.role ?? '',
+        }))
+      : [];
+    return {
+      roomId: c.roomId,
+      roomName: c.name,
+      mode: state?.modeTag ?? c.name,
+      phase: state?.phase ?? 'unknown',
+      paused: !!state?.adminPaused,
+      playerCount: players.length,
+      players,
+    };
+  });
+  res.json({ ok: true, matches });
+});
+
+app.post('/admin/live-matches/:roomId/pause', (req, res) => {
+  if (!requireAdminSecret(req, res)) return;
+  const room = matchMaker.getLocalRoomById(req.params.roomId) as unknown as
+    | AdminControllableRoom
+    | undefined;
+  if (!room) {
+    res.status(404).json({ ok: false, error: 'Match not found on this process' });
+    return;
+  }
+  room.adminPause();
+  res.json({ ok: true });
+});
+
+app.post('/admin/live-matches/:roomId/resume', (req, res) => {
+  if (!requireAdminSecret(req, res)) return;
+  const room = matchMaker.getLocalRoomById(req.params.roomId) as unknown as
+    | AdminControllableRoom
+    | undefined;
+  if (!room) {
+    res.status(404).json({ ok: false, error: 'Match not found on this process' });
+    return;
+  }
+  room.adminResume();
+  res.json({ ok: true });
+});
+
+app.post('/admin/live-matches/:roomId/cancel', (req, res) => {
+  if (!requireAdminSecret(req, res)) return;
+  const room = matchMaker.getLocalRoomById(req.params.roomId) as unknown as
+    | AdminControllableRoom
+    | undefined;
+  if (!room) {
+    res.status(404).json({ ok: false, error: 'Match not found on this process' });
+    return;
+  }
+  room.adminCancelMatch();
+  res.json({ ok: true });
+});
+
+app.post('/admin/live-matches/:roomId/message', (req, res) => {
+  if (!requireAdminSecret(req, res)) return;
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim().slice(0, 240) : '';
+  if (!text) {
+    res.status(400).json({ ok: false, error: 'text is required' });
+    return;
+  }
+  const room = matchMaker.getLocalRoomById(req.params.roomId) as unknown as
+    | AdminControllableRoom
+    | undefined;
+  if (!room) {
+    res.status(404).json({ ok: false, error: 'Match not found on this process' });
+    return;
+  }
+  room.adminBroadcastMessage(text);
+  res.json({ ok: true });
 });
 
 // Lightweight room-state dashboard for local debugging; not linked from the game itself.

@@ -27,6 +27,13 @@ export const HordeResultsScreen: React.FC<Props> = ({ room, player, onContinue }
 
   useEffect(() => {
     if (!player.userId) return;
+    // Admin-cancelled: rewardsReady never becomes true, so without this
+    // guard the fallback client-authored recordHordeResult() below would
+    // still fire and grant rewards for a match that was voided, not lost.
+    if (room.wasCancelled) {
+      hasRecordedRef.current = true;
+      return;
+    }
 
     if (room.rewardsReady || (player.xpEarned ?? 0) > 0 || (player.vpEarned ?? 0) > 0) {
       setRewards({
@@ -76,7 +83,24 @@ export const HordeResultsScreen: React.FC<Props> = ({ room, player, onContinue }
     room.rewardsReady,
     room.matchId,
     survived,
+    room.wasCancelled,
   ]);
+
+  if (room.wasCancelled) {
+    return (
+      <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 z-[300]">
+        <h2 className="text-5xl font-black mb-2 uppercase italic tracking-tighter text-slate-300">
+          Match Cancelled
+        </h2>
+        <p className="text-slate-500 uppercase font-bold tracking-widest mb-10">
+          Cancelled by an admin — no rewards granted
+        </p>
+        <Button size="lg" className="px-16 py-8 text-xl font-black uppercase rounded-2xl" onClick={onContinue}>
+          Return to Menu
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 z-[300]">
