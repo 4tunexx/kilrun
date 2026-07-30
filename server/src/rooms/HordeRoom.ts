@@ -75,6 +75,7 @@ import {
 import { fetchActiveMapPayload } from '../active-map.js';
 import { ensurePowerDefinitionsLoaded } from '../power-defs.js';
 import { detectStaffMention, reportChatFlag, sanitizeChatText } from '../lib/chat.js';
+import { reportAdminBan } from '../lib/admin-actions.js';
 
 interface JoinOptions {
   token?: string;
@@ -186,6 +187,8 @@ export class HordeRoom extends Room<RoomState> {
   private customMapLoaded = false;
   private adminSessions = new Set<string>();
   private lastChatAt = new Map<string, number>();
+  /** sessionId → mute expiry ms (Date.now()-based). */
+  private mutedUntil = new Map<string, number>();
 
   private playerSpawns: SpawnPoint[] = [];
   private monsterSpawnPoints: MonsterSpawnBlueprint[] = [];
@@ -364,6 +367,8 @@ export class HordeRoom extends Room<RoomState> {
       (client, payload: { text?: string; scope?: 'all' | 'team' } | undefined) => {
         const player = this.state.players.get(client.sessionId);
         if (!player) return;
+        const muteExpiry = this.mutedUntil.get(client.sessionId);
+        if (muteExpiry && muteExpiry > Date.now()) return;
         const text = sanitizeChatText(payload?.text);
         if (!text) return;
         const now = Date.now();
@@ -393,6 +398,50 @@ export class HordeRoom extends Room<RoomState> {
             text,
             mention,
           });
+        }
+      }
+    );
+
+    this.onMessage('adminKick', (client, payload: { targetSessionId?: string } | undefined) => {
+      if (!this.adminSessions.has(client.sessionId)) return;
+      const targetSessionId = payload?.targetSessionId;
+      if (!targetSessionId || targetSessionId === client.sessionId) return;
+      const target = this.clients.getById(targetSessionId);
+      target?.leave(4000, 'kicked_by_admin');
+    });
+
+    this.onMessage(
+      'adminMute',
+      (client, payload: { targetSessionId?: string; minutes?: number } | undefined) => {
+        if (!this.adminSessions.has(client.sessionId)) return;
+        const targetSessionId = payload?.targetSessionId;
+        if (!targetSessionId || targetSessionId === client.sessionId) return;
+        if (!this.state.players.has(targetSessionId)) return;
+        const minutes = Math.min(120, Math.max(1, Math.floor(payload?.minutes ?? 5)));
+        this.mutedUntil.set(targetSessionId, Date.now() + minutes * 60_000);
+      }
+    );
+
+    this.onMessage(
+      'adminBan',
+      async (client, payload: { targetSessionId?: string; reason?: string } | undefined) => {
+        if (!this.adminSessions.has(client.sessionId)) return;
+        const admin = this.state.players.get(client.sessionId);
+        const targetSessionId = payload?.targetSessionId;
+        if (!admin || !targetSessionId || targetSessionId === client.sessionId) return;
+        const target = this.state.players.get(targetSessionId);
+        if (!target) return;
+        const result = await reportAdminBan({
+          actorUserId: admin.userId,
+          actorUsername: admin.username,
+          targetUserId: target.userId,
+          mode: 'horde',
+          detail: payload?.reason,
+        });
+        if (result.ok) {
+          this.clients.getById(targetSessionId)?.leave(4001, 'banned_by_admin');
+        } else {
+          console.error('[HordeRoom] adminBan failed:', result.error);
         }
       }
     );
@@ -740,6 +789,7 @@ export class HordeRoom extends Room<RoomState> {
     this.lastShotAt.delete(client.sessionId);
     this.adminSessions.delete(client.sessionId);
     this.lastChatAt.delete(client.sessionId);
+    this.mutedUntil.delete(client.sessionId);
     if (this.hostSessionId === client.sessionId) {
       this.hostSessionId = this.state.players.keys().next().value ?? null;
     }

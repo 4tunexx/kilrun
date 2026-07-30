@@ -35,6 +35,7 @@ import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
 import { Crosshair } from './ui/crosshair';
 import { LiveChatOverlay } from './ui/live-chat-overlay';
+import { AdminInGamePanel } from './ui/admin-in-game-panel';
 import {
   loadTpsViewSettings,
   mouseSensRadians,
@@ -170,6 +171,7 @@ export default function KilrunEngine({
   const [paused, setPaused] = useState(false);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
   const [scoreboardOpen, setScoreboardOpen] = useState(false);
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   useEffect(() => {
     gameMenuOpenRef.current = gameMenuOpen;
   }, [gameMenuOpen]);
@@ -418,6 +420,24 @@ export default function KilrunEngine({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [editorOpen, paused]);
+
+  // Admin panel — press X to open (admin-only). Guard against stealing the
+  // keystroke while the chat box (or any other input) is focused, same as
+  // the live-chat overlay's own Enter guard.
+  useEffect(() => {
+    if (!isAdmin) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'x') return;
+      if (editorOpen || paused) return;
+      const active = document.activeElement as HTMLElement | null;
+      const tag = active?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.isContentEditable) return;
+      e.preventDefault();
+      setAdminPanelOpen((open) => !open);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editorOpen, paused, isAdmin]);
 
   // Scoreboard: classic FPS hold-Tab pattern (show while held, hide on release).
   useEffect(() => {
@@ -1147,7 +1167,7 @@ export default function KilrunEngine({
             <LiveChatOverlay
               registerOnChat={registerOnChat}
               sendChat={sendChatToRoom}
-              disabled={gameMenuOpen}
+              disabled={gameMenuOpen || adminPanelOpen}
             />
           </>
         )}
@@ -1178,6 +1198,18 @@ export default function KilrunEngine({
           playersRef={playersRef}
           localSessionIdRef={localSessionRef}
         />
+
+        {isAdmin && (
+          <AdminInGamePanel
+            open={adminPanelOpen && !paused && !editorOpen}
+            onClose={() => setAdminPanelOpen(false)}
+            playersRef={playersRef}
+            localSessionIdRef={localSessionRef}
+            onKick={(sid) => connectionRef.current?.sendAdminKick(sid)}
+            onMute={(sid, minutes) => connectionRef.current?.sendAdminMute(sid, minutes)}
+            onBan={(sid) => connectionRef.current?.sendAdminBan(sid)}
+          />
+        )}
 
         {!paused && !editorOpen && !gameMenuOpen && gameProgression.hasUnspentPoints && (
           <div className="absolute top-3 right-16 pointer-events-auto z-[200]">

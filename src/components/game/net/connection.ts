@@ -453,6 +453,19 @@ export class GameConnection {
     this.room?.onMessage('chat', callback);
   }
 
+  /** Admin-only — server re-checks adminSessions, this is UI convenience only. */
+  public sendAdminKick(targetSessionId: string): void {
+    this.safeSend('adminKick', { targetSessionId });
+  }
+
+  public sendAdminMute(targetSessionId: string, minutes: number): void {
+    this.safeSend('adminMute', { targetSessionId, minutes });
+  }
+
+  public sendAdminBan(targetSessionId: string, reason?: string): void {
+    this.safeSend('adminBan', { targetSessionId, reason });
+  }
+
   /** Colyseus room id after a successful connect (for party queue sync). */
   public get roomId(): string | undefined {
     return this.room?.roomId;
