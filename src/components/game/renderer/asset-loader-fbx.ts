@@ -102,6 +102,7 @@ function getSharedAtlasTexture(): THREE.Texture {
 function installTextureFallback(group: THREE.Object3D, chosenPath: string) {
   if (chosenPath === SHARED_SKIN_ATLAS) return;
   const MAP_SLOTS = ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'] as const;
+  let fallbackCount = 0;
   group.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
@@ -117,18 +118,24 @@ function installTextureFallback(group: THREE.Object3D, chosenPath: string) {
           try {
             (std as unknown as Record<string, THREE.Texture>)[slot] = getSharedAtlasTexture();
             std.needsUpdate = true;
+            fallbackCount++;
+            console.warn(`[fbx-fallback] swapped ${slot} to global atlas (failed: ${chosenPath})`);
           } catch {
             /* ignore */
           }
         };
         if (img && typeof img.complete === 'boolean' && img.complete) {
-          if (!img.naturalWidth || img.naturalWidth === 0) swapToShared();
+          if (!img.naturalWidth || img.naturalWidth === 0) {
+            console.warn(`[fbx-fallback] detected 404 in ${slot} (chosen: ${chosenPath})`);
+            swapToShared();
+          }
         } else if (img && typeof img.addEventListener === 'function') {
           img.addEventListener('error', swapToShared, { once: true });
         }
       }
     }
   });
+  if (fallbackCount > 0) console.log(`[fbx-fallback] total swaps: ${fallbackCount}`);
 }
 
 const cache = new Map<string, Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] }>>();
@@ -200,6 +207,7 @@ export function loadFbxModel(
                 }
               });
               installTextureFallback(group, source.path);
+              console.log(`[fbx] loaded ${url} (texture source: ${source.kind} → ${source.path})`);
               resolve({
                 scene: group,
                 animations: group.animations ?? [],
