@@ -615,6 +615,15 @@ export function MapPlayPreview({
     const clock = new THREE.Clock();
     const playerPos = new THREE.Vector3();
     let smoothCamY: number | null = null;
+    // Separate from smoothCamY: that softening was written for the old
+    // stepped-shelf ramp approximation to keep the CAMERA from feeling
+    // jerky hopping between shelves. Ramps are now true continuous analytic
+    // slopes, so the softening is no longer needed for correctness — but it
+    // was also being applied to the PLAYER MESH's own rendered height,
+    // which made the visible character lag behind the real (already
+    // correct) ramp height while walking uphill, sinking the legs into the
+    // ramp. The camera can keep its cinematic lag; the mesh must not.
+    let meshY: number | null = null;
     const tick = () => {
       if (disposed) return;
       raf = requestAnimationFrame(tick);
@@ -820,6 +829,17 @@ export function MapPlayPreview({
       }
       playerPos.set(tx, smoothCamY, tz);
 
+      // Player mesh height: sharp snap while grounded (matches the true
+      // continuous ramp surface instead of lagging into it), softer while
+      // airborne so jumps/falls still look smooth. See `meshY` comment above.
+      if (meshY === null || Math.abs(meshY - ty) > 3.5) {
+        meshY = ty;
+      } else {
+        const meshSharpness = body.isGrounded ? 40 : 16;
+        const meshLerp = 1 - Math.pow(0.001, dt * meshSharpness);
+        meshY += (ty - meshY) * Math.min(1, meshLerp);
+      }
+
       const liveTps = tpsRef.current;
       if (camera.fov !== liveTps.camera.fov) {
         camera.fov = liveTps.camera.fov;
@@ -855,7 +875,7 @@ export function MapPlayPreview({
         playerRoot.visible = !(
           liveTps.player.hideWhenClose && liveTps.camera.boomDistance < liveTps.player.hideDistance
         );
-        playerRoot.position.set(tx, smoothCamY + liveTps.player.offsetY, tz);
+        playerRoot.position.set(tx, (meshY ?? ty) + liveTps.player.offsetY, tz);
         const tpsScale = liveTps.player.scale || 1;
         playerRoot.scale.set(
           playerBaseScale[0] * tpsScale,
