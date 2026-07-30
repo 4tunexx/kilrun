@@ -19,6 +19,16 @@ const nextConfig: NextConfig = {
     if (isServer) {
       config.plugins = [...config.plugins, new PrismaPlugin()];
     }
+    // shared/**/*.ts is also compiled by the separate Colyseus server build
+    // (server/tsconfig.json), which runs on Node's native ESM loader and
+    // therefore requires explicit .js extensions on relative imports
+    // (e.g. shared/ability-progression.ts imports './power-definitions.js').
+    // Webpack doesn't map a literal .js specifier back to its .ts source by
+    // default, so without this alias those same imports 404 under Next.js.
+    config.resolve.extensionAlias = {
+      ...config.resolve.extensionAlias,
+      '.js': ['.ts', '.tsx', '.js'],
+    };
     return config;
   },
   images: {
