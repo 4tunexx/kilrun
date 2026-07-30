@@ -73,7 +73,12 @@ import {
 } from '../match-report.js';
 import { fetchActiveMapPayload } from '../active-map.js';
 import { ensurePowerDefinitionsLoaded } from '../power-defs.js';
-import { detectStaffMention, reportChatFlag, sanitizeChatText } from '../lib/chat.js';
+import {
+  detectPlayerCommand,
+  detectStaffMention,
+  reportChatFlag,
+  sanitizeChatText,
+} from '../lib/chat.js';
 import { reportAdminBan } from '../lib/admin-actions.js';
 
 const KP_DEFAULT = 1000;
@@ -141,6 +146,10 @@ const MAX_ROUNDS = 6;
 const ROUND_TIME_MS = 120_000;
 const DEFAULT_MM_WAIT_MS = 12_000;
 const DEFAULT_MIN_SAME_RANK = 4;
+/** @timeout / @surrender player commands. */
+const MAX_TIMEOUTS_PER_TEAM = 3;
+const TIMEOUT_DURATION_MS = 60_000;
+const SURRENDER_VOTE_DURATION_MS = 30_000;
 
 /**
  * Competitive 4v4 — best of 6 rounds (first to 4). Team elimination via hitscan.
@@ -161,6 +170,15 @@ export class CompetitiveRoom extends Room<RoomState> {
   private lastChatAt = new Map<string, number>();
   /** sessionId → mute expiry ms (Date.now()-based). */
   private mutedUntil = new Map<string, number>();
+  /** Player-facing @timeout / @surrender — see handle*Command below. */
+  private teamTimeoutsUsed = new Map<string, number>();
+  private teamTimeoutResumeAt: number | null = null;
+  private surrenderVote: {
+    team: string;
+    yes: Set<string>;
+    no: Set<string>;
+    startedAt: number;
+  } | null = null;
 
   private teamASpawns: SpawnPoint[] = [];
   private teamBSpawns: SpawnPoint[] = [];
@@ -401,6 +419,12 @@ export class CompetitiveRoom extends Room<RoomState> {
             mention,
           });
         }
+
+        const command = detectPlayerCommand(text);
+        if (command === 'timeout') this.handleTimeoutCommand(player);
+        else if (command === 'surrender') this.handleSurrenderCommand(player);
+        else if (command === 'vote_yes') this.handleVoteCommand(player, true);
+        else if (command === 'vote_no') this.handleVoteCommand(player, false);
       }
     );
 
@@ -856,7 +880,24 @@ export class CompetitiveRoom extends Room<RoomState> {
   }
 
   private update(dtMs: number) {
-    if (this.state.adminPaused) return;
+    if (this.state.adminPaused) {
+      if (this.teamTimeoutResumeAt !== null && Date.now() >= this.teamTimeoutResumeAt) {
+        this.state.adminPaused = false;
+        this.teamTimeoutResumeAt = null;
+        this.systemMessage('Timeout over — match resumed.');
+      } else {
+        return;
+      }
+    }
+    if (
+      this.surrenderVote &&
+      Date.now() - this.surrenderVote.startedAt > SURRENDER_VOTE_DURATION_MS
+    ) {
+      this.systemMessage(
+        `Surrender vote (${this.surrenderVote.team === 'team_a' ? 'Team A' : 'Team B'}) expired without a majority.`
+      );
+      this.surrenderVote = null;
+    }
     switch (this.state.phase) {
       case 'lobby':
         this.lobbyElapsedMs += dtMs;
@@ -1139,17 +1180,108 @@ export class CompetitiveRoom extends Room<RoomState> {
           : this.state.scoreA > this.state.scoreB
             ? 'team_a'
             : 'team_b';
-      this.state.phase = 'results';
-      this.state.winnerRole = matchWinner;
-      this.resultsElapsedMs = 0;
-      this.matchStarted = false;
-      void this.reportRewards(matchWinner);
+      this.finishMatch(matchWinner);
       return;
     }
 
     // Short pause then countdown for next round
     this.betweenRounds = true;
     this.betweenRoundMs = 2000;
+  }
+
+  /** Concludes the WHOLE match (not just a round) — shared by endRound's
+   * normal score-threshold path and the @surrender vote, which must force
+   * an immediate conclusion regardless of current round score. */
+  private finishMatch(matchWinner: 'team_a' | 'team_b') {
+    this.state.phase = 'results';
+    this.state.winnerRole = matchWinner;
+    this.resultsElapsedMs = 0;
+    this.matchStarted = false;
+    void this.reportRewards(matchWinner);
+  }
+
+  private systemMessage(text: string): void {
+    this.broadcast('chat', {
+      sessionId: 'system',
+      username: 'System',
+      text,
+      scope: 'all',
+      at: Date.now(),
+    });
+  }
+
+  private teamMembers(team: string): PlayerState[] {
+    return Array.from(this.state.players.values()).filter((p) => p.role === team);
+  }
+
+  private handleTimeoutCommand(player: PlayerState): void {
+    if (this.state.phase !== 'playing' || this.state.adminPaused) return;
+    const team = player.role;
+    const used = this.teamTimeoutsUsed.get(team) ?? 0;
+    if (used >= MAX_TIMEOUTS_PER_TEAM) {
+      this.systemMessage(`${team === 'team_a' ? 'Team A' : 'Team B'} has no timeouts left.`);
+      return;
+    }
+    this.teamTimeoutsUsed.set(team, used + 1);
+    this.state.adminPaused = true;
+    this.teamTimeoutResumeAt = Date.now() + TIMEOUT_DURATION_MS;
+    const remaining = MAX_TIMEOUTS_PER_TEAM - used - 1;
+    this.systemMessage(
+      `${player.username} called a timeout (${remaining} left for ${team === 'team_a' ? 'Team A' : 'Team B'}). Match paused for 60s.`
+    );
+  }
+
+  private handleSurrenderCommand(player: PlayerState): void {
+    if (this.state.phase !== 'playing') return;
+    if (this.surrenderVote) {
+      this.systemMessage('A surrender vote is already in progress.');
+      return;
+    }
+    const team = player.role;
+    const members = this.teamMembers(team);
+    this.surrenderVote = {
+      team,
+      yes: new Set([player.sessionId]),
+      no: new Set(),
+      startedAt: Date.now(),
+    };
+    this.systemMessage(
+      `${player.username} called for a surrender vote (${team === 'team_a' ? 'Team A' : 'Team B'})! Type @yes or @no — needs a majority of ${members.length}.`
+    );
+    this.checkSurrenderVote();
+  }
+
+  private handleVoteCommand(player: PlayerState, yes: boolean): void {
+    if (!this.surrenderVote || this.surrenderVote.team !== player.role) return;
+    this.surrenderVote.yes.delete(player.sessionId);
+    this.surrenderVote.no.delete(player.sessionId);
+    (yes ? this.surrenderVote.yes : this.surrenderVote.no).add(player.sessionId);
+    this.checkSurrenderVote();
+  }
+
+  private checkSurrenderVote(): void {
+    const vote = this.surrenderVote;
+    if (!vote) return;
+    const memberIds = new Set(this.teamMembers(vote.team).map((m) => m.sessionId));
+    const yesCount = Array.from(vote.yes).filter((id) => memberIds.has(id)).length;
+    const noCount = Array.from(vote.no).filter((id) => memberIds.has(id)).length;
+    const needed = Math.floor(memberIds.size / 2) + 1;
+
+    if (yesCount >= needed) {
+      this.surrenderVote = null;
+      const opposing: 'team_a' | 'team_b' = vote.team === 'team_a' ? 'team_b' : 'team_a';
+      this.systemMessage(
+        `Surrender vote passed — ${vote.team === 'team_a' ? 'Team A' : 'Team B'} surrendered.`
+      );
+      // Real conclusion (unlike admin cancel) — finishMatch's existing
+      // reportRewards() still runs, including Ranked KP for the win/loss.
+      this.finishMatch(opposing);
+      return;
+    }
+    if (noCount >= needed) {
+      this.surrenderVote = null;
+      this.systemMessage('Surrender vote failed.');
+    }
   }
 
   private avgEnemyKp(role: string): number {

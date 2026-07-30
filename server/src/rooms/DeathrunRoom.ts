@@ -65,7 +65,12 @@ import {
 } from '../match-report.js';
 import { fetchActiveMapPayload } from '../active-map.js';
 import { ensurePowerDefinitionsLoaded } from '../power-defs.js';
-import { detectStaffMention, reportChatFlag, sanitizeChatText } from '../lib/chat.js';
+import {
+  detectPlayerCommand,
+  detectStaffMention,
+  reportChatFlag,
+  sanitizeChatText,
+} from '../lib/chat.js';
 import { reportAdminBan } from '../lib/admin-actions.js';
 
 interface JoinOptions {
@@ -133,6 +138,10 @@ interface TeleportZone {
 }
 
 const RESULTS_DISPLAY_MS = 8000;
+/** @timeout / @surrender player commands — see handle*Command below. */
+const MAX_TIMEOUTS_PER_TEAM = 3;
+const TIMEOUT_DURATION_MS = 60_000;
+const SURRENDER_VOTE_DURATION_MS = 30_000;
 
 /**
  * Deathrun match room — authoritative platformer sim shared by all modes.
@@ -171,6 +180,15 @@ export class DeathrunRoom extends Room<RoomState> {
   private lastChatAt = new Map<string, number>();
   /** sessionId → mute expiry ms (Date.now()-based). */
   private mutedUntil = new Map<string, number>();
+  /** Player-facing @timeout / @surrender — see handle*Command below. */
+  private teamTimeoutsUsed = new Map<string, number>();
+  private teamTimeoutResumeAt: number | null = null;
+  private surrenderVote: {
+    team: string;
+    yes: Set<string>;
+    no: Set<string>;
+    startedAt: number;
+  } | null = null;
   private matchDurationMs = MATCH_DURATION_MS;
   private lobbyCountdownMs = LOBBY_COUNTDOWN_MS;
   private trapperEnabled = true;
@@ -289,6 +307,12 @@ export class DeathrunRoom extends Room<RoomState> {
             mention,
           });
         }
+
+        const command = detectPlayerCommand(text);
+        if (command === 'timeout') this.handleTimeoutCommand(player);
+        else if (command === 'surrender') this.handleSurrenderCommand(player);
+        else if (command === 'vote_yes') this.handleVoteCommand(player, true);
+        else if (command === 'vote_no') this.handleVoteCommand(player, false);
       }
     );
 
@@ -626,7 +650,27 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private update(dtMs: number) {
-    if (this.state.adminPaused) return;
+    if (this.state.adminPaused) {
+      // Only a player-called @timeout has an auto-resume timestamp — an
+      // admin pause from the website Live tab stays paused until the
+      // admin explicitly resumes it.
+      if (this.teamTimeoutResumeAt !== null && Date.now() >= this.teamTimeoutResumeAt) {
+        this.state.adminPaused = false;
+        this.teamTimeoutResumeAt = null;
+        this.systemMessage('Timeout over — match resumed.');
+      } else {
+        return;
+      }
+    }
+    if (
+      this.surrenderVote &&
+      Date.now() - this.surrenderVote.startedAt > SURRENDER_VOTE_DURATION_MS
+    ) {
+      this.systemMessage(
+        `Surrender vote (${this.surrenderVote.team}) expired without a majority.`
+      );
+      this.surrenderVote = null;
+    }
     switch (this.state.phase) {
       case 'lobby':
         this.tickLobby();
@@ -1052,6 +1096,97 @@ export class DeathrunRoom extends Room<RoomState> {
   public adminBroadcastMessage(text: string): void {
     this.state.adminMessage = text;
     this.state.adminMessageSeq += 1;
+  }
+
+  /** Server-authored info line, same 'chat' channel, distinct sender so
+   * clients can style it differently from a real player's message. */
+  private systemMessage(text: string): void {
+    this.broadcast('chat', {
+      sessionId: 'system',
+      username: 'System',
+      text,
+      scope: 'all',
+      at: Date.now(),
+    });
+  }
+
+  private teamMembers(team: string): PlayerState[] {
+    return Array.from(this.state.players.values()).filter((p) => p.role === team);
+  }
+
+  private handleTimeoutCommand(player: PlayerState): void {
+    if (this.state.phase !== 'playing' || this.state.adminPaused) return;
+    const team = player.role;
+    const used = this.teamTimeoutsUsed.get(team) ?? 0;
+    if (used >= MAX_TIMEOUTS_PER_TEAM) {
+      this.systemMessage(`${team === 'trapper' ? 'Trapper' : 'Runners'} have no timeouts left.`);
+      return;
+    }
+    this.teamTimeoutsUsed.set(team, used + 1);
+    this.state.adminPaused = true;
+    this.teamTimeoutResumeAt = Date.now() + TIMEOUT_DURATION_MS;
+    const remaining = MAX_TIMEOUTS_PER_TEAM - used - 1;
+    this.systemMessage(
+      `${player.username} called a timeout (${remaining} left for ${team === 'trapper' ? 'Trapper' : 'Runners'}). Match paused for 60s.`
+    );
+  }
+
+  private handleSurrenderCommand(player: PlayerState): void {
+    if (this.state.phase !== 'playing') return;
+    if (this.surrenderVote) {
+      this.systemMessage('A surrender vote is already in progress.');
+      return;
+    }
+    const team = player.role;
+    const members = this.teamMembers(team);
+    this.surrenderVote = {
+      team,
+      yes: new Set([player.sessionId]),
+      no: new Set(),
+      startedAt: Date.now(),
+    };
+    this.systemMessage(
+      `${player.username} called for a surrender vote (${team === 'trapper' ? 'Trapper' : 'Runners'})! Type @yes or @no — needs a majority of ${members.length}.`
+    );
+    this.checkSurrenderVote();
+  }
+
+  private handleVoteCommand(player: PlayerState, yes: boolean): void {
+    if (!this.surrenderVote || this.surrenderVote.team !== player.role) return;
+    this.surrenderVote.yes.delete(player.sessionId);
+    this.surrenderVote.no.delete(player.sessionId);
+    (yes ? this.surrenderVote.yes : this.surrenderVote.no).add(player.sessionId);
+    this.checkSurrenderVote();
+  }
+
+  /** Resolves immediately once either side reaches a strict majority of
+   * the team's CURRENT roster (not just however many votes were cast, and
+   * re-counted against current members each time in case someone left
+   * mid-vote). */
+  private checkSurrenderVote(): void {
+    const vote = this.surrenderVote;
+    if (!vote) return;
+    const memberIds = new Set(this.teamMembers(vote.team).map((m) => m.sessionId));
+    const yesCount = Array.from(vote.yes).filter((id) => memberIds.has(id)).length;
+    const noCount = Array.from(vote.no).filter((id) => memberIds.has(id)).length;
+    const needed = Math.floor(memberIds.size / 2) + 1;
+
+    if (yesCount >= needed) {
+      this.surrenderVote = null;
+      const opposing: 'trapper' | 'runner' = vote.team === 'trapper' ? 'runner' : 'trapper';
+      this.systemMessage(
+        `Surrender vote passed — ${vote.team === 'trapper' ? 'Trapper' : 'Runners'} surrendered.`
+      );
+      // A surrender is a REAL conclusion (unlike admin cancel) — the
+      // opposing side gets their normal win rewards via endRound's
+      // existing reportRewards() call.
+      this.endRound(opposing);
+      return;
+    }
+    if (noCount >= needed) {
+      this.surrenderVote = null;
+      this.systemMessage('Surrender vote failed.');
+    }
   }
 
   private endRound(winnerRole: 'trapper' | 'runner') {

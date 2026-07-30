@@ -135,6 +135,16 @@ export const LiveChatOverlay: React.FC<{
             >
               Admin: {m.text}
             </div>
+          ) : m.sessionId === 'system' ? (
+            // @timeout / @surrender / vote announcements — server-authored,
+            // distinct from a real player's line but less alarming than an
+            // admin broadcast.
+            <div
+              key={m.id}
+              className="text-sm bg-amber-500/20 text-amber-200 border border-amber-500/30 rounded px-2 py-1 font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] leading-snug"
+            >
+              {m.text}
+            </div>
           ) : (
             <div
               key={m.id}

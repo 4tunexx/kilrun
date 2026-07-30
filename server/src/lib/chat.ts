@@ -35,6 +35,22 @@ export function detectStaffMention(text: string): StaffMention | null {
   return null;
 }
 
+export type PlayerCommand = 'timeout' | 'surrender' | 'vote_yes' | 'vote_no';
+
+/**
+ * Player-facing gameplay commands (distinct from @admin/@mod staff
+ * mentions above) — must start the message so "hey does anyone want to
+ * @surrender" doesn't accidentally fire the real command.
+ */
+export function detectPlayerCommand(text: string): PlayerCommand | null {
+  const trimmed = text.trim();
+  if (/^@timeout\b/i.test(trimmed)) return 'timeout';
+  if (/^@surrender\b/i.test(trimmed)) return 'surrender';
+  if (/^@yes\b/i.test(trimmed)) return 'vote_yes';
+  if (/^@no\b/i.test(trimmed)) return 'vote_no';
+  return null;
+}
+
 function resolveWebAppUrl(): string | null {
   const raw = (process.env.WEB_APP_URL || process.env.CLIENT_ORIGIN || '').trim();
   if (!raw || raw === '*') return null;

@@ -74,7 +74,12 @@ import {
 } from '../match-report.js';
 import { fetchActiveMapPayload } from '../active-map.js';
 import { ensurePowerDefinitionsLoaded } from '../power-defs.js';
-import { detectStaffMention, reportChatFlag, sanitizeChatText } from '../lib/chat.js';
+import {
+  detectPlayerCommand,
+  detectStaffMention,
+  reportChatFlag,
+  sanitizeChatText,
+} from '../lib/chat.js';
 import { reportAdminBan } from '../lib/admin-actions.js';
 
 interface JoinOptions {
@@ -162,6 +167,10 @@ const RESULTS_DISPLAY_MS = 8000;
 const MAX_WAVES = 8;
 const WAVE_CLEAR_PAUSE_MS = 2500;
 const HORDE_MATCH_MS = 600_000;
+/** @timeout / @surrender player commands. */
+const MAX_SQUAD_TIMEOUTS = 3;
+const TIMEOUT_DURATION_MS = 60_000;
+const SURRENDER_VOTE_DURATION_MS = 30_000;
 
 const MONSTER_STATS = {
   basic: { hp: 40, speed: 2.4, damage: 12, radius: 0.55 },
@@ -189,6 +198,12 @@ export class HordeRoom extends Room<RoomState> {
   private lastChatAt = new Map<string, number>();
   /** sessionId → mute expiry ms (Date.now()-based). */
   private mutedUntil = new Map<string, number>();
+  /** Player-facing @timeout / @surrender. Horde is co-op (everyone is
+   * role='survivor'), so there's a single squad-wide counter/vote, not a
+   * per-team one like Deathrun/Competitive. */
+  private squadTimeoutsUsed = 0;
+  private squadTimeoutResumeAt: number | null = null;
+  private surrenderVote: { yes: Set<string>; no: Set<string>; startedAt: number } | null = null;
 
   private playerSpawns: SpawnPoint[] = [];
   private monsterSpawnPoints: MonsterSpawnBlueprint[] = [];
@@ -399,6 +414,12 @@ export class HordeRoom extends Room<RoomState> {
             mention,
           });
         }
+
+        const command = detectPlayerCommand(text);
+        if (command === 'timeout') this.handleTimeoutCommand(player);
+        else if (command === 'surrender') this.handleSurrenderCommand(player);
+        else if (command === 'vote_yes') this.handleVoteCommand(player, true);
+        else if (command === 'vote_no') this.handleVoteCommand(player, false);
       }
     );
 
@@ -837,7 +858,22 @@ export class HordeRoom extends Room<RoomState> {
   }
 
   private update(dtMs: number) {
-    if (this.state.adminPaused) return;
+    if (this.state.adminPaused) {
+      if (this.squadTimeoutResumeAt !== null && Date.now() >= this.squadTimeoutResumeAt) {
+        this.state.adminPaused = false;
+        this.squadTimeoutResumeAt = null;
+        this.systemMessage('Timeout over — match resumed.');
+      } else {
+        return;
+      }
+    }
+    if (
+      this.surrenderVote &&
+      Date.now() - this.surrenderVote.startedAt > SURRENDER_VOTE_DURATION_MS
+    ) {
+      this.systemMessage('Surrender vote expired without a majority.');
+      this.surrenderVote = null;
+    }
     switch (this.state.phase) {
       case 'lobby':
         if (this.state.players.size >= HORDE_MIN_PLAYERS_TO_START) {
@@ -1343,6 +1379,75 @@ export class HordeRoom extends Room<RoomState> {
   public adminBroadcastMessage(text: string): void {
     this.state.adminMessage = text;
     this.state.adminMessageSeq += 1;
+  }
+
+  private systemMessage(text: string): void {
+    this.broadcast('chat', {
+      sessionId: 'system',
+      username: 'System',
+      text,
+      scope: 'all',
+      at: Date.now(),
+    });
+  }
+
+  private handleTimeoutCommand(player: PlayerState): void {
+    if (this.state.phase !== 'playing' || this.state.adminPaused) return;
+    if (this.squadTimeoutsUsed >= MAX_SQUAD_TIMEOUTS) {
+      this.systemMessage('The squad has no timeouts left.');
+      return;
+    }
+    this.squadTimeoutsUsed += 1;
+    this.state.adminPaused = true;
+    this.squadTimeoutResumeAt = Date.now() + TIMEOUT_DURATION_MS;
+    const remaining = MAX_SQUAD_TIMEOUTS - this.squadTimeoutsUsed;
+    this.systemMessage(
+      `${player.username} called a timeout (${remaining} left). Match paused for 60s.`
+    );
+  }
+
+  private handleSurrenderCommand(player: PlayerState): void {
+    if (this.state.phase !== 'playing') return;
+    if (this.surrenderVote) {
+      this.systemMessage('A surrender vote is already in progress.');
+      return;
+    }
+    const memberCount = this.state.players.size;
+    this.surrenderVote = { yes: new Set([player.sessionId]), no: new Set(), startedAt: Date.now() };
+    this.systemMessage(
+      `${player.username} called for a surrender vote! Type @yes or @no — needs a majority of ${memberCount}.`
+    );
+    this.checkSurrenderVote();
+  }
+
+  private handleVoteCommand(player: PlayerState, yes: boolean): void {
+    if (!this.surrenderVote) return;
+    this.surrenderVote.yes.delete(player.sessionId);
+    this.surrenderVote.no.delete(player.sessionId);
+    (yes ? this.surrenderVote.yes : this.surrenderVote.no).add(player.sessionId);
+    this.checkSurrenderVote();
+  }
+
+  private checkSurrenderVote(): void {
+    const vote = this.surrenderVote;
+    if (!vote) return;
+    const memberIds = new Set(this.state.players.keys());
+    const yesCount = Array.from(vote.yes).filter((id) => memberIds.has(id)).length;
+    const noCount = Array.from(vote.no).filter((id) => memberIds.has(id)).length;
+    const needed = Math.floor(memberIds.size / 2) + 1;
+
+    if (yesCount >= needed) {
+      this.surrenderVote = null;
+      this.systemMessage('Surrender vote passed — the squad gave up.');
+      // Real conclusion (unlike admin cancel) — endMatch's existing
+      // reportRewards() still runs, granting the normal "loss" rewards.
+      this.endMatch('horde');
+      return;
+    }
+    if (noCount >= needed) {
+      this.surrenderVote = null;
+      this.systemMessage('Surrender vote failed.');
+    }
   }
 
   private endMatch(winnerRole: 'survivor' | 'horde') {
