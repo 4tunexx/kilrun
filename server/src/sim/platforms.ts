@@ -3,7 +3,14 @@
  * not a continuous tunnel floor.
  */
 import { ObstacleState, PlatformState } from '../schema/RoomState.js';
-import { COLLISION_SKIN, PLAYER_HEIGHT, PLAYER_RADIUS, WORLD_HEIGHT, WORLD_WIDTH } from './constants.js';
+import {
+  COLLISION_SKIN,
+  LAND_STEP_CLIMB,
+  PLAYER_HEIGHT,
+  PLAYER_RADIUS,
+  WORLD_HEIGHT,
+  WORLD_WIDTH,
+} from './constants.js';
 
 export interface PlatformBlueprint {
   x: number;
@@ -231,6 +238,14 @@ export function resolveSolidCollisions(
 
     const topZ = platform.z;
     const bottomZ = topZ - boxH;
+    // Step-up allowance: a ledge within normal walkable step height (the
+    // same LAND_STEP_CLIMB tolerance movement.ts already uses to re-stick
+    // feet onto a slightly-higher pad) should be walkable, not a wall.
+    // Without this, any tall solid whose top sits even a few cm above the
+    // player's current feet — e.g. a ramp leading into an adjacent flat
+    // platform that isn't pixel-perfect flush — reads as an impassable
+    // barrier that only a jump clears, instead of a smooth step up.
+    if (playerBottom >= topZ - LAND_STEP_CLIMB) continue;
     // Vertical overlap with skin
     if (playerTop <= bottomZ + COLLISION_SKIN || playerBottom >= topZ - COLLISION_SKIN) {
       continue;

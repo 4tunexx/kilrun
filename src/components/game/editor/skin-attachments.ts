@@ -130,6 +130,39 @@ async function ensurePackAtlasMap(root: THREE.Object3D, modelSrc: string): Promi
   await waitForRootTextures(root, 2500);
 }
 
+/**
+ * Universal safety net: whatever the source (built-in pack, custom upload,
+ * any slot), if a material's texture actually 404'd (image finished loading
+ * but decoded to zero size), leave the mesh flat black instead of a graceful
+ * neutral tint is worse than no texture at all — this is what previously
+ * only /fullbody/ costumes got via `solidColorHintForSrc`'s beige fallback.
+ * Non-fullbody accessories (hats, glasses, custom props) had no equivalent,
+ * so a broken texture on those just rendered pure black with no fallback.
+ */
+async function applyBrokenTextureFallback(
+  root: THREE.Object3D,
+  fallbackColor = '#c4a882'
+): Promise<void> {
+  await waitForRootTextures(root, 2000);
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.material) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const m of mats) {
+      const std = m as THREE.MeshStandardMaterial;
+      if (!std || !('map' in std) || !std.map) continue;
+      const img = std.map.image as HTMLImageElement | undefined;
+      const broken =
+        img && typeof img.complete === 'boolean' && img.complete && !img.naturalWidth;
+      if (broken) {
+        std.map = null;
+        std.color?.set(fallbackColor);
+        std.needsUpdate = true;
+      }
+    }
+  });
+}
+
 function waitForRootTextures(root: THREE.Object3D, timeoutMs: number): Promise<void> {
   const textures: THREE.Texture[] = [];
   root.traverse((o) => {
@@ -503,7 +536,11 @@ export async function buildSkinPartMesh(att: SkinAttachment): Promise<THREE.Obje
         }
       }
       sanitizePackSkinMaterials(root);
-      if (!solidHint) await waitForRootTextures(root, 2000);
+      if (!solidHint) {
+        // Reactive, name-independent: catches broken textures on ANY slot
+        // (hats/glasses/custom uploads), not just the /fullbody/ category.
+        await applyBrokenTextureFallback(root);
+      }
       primary = root;
     }
   }

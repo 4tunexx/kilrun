@@ -260,6 +260,11 @@ function resolveSolids(body: SimBody, pads: SimPad[]) {
     if (boxH <= 0.35) continue;
     const topZ = pad.z;
     const bottomZ = topZ - boxH;
+    // Step-up allowance: mirrors server/src/sim/platforms.ts's fix for the
+    // same duplicated logic — a ledge within LAND_STEP_CLIMB of the
+    // player's feet is a walkable step, not a wall (fixes Play Test
+    // matching the live "stuck at ramp-to-platform seam" bug).
+    if (playerBottom >= topZ - LAND_STEP_CLIMB) continue;
     if (playerTop <= bottomZ + SKIN || playerBottom >= topZ - SKIN) continue;
     const halfW = pad.width / 2 + PLAYER_RADIUS;
     const halfD = pad.depth / 2 + PLAYER_RADIUS;
