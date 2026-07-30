@@ -6,17 +6,21 @@
  * generic internal texture reference name ("Textures.png", sometimes with a
  * stale absolute path from whoever authored it). Blindly redirecting every
  * one of those to a single global shared atlas breaks anything that isn't
- * actually part of that pack. In practice this repo has THREE different
- * legitimate texture sources behind that same generic reference, and which
- * one is correct depends on the specific asset:
+ * actually part of that pack. There are THREE candidate texture sources
+ * behind that same generic reference:
  *
- *  1. A dedicated PNG next to the FBX, same basename (e.g.
- *     `FullBody_Demon_001.fbx` + `FullBody_Demon_001.png`). Verified: every
- *     asset in fullbody/hair/gloves/outerwear/eyebrows/shoes/hats/pants has
- *     one of these — highest priority when present.
- *  2. A per-folder shared atlas (`<category>/Textures.png`), for categories
- *     where individual assets DON'T have their own PNG — verified: every
- *     one of the 36 `mustaches/*.fbx` relies on `mustaches/Textures.png`.
+ *  1. A per-folder shared atlas (`<category>/Textures.png`) — the REAL,
+ *     full-size (1024×1024, verified) UV-mapped diffuse for every asset in
+ *     that category. This is almost always the correct source.
+ *  2. A same-basename sibling PNG next to the FBX (e.g. `Hat_001.fbx` +
+ *     `Hat_001.png`). Every asset in every category (fullbody/hair/gloves/
+ *     outerwear/eyebrows/shoes/hats/pants/glasses/backpacks/bodies —
+ *     verified across all of them) has one of these, but they are uniformly
+ *     128×128 shop/admin PREVIEW ICONS, not UV atlases — see the identical
+ *     warning in `src/lib/asset-registry.ts`'s `isPackPreviewIconUrl()`.
+ *     Applying one as `material.map` smears a tiny icon across the mesh's
+ *     real UVs and reads as flat black/grey. Only used as a last-resort
+ *     fallback below the folder atlas, never preferred over it.
  *  3. The true global Characters_7 atlas (`/game/skins/Textures.png`), for
  *     assets from that pack that have neither of the above.
  *
@@ -75,8 +79,10 @@ async function resolveTextureSource(fbxUrl: string): Promise<TextureSource> {
       const sibling = siblingPngPath(fbxUrl);
       const folder = folderAtlasPath(fbxUrl);
       const [siblingOk, folderOk] = await Promise.all([urlExists(sibling), urlExists(folder)]);
-      if (siblingOk) return { kind: 'sibling' as const, path: sibling };
+      // Folder atlas first: the sibling PNG is confirmed to always be a
+      // 128px preview icon (see header comment), never the real UV atlas.
       if (folderOk) return { kind: 'folder' as const, path: folder };
+      if (siblingOk) return { kind: 'sibling' as const, path: sibling };
       return { kind: 'global' as const, path: SHARED_SKIN_ATLAS };
     })();
     textureSourceCache.set(fbxUrl, pending);
