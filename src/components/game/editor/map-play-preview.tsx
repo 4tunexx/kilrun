@@ -59,6 +59,8 @@ import {
 } from './prefab-storage';
 import { loadMapPlayable } from './map-storage';
 import { loadPlayerAvatar, getMapPlayerAvatar, fitAvatarLikeEditor, avatarAuthoredScale } from './player-avatar';
+import { applyTeamTint } from '@/lib/premium-skin-config';
+import { BODY_COLOR_RED, BODY_COLOR_BLUE } from '@/lib/body-colors';
 import { updateFollowCamera } from '../renderer/three-world';
 import { applySkinAttachments, tickSkinAttachments } from './skin-attachments';
 import {
@@ -326,6 +328,11 @@ export function MapPlayPreview({
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.95;
     host.appendChild(renderer.domElement);
     Object.assign(renderer.domElement.style, { width: '100%', height: '100%', display: 'block' });
 
@@ -333,6 +340,14 @@ export function MapPlayPreview({
     scene.add(ambient);
     const sun = new THREE.DirectionalLight(0xfff2d6, env.sunIntensity ?? 1.15);
     sun.position.set(10, 22, 8);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 90;
+    sun.shadow.camera.left = -45;
+    sun.shadow.camera.right = 45;
+    sun.shadow.camera.top = 45;
+    sun.shadow.camera.bottom = -45;
     scene.add(sun);
     const hemi = new THREE.HemisphereLight(0x88aacc, 0x1a2740, 0.45);
     scene.add(hemi);
@@ -429,6 +444,13 @@ export function MapPlayPreview({
           await applySkinAttachments(loaded.scene, previewAttachments);
           if (disposed) return;
         }
+        // Trapper/team_a render red, runner/team_b (and default solo) render blue —
+        // matches server-assigned bodyColorIndex behavior in live Deathrun/Competitive.
+        applyTeamTint(
+          loaded.scene,
+          playTestRole === 'trapper' || playTestRole === 'team_a' ? BODY_COLOR_RED : BODY_COLOR_BLUE,
+          { preferEmissive: false }
+        );
         // Same 1.75m planted fit used by player and skin studios.
         const root = fitAvatarLikeEditor(loaded.scene, avatarEntity, loaded.isDefaultMannequin);
         const [px, py, pz] = simToThree(body.x, body.y, body.z);

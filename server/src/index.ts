@@ -6,6 +6,7 @@ import { Server, matchMaker } from 'colyseus';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { monitor } from '@colyseus/monitor';
 import { DeathrunRoom } from './rooms/DeathrunRoom.js';
+import { DeathrunPracticeRoom } from './rooms/DeathrunPracticeRoom.js';
 import { HordeRoom } from './rooms/HordeRoom.js';
 import { CompetitiveRoom } from './rooms/CompetitiveRoom.js';
 
@@ -215,6 +216,10 @@ const gameServer = new Server({
 });
 
 gameServer.define('deathrun', DeathrunRoom);
+// Private, solo, no-rewards Deathrun room used only by the map editor's
+// "Play Test" — same sim/HUD/chat/admin-panel code as a real match, but
+// never appears in normal matchmaking (setPrivate) and never grants XP/VP.
+gameServer.define('deathrun_practice', DeathrunPracticeRoom);
 gameServer.define('horde', HordeRoom);
 gameServer.define('competitive', CompetitiveRoom);
 gameServer

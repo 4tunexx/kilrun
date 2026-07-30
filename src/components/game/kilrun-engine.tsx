@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useRoomState } from './net/use-room-state';
 import type { JoinOptions } from './net/connection';
-import type { ChatMessage, NetObstacleState, NetPlatformState, PlayerInputMessage } from './net/types';
+import type { ChatMessage, NetObstacleState, NetPlatformState, NetPlayerState, PlayerInputMessage } from './net/types';
 import { InputManager } from './input/input-manager';
 import type { DualJoystick } from './input/dual-joystick';
 import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
@@ -70,7 +70,17 @@ import {
   mapDocToWorldBounds,
   mapDocPushPayloads,
   prepareDocForPlayTest,
+  type SimWorldBounds,
 } from './editor/prefab-storage';
+import {
+  createSimScratch,
+  stepPlatformer,
+  type SimBody,
+  type SimPad,
+  type SimPhysicsOpts,
+  type SimScratch,
+} from '@/lib/platformer-sim';
+import { reconcilePredictedBody } from '@/lib/client-prediction';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
 import { ensureEnvironment, shopItemsForMode, shopPowerUpsForMode, shopSkinsForMode, ensureShopSettings, ensureCombatSettings } from './editor/map-document';
@@ -100,6 +110,27 @@ interface KilrunEngineProps {
   competitiveQueue?: 'casual' | 'ranked';
   /** Fired once after Colyseus connect (party leader publishes room id). */
   onRoomConnected?: (roomId: string) => void;
+  /**
+   * Map editor "Play Test" only — join this Colyseus room name instead of the
+   * one derived from `mode` (e.g. 'deathrun_practice' instead of 'deathrun').
+   * The room is private/solo and never grants real rewards; every other
+   * gameplay/UI code path (HUD, chat, admin panel, menus) is untouched and
+   * keyed off `mode` as normal.
+   */
+  roomNameOverride?: GameRoomName;
+  /**
+   * Map editor "Play Test" only — an in-progress, possibly-unsaved map draft
+   * to use directly instead of fetching the published Active cloud map. When
+   * set, skips the network fetch entirely so editing the map live and hitting
+   * Play Test always reflects exactly what's in the editor right now.
+   */
+  draftDoc?: MapDocument | null;
+  /**
+   * Map editor "Play Test" only — forces the solo player's role in a
+   * 'deathrun_practice' room (no second player to auto-assign trapper to).
+   * Ignored by any other room.
+   */
+  practiceRole?: 'runner' | 'trapper';
 }
 
 export default function KilrunEngine({
@@ -111,6 +142,9 @@ export default function KilrunEngine({
   mode = 'deathrun',
   competitiveQueue = 'casual',
   onRoomConnected,
+  roomNameOverride,
+  draftDoc = null,
+  practiceRole,
 }: KilrunEngineProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -118,11 +152,12 @@ export default function KilrunEngine({
   const pausedRef = useRef(false);
   const gameMenuOpenRef = useRef(false);
   const roomName: GameRoomName =
-    mode === 'competitive'
+    roomNameOverride ??
+    (mode === 'competitive'
       ? competitiveQueue === 'ranked'
         ? 'competitive_ranked'
         : 'competitive'
-      : mode;
+      : mode);
   const {
     connectionRef,
     playersRef,
@@ -227,6 +262,24 @@ export default function KilrunEngine({
   useEffect(() => {
     let cancelled = false;
     setCloudReady(false);
+    if (draftDoc) {
+      // Play Test from the map editor — use the in-progress draft exactly as
+      // authored, skip the Active-cloud-map network fetch entirely so this
+      // always reflects what's currently in the editor, saved or not.
+      cloudDocRef.current = draftDoc;
+      customLoadedRef.current = false;
+      deathrunTpsRef.current = draftDoc.tpsView ?? null;
+      const applied = resolvePlatformTpsView({
+        modeMapOverride: draftDoc.tpsView ?? null,
+        deathrunMapOverride: deathrunTpsRef.current,
+      });
+      tpsRef.current = applied;
+      setTpsHud(applied);
+      setCloudReady(true);
+      return () => {
+        cancelled = true;
+      };
+    }
     void Promise.all([
       getActiveCloudMapDocument(mode),
       mode === 'deathrun'
@@ -273,7 +326,7 @@ export default function KilrunEngine({
     return () => {
       cancelled = true;
     };
-  }, [mode]);
+  }, [mode, draftDoc]);
 
   // Load progression metrics for weapon unlock gates in the buy shop.
   useEffect(() => {
@@ -373,7 +426,10 @@ export default function KilrunEngine({
           }
         : {}),
     });
-  }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode]);
+    if (practiceRole) {
+      connectionRef.current.sendPracticeSetRole(practiceRole);
+    }
+  }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode, practiceRole]);
 
   useEffect(() => {
     pausedRef.current = paused || editorOpen;
@@ -546,6 +602,60 @@ export default function KilrunEngine({
     const smoothCamTarget = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     let hasSmoothCamTarget = false;
 
+    // --- Local-player client-side prediction (movement only) ---
+    // Mirrors the map editor's fully-local `stepPlatformer` sim so the local
+    // player's own movement feels instant instead of waiting on the 30Hz
+    // server round-trip. Remote players are entirely unaffected — they keep
+    // using ThreeCharacter's existing server-snapshot smoothing path.
+    let predictedPads: SimPad[] = [];
+    let predictedBounds: SimWorldBounds = { minX: -200, maxX: 200, minY: -200, maxY: 200 };
+    let predictedPhysOpts: SimPhysicsOpts = {};
+    try {
+      if (playDoc) {
+        // Match map-play-preview.tsx's pad shape: stamp id/home* so moving
+        // platforms have a stable identity for stepPlatformer's carry logic
+        // (`supportPadId`), even though we don't animate motion client-side.
+        predictedPads = mapDocToSimPlatforms(playDoc).map((p, i) => ({
+          ...p,
+          id: p.entityId || `pad_${i}`,
+          homeX: p.x,
+          homeY: p.y,
+          homeZ: p.z,
+        }));
+        const finishes = mapDocToSimFinishes(playDoc);
+        predictedBounds = mapDocToWorldBounds(playDoc, predictedPads, finishes);
+        const cs = ensureCombatSettings(playDoc);
+        predictedPhysOpts = {
+          gravity: cs.gravity,
+          jumpVelocity: cs.jumpVelocity,
+          doubleJumpVelocity: cs.doubleJumpVelocity,
+          doubleJumpEnabled: cs.doubleJumpEnabled,
+          jumpCutMult: cs.jumpCutMult,
+          coyoteMs: cs.coyoteMs,
+          jumpBufferMs: cs.jumpBufferMs,
+          walkSpeed: cs.walkSpeed,
+          sprintMult: cs.sprintMult,
+          crouchMult: cs.crouchMult,
+          maxFallSpeed: cs.maxFallSpeed,
+          apexGravMult: cs.apexGravMult,
+          slideEnabled: cs.slideEnabled,
+          slideMult: cs.slideMult,
+          slideDurationMs: cs.slideDurationMs,
+          slideCooldownMs: cs.slideCooldownMs,
+          wallJumpEnabled: cs.wallJumpEnabled,
+          wallJumpHorizVel: cs.wallJumpHorizVel,
+          wallJumpVertVel: cs.wallJumpVertVel,
+          wallSlideGravMult: cs.wallSlideGravMult,
+        };
+      }
+    } catch (err) {
+      console.warn('[kilrun-engine] prediction pad/bounds setup failed — falling back to server-only movement', err);
+      predictedPads = [];
+    }
+    let predictedBody: SimBody | null = null;
+    const predictedScratch: SimScratch = createSimScratch();
+    let predictionFailed = false;
+
     const spawnCharacter = (sessionId: string, username: string) => {
       if (characters.has(sessionId)) return;
       const avatarEntity = customDocRef.current?.entities.find((e) => e.kind === 'player');
@@ -678,6 +788,73 @@ export default function KilrunEngine({
       const wishStrafe = stick.x;
       const aimHeld = !frozen && inputManager.isAimHeld();
 
+      // --- Advance local-player prediction this frame (render-rate, not 30Hz) ---
+      if (localState) {
+        if (!predictedBody) {
+          // First snapshot for the local player — seed prediction from server
+          // state rather than starting at the origin.
+          predictedBody = {
+            x: localState.x,
+            y: localState.y,
+            z: localState.z ?? 0,
+            vz: localState.vz ?? 0,
+            isGrounded: localState.isGrounded,
+            energy: localState.energy ?? 100,
+          };
+          predictionFailed = false;
+        } else {
+          try {
+            if (predictedPads.length > 0 && !frozen) {
+              const cos = Math.cos(cameraYaw);
+              const sin = Math.sin(cameraYaw);
+              const moveX = wishFwd * cos + wishStrafe * sin;
+              const moveY = wishFwd * sin - wishStrafe * cos;
+              stepPlatformer(
+                predictedBody,
+                {
+                  moveX,
+                  moveY,
+                  jumpPressed: inputManager.isJumpPressed(),
+                  sprint: inputManager.isSprintPressed(),
+                  crouch: inputManager.isCrouchPressed(),
+                  meleeActive: performance.now() < meleeUntil,
+                },
+                dt,
+                predictedPads,
+                predictedScratch,
+                predictedBounds,
+                predictedPhysOpts
+              );
+            }
+            // Reconcile toward the latest authoritative snapshot — soft pull
+            // for small errors, hard snap only for large desyncs (teleport/
+            // respawn). Never fight the server; never diverge permanently.
+            reconcilePredictedBody(predictedBody, {
+              x: localState.x,
+              y: localState.y,
+              z: localState.z ?? 0,
+              vz: localState.vz,
+              isGrounded: localState.isGrounded,
+            });
+            predictionFailed = false;
+          } catch (err) {
+            if (!predictionFailed) {
+              console.warn('[kilrun-engine] local prediction step failed — falling back to server snapshot', err);
+            }
+            predictionFailed = true;
+            // Fall back to the server snapshot outright so a bad pad/physics
+            // state can't strand or teleport the player.
+            predictedBody.x = localState.x;
+            predictedBody.y = localState.y;
+            predictedBody.z = localState.z ?? 0;
+            predictedBody.vz = localState.vz ?? 0;
+            predictedBody.isGrounded = localState.isGrounded;
+          }
+        }
+      } else {
+        predictedBody = null;
+      }
+
       characters.forEach((view, sessionId) => {
         const player = playersRef.current.get(sessionId);
         if (!player) return;
@@ -724,8 +901,23 @@ export default function KilrunEngine({
             }
           }
         }
+        // Local player: feed the PREDICTED body (instant, render-rate movement)
+        // into the character instead of the raw (30Hz) server snapshot. Remote
+        // players are untouched — they keep using `player` as-is, which drives
+        // ThreeCharacter's existing server-snapshot smoothing path unchanged.
+        const renderPlayer: NetPlayerState =
+          isLocal && predictedBody
+            ? {
+                ...player,
+                x: predictedBody.x,
+                y: predictedBody.y,
+                z: predictedBody.z,
+                vz: predictedBody.vz,
+                isGrounded: predictedBody.isGrounded,
+              }
+            : player;
         view.update(
-          player,
+          renderPlayer,
           dt,
           isLocal ? cameraYaw : player.cameraYaw,
           isLocal && !frozen ? { fwd: wishFwd, strafe: wishStrafe } : undefined,

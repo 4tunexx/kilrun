@@ -152,6 +152,7 @@ import {
   type TransformMode,
 } from './editor-viewport';
 import { MapPlayPreview } from './map-play-preview';
+import { PlayTestEngine } from './play-test-engine';
 import { PlayerModelStudio } from './player-model-studio';
 import { ModelSkinEditor } from './model-skin-editor';
 import { TpsViewStudio } from './tps-view-studio';
@@ -302,6 +303,13 @@ export function MapEditor({
     'runner' | 'trapper' | 'team_a' | 'team_b' | undefined
   >(undefined);
   const [playTestRolePrompt, setPlayTestRolePrompt] = useState(false);
+  /** "Play Test (Live)" — real KilrunEngine game client (HUD/chat/admin/skill
+   * menu) against a private practice room, instead of the lightweight local
+   * MapPlayPreview renderer. Requires the Colyseus game server (server/)
+   * running locally. Deathrun only for now. */
+  const [playTestLive, setPlayTestLive] = useState(false);
+  /** Which start function the role-prompt's confirm buttons should call. */
+  const [playTestPromptTarget, setPlayTestPromptTarget] = useState<'preview' | 'live'>('preview');
   const [customTextures, setCustomTextures] = useState<CustomTexture[]>([]);
   const [snapY, setSnapY] = useState(false);
   const [scaleFromSide, setScaleFromSide] = useState(() => {
@@ -1528,6 +1536,30 @@ export function MapEditor({
     });
   };
 
+  /** "Play Test (Live)" — same pre-play snapshot/pause/persist as startPlay,
+   * but launches the real KilrunEngine against a private practice room
+   * instead of the local MapPlayPreview renderer. Deathrun only. */
+  const startPlayLive = () => {
+    if (freeFly) apiRef.current?.setFreeFly(false);
+    cameraBeforePlayRef.current = apiRef.current?.getCameraState() ?? null;
+    apiRef.current?.setPaused(true);
+    persist();
+    setPlayTestLive(true);
+  };
+
+  const exitPlayTestLive = () => {
+    setPlayTestLive(false);
+    setPlayTestRole(undefined);
+    requestAnimationFrame(() => {
+      apiRef.current?.setPaused(false);
+      apiRef.current?.resize();
+      const saved = cameraBeforePlayRef.current;
+      if (saved) apiRef.current?.setCameraState(saved);
+      else apiRef.current?.resetCamera();
+      cameraBeforePlayRef.current = null;
+    });
+  };
+
   return createPortal(
     <div className="fixed inset-0 z-[9999] bg-[#0d121a] text-white flex flex-col">
       {isTouch && (
@@ -1813,6 +1845,7 @@ export function MapEditor({
             // Deathrun/Competitive have distinct spawn roles worth testing
             // from both sides; Horde has no role split, so start directly.
             if (gameMode === 'deathrun' || gameMode === 'competitive') {
+              setPlayTestPromptTarget('preview');
               setPlayTestRolePrompt(true);
             } else {
               setPlayTestRole(undefined);
@@ -1822,6 +1855,20 @@ export function MapEditor({
         >
           <Play className="w-4 h-4 mr-1" /> Play Test
         </Button>
+        {gameMode === 'deathrun' && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-2 border-amber-500/60 text-amber-300 hover:bg-amber-500/10 shrink-0"
+            title="Real game client — HUD, chat, admin panel, skill menu. Requires the game server (server/) running locally."
+            onClick={() => {
+              setPlayTestPromptTarget('live');
+              setPlayTestRolePrompt(true);
+            }}
+          >
+            <Play className="w-4 h-4 mr-1" /> Play Test (Live)
+          </Button>
+        )}
         <Button
           size="sm"
           variant="secondary"
@@ -6239,7 +6286,8 @@ export function MapEditor({
                     onClick={() => {
                       setPlayTestRole('runner');
                       setPlayTestRolePrompt(false);
-                      startPlay();
+                      if (playTestPromptTarget === 'live') startPlayLive();
+                      else startPlay();
                     }}
                   >
                     Runner
@@ -6250,7 +6298,8 @@ export function MapEditor({
                     onClick={() => {
                       setPlayTestRole('trapper');
                       setPlayTestRolePrompt(false);
-                      startPlay();
+                      if (playTestPromptTarget === 'live') startPlayLive();
+                      else startPlay();
                     }}
                   >
                     Trapper
@@ -6302,6 +6351,15 @@ export function MapEditor({
             tpsViewOverride={playTpsOverride}
             onClose={exitPlayTest}
             playTestRole={playTestRole}
+          />
+        </div>
+      )}
+      {playTestLive && (
+        <div className="fixed inset-0 z-[10050]">
+          <PlayTestEngine
+            doc={apiRef.current?.getDoc() ?? doc}
+            onClose={exitPlayTestLive}
+            playTestRole={playTestRole === 'trapper' ? 'trapper' : 'runner'}
           />
         </div>
       )}

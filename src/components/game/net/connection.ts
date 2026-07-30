@@ -52,7 +52,12 @@ export interface JoinOptions {
   };
 }
 
-export type GameRoomName = 'deathrun' | 'horde' | 'competitive' | 'competitive_ranked';
+export type GameRoomName =
+  | 'deathrun'
+  | 'deathrun_practice'
+  | 'horde'
+  | 'competitive'
+  | 'competitive_ranked';
 
 
 
@@ -148,19 +153,35 @@ export class GameConnection {
     const { joinByRoomId, ...joinPayload } = options;
 
     if (joinByRoomId) {
-      this.room = await this.client.joinById(joinByRoomId, {
+      const room = await this.client.joinById(joinByRoomId, {
         ...joinPayload,
         rankKey: preferredKey ?? 'open',
       });
+      // A disconnect() (e.g. React StrictMode's dev-only mount → unmount →
+      // remount cycle, or the user closing Play Test before the join
+      // finished) can land while this await was pending. Leave immediately
+      // instead of binding a room this connection no longer owns — without
+      // this, two joins can both land server-side (e.g. a maxClients:1
+      // practice room) and produce a stray/duplicate player.
+      if (this.disposed) {
+        room.leave();
+        return;
+      }
+      this.room = room;
       this.bindRoom(callbacks);
       callbacks.onConnectionState?.('connected');
       return;
     }
 
-    this.room = await this.client.joinOrCreate(roomName, {
+    const room = await this.client.joinOrCreate(roomName, {
       ...joinPayload,
       rankKey: preferredKey ?? 'open',
     });
+    if (this.disposed) {
+      room.leave();
+      return;
+    }
+    this.room = room;
     this.bindRoom(callbacks);
     callbacks.onConnectionState?.('connected');
 
@@ -454,6 +475,12 @@ export class GameConnection {
 
   public sendChat(text: string, scope: 'all' | 'team'): void {
     this.safeSend('chat', { text, scope });
+  }
+
+  /** 'deathrun_practice' room only — forces the solo player's role since
+   * there's no second player for the server to auto-assign trapper to. */
+  public sendPracticeSetRole(role: 'runner' | 'trapper'): void {
+    this.safeSend('practiceSetRole', { role });
   }
 
   /** Subscribe to broadcast in-match chat. Room teardown clears listeners itself. */

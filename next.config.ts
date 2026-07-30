@@ -8,6 +8,21 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // Turbopack (used by `next dev --turbopack`) has its own resolver, separate
+  // from the webpack() config below — it doesn't see the extensionAlias set
+  // there. shared/**/*.ts uses explicit .js-suffixed relative imports (e.g.
+  // shared/ability-progression.ts → './power-definitions.js') because that
+  // same code is also compiled by the standalone Colyseus server build
+  // (server/tsconfig.json) under Node's native ESM loader, which requires
+  // real .js extensions on relative imports. Without this, Turbopack dev
+  // fails with "Module not found: Can't resolve './power-definitions.js'"
+  // even though `next build` (webpack) compiles the exact same file fine.
+  turbopack: {
+    resolveExtensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.json'],
+    resolveAlias: {
+      './power-definitions.js': './power-definitions.ts',
+    },
+  },
   // Ensure custom-output Prisma engines are traced into Vercel serverless bundles.
   outputFileTracingIncludes: {
     '/**': ['./src/generated/prisma/**/*'],

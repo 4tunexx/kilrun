@@ -1212,7 +1212,9 @@ export class DeathrunRoom extends Room<RoomState> {
     void this.reportRewards(winnerRole);
   }
 
-  private async reportRewards(winnerRole: 'trapper' | 'runner') {
+  /** protected (not private) so DeathrunPracticeRoom can override and skip
+   * real reward reporting entirely for solo map-editor Play Test runs. */
+  protected async reportRewards(winnerRole: 'trapper' | 'runner') {
     const matchId = this.state.matchId || `${this.roomId}-${Date.now()}`;
     this.state.matchId = matchId;
 
