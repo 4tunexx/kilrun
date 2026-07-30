@@ -96,6 +96,26 @@ function getSharedAtlasTexture(): THREE.Texture {
   return _sharedAtlasTexture;
 }
 
+/** Ensure all textures have correct color space (fixes black/washed-out skins). */
+function fixTextureColorSpaces(group: THREE.Object3D) {
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) {
+      const std = m as THREE.MeshStandardMaterial;
+      const MAP_SLOTS = ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'] as const;
+      for (const slot of MAP_SLOTS) {
+        const tex = std[slot] as THREE.Texture | null | undefined;
+        if (tex && tex.colorSpace !== THREE.SRGBColorSpace) {
+          tex.colorSpace = THREE.SRGBColorSpace;
+        }
+      }
+    }
+  });
+}
+
 /** Safety net: if the texture we picked (sibling or folder atlas) still
  * fails to actually load at runtime for any reason, swap to the global
  * atlas rather than leaving the material untextured/black. */
@@ -206,6 +226,7 @@ export function loadFbxModel(
                   obj.receiveShadow = true;
                 }
               });
+              fixTextureColorSpaces(group);
               installTextureFallback(group, source.path);
               console.log(`[fbx] loaded ${url} (texture source: ${source.kind} → ${source.path})`);
               resolve({
