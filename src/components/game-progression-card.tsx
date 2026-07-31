@@ -8,39 +8,10 @@ import {
 } from '@shared/ability-progression';
 import { getGameProgression, type GameProgressionSnapshot } from '@/lib/game-progression-actions';
 import {
-  HealthIcon,
-  SpeedIcon,
-  JumpIcon,
-  EnergyIcon,
-  VisibilityIcon,
-  PunchIcon,
-  FlyIcon,
-  HookIcon,
-  BerserkIcon,
-  BulletIcon,
-  ThunderIcon,
-  BackflipIcon,
-} from '@/components/ability-icons';
-import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-
-const ABILITY_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-  health: HealthIcon,
-  speed: SpeedIcon,
-  jump: JumpIcon,
-  energy: EnergyIcon,
-  visibility: VisibilityIcon,
-  punch: PunchIcon,
-  fly: FlyIcon,
-  hook: HookIcon,
-  berserk: BerserkIcon,
-  bullet: BulletIcon,
-  thunder: ThunderIcon,
-  backflip: BackflipIcon,
-};
 
 /**
  * Read-only card for the in-game (match) level + power upgrades.
@@ -122,7 +93,6 @@ export function GameProgressionCard({ userId }: { userId: string }) {
             const def = ABILITY_DEFINITIONS[key];
             const lvl = snap.abilities[key] ?? 0;
             const locked = snap.level < def.unlockLevel;
-            const IconComponent = ABILITY_ICON_MAP[key];
 
             return (
               <Popover key={key}>
@@ -134,11 +104,7 @@ export function GameProgressionCard({ userId }: { userId: string }) {
                         : 'border-slate-700/40 bg-slate-900/40 hover:border-orange-400/50 hover:bg-slate-900/60'
                     }`}
                   >
-                    {IconComponent ? (
-                      <IconComponent className={`w-5 h-5 flex-shrink-0 ${locked ? 'text-slate-500' : 'text-orange-400'}`} />
-                    ) : (
-                      <span className="text-lg leading-none">{def.icon}</span>
-                    )}
+                    <span className={`text-lg leading-none ${locked ? 'grayscale opacity-70' : ''}`}>{def.icon}</span>
                     <div className="min-w-0">
                       <p className="text-[11px] font-bold text-white truncate">{def.name}</p>
                       <p className="text-[10px] font-bold text-slate-400">
@@ -150,11 +116,7 @@ export function GameProgressionCard({ userId }: { userId: string }) {
                 <PopoverContent className="w-64 bg-slate-900 border-slate-700 p-3">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      {IconComponent ? (
-                        <IconComponent className="w-6 h-6 text-orange-400" />
-                      ) : (
-                        <span className="text-xl">{def.icon}</span>
-                      )}
+                      <span className="text-xl">{def.icon}</span>
                       <div>
                         <p className="text-sm font-bold text-orange-300">{def.name}</p>
                         <p className="text-xs text-slate-400">
