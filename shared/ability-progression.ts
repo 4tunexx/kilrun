@@ -42,6 +42,8 @@ export {
   getTimedBuffStatsByKey,
   getBurstEffectStatsByKey,
   getEnergyCostForAbility,
+  getCooldownForAbility,
+  getAbilitySlotKind,
   STATIC_FALLBACK_POWERS,
   type PowerDefinitionRecord,
   type PowerEffectType,
@@ -50,6 +52,7 @@ export {
   type StatBonusParams,
   type TimedBuffParams,
   type BurstEffectParams,
+  type AbilitySlotKind,
 } from './power-definitions.js';
 
 /** Re-exported so callers don't need to import from two modules. Hot-swaps

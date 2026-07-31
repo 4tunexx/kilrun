@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import type { NetPlayerState, NetRoomState } from '../net/types';
 import { RunnerHud } from '../modes/deathrun/runner-hud';
+import { AbilityCooldownRow } from './ability-hud';
 import type { WeaponCombatKind } from '@/lib/weapons';
 import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
 
@@ -285,6 +286,15 @@ export const HUD: React.FC<{
         >
           {String(energy).padStart(3, '0')}
         </span>
+      </div>
+
+      {/* Power cooldown rings — unrotated for legibility, tucked just above the bars. */}
+      <div className="absolute left-8 bottom-[172px] z-20">
+        <AbilityCooldownRow
+          abilities={player.ability}
+          abilityLevels={gameProgress?.abilities}
+          playerEnergy={energy}
+        />
       </div>
 
       {!isTrapper && (

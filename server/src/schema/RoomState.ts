@@ -28,6 +28,15 @@ export class AbilityLoadoutState extends Schema {
   @type('number') bulletEndsAt = 0;
   @type('number') thunderEndsAt = 0;
   @type('number') backflipEndsAt = 0;
+  /** Timestamp (Date.now() ms) each power can be activated again — drives
+   * the HUD's radial recharge ring. 0 = not on cooldown. */
+  @type('number') visibilityCooldownEndsAt = 0;
+  @type('number') flyCooldownEndsAt = 0;
+  @type('number') hookCooldownEndsAt = 0;
+  @type('number') berserkCooldownEndsAt = 0;
+  @type('number') bulletCooldownEndsAt = 0;
+  @type('number') thunderCooldownEndsAt = 0;
+  @type('number') backflipCooldownEndsAt = 0;
 }
 
 /** A single networked player -- position/aim are authoritative (server-simulated). */

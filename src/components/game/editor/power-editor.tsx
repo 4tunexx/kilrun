@@ -467,6 +467,7 @@ function PowerForm({
                     durationBaseSec: 2,
                     durationPerLevelSec: 0.5,
                     energyCost: 15,
+                    cooldownMs: 10000,
                   } as TimedBuffParams)
                 : ({
                     kind: 'radius_damage',
@@ -475,6 +476,7 @@ function PowerForm({
                     damageBase: 15,
                     damagePerLevel: 5,
                     energyCost: 15,
+                    cooldownMs: 8000,
                   } as BurstEffectParams);
             onChange({ effectType: t, effectParams: params });
           }}
@@ -682,15 +684,27 @@ function TimedBuffEditor({ params, onChange }: { params: TimedBuffParams; onChan
           />
         </Field>
       </div>
-      <Field label="Energy cost to activate (0 = free)">
-        <input
-          type="number"
-          min={0}
-          className={inputCls}
-          value={params.energyCost ?? 0}
-          onChange={(e) => onChange({ ...params, energyCost: Math.max(0, Number(e.target.value) || 0) })}
-        />
-      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Energy cost to activate (0 = free)">
+          <input
+            type="number"
+            min={0}
+            className={inputCls}
+            value={params.energyCost ?? 0}
+            onChange={(e) => onChange({ ...params, energyCost: Math.max(0, Number(e.target.value) || 0) })}
+          />
+        </Field>
+        <Field label="Cooldown ms (0 = none)">
+          <input
+            type="number"
+            min={0}
+            step={500}
+            className={inputCls}
+            value={params.cooldownMs ?? 0}
+            onChange={(e) => onChange({ ...params, cooldownMs: Math.max(0, Number(e.target.value) || 0) })}
+          />
+        </Field>
+      </div>
     </div>
   );
 }
@@ -794,15 +808,27 @@ function BurstEffectEditor({
           </Field>
         </div>
       )}
-      <Field label="Energy cost to activate (0 = free)">
-        <input
-          type="number"
-          min={0}
-          className={inputCls}
-          value={params.energyCost ?? 0}
-          onChange={(e) => onChange({ ...params, energyCost: Math.max(0, Number(e.target.value) || 0) })}
-        />
-      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Energy cost to activate (0 = free)">
+          <input
+            type="number"
+            min={0}
+            className={inputCls}
+            value={params.energyCost ?? 0}
+            onChange={(e) => onChange({ ...params, energyCost: Math.max(0, Number(e.target.value) || 0) })}
+          />
+        </Field>
+        <Field label="Cooldown ms (0 = none)">
+          <input
+            type="number"
+            min={0}
+            step={500}
+            className={inputCls}
+            value={params.cooldownMs ?? 0}
+            onChange={(e) => onChange({ ...params, cooldownMs: Math.max(0, Number(e.target.value) || 0) })}
+          />
+        </Field>
+      </div>
     </div>
   );
 }
