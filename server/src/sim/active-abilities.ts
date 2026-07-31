@@ -2,6 +2,7 @@ import type { PlayerState } from '../schema/RoomState.js';
 import {
   getTimedBuffStatsByKey,
   getBurstEffectStatsByKey,
+  getEnergyCostForAbility,
   parseAbilityLevels,
   type AbilityLevels,
 } from '../../../shared/ability-progression.js';
@@ -46,6 +47,22 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
   const level = levels[abilityKey] ?? 0;
   if (level <= 0) return false;
 
+  // Powers draw from the same energy pool as sprinting/jumping — block
+  // activation if the player can't afford it, and only spend once the
+  // effect actually applies below.
+  const energyCost = getEnergyCostForAbility(abilityKey);
+  if (energyCost > 0 && player.energy < energyCost) return false;
+
+  const applied = applyAbilityEffect(player, abilityKey, level, now);
+  if (!applied) return false;
+
+  if (energyCost > 0) {
+    player.energy = Math.max(0, player.energy - energyCost);
+  }
+  return true;
+}
+
+function applyAbilityEffect(player: PlayerState, abilityKey: string, level: number, now: number): boolean {
   const timedBuff = getTimedBuffStatsByKey(abilityKey, level);
   if (timedBuff.buffKind) {
     if (!timedBuff.durationMs) return false;

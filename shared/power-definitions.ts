@@ -69,6 +69,9 @@ export interface TimedBuffParams {
   durationPerLevelSec: number;
   /** Optional cooldown in ms between activations (0 = no explicit cooldown tracked). */
   cooldownMs?: number;
+  /** Energy consumed from the shared sprint/jump energy pool on activation
+   * (0/undefined = free). Activation is blocked if the player has less. */
+  energyCost?: number;
 }
 
 export type BurstEffectKind = 'radius_damage' | 'range_pull' | 'range_dash';
@@ -86,6 +89,9 @@ export interface BurstEffectParams {
   rangePerLevelMeters?: number;
   pullDurationBaseSec?: number;
   pullDurationPerLevelSec?: number;
+  /** Energy consumed from the shared sprint/jump energy pool on activation
+   * (0/undefined = free). Activation is blocked if the player has less. */
+  energyCost?: number;
 }
 
 export type PowerEffectParams = StatBonusParams | TimedBuffParams | BurstEffectParams;
@@ -168,17 +174,20 @@ export function effectLabelGeneric(def: PowerDefinitionRecord, level: number): s
   }
   if (def.effectType === 'timed_buff') {
     if (level <= 0) return 'Locked';
-    const ms = timedBuffDurationMs(def.effectParams as TimedBuffParams, level);
-    return `${(ms / 1000).toFixed(1)}s duration`;
+    const params = def.effectParams as TimedBuffParams;
+    const ms = timedBuffDurationMs(params, level);
+    const energySuffix = params.energyCost ? ` · ${params.energyCost} energy` : '';
+    return `${(ms / 1000).toFixed(1)}s duration${energySuffix}`;
   }
   // burst_effect
   if (level <= 0) return 'Locked';
   const stats = burstEffectStats(def.effectParams as BurstEffectParams, level);
   const params = def.effectParams as BurstEffectParams;
+  const energySuffix = params.energyCost ? ` · ${params.energyCost} energy` : '';
   if (params.kind === 'radius_damage') {
-    return `${stats.radiusMeters.toFixed(1)}m radius · ${stats.damage} dmg`;
+    return `${stats.radiusMeters.toFixed(1)}m radius · ${stats.damage} dmg${energySuffix}`;
   }
-  return `${stats.rangeMeters.toFixed(1)}m range · ${(stats.pullDurationMs / 1000).toFixed(2)}s pull`;
+  return `${stats.rangeMeters.toFixed(1)}m range · ${(stats.pullDurationMs / 1000).toFixed(2)}s pull${energySuffix}`;
 }
 
 function statLabel(stat: StatBonusStat): string {
@@ -263,7 +272,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
     prerequisites: [],
     cost: { type: 'ramp', base: 1, step: 1 },
     effectType: 'timed_buff',
-    effectParams: { buffKind: 'invisibility', durationBaseSec: 2, durationPerLevelSec: 0.8 },
+    effectParams: { buffKind: 'invisibility', durationBaseSec: 2, durationPerLevelSec: 0.8, energyCost: 20 },
     isCore: true,
     sortOrder: 3,
   },
@@ -277,7 +286,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
     prerequisites: [{ key: 'visibility', level: 3 }],
     cost: { type: 'ramp', base: 1, step: 1 },
     effectType: 'timed_buff',
-    effectParams: { buffKind: 'unlimited_ammo', durationBaseSec: 3, durationPerLevelSec: 0.6 },
+    effectParams: { buffKind: 'unlimited_ammo', durationBaseSec: 3, durationPerLevelSec: 0.6, energyCost: 20 },
     isCore: true,
     sortOrder: 4,
   },
@@ -325,6 +334,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
       rangePerLevelMeters: 1.5,
       pullDurationBaseSec: 0.4,
       pullDurationPerLevelSec: 0.05,
+      energyCost: 15,
     },
     isCore: true,
     sortOrder: 7,
@@ -339,7 +349,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
     prerequisites: [{ key: 'hook', level: 3 }],
     cost: { type: 'ramp', base: 1, step: 1 },
     effectType: 'timed_buff',
-    effectParams: { buffKind: 'fly', durationBaseSec: 1.5, durationPerLevelSec: 0.7 },
+    effectParams: { buffKind: 'fly', durationBaseSec: 1.5, durationPerLevelSec: 0.7, energyCost: 25 },
     isCore: true,
     sortOrder: 8,
   },
@@ -353,7 +363,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
     prerequisites: [{ key: 'punch', level: 5 }],
     cost: { type: 'ramp', base: 2, step: 1 },
     effectType: 'timed_buff',
-    effectParams: { buffKind: 'berserk', durationBaseSec: 3, durationPerLevelSec: 0.6 },
+    effectParams: { buffKind: 'berserk', durationBaseSec: 3, durationPerLevelSec: 0.6, energyCost: 30 },
     isCore: true,
     sortOrder: 9,
   },
@@ -373,6 +383,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
       radiusPerLevelMeters: 0.5,
       damageBase: 20,
       damagePerLevel: 8,
+      energyCost: 25,
     },
     isCore: true,
     sortOrder: 10,
@@ -393,6 +404,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
       rangePerLevelMeters: 0.6,
       pullDurationBaseSec: 0.25,
       pullDurationPerLevelSec: 0.02,
+      energyCost: 15,
     },
     isCore: true,
     sortOrder: 11,
@@ -556,6 +568,18 @@ export function getTimedBuffStatsByKey(
   if (!def || def.effectType !== 'timed_buff') return { durationMs: 0, buffKind: null };
   const params = def.effectParams as TimedBuffParams;
   return { durationMs: timedBuffDurationMs(params, level), buffKind: params.buffKind };
+}
+
+/** Energy cost (from the shared sprint/jump pool) to activate this power,
+ * for any timed_buff or burst_effect power. 0 for passive stat_bonus powers
+ * or powers with no cost configured. Generic by key so custom powers pick
+ * this up automatically, same as the six legacy stat getters above. */
+export function getEnergyCostForAbility(key: string): number {
+  const def = getPowerDefinitionByKey(key);
+  if (!def) return 0;
+  if (def.effectType === 'timed_buff') return Math.max(0, (def.effectParams as TimedBuffParams).energyCost ?? 0);
+  if (def.effectType === 'burst_effect') return Math.max(0, (def.effectParams as BurstEffectParams).energyCost ?? 0);
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
