@@ -1591,7 +1591,23 @@ export class CompetitiveRoom extends Room<RoomState> {
 
     for (const { target, dmg } of dmgById.values()) {
       this.damagePlayer(target, dmg, shooter);
+      this.sendHitFx(shooter.sessionId, dmg, target.x, target.y, (target.z ?? 0) + 1.4, 'player');
     }
+  }
+
+  /** Tells the ATTACKER's own client a hit landed (amount + world position)
+   * so it can pop a floating damage number — a targeted send, not a
+   * broadcast, since only the attacker needs to see their own hit numbers. */
+  private sendHitFx(
+    attackerSessionId: string | undefined,
+    amount: number,
+    x: number,
+    y: number,
+    z: number,
+    kind: 'player' | 'monster' = 'player'
+  ): void {
+    if (!attackerSessionId || amount <= 0) return;
+    this.clients.getById(attackerSessionId)?.send('hitFx', { x, y, z, amount: Math.round(amount), kind });
   }
 
   private damagePlayer(player: PlayerState, amount: number, shooter?: PlayerState) {

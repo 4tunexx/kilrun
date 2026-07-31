@@ -209,3 +209,13 @@ export interface ChatMessage {
   /** Server Date.now() at send time. */
   at: number;
 }
+
+/** Sent to the ATTACKER only (never broadcast) when their hit lands — drives
+ * the floating damage-number popup at the hit's server world position. */
+export interface HitFxMessage {
+  x: number;
+  y: number;
+  z: number;
+  amount: number;
+  kind: 'player' | 'monster';
+}

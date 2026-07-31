@@ -11,6 +11,7 @@ import { InputManager } from './input/input-manager';
 import type { DualJoystick } from './input/dual-joystick';
 import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
 import { SprintParticles } from './effects/sprint-particles';
+import { DamageNumberFx } from './effects/damage-numbers';
 import { ThreeCharacter } from './entities/three-character';
 import { ThreeMap } from './entities/three-map';
 import { CustomMapOverlay } from './entities/custom-map-overlay';
@@ -572,6 +573,8 @@ export default function KilrunEngine({
     charactersRef.current = characters;
     const inputManager = new InputManager(hostElement, isMobile);
     joystickRef.current = inputManager.joystick;
+    const damageNumbers = new DamageNumberFx(hostElement);
+    connectionRef.current?.onHitFx((msg) => damageNumbers.spawn(msg.x, msg.y, msg.z, msg.amount, msg.kind));
     let envHandle: { dispose: () => void } | null = null;
     let envFloor: THREE.Mesh | null = null;
 
@@ -911,6 +914,8 @@ export default function KilrunEngine({
         }
       }
 
+      damageNumbers.update(dt, world.camera, hostElement.clientWidth, hostElement.clientHeight);
+
       const swayCombat = ensureCombatSettings(
         customDocRef.current ?? ({ combatSettings: {} } as MapDocument)
       );
@@ -1214,6 +1219,7 @@ export default function KilrunEngine({
       if (document.pointerLockElement) document.exitPointerLock?.();
       characters.forEach((c) => c.destroy());
       sprintParticles.dispose();
+      damageNumbers.dispose();
       overlay.destroy();
       map.destroy();
       envHandle?.dispose();

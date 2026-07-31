@@ -1,6 +1,7 @@
 import { Client, Room, getStateCallbacks } from 'colyseus.js';
 import type {
   ChatMessage,
+  HitFxMessage,
   NetObstacleState,
   NetPlatformKind,
   NetPlatformState,
@@ -486,6 +487,12 @@ export class GameConnection {
   /** Subscribe to broadcast in-match chat. Room teardown clears listeners itself. */
   public onChat(callback: (msg: ChatMessage) => void): void {
     this.room?.onMessage('chat', callback);
+  }
+
+  /** Subscribe to this client's own hit-landed events (damage-number popups).
+   * Only ever sent to the attacker, never broadcast. */
+  public onHitFx(callback: (msg: HitFxMessage) => void): void {
+    this.room?.onMessage('hitFx', callback);
   }
 
   /** Admin-only — server re-checks adminSessions, this is UI convenience only. */

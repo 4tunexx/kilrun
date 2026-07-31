@@ -975,7 +975,26 @@ export class DeathrunRoom extends Room<RoomState> {
         closest = target;
       }
     }
-    if (closest) this.damagePlayer(closest, isBerserkActive(trapper, Date.now()) ? berserkDamage : damage);
+    if (closest) {
+      const dmg = isBerserkActive(trapper, Date.now()) ? berserkDamage : damage;
+      this.damagePlayer(closest, dmg);
+      this.sendHitFx(trapper.sessionId, dmg, closest.x, closest.y, (closest.z ?? 0) + 1.4, 'player');
+    }
+  }
+
+  /** Tells the ATTACKER's own client a hit landed (amount + world position)
+   * so it can pop a floating damage number — a targeted send, not a
+   * broadcast, since only the attacker needs to see their own hit numbers. */
+  private sendHitFx(
+    attackerSessionId: string | undefined,
+    amount: number,
+    x: number,
+    y: number,
+    z: number,
+    kind: 'player' | 'monster' = 'player'
+  ): void {
+    if (!attackerSessionId || amount <= 0) return;
+    this.clients.getById(attackerSessionId)?.send('hitFx', { x, y, z, amount: Math.round(amount), kind });
   }
 
   private respawnAtCheckpoint(player: PlayerState) {
