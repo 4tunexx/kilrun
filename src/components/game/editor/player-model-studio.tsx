@@ -17,6 +17,7 @@ import {
   Square,
   Palette,
   Disc3,
+  Upload,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type {
@@ -47,8 +48,10 @@ import {
   listMeshes,
   removeExtraBone,
 } from './player-mesh-edits';
+import { loadAnimatedPrefab } from './model-scan';
+import { listClipBones, retargetClip } from './mixamo-import';
 
-type StudioTab = 'model' | 'mesh' | 'bones' | 'record' | 'anims';
+type StudioTab = 'model' | 'mesh' | 'bones' | 'record' | 'import' | 'anims';
 
 type TimelineKey = {
   time: number;
@@ -93,6 +96,16 @@ export function PlayerModelStudio({
   const [clipName, setClipName] = useState('custom_move');
   const [boneScale, setBoneScale] = useState<[number, number, number]>([1, 1, 1]);
   const [meshColor, setMeshColor] = useState('#c4a574');
+
+  // --- Mixamo import (Import tab) ---
+  const [mixamoFileName, setMixamoFileName] = useState<string | null>(null);
+  const [mixamoClips, setMixamoClips] = useState<THREE.AnimationClip[]>([]);
+  const [mixamoClipIdx, setMixamoClipIdx] = useState(0);
+  const [mixamoBoneMap, setMixamoBoneMap] = useState<Record<string, string>>({});
+  const [mixamoClipName, setMixamoClipName] = useState('');
+  const [mixamoLoading, setMixamoLoading] = useState(false);
+  const [mixamoError, setMixamoError] = useState<string | null>(null);
+  const [mixamoStatus, setMixamoStatus] = useState<string | null>(null);
 
   const anim = ensureAnimation(entity);
   const clips = anim.availableClips;
@@ -276,11 +289,94 @@ export function PlayerModelStudio({
     setPreviewSlot('clip');
   };
 
+  const targetBoneNames = () => {
+    const live = previewRef.current?.getBoneNames();
+    return live && live.length ? live : boneNames;
+  };
+
+  const initMixamoBoneMap = (clip: THREE.AnimationClip) => {
+    const usage = listClipBones(clip, targetBoneNames());
+    const map: Record<string, string> = {};
+    for (const { sourceBone, guess } of usage) {
+      if (guess) map[sourceBone] = guess;
+    }
+    setMixamoBoneMap(map);
+    setMixamoClipName(clip.name || 'mixamo_clip');
+  };
+
+  const handleMixamoFile = async (file: File) => {
+    setMixamoLoading(true);
+    setMixamoError(null);
+    setMixamoStatus(null);
+    setMixamoFileName(file.name);
+    const url = URL.createObjectURL(file);
+    try {
+      const loaded = await loadAnimatedPrefab(url);
+      if (!loaded.clips.length) {
+        setMixamoError('No animation clips found in that file.');
+        setMixamoClips([]);
+        return;
+      }
+      setMixamoClips(loaded.clips);
+      setMixamoClipIdx(0);
+      initMixamoBoneMap(loaded.clips[0]);
+    } catch (err) {
+      console.warn('[PlayerModelStudio] mixamo import failed', err);
+      setMixamoError('Could not read that file — expected an FBX or GLB with baked animation.');
+      setMixamoClips([]);
+    } finally {
+      URL.revokeObjectURL(url);
+      setMixamoLoading(false);
+    }
+  };
+
+  const buildMixamoAuthored = () => {
+    const clip = mixamoClips[mixamoClipIdx];
+    if (!clip) return null;
+    return retargetClip(clip, mixamoBoneMap, mixamoClipName);
+  };
+
+  const previewMixamoClip = () => {
+    const built = buildMixamoAuthored();
+    if (!built) return;
+    const threeClips = authoredClipsToThree([built.authored]);
+    previewRef.current?.registerClips(threeClips);
+    previewRef.current?.playClip(built.authored.name, true);
+    setPreviewSlot('clip');
+    setMixamoStatus(
+      `Previewing “${built.authored.name}” — ${built.usedTracks} bone track(s) mapped, ${built.droppedTracks} skipped.`
+    );
+  };
+
+  const saveMixamoClip = () => {
+    const built = buildMixamoAuthored();
+    if (!built) return;
+    const nextAuthored = [
+      ...authoredClips.filter((c) => c.name !== built.authored.name),
+      built.authored,
+    ];
+    const threeClips = authoredClipsToThree([built.authored]);
+    previewRef.current?.registerClips(threeClips);
+    const allNames = Array.from(
+      new Set([...(entity.animation?.availableClips ?? clips), built.authored.name])
+    );
+    onChange({
+      playerAuthoredClips: nextAuthored,
+      animation: {
+        ...(entity.animation ?? ensureAnimation(entity)),
+        availableClips: allNames,
+      },
+    });
+    setClipCount(allNames.length);
+    setMixamoStatus(`Saved “${built.authored.name}” — pick it in the Anims tab to bind it to a slot.`);
+  };
+
   const tabs: { id: StudioTab; label: string }[] = [
     { id: 'model', label: 'Model' },
     { id: 'mesh', label: 'Mesh' },
     { id: 'bones', label: 'Bones' },
     { id: 'record', label: 'Record' },
+    { id: 'import', label: 'Import' },
     { id: 'anims', label: 'Anims' },
   ];
 
@@ -784,6 +880,135 @@ export function PlayerModelStudio({
               Workflow: select bone → Record → drag gizmo to pose → Add to timeline at each time →
               Save clip. Only that bone is keyed (arm swing won&apos;t bake the whole body).
             </p>
+          </div>
+        )}
+
+        {tab === 'import' && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-white/10 bg-black/25 p-3 space-y-2">
+              <p className="text-[10px] uppercase tracking-wider text-white/45">
+                Upload Mixamo clip
+              </p>
+              <label className="flex items-center justify-center gap-2 min-h-10 rounded border border-dashed border-white/20 bg-black/30 text-xs text-white/60 cursor-pointer hover:border-sky-400/50 hover:text-sky-200">
+                <Upload className="w-3.5 h-3.5" />
+                <span className="truncate">{mixamoFileName ?? 'Choose FBX or GLB…'}</span>
+                <input
+                  type="file"
+                  accept=".fbx,.glb,.gltf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleMixamoFile(file);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              <p className="text-[10px] text-white/40 leading-snug">
+                Export from Mixamo as FBX (baked animation, Y-up) or a GLB with animation. Bone
+                names get matched to this avatar&apos;s rig automatically — review the mapping
+                below before saving.
+              </p>
+              {mixamoLoading && <p className="text-[10px] text-sky-300">Reading file…</p>}
+              {mixamoError && <p className="text-[10px] text-rose-300">{mixamoError}</p>}
+            </div>
+
+            {mixamoClips.length > 0 && (
+              <>
+                {mixamoClips.length > 1 && (
+                  <label className="block text-xs text-white/60">
+                    Clip in file
+                    <select
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-2 text-sm"
+                      value={mixamoClipIdx}
+                      onChange={(e) => {
+                        const idx = Number(e.target.value);
+                        setMixamoClipIdx(idx);
+                        initMixamoBoneMap(mixamoClips[idx]);
+                        setMixamoStatus(null);
+                      }}
+                    >
+                      {mixamoClips.map((c, i) => (
+                        <option key={`${c.name}-${i}`} value={i}>
+                          {c.name || `Clip ${i + 1}`} ({c.duration.toFixed(2)}s)
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                <label className="block text-xs text-white/60">
+                  Save as clip name
+                  <input
+                    className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-2 text-sm"
+                    value={mixamoClipName}
+                    onChange={(e) => setMixamoClipName(e.target.value)}
+                  />
+                </label>
+
+                <div className="rounded-lg border border-white/10 bg-black/25 p-2 space-y-1.5 max-h-56 overflow-y-auto">
+                  <p className="text-[10px] uppercase tracking-wider text-white/45">
+                    Bone mapping ({Object.keys(mixamoBoneMap).length} mapped)
+                  </p>
+                  {listClipBones(mixamoClips[mixamoClipIdx], targetBoneNames()).map(
+                    ({ sourceBone }) => (
+                      <div key={sourceBone} className="flex items-center gap-2 text-[11px]">
+                        <span className="truncate text-white/55 flex-1" title={sourceBone}>
+                          {sourceBone}
+                        </span>
+                        <select
+                          className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[11px] w-40 shrink-0"
+                          value={mixamoBoneMap[sourceBone] ?? ''}
+                          onChange={(e) =>
+                            setMixamoBoneMap((prev) => {
+                              const next = { ...prev };
+                              if (e.target.value) next[sourceBone] = e.target.value;
+                              else delete next[sourceBone];
+                              return next;
+                            })
+                          }
+                        >
+                          <option value="">— skip —</option>
+                          {targetBoneNames().map((b) => (
+                            <option key={b} value={b}>
+                              {b}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1 min-h-10"
+                    onClick={previewMixamoClip}
+                  >
+                    <Play className="w-3.5 h-3.5 mr-1" />
+                    Preview
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="flex-1 min-h-10 bg-emerald-600 hover:bg-emerald-500"
+                    disabled={!mixamoClipName.trim()}
+                    onClick={saveMixamoClip}
+                  >
+                    Save clip to avatar
+                  </Button>
+                </div>
+                {mixamoStatus && (
+                  <p className="text-[10px] text-emerald-300 leading-snug">{mixamoStatus}</p>
+                )}
+                <p className="text-[10px] text-white/40 leading-snug">
+                  This renames bone tracks to match — it does not correct bind-pose / bone-roll
+                  differences. Simple locomotion clips usually preview fine; anything that looks
+                  twisted still benefits from a proper Blender/Cascadeur retarget (see
+                  docs/ANIMATIONS_MIXAMO_AND_COMBAT.md).
+                </p>
+              </>
+            )}
           </div>
         )}
 

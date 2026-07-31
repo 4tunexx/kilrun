@@ -27,6 +27,7 @@ export interface NetPlayerState {
   isCrouching: boolean;
   isGrounded: boolean;
   isSprinting: boolean;
+  isSliding: boolean;
   isReady: boolean;
   kp?: number;
   /** Compact SkinAttachment[] JSON for remote cosmetics. */

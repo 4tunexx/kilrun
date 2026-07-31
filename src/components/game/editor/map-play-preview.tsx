@@ -1076,6 +1076,7 @@ export function MapPlayPreview({
           sprint,
           grounded: body.isGrounded,
           crouch,
+          sliding: scratch.slideMs > 0,
           moveX: wishStrafe,
           moveZ: wishFwd,
           alive: hpLocal > 0,

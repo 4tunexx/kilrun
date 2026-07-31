@@ -968,6 +968,7 @@ export default function KilrunEngine({
                 z: predictedBody.z,
                 vz: predictedBody.vz,
                 isGrounded: predictedBody.isGrounded,
+                isSliding: predictedScratch.slideMs > 0,
               }
             : player;
         view.update(

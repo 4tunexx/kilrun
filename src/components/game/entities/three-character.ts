@@ -221,6 +221,7 @@ export class ThreeCharacter {
       bindSlot('fall', ['fall', 'air', 'falling']);
       bindSlot('land', ['land', 'landing'], false);
       bindSlot('crouch', ['crouch', 'sneak', 'duck']);
+      bindSlot('slide', ['slide', 'sliding', 'slid']);
       bindSlot('strafe_left', ['left', 'strafe']);
       bindSlot('strafe_right', ['right', 'strafe']);
       bindSlot('back', ['back', 'backward']);
@@ -617,6 +618,8 @@ export class ThreeCharacter {
       // vz threshold is NOT used — otherwise the anim flips to fall at apex
       // (vz ~0 → negative) before player has visually left the ground.
       this.play(moving || wishFwd !== 0 ? 'jump' : 'fall', false);
+    } else if (player.isSliding && this.actions.has('slide')) {
+      this.play('slide');
     } else if (player.isCrouching) {
       this.play('crouch');
     } else if (moving) {

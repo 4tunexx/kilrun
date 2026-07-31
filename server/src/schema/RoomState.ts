@@ -55,6 +55,7 @@ export class PlayerState extends Schema {
   @type('boolean') isCrouching = false;
   @type('boolean') isGrounded = true;
   @type('boolean') isSprinting = false;
+  @type('boolean') isSliding = false;
   @type('boolean') isReady = false;
   @type('boolean') isInvisible = false;
   /** Last checkpoint touch (sim space). 0 = unset. */

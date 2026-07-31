@@ -312,6 +312,7 @@ export function applyMovement(
   ) {
     scratch.slideMs = effSlideDurationMs;
   }
+  player.isSliding = scratch.slideMs > 0;
   if (scratch.slideMs > 0) {
     maxSpeed = baseMax * effSlideMult;
     scratch.slideMs = Math.max(0, scratch.slideMs - dtSeconds * 1000);
