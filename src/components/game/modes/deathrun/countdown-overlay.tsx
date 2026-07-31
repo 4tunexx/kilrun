@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import type { KilrunMode } from '@/lib/game-modes';
+import { playSound } from '../../effects/soundboard';
 
 const MODE_LABELS: Record<string, string> = {
   deathrun: 'Roles assigned \u2014 get ready!',
@@ -17,6 +18,15 @@ export const CountdownOverlay: React.FC<{
   // Show the last 5 seconds as a big countdown; before that show a "buy phase" banner.
   const isBuyPhase = countdownMs > 5000 && (mode === 'competitive' || mode === 'horde');
   const seconds = Math.max(1, Math.min(5, totalSec));
+
+  const lastTickRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (isBuyPhase) return;
+    if (lastTickRef.current !== seconds) {
+      lastTickRef.current = seconds;
+      playSound('match_countdown_tick');
+    }
+  }, [seconds, isBuyPhase]);
 
   if (isBuyPhase) {
     return (

@@ -27,6 +27,7 @@ import {
 } from './utils/constants';
 import { HUD } from './ui/hud';
 import { KillStreakBanner } from './ui/kill-streak-banner';
+import { MatchIntroBanner } from './ui/match-intro-banner';
 import { MultiKillCounter } from './ui/multi-kill-counter';
 import { GameMenu, LevelUpPopup, useGameProgression } from './ui/game-menu';
 import { Scoreboard } from './ui/scoreboard';
@@ -1319,6 +1320,15 @@ export default function KilrunEngine({
           <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 z-[105] pointer-events-none">
             <p className="text-white font-bold tracking-wide animate-pulse">Loading map & character…</p>
           </div>
+        )}
+
+        {!editorOpen && (
+          <MatchIntroBanner
+            phase={room.phase}
+            mode={mode}
+            localRole={localPlayer?.role}
+            competitiveQueue={competitiveQueue}
+          />
         )}
 
         {room.phase === 'playing' && localPlayer && !editorOpen && (
