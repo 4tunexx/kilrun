@@ -44,7 +44,6 @@ import BadgesView from '@/components/views/badges-view';
 import NotificationsView from '@/components/views/notifications-view';
 import MessagesView from '@/components/views/messages-view';
 import PublicProfileView from '@/components/views/public-profile-view';
-import { GameProgressionCompact } from '@/components/game-progression-compact';
 import FriendsList from '@/components/views/friends-list';
 import LobbyView from '@/components/views/lobby-view';
 import AdminView from '@/components/views/admin-view';
@@ -97,11 +96,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
 import {
   Dialog,
   DialogContent,
@@ -956,10 +950,6 @@ export default function GameHubInterface({
 
               <div className="my-2 w-3/4 h-px bg-slate-700/50 shrink-0" />
 
-              {/* In-Game Abilities Collapsible */}
-              <div className="w-full px-2 space-y-1">
-              </div>
-
               <Dialog open={isVipDialogOpen} onOpenChange={setIsVipDialogOpen}>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1328,20 +1318,6 @@ export default function GameHubInterface({
                         {user.role} · Lv {level} · {xpIntoLevel.toLocaleString()}/
                         {xpForNextLevel.toLocaleString()} XP
                       </p>
-                      
-                      {/* In-Game Progression Card - Collapsible */}
-                      <Collapsible className="mt-4" suppressHydrationWarning>
-                        <CollapsibleTrigger asChild>
-                          <button className="w-full rounded-lg border border-slate-700/30 bg-slate-800/40 hover:bg-slate-800/60 px-3 py-2 text-left transition-colors flex items-center justify-between group">
-                            <span className="text-xs font-bold text-orange-300">In-Game Powers</span>
-                            <ChevronRight className="w-4 h-4 text-slate-400 transition-transform group-data-[state=open]:rotate-90" />
-                          </button>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="mt-2" suppressHydrationWarning>
-                          <GameProgressionCompact userId={user.id} />
-                        </CollapsibleContent>
-                      </Collapsible>
-                      
                       <button
                         type="button"
                         onClick={handleTogglePulsar}
