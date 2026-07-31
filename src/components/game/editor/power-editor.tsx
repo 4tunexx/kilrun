@@ -69,7 +69,7 @@ function emptyDraft(sortOrder: number): PowerDefinitionRecord {
     name: '',
     description: '',
     icon: '✨',
-    maxLevel: 10,
+    maxLevel: 5,
     unlockLevel: 1,
     prerequisites: [],
     cost: { type: 'flat', base: 1 },
