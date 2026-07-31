@@ -36,6 +36,18 @@ interface GameMenuProps {
   /** Data-driven power list (core + any custom powers from the Power
    * Editor), fetched at runtime — falls back to the static 11 on failure. */
   powers?: PowerDefinitionRecord[];
+  /** Viewing someone else's tree (public profile) — hides the Buy button.
+   * Spending is also blocked server-side (assertCanMutateUser), this just
+   * keeps the UI honest about what a visitor can actually do here. */
+  readOnly?: boolean;
+  /**
+   * In a live match this renders as an overlay inside the game canvas
+   * (`absolute`, sized to a positioned ancestor). Opened from a normal page
+   * (profile), there's no such ancestor to size against, so it needs to
+   * cover the viewport directly instead. Default 'overlay' keeps existing
+   * in-match behavior byte-identical.
+   */
+  positioning?: 'overlay' | 'viewport';
 }
 
 /**
@@ -54,6 +66,8 @@ export function GameMenu({
   error,
   onUpgrade,
   powers,
+  readOnly = false,
+  positioning = 'overlay',
 }: GameMenuProps) {
   const activePowers = powers && powers.length > 0 ? powers : STATIC_FALLBACK_POWERS;
 
@@ -72,7 +86,9 @@ export function GameMenu({
   const selectedPower = activePowers.find((p) => p.key === selectedKey) ?? null;
 
   return (
-    <div className="absolute inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-md pointer-events-auto p-4">
+    <div
+      className={`${positioning === 'viewport' ? 'fixed' : 'absolute'} inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-md pointer-events-auto p-4`}
+    >
       <div className="w-full max-w-6xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.09] to-white/[0.02] backdrop-blur-2xl shadow-2xl shadow-black/50">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-gradient-to-b from-[#0f1724]/95 to-[#0f1724]/80 backdrop-blur-xl px-6 py-4">
           <div className="flex items-center gap-3">
@@ -273,7 +289,12 @@ export function GameMenu({
                     {!locked && atMax && (
                       <p className="text-[10px] font-black text-amber-300 uppercase tracking-wide">Maxed out</p>
                     )}
-                    {!locked && !atMax && (
+                    {readOnly && !locked && !atMax && (
+                      <p className="text-[10px] font-bold text-white/35 uppercase tracking-wide">
+                        Viewing {username}&apos;s tree — visit your own profile to spend points
+                      </p>
+                    )}
+                    {!readOnly && !locked && !atMax && (
                       <Button
                         onClick={() => onUpgrade(p.key)}
                         disabled={!canAfford || upgrading === p.key}
@@ -293,7 +314,9 @@ export function GameMenu({
 
         <div className="px-6 pb-6">
           <p className="text-[10px] font-bold text-white/30 text-center">
-            Press M to close · Kill enemies and win matches to earn XP and Skill Points
+            {positioning === 'viewport'
+              ? 'Kill enemies and win matches to earn XP and Skill Points'
+              : 'Press M to close · Kill enemies and win matches to earn XP and Skill Points'}
           </p>
         </div>
       </div>

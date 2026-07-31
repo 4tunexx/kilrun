@@ -69,6 +69,7 @@ import {
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import { ShowcaseEditor } from '@/components/views/profile/showcase-editor';
 import { GameProgressionCard } from '@/components/game-progression-card';
+import { PowerSkillTreeLauncher } from '@/components/power-skill-tree-launcher';
 import { useToast } from '@/hooks/use-toast';
 import { EmailVerificationForm } from '@/components/email-verification-form';
 import { COUNTRIES, flagUrl, getCountryName } from '@/lib/countries';
@@ -551,12 +552,17 @@ export default function ProfileView({ userId }: { userId: string }) {
             </CardContent>
           </Card>
           <div>
-            <h3 className="text-base font-semibold text-white mb-1">In-Game Powers</h3>
+            <h3 className="text-base font-semibold text-white mb-1">Power Skill Tree</h3>
             <p className="text-xs text-slate-400 mb-3">
-              In-match level, Skill Points, and power upgrades — earned by playing and spent
-              from the in-game menu (press M during a match). Separate from your account level.
+              In-match level, Skill Points, and power upgrades — earned by playing. Spend points
+              here or from the in-game menu (press M during a match). Separate from your account
+              level.
             </p>
-            <GameProgressionCard userId={userId} />
+            <PowerSkillTreeLauncher
+              userId={userId}
+              username={user?.username ?? 'Player'}
+              avatarUrl={user?.avatarUrl ?? undefined}
+            />
           </div>
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>

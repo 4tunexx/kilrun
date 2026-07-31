@@ -1,5 +1,7 @@
 import { PlatformState, PlayerState } from '../schema/RoomState.js';
 import {
+  APEX_GRAVITY_MULT,
+  APEX_VZ_THRESHOLD,
   COYOTE_TIME_MS,
   CROUCH_SPEED_MULTIPLIER,
   DOUBLE_JUMP_VELOCITY,
@@ -100,6 +102,12 @@ export interface PlayerSimScratch {
   wallJumpCooldownNormalY: number;
   /** Platform id under feet last tick (moving-platform carry). */
   supportPlatformId: string | null;
+  /** Remaining ms of an active slide (0 = not sliding). */
+  slideMs: number;
+  /** Remaining ms before a new slide can start. */
+  slideCooldownMs: number;
+  /** Edge-detects the crouch button so holding it doesn't retrigger every tick. */
+  wasCrouchHeld: boolean;
 }
 
 export function createSimScratch(): PlayerSimScratch {
@@ -118,6 +126,9 @@ export function createSimScratch(): PlayerSimScratch {
     wallJumpCooldownNormalX: 0,
     wallJumpCooldownNormalY: 0,
     supportPlatformId: null,
+    slideMs: 0,
+    slideCooldownMs: 0,
+    wasCrouchHeld: false,
   };
 }
 
@@ -153,6 +164,10 @@ export interface MovementPhysicsOpts {
   wallJumpHorizVel?: number;
   wallJumpVertVel?: number;
   wallSlideGravMult?: number;
+  slideEnabled?: boolean;
+  slideMult?: number;
+  slideDurationMs?: number;
+  slideCooldownMs?: number;
 }
 
 /**
@@ -184,6 +199,7 @@ export function applyMovement(
   const effSprintMult = physOpts?.sprintMult ?? SPRINT_MULTIPLIER;
   const effCrouchMult = physOpts?.crouchMult ?? CROUCH_SPEED_MULTIPLIER;
   const effMaxFall = physOpts?.maxFallSpeed ?? MAX_FALL_SPEED;
+  const effApexGravMult = physOpts?.apexGravMult ?? APEX_GRAVITY_MULT;
   const effWallJumpEnabled = physOpts?.wallJumpEnabled ?? WALL_JUMP_ENABLED_DEFAULT;
   const effWallJumpHorizVel = physOpts?.wallJumpHorizVel ?? WALL_JUMP_HORIZ_VEL;
   const effWallJumpVertVel = physOpts?.wallJumpVertVel ?? WALL_JUMP_VERT_VEL;
@@ -272,6 +288,38 @@ export function applyMovement(
 
   let grounded = !!support && player.vz <= 0.2;
   player.isGrounded = grounded;
+
+  // Slide (crouch while sprinting) — see CombatSettings.slideEnabled doc.
+  // A speed-boosted burst for slideDurationMs, then a cooldown before it can
+  // retrigger. Slide-jump falls out naturally without extra logic: jumping
+  // only ever sets vz, so a jump mid-slide keeps whatever slide-boosted
+  // velX/velY the player already had (momentum carries into the air).
+  const effSlideEnabled = physOpts?.slideEnabled ?? false;
+  const effSlideMult = physOpts?.slideMult ?? 2.2;
+  const effSlideDurationMs = physOpts?.slideDurationMs ?? 600;
+  const effSlideCooldownMs = physOpts?.slideCooldownMs ?? 1000;
+  const crouchEdge = input.crouch && !scratch.wasCrouchHeld;
+  scratch.wasCrouchHeld = input.crouch;
+  if (
+    effSlideEnabled &&
+    crouchEdge &&
+    input.sprint &&
+    grounded &&
+    wishMag > 0.2 &&
+    !scratch.exhausted &&
+    scratch.slideMs <= 0 &&
+    scratch.slideCooldownMs <= 0
+  ) {
+    scratch.slideMs = effSlideDurationMs;
+  }
+  player.isSliding = scratch.slideMs > 0;
+  if (scratch.slideMs > 0) {
+    maxSpeed = baseMax * effSlideMult;
+    scratch.slideMs = Math.max(0, scratch.slideMs - dtSeconds * 1000);
+    if (scratch.slideMs <= 0) scratch.slideCooldownMs = effSlideCooldownMs;
+  } else if (scratch.slideCooldownMs > 0) {
+    scratch.slideCooldownMs = Math.max(0, scratch.slideCooldownMs - dtSeconds * 1000);
+  }
 
   const flyActive = isFlyActive(player, Date.now());
   if (flyActive) {
@@ -501,7 +549,16 @@ export function applyMovement(
       pushed.touchingWall &&
       player.vz <= 0 &&
       scratch.wallJumpLockoutMs <= 0;
-    const gravityThisTick = slidingOnWall ? effGravity * effWallSlideGravMult : effGravity;
+    // Apex softening: near the top of the arc (|vz| within the apex band),
+    // scale gravity by the map's apexGravMult (<1 = floatier hang, >1 =
+    // snappier). Neutral by default (mult 1, band 0) so maps that never set
+    // apexGravMult are byte-identical to before this existed.
+    const atApex = Math.abs(player.vz) <= Math.max(APEX_VZ_THRESHOLD, 1.5);
+    const gravityThisTick = slidingOnWall
+      ? effGravity * effWallSlideGravMult
+      : atApex
+        ? effGravity * effApexGravMult
+        : effGravity;
     player.vz = Math.max(-effMaxFall, player.vz - gravityThisTick * dtSeconds);
     player.z += player.vz * dtSeconds;
 

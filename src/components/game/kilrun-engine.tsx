@@ -10,6 +10,7 @@ import type { ChatMessage, NetObstacleState, NetPlatformState, NetPlayerState, P
 import { InputManager } from './input/input-manager';
 import type { DualJoystick } from './input/dual-joystick';
 import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
+import { SprintParticles } from './effects/sprint-particles';
 import { ThreeCharacter } from './entities/three-character';
 import { ThreeMap } from './entities/three-map';
 import { CustomMapOverlay } from './entities/custom-map-overlay';
@@ -69,6 +70,7 @@ import {
   mapDocToSimTeleports,
   mapDocToWorldBounds,
   mapDocPushPayloads,
+  mapDocWaveAnchors,
   prepareDocForPlayTest,
   type SimWorldBounds,
 } from './editor/prefab-storage';
@@ -148,6 +150,7 @@ export default function KilrunEngine({
 }: KilrunEngineProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  const sprintFxRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const pausedRef = useRef(false);
   const gameMenuOpenRef = useRef(false);
@@ -366,70 +369,98 @@ export default function KilrunEngine({
     if (customLoadedRef.current) return;
     if (!connectionRef.current?.sessionId) return;
 
-    const resolveDoc = (): MapDocument | null => {
-      const raw = cloudDocRef.current
-        ? cloudDocRef.current
-        : (() => {
-            const mapId = getActivePlayMapIdForMode(mode);
-            if (!mapId) return null;
-            return loadMapPlayable(mapId);
-          })();
+    let cancelled = false;
+
+    const resolveDoc = async (): Promise<MapDocument | null> => {
+      // Play Test (draftDoc) always reflects the live editor state already —
+      // no network round trip needed. Otherwise, refetch the cloud Active map
+      // fresh instead of trusting the mount-time cache: an admin who publishes
+      // a map edit in another tab and returns to an already-open game tab
+      // must not have their host push re-send the stale doc it loaded at
+      // mount (which would clobber the server's own fresh fetch and bring
+      // back the old wall heights / geometry).
+      if (draftDoc) return prepareDocForPlayTest(draftDoc).doc;
+      const fresh = await getActiveCloudMapDocument(mode).catch(() => null);
+      if (fresh?.document) {
+        cloudDocRef.current = fresh.document;
+        return prepareDocForPlayTest(fresh.document).doc;
+      }
+      const raw =
+        cloudDocRef.current ??
+        (() => {
+          const mapId = getActivePlayMapIdForMode(mode);
+          if (!mapId) return null;
+          return loadMapPlayable(mapId);
+        })();
       if (!raw) return null;
       return prepareDocForPlayTest(raw).doc;
     };
 
-    const doc = resolveDoc();
-    if (!doc) return;
+    const pushCustomMap = (doc: MapDocument) => {
+      // Re-check: the network refetch above may have outlived a disconnect,
+      // a phase change, or a race with another push that already landed.
+      if (cancelled || customLoadedRef.current || !connectionRef.current?.sessionId) return;
+      const platforms = mapDocToSimPlatforms(doc);
+      if (!platforms.length) return;
 
-    const platforms = mapDocToSimPlatforms(doc);
-    if (!platforms.length) return;
+      const obstacles = mapDocToSimHazards(doc);
+      const finishes = mapDocToSimFinishes(doc);
+      const buttons = mapDocToSimButtons(doc);
+      const actions = mapDocToSimActions(doc);
+      const teleports = mapDocToSimTeleports(doc);
+      const spawns = mapDocSpawnPoints(doc);
+      const playerSpawns = mapDocPlayerSpawns(doc);
+      const monsterSpawns = mapDocMonsterSpawns(doc);
+      const waveAnchors = mapDocWaveAnchors(doc);
+      const teams = mapDocTeamSpawns(doc);
+      const healthFloors = mapDocHealthFloors(doc);
+      const redZones = mapDocRedZones(doc);
+      const revivePads = mapDocRevivePads(doc);
+      const pushPayloads = mapDocPushPayloads(doc);
+      const worldBounds = mapDocToWorldBounds(doc, platforms, finishes);
+      customDocRef.current = doc;
+      customLoadedRef.current = true;
+      connectionRef.current.sendLoadCustomMap({
+        platforms,
+        obstacles,
+        finishes,
+        buttons,
+        actions,
+        teleports,
+        spawn: spawns.runner ?? playerSpawns[0] ?? undefined,
+        trapperSpawn: spawns.trapper ?? undefined,
+        playerSpawns,
+        monsterSpawns,
+        waveAnchors,
+        teamASpawns: teams.teamA,
+        teamBSpawns: teams.teamB,
+        healthFloors,
+        redZones,
+        revivePads,
+        pushPayloads,
+        worldBounds,
+        modeSettings: doc.modeSettings as Record<string, unknown> | undefined,
+        combatSettings: doc.combatSettings as Record<string, unknown> | undefined,
+        ...(mode === 'horde' || mode === 'competitive'
+          ? {
+              shopSettings: ensureShopSettings(doc) as unknown as Record<string, unknown>,
+            }
+          : {}),
+      });
+      if (practiceRole) {
+        connectionRef.current.sendPracticeSetRole(practiceRole);
+      }
+    };
 
-    const obstacles = mapDocToSimHazards(doc);
-    const finishes = mapDocToSimFinishes(doc);
-    const buttons = mapDocToSimButtons(doc);
-    const actions = mapDocToSimActions(doc);
-    const teleports = mapDocToSimTeleports(doc);
-    const spawns = mapDocSpawnPoints(doc);
-    const playerSpawns = mapDocPlayerSpawns(doc);
-    const monsterSpawns = mapDocMonsterSpawns(doc);
-    const teams = mapDocTeamSpawns(doc);
-    const healthFloors = mapDocHealthFloors(doc);
-    const redZones = mapDocRedZones(doc);
-    const revivePads = mapDocRevivePads(doc);
-    const pushPayloads = mapDocPushPayloads(doc);
-    const worldBounds = mapDocToWorldBounds(doc, platforms, finishes);
-    customDocRef.current = doc;
-    customLoadedRef.current = true;
-    connectionRef.current.sendLoadCustomMap({
-      platforms,
-      obstacles,
-      finishes,
-      buttons,
-      actions,
-      teleports,
-      spawn: spawns.runner ?? playerSpawns[0] ?? undefined,
-      trapperSpawn: spawns.trapper ?? undefined,
-      playerSpawns,
-      monsterSpawns,
-      teamASpawns: teams.teamA,
-      teamBSpawns: teams.teamB,
-      healthFloors,
-      redZones,
-      revivePads,
-      pushPayloads,
-      worldBounds,
-      modeSettings: doc.modeSettings as Record<string, unknown> | undefined,
-      combatSettings: doc.combatSettings as Record<string, unknown> | undefined,
-      ...(mode === 'horde' || mode === 'competitive'
-        ? {
-            shopSettings: ensureShopSettings(doc) as unknown as Record<string, unknown>,
-          }
-        : {}),
+    void resolveDoc().then((doc) => {
+      if (cancelled || !doc) return;
+      pushCustomMap(doc);
     });
-    if (practiceRole) {
-      connectionRef.current.sendPracticeSetRole(practiceRole);
-    }
-  }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode, practiceRole]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode, practiceRole, draftDoc]);
 
   useEffect(() => {
     pausedRef.current = paused || editorOpen;
@@ -595,6 +626,11 @@ export default function KilrunEngine({
     /** Visual-only recoil (does not corrupt aimPitch sent to server). */
     let recoilPitch = 0;
     let shakeAmp = 0;
+    let wasGroundedForShake = false;
+    let lastHealthForShake: number | null = null;
+    /** Sprint/slide screen FX intensity, eased toward 0/1 each frame. */
+    let sprintFx = 0;
+    const sprintParticles = new SprintParticles(world.camera);
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
     // Smoothed local player position for the camera — follows the interpolated
@@ -855,6 +891,49 @@ export default function KilrunEngine({
         predictedBody = null;
       }
 
+      // Sprint/slide screen FX — eases in while actually moving fast with
+      // sprint held (or sliding), eases back out otherwise.
+      {
+        const horizSpeed = Math.hypot(predictedScratch.velX, predictedScratch.velY);
+        const sprinting =
+          !frozen &&
+          inputManager.isSprintPressed() &&
+          (predictedBody?.isGrounded ?? true) &&
+          horizSpeed > 4.5;
+        const sliding = predictedScratch.slideMs > 0;
+        const targetFx = sliding ? 1 : sprinting ? Math.min(1, horizSpeed / 9) : 0;
+        const rate = targetFx > sprintFx ? 7 : 3.2;
+        sprintFx += (targetFx - sprintFx) * Math.min(1, dt * rate);
+        if (sprintFx < 0.001) sprintFx = 0;
+        sprintParticles.update(dt, sprintFx);
+        if (sprintFxRef.current) {
+          sprintFxRef.current.style.opacity = String(sprintFx);
+        }
+      }
+
+      const swayCombat = ensureCombatSettings(
+        customDocRef.current ?? ({ combatSettings: {} } as MapDocument)
+      );
+      const weaponSway = {
+        enabled: swayCombat.swayEnabled,
+        amplitudeDeg: swayCombat.swayAmplitudeDeg,
+        speedHz: swayCombat.swaySpeedHz,
+        moveMult: swayCombat.swayMoveMult,
+      };
+      // Camera shake on landing / taking damage (shakeOnFire already fires
+      // from the shoot-handling block below) — local player only.
+      if (localSessionId && localState) {
+        const groundedNow = predictedBody?.isGrounded ?? localState.isGrounded;
+        if (!wasGroundedForShake && groundedNow) {
+          shakeAmp = Math.max(shakeAmp, swayCombat.shakeOnLand ?? 0);
+        }
+        wasGroundedForShake = groundedNow;
+
+        if (lastHealthForShake !== null && localState.health < lastHealthForShake) {
+          shakeAmp = Math.max(shakeAmp, swayCombat.shakeOnHit ?? 0);
+        }
+        lastHealthForShake = localState.health;
+      }
       characters.forEach((view, sessionId) => {
         const player = playersRef.current.get(sessionId);
         if (!player) return;
@@ -914,6 +993,7 @@ export default function KilrunEngine({
                 z: predictedBody.z,
                 vz: predictedBody.vz,
                 isGrounded: predictedBody.isGrounded,
+                isSliding: predictedScratch.slideMs > 0,
               }
             : player;
         view.update(
@@ -921,7 +1001,8 @@ export default function KilrunEngine({
           dt,
           isLocal ? cameraYaw : player.cameraYaw,
           isLocal && !frozen ? { fwd: wishFwd, strafe: wishStrafe } : undefined,
-          isLocal ? aimHeld : false
+          isLocal ? aimHeld : false,
+          weaponSway
         );
         if (isLocal) {
           const pl = tpsRef.current.player;
@@ -1033,7 +1114,8 @@ export default function KilrunEngine({
           inputManager.consumeAbilityPulse('bullet') ??
           inputManager.consumeAbilityPulse('thunder') ??
           inputManager.consumeAbilityPulse('visibility') ??
-          inputManager.consumeAbilityPulse('fly');
+          inputManager.consumeAbilityPulse('fly') ??
+          inputManager.consumeAbilityPulse('backflip');
         if (abilityPulse && !gameMenuOpenRef.current && localSessionId && localState) {
           connectionRef.current?.sendActivateAbility(abilityPulse);
         }
@@ -1131,6 +1213,7 @@ export default function KilrunEngine({
       window.clearInterval(syncTimer);
       if (document.pointerLockElement) document.exitPointerLock?.();
       characters.forEach((c) => c.destroy());
+      sprintParticles.dispose();
       overlay.destroy();
       map.destroy();
       envHandle?.dispose();
@@ -1179,6 +1262,19 @@ export default function KilrunEngine({
     >
       <MobilePlayGate containerRef={rootRef}>
         <div ref={hostRef} className="absolute inset-0 w-full h-full" />
+
+        <div
+          ref={sprintFxRef}
+          className="pointer-events-none absolute inset-0 z-[119]"
+          aria-hidden
+          style={{
+            opacity: 0,
+            background:
+              'radial-gradient(ellipse at center, rgba(90,170,255,0) 38%, rgba(50,120,255,0.16) 72%, rgba(6,16,40,0.6) 100%)',
+            boxShadow: 'inset 0 0 160px 50px rgba(60,140,255,0.35)',
+            mixBlendMode: 'screen',
+          }}
+        />
 
         {!assetsReady && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 z-[105] pointer-events-none">

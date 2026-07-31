@@ -60,6 +60,7 @@ const BUFF_KIND_OPTIONS: { value: TimedBuffKind; label: string }[] = [
 const BURST_KIND_OPTIONS: { value: BurstEffectKind; label: string }[] = [
   { value: 'radius_damage', label: 'Radius Damage Pulse (thunder-style)' },
   { value: 'range_pull', label: 'Range + Pull (hook-style)' },
+  { value: 'range_dash', label: 'Range + Dash away (backflip-style)' },
 ];
 
 function emptyDraft(sortOrder: number): PowerDefinitionRecord {
@@ -68,7 +69,7 @@ function emptyDraft(sortOrder: number): PowerDefinitionRecord {
     name: '',
     description: '',
     icon: '✨',
-    maxLevel: 10,
+    maxLevel: 5,
     unlockLevel: 1,
     prerequisites: [],
     cost: { type: 'flat', base: 1 },
@@ -461,13 +462,19 @@ function PowerForm({
               t === 'stat_bonus'
                 ? ({ bonuses: [{ stat: 'maxHealth', mode: 'additive', perLevel: 5 }] } as StatBonusParams)
                 : t === 'timed_buff'
-                ? ({ buffKind: 'invisibility', durationBaseSec: 2, durationPerLevelSec: 0.5 } as TimedBuffParams)
+                ? ({
+                    buffKind: 'invisibility',
+                    durationBaseSec: 2,
+                    durationPerLevelSec: 0.5,
+                    energyCost: 15,
+                  } as TimedBuffParams)
                 : ({
                     kind: 'radius_damage',
                     radiusBaseMeters: 3,
                     radiusPerLevelMeters: 0.5,
                     damageBase: 15,
                     damagePerLevel: 5,
+                    energyCost: 15,
                   } as BurstEffectParams);
             onChange({ effectType: t, effectParams: params });
           }}
@@ -675,6 +682,15 @@ function TimedBuffEditor({ params, onChange }: { params: TimedBuffParams; onChan
           />
         </Field>
       </div>
+      <Field label="Energy cost to activate (0 = free)">
+        <input
+          type="number"
+          min={0}
+          className={inputCls}
+          value={params.energyCost ?? 0}
+          onChange={(e) => onChange({ ...params, energyCost: Math.max(0, Number(e.target.value) || 0) })}
+        />
+      </Field>
     </div>
   );
 }
@@ -778,6 +794,15 @@ function BurstEffectEditor({
           </Field>
         </div>
       )}
+      <Field label="Energy cost to activate (0 = free)">
+        <input
+          type="number"
+          min={0}
+          className={inputCls}
+          value={params.energyCost ?? 0}
+          onChange={(e) => onChange({ ...params, energyCost: Math.max(0, Number(e.target.value) || 0) })}
+        />
+      </Field>
     </div>
   );
 }

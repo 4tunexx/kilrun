@@ -27,6 +27,7 @@ export class AbilityLoadoutState extends Schema {
   @type('number') berserkEndsAt = 0;
   @type('number') bulletEndsAt = 0;
   @type('number') thunderEndsAt = 0;
+  @type('number') backflipEndsAt = 0;
 }
 
 /** A single networked player -- position/aim are authoritative (server-simulated). */
@@ -55,6 +56,7 @@ export class PlayerState extends Schema {
   @type('boolean') isCrouching = false;
   @type('boolean') isGrounded = true;
   @type('boolean') isSprinting = false;
+  @type('boolean') isSliding = false;
   @type('boolean') isReady = false;
   @type('boolean') isInvisible = false;
   /** Last checkpoint touch (sim space). 0 = unset. */
@@ -195,6 +197,12 @@ export class ObstacleState extends Schema {
   @type('boolean') alwaysActive = false;
   /** When true, only buttons arm this obstacle (no auto pulse). */
   @type('boolean') buttonControlled = false;
+  /** Horde custom monster: GLB to render instead of the generic kind-based prefab. */
+  @type('string') modelUrl = '';
+  /** Horde custom monster: catalog model id (used when modelUrl is a custom upload). */
+  @type('string') modelId = '';
+  /** Horde custom monster: name shown on a floating nameplate above the mesh. */
+  @type('string') displayName = '';
 }
 
 export class RoomState extends Schema {

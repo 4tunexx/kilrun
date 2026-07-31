@@ -202,9 +202,42 @@ Equip clash rules: `src/lib/skin-equip-rules.ts` (full-body exclusive; helmet vs
 
 ---
 
+## Pipeline C — Mixamo importer UI (Player Model studio → Import tab)
+
+Ships a "get it in and try it" path that automates the tedious part of
+Pipeline B (Option 3 / manual bone matching) without requiring Blender:
+
+1. Player Model studio → **Import** tab → upload the Mixamo FBX (or a GLB
+   with baked animation).
+2. If the file has multiple clips, pick one from the dropdown.
+3. Bone mapping is auto-filled by matching standard Mixamo bone names
+   (`mixamorig:LeftArm`, …) against this avatar's actual rig bones — review/
+   correct any row before saving; `— skip —` drops that bone's tracks.
+4. **Preview** plays the retargeted clip live on the avatar in the studio
+   viewport before you commit to it.
+5. **Save clip to avatar** stores it as a `playerAuthoredClip` (same storage
+   as the Record tab) and adds its name to the Anims tab's slot dropdowns —
+   bind it to `attack`, `run`, etc. like any other clip.
+
+**What this is not:** a full bind-pose / bone-roll retarget. It renames
+track targets (`mixamorig:LeftArm.quaternion` → `DEF-upper_arm.L.quaternion`)
+and plays the raw keyframes on the new skeleton — no IK-based correction for
+differences in rest pose or bone orientation between the Mixamo rig and this
+pack's Rigify `DEF-*` rig. Simple locomotion (walk/run/idle) usually previews
+fine; combat/pose-heavy clips can come out twisted at elbows/shoulders and
+still benefit from the Blender/Cascadeur retarget in Pipeline B. Always
+**Preview** before **Save** — if a joint looks wrong, retarget properly
+first rather than shipping a broken clip.
+
+Implementation: `src/components/game/editor/mixamo-import.ts` (bone-name
+table + track retarget, unit tested) and the Import tab in
+`player-model-studio.tsx`.
+
+---
+
 ## Future wishlist (not built)
 
-1. First-class Mixamo importer UI (upload FBX → preview retarget → append clip).  
+1. ~~First-class Mixamo importer UI (upload FBX → preview retarget → append clip).~~ **Built** — see Pipeline C above. Still no bind-pose/bone-roll correction; that remains a Blender/Cascadeur job.
 2. Server-authoritative damage from equipped weapon skins everywhere (partially there).  
 3. Weapon-only VFX clips (muzzle flash / reload) without replacing Attack.  
 4. Gate or remove `/anim-test` once conversion is forever frozen.

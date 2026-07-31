@@ -262,6 +262,7 @@ export type PlayerAnimSlot =
   | 'fall'
   | 'land'
   | 'crouch'
+  | 'slide'
   | 'strafe_left'
   | 'strafe_right'
   | 'back'
@@ -277,6 +278,7 @@ export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string; hint?: stri
   { id: 'fall', label: 'Fall / Air', hint: 'In air, not jumping up' },
   { id: 'land', label: 'Land', hint: 'Touching down after a fall' },
   { id: 'crouch', label: 'Crouch', hint: 'Ctrl / C held' },
+  { id: 'slide', label: 'Slide', hint: 'Crouch while sprinting (CombatSettings slideEnabled)' },
   { id: 'strafe_left', label: 'Strafe Left (A)' },
   { id: 'strafe_right', label: 'Strafe Right (D)' },
   { id: 'back', label: 'Walk Back (S)' },
@@ -344,6 +346,7 @@ export function suggestPlayerBindings(clips: string[]): PlayerAnimBindings {
     fall: find('fall', 'air', 'falling') ?? find('jump') ?? idle,
     land: find('land', 'landing') ?? idle,
     crouch: find('crouch', 'sneak', 'duck') ?? idle,
+    slide: find('slide', 'sliding', 'slid') ?? find('crouch', 'sneak', 'duck') ?? idle,
     strafe_left: find('left', 'strafe_l', 'strafe left') ?? walk,
     strafe_right: find('right', 'strafe_r', 'strafe right') ?? walk,
     back: find('back', 'backward', 'reverse') ?? walk,
@@ -1714,6 +1717,48 @@ export function ensureTeleport(ent: EditorEntity): EntityTeleport {
     cooldownMs: 800,
     ...ent.teleport,
   };
+}
+
+/**
+ * Clear teleport targets / button-trap wiring that point at ids no longer in
+ * the map. Without this, deleting an entity that's referenced by a
+ * teleporter's target or a button's activatesEntityIds/listenToEntityId
+ * leaves the reference dangling — the teleporter silently stops working
+ * (mapDocToSimTeleports drops it with no author-visible warning) or a
+ * duplicated button/trap pair keeps pointing at the original instead of its
+ * new sibling. Call with the ids being removed right before/after filtering
+ * `doc.entities`.
+ */
+export function scrubDanglingReferences(
+  entities: EditorEntity[],
+  removedIds: ReadonlySet<string>
+): EditorEntity[] {
+  if (removedIds.size === 0) return entities;
+  return entities.map((e) => {
+    let next = e;
+    if (e.teleport?.targetEntityId && removedIds.has(e.teleport.targetEntityId)) {
+      next = { ...next, teleport: { ...next.teleport!, targetEntityId: undefined } };
+    }
+    if (e.animation) {
+      const listenDangling =
+        e.animation.listenToEntityId && removedIds.has(e.animation.listenToEntityId);
+      const activates = e.animation.activatesEntityIds;
+      const filteredActivates = activates?.filter((id) => !removedIds.has(id));
+      const activatesChanged =
+        !!activates && !!filteredActivates && filteredActivates.length !== activates.length;
+      if (listenDangling || activatesChanged) {
+        next = {
+          ...next,
+          animation: {
+            ...next.animation!,
+            ...(listenDangling ? { listenToEntityId: undefined } : {}),
+            ...(activatesChanged ? { activatesEntityIds: filteredActivates } : {}),
+          },
+        };
+      }
+    }
+    return next;
+  });
 }
 
 /** Whether this entity should export as a standable / jump-pad platform. */

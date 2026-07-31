@@ -95,6 +95,8 @@ export class AnimationDirector {
       sprint: boolean;
       grounded: boolean;
       crouch: boolean;
+      /** Slide burst active (CombatSettings slideEnabled — crouch while sprinting). */
+      sliding?: boolean;
       moveX: number; // -1 left … +1 right (camera relative wish)
       moveZ: number; // -1 back … +1 forward
       /** When false, play die once. */
@@ -139,6 +141,8 @@ export class AnimationDirector {
       slot = 'land';
     } else if (!state.grounded) {
       slot = state.moveZ !== 0 || state.moving ? 'jump' : 'fall';
+    } else if (state.sliding && bindings.slide) {
+      slot = 'slide';
     } else if (state.crouch) {
       slot = 'crouch';
     } else if (state.moving) {

@@ -67,6 +67,8 @@ import {
   Sparkles,
   Scissors,
   Combine,
+  Route,
+  Package,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -4191,6 +4193,18 @@ export function MapEditor({
             >
               <Box className="w-4 h-4 text-violet-200" />
             </ToolBtn>
+                <ToolBtn
+                  onClick={() => armPlaceEntity('push_rail')}
+                  title="Push rail (payload track — place before the block)"
+                >
+                  <Route className="w-4 h-4 text-sky-300" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => armPlaceEntity('push_block')}
+                  title="Push payload (escort cart — stand near it to push along the rail)"
+                >
+                  <Package className="w-4 h-4 text-amber-300" />
+                </ToolBtn>
               </>
             )}
             <ToolBtn

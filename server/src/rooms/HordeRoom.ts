@@ -139,6 +139,35 @@ interface PadZone {
   reviveTimeMs?: number;
 }
 
+interface ButtonZone {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  activatesObstacleIds: string[];
+  holdMs: number;
+  cooldownMs: number;
+}
+
+interface ActionZone extends ButtonZone {
+  trigger: 'proximity' | 'interact' | 'collide' | 'always';
+}
+
+interface TeleportZone {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  depth: number;
+  height: number;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+  cooldownMs: number;
+}
+
 interface HordeModeSettings {
   warmupSec?: number;
   waveTimeSec?: number;
@@ -207,10 +236,17 @@ export class HordeRoom extends Room<RoomState> {
 
   private playerSpawns: SpawnPoint[] = [];
   private monsterSpawnPoints: MonsterSpawnBlueprint[] = [];
+  private waveAnchors: { waveNumber: number; difficultyMultiplier: number }[] = [];
   private healthFloors: PadZone[] = [];
   private redZones: PadZone[] = [];
   private revivePads: PadZone[] = [];
   private staticHazards: ObstacleBlueprint[] = [];
+  private customButtons: ButtonZone[] = [];
+  private customActions: ActionZone[] = [];
+  private customTeleports: TeleportZone[] = [];
+  private buttonArmRemaining = new Map<string, number>();
+  private lastButtonPressAt = new Map<string, number>();
+  private lastTeleportAt = new Map<string, number>();
 
   private monsters: MonsterSim[] = [];
   private waveSpawnQueue: { point: MonsterSpawnBlueprint; remaining: number; intervalMs: number; nextAt: number }[] =
@@ -664,6 +700,10 @@ export class HordeRoom extends Room<RoomState> {
           crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
           maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
           apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+          slideEnabled: typeof cs.slideEnabled === 'boolean' ? cs.slideEnabled : undefined,
+          slideMult: typeof cs.slideMult === 'number' ? cs.slideMult : undefined,
+          slideDurationMs: typeof cs.slideDurationMs === 'number' ? cs.slideDurationMs : undefined,
+          slideCooldownMs: typeof cs.slideCooldownMs === 'number' ? cs.slideCooldownMs : undefined,
           wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
           wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
           wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
@@ -680,12 +720,23 @@ export class HordeRoom extends Room<RoomState> {
       this.monsterSpawnPoints = Array.isArray(data?.monsterSpawns)
         ? (data.monsterSpawns as MonsterSpawnBlueprint[]).map((m) => ({ ...m }))
         : this.monsterSpawnPoints;
+      this.waveAnchors = Array.isArray(data?.waveAnchors)
+        ? (data.waveAnchors as { waveNumber: number; difficultyMultiplier: number }[]).map((w) => ({
+            ...w,
+          }))
+        : [];
 
       this.healthFloors = Array.isArray(data?.healthFloors)
         ? (data.healthFloors as PadZone[])
         : [];
       this.redZones = Array.isArray(data?.redZones) ? (data.redZones as PadZone[]) : [];
       this.revivePads = Array.isArray(data?.revivePads) ? (data.revivePads as PadZone[]) : [];
+      this.customButtons = Array.isArray(data?.buttons) ? (data.buttons as ButtonZone[]) : [];
+      this.customActions = Array.isArray(data?.actions) ? (data.actions as ActionZone[]) : [];
+      this.customTeleports = Array.isArray(data?.teleports)
+        ? (data.teleports as TeleportZone[])
+        : [];
+      this.buttonArmRemaining.clear();
 
       if (data.worldBounds) {
         this.worldBounds = { ...(data.worldBounds as WorldBounds) };
@@ -703,8 +754,22 @@ export class HordeRoom extends Room<RoomState> {
 
     void ensurePowerDefinitionsLoaded();
 
+    this.syncActiveMapFromCloud();
+
+    this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
+  }
+
+  /**
+   * Re-sync platforms/spawns/settings from the cloud Active map. Called at
+   * room creation and again on every results→lobby round reset — a room can
+   * live across many rounds, so without the second call a map republished
+   * mid-session (taller walls, moved spawns) never reaches players until an
+   * admin manually restarts Colyseus.
+   */
+  private syncActiveMapFromCloud(force = false) {
     void fetchActiveMapPayload('horde').then((active) => {
-      if (!active || this.customMapLoaded) return;
+      if (!active) return;
+      if (this.customMapLoaded && !force) return;
       const pads = active.payload.platforms as PlatformBlueprint[] | undefined;
       if (!Array.isArray(pads) || pads.length === 0) return;
       const data = active.payload;
@@ -724,6 +789,9 @@ export class HordeRoom extends Room<RoomState> {
       if (Array.isArray(data.monsterSpawns)) {
         this.monsterSpawnPoints = data.monsterSpawns as typeof this.monsterSpawnPoints;
       }
+      this.waveAnchors = Array.isArray(data.waveAnchors)
+        ? (data.waveAnchors as typeof this.waveAnchors)
+        : [];
       this.healthFloors = Array.isArray(data.healthFloors)
         ? (data.healthFloors as typeof this.healthFloors)
         : [];
@@ -731,6 +799,12 @@ export class HordeRoom extends Room<RoomState> {
       this.revivePads = Array.isArray(data.revivePads)
         ? (data.revivePads as typeof this.revivePads)
         : [];
+      this.customButtons = Array.isArray(data.buttons) ? (data.buttons as ButtonZone[]) : [];
+      this.customActions = Array.isArray(data.actions) ? (data.actions as ActionZone[]) : [];
+      this.customTeleports = Array.isArray(data.teleports)
+        ? (data.teleports as TeleportZone[])
+        : [];
+      this.buttonArmRemaining.clear();
       if (data.worldBounds) {
         this.worldBounds = { ...(data.worldBounds as typeof this.worldBounds) };
       }
@@ -751,6 +825,10 @@ export class HordeRoom extends Room<RoomState> {
           crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
           maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
           apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+          slideEnabled: typeof cs.slideEnabled === 'boolean' ? cs.slideEnabled : undefined,
+          slideMult: typeof cs.slideMult === 'number' ? cs.slideMult : undefined,
+          slideDurationMs: typeof cs.slideDurationMs === 'number' ? cs.slideDurationMs : undefined,
+          slideCooldownMs: typeof cs.slideCooldownMs === 'number' ? cs.slideCooldownMs : undefined,
           wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
           wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
           wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
@@ -765,8 +843,6 @@ export class HordeRoom extends Room<RoomState> {
       });
       console.log(`[HordeRoom] MAIN map loaded from server (${active.name}): ${pads.length} pads`);
     });
-
-    this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
   }
 
   onAuth(_client: Client, options: JoinOptions): GameJoinClaims {
@@ -907,6 +983,7 @@ export class HordeRoom extends Room<RoomState> {
             player.vpEarned = 0;
             player.kpDelta = 0;
           }
+          this.syncActiveMapFromCloud(true);
         }
         break;
     }
@@ -945,6 +1022,12 @@ export class HordeRoom extends Room<RoomState> {
     this.beginWave(this.startingWave);
   }
 
+  /** Wave Anchor override for this wave number, on top of the mode-wide difficultyScale. */
+  private waveDifficultyMult(wave: number): number {
+    const anchor = this.waveAnchors.find((w) => w.waveNumber === wave);
+    return anchor ? anchor.difficultyMultiplier : 1;
+  }
+
   private beginWave(wave: number) {
     this.state.wave = wave;
     this.betweenWavesMs = 0;
@@ -974,9 +1057,10 @@ export class HordeRoom extends Room<RoomState> {
     }
 
     const now = Date.now();
+    const waveMult = this.waveDifficultyMult(wave);
     for (const point of points.length ? points : this.monsterSpawnPoints) {
       const base = point.countPerWave ?? 2;
-      const scale = 1 + (wave - 1) * 0.35 * this.difficultyScale;
+      const scale = (1 + (wave - 1) * 0.35 * this.difficultyScale) * waveMult;
       const count = Math.max(1, Math.round(base * scale));
       const intervalMs = Math.max(400, (point.spawnIntervalSec ?? 1.5) * 1000);
       this.waveSpawnQueue.push({
@@ -1021,11 +1105,23 @@ export class HordeRoom extends Room<RoomState> {
     const base = MONSTER_STATS[type] ?? MONSTER_STATS.basic;
     const level = Math.max(1, point.level ?? 1);
     const levelScale = 1 + (level - 1) * 0.18;
-    const waveScaling = 1 + (this.state.wave - 1) * 0.12 * this.difficultyScale;
+    const waveMult = this.waveDifficultyMult(this.state.wave);
+    const waveScaling = (1 + (this.state.wave - 1) * 0.12 * this.difficultyScale) * waveMult;
     const stats = {
       hp: (point.hp && point.hp > 0 ? point.hp : base.hp * levelScale) * waveScaling,
-      speed: point.speed && point.speed > 0 ? point.speed : base.speed * (1 + (this.state.wave - 1) * 0.04 * this.difficultyScale),
-      damage: point.damage && point.damage > 0 ? point.damage : Math.round(base.damage * levelScale * (1 + (this.state.wave - 1) * 0.08 * this.difficultyScale)),
+      speed:
+        point.speed && point.speed > 0
+          ? point.speed
+          : base.speed * (1 + (this.state.wave - 1) * 0.04 * this.difficultyScale) * waveMult,
+      damage:
+        point.damage && point.damage > 0
+          ? point.damage
+          : Math.round(
+              base.damage *
+                levelScale *
+                (1 + (this.state.wave - 1) * 0.08 * this.difficultyScale) *
+                waveMult
+            ),
       radius: point.radius && point.radius > 0 ? point.radius : base.radius,
     };
     const id = `mon_${Math.random().toString(36).slice(2, 9)}`;
@@ -1042,6 +1138,9 @@ export class HordeRoom extends Room<RoomState> {
     obs.activeMs = 999999;
     obs.alwaysActive = true;
     obs.active = true;
+    obs.modelUrl = point.modelUrl ?? '';
+    obs.modelId = point.modelId ?? '';
+    obs.displayName = point.displayName ?? '';
     this.state.obstacles.push(obs);
 
     this.monsters.push({
@@ -1073,6 +1172,7 @@ export class HordeRoom extends Room<RoomState> {
     );
     this.tickSpawnQueue();
     this.tickMonsters(dtMs / 1000);
+    this.tickButtonArming(dtMs);
     this.tickPlayers(dtMs, platformDeltas);
     this.tickPads();
 
@@ -1118,6 +1218,87 @@ export class HordeRoom extends Room<RoomState> {
       if (this.betweenWavesMs >= this.waveClearPauseMs) {
         this.beginWave(this.state.wave + 1);
       }
+    }
+  }
+
+  /** Decays button-armed obstacle activations. Mirrors DeathrunRoom.tickObstacles. */
+  private tickButtonArming(dtMs: number) {
+    for (const [id, remaining] of Array.from(this.buttonArmRemaining.entries())) {
+      const next = remaining - dtMs;
+      if (next <= 0) {
+        this.buttonArmRemaining.delete(id);
+        const obs = this.state.obstacles.find((o) => o.id === id);
+        if (obs?.buttonControlled) obs.active = false;
+      } else {
+        this.buttonArmRemaining.set(id, next);
+      }
+    }
+    for (const obstacle of this.state.obstacles) {
+      if (obstacle.buttonControlled && this.buttonArmRemaining.has(obstacle.id)) {
+        obstacle.active = true;
+      }
+    }
+  }
+
+  private tryPressButtons(player: PlayerState, sessionId: string, now: number) {
+    for (const btn of this.customButtons) {
+      if (!this.isPlayerInActivationRadius(player, btn)) continue;
+      this.activateObstacleZone(btn, `button:${sessionId}:${btn.id}`, now);
+    }
+  }
+
+  private tryTriggerActions(
+    player: PlayerState,
+    sessionId: string,
+    now: number,
+    interactPressed: boolean
+  ) {
+    for (const action of this.customActions) {
+      if (action.trigger === 'interact' && !interactPressed) continue;
+      if (!this.isPlayerInActivationRadius(player, action)) continue;
+      this.activateObstacleZone(action, `action:${sessionId}:${action.id}`, now);
+    }
+  }
+
+  private isPlayerInActivationRadius(player: PlayerState, zone: ButtonZone): boolean {
+    const dx = player.x - zone.x;
+    const dy = player.y - zone.y;
+    const dz = player.z - zone.z;
+    return Math.hypot(dx, dy) <= zone.radius + PLAYER_RADIUS && Math.abs(dz) <= 2.2;
+  }
+
+  private activateObstacleZone(zone: ButtonZone, cooldownKey: string, now: number) {
+    const last = this.lastButtonPressAt.get(cooldownKey) ?? 0;
+    if (now - last < zone.cooldownMs) return;
+    this.lastButtonPressAt.set(cooldownKey, now);
+    for (const oid of zone.activatesObstacleIds) {
+      const obs = this.state.obstacles.find((o) => o.id === oid);
+      if (!obs) continue;
+      obs.active = true;
+      const hold = zone.holdMs > 0 ? zone.holdMs : obs.activeMs || 1500;
+      this.buttonArmRemaining.set(oid, hold);
+    }
+  }
+
+  private tryTeleport(player: PlayerState, sessionId: string, now: number) {
+    for (const portal of this.customTeleports) {
+      const halfW = portal.width / 2 + PLAYER_RADIUS;
+      const halfD = portal.depth / 2 + PLAYER_RADIUS;
+      if (Math.abs(player.x - portal.x) > halfW || Math.abs(player.y - portal.y) > halfD) {
+        continue;
+      }
+      if (player.z < portal.z - 0.4 || player.z > portal.z + Math.max(portal.height, 1.2)) {
+        continue;
+      }
+      const key = `${sessionId}:${portal.id}`;
+      const last = this.lastTeleportAt.get(key) ?? 0;
+      if (now - last < portal.cooldownMs) continue;
+      this.lastTeleportAt.set(key, now);
+      player.x = portal.targetX;
+      player.y = portal.targetY;
+      player.z = portal.targetZ;
+      player.vz = 0;
+      break;
     }
   }
 
@@ -1204,6 +1385,10 @@ export class HordeRoom extends Room<RoomState> {
       tickActiveAbilityTimers(player, now);
       applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
       finishReloadIfDue(player, now);
+
+      if (input.interactPressed) this.tryPressButtons(player, sessionId, now);
+      this.tryTriggerActions(player, sessionId, now, input.interactPressed);
+      this.tryTeleport(player, sessionId, now);
 
       for (const obstacle of this.state.obstacles) {
         if (!isPlayerHitByObstacle(player, obstacle)) continue;

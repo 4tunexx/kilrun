@@ -8,7 +8,11 @@ import {
   computeLocomotionFacingYaw,
   stepBodyYaw,
 } from '../tps/locomotion-facing';
-import { applySkinAttachments, tickSkinAttachments } from '../editor/skin-attachments';
+import {
+  applySkinAttachments,
+  tickSkinAttachments,
+  type WeaponSwayOpts,
+} from '../editor/skin-attachments';
 import { resolveModelSrc } from '../editor/model-scan';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { BODY_COLOR_NONE } from '@/lib/body-colors';
@@ -217,6 +221,7 @@ export class ThreeCharacter {
       bindSlot('fall', ['fall', 'air', 'falling']);
       bindSlot('land', ['land', 'landing'], false);
       bindSlot('crouch', ['crouch', 'sneak', 'duck']);
+      bindSlot('slide', ['slide', 'sliding', 'slid']);
       bindSlot('strafe_left', ['left', 'strafe']);
       bindSlot('strafe_right', ['right', 'strafe']);
       bindSlot('back', ['back', 'backward']);
@@ -486,7 +491,8 @@ export class ThreeCharacter {
     cameraYaw?: number,
     moveWish?: { fwd: number; strafe: number },
     /** GTA aim: face camera and strafe — ignore locomotion turn. */
-    aimHeld?: boolean
+    aimHeld?: boolean,
+    weaponSway?: Omit<WeaponSwayOpts, 'moving'>
   ) {
     if (this.disposed) return;
 
@@ -612,6 +618,8 @@ export class ThreeCharacter {
       // vz threshold is NOT used — otherwise the anim flips to fall at apex
       // (vz ~0 → negative) before player has visually left the ground.
       this.play(moving || wishFwd !== 0 ? 'jump' : 'fall', false);
+    } else if (player.isSliding && this.actions.has('slide')) {
+      this.play('slide');
     } else if (player.isCrouching) {
       this.play('crouch');
     } else if (moving) {
@@ -643,7 +651,14 @@ export class ThreeCharacter {
     this.mixer?.update(dt);
     this.weaponMixer?.update(dt);
     this.skinTime += dt;
-    if (this.avatarScene) tickSkinAttachments(this.avatarScene, dt, this.skinTime);
+    if (this.avatarScene) {
+      tickSkinAttachments(
+        this.avatarScene,
+        dt,
+        this.skinTime,
+        weaponSway ? { ...weaponSway, moving: this.speed > 0.3 } : undefined
+      );
+    }
   }
 
   public destroy() {

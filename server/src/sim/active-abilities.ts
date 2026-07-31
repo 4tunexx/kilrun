@@ -2,11 +2,19 @@ import type { PlayerState } from '../schema/RoomState.js';
 import {
   getTimedBuffStatsByKey,
   getBurstEffectStatsByKey,
+  getEnergyCostForAbility,
   parseAbilityLevels,
   type AbilityLevels,
 } from '../../../shared/ability-progression.js';
 
-export type ActiveAbilityKey = 'visibility' | 'fly' | 'hook' | 'berserk' | 'bullet' | 'thunder';
+export type ActiveAbilityKey =
+  | 'visibility'
+  | 'fly'
+  | 'hook'
+  | 'berserk'
+  | 'bullet'
+  | 'thunder'
+  | 'backflip';
 
 export function applyAbilityLevelsToPlayer(
   player: PlayerState,
@@ -39,6 +47,22 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
   const level = levels[abilityKey] ?? 0;
   if (level <= 0) return false;
 
+  // Powers draw from the same energy pool as sprinting/jumping — block
+  // activation if the player can't afford it, and only spend once the
+  // effect actually applies below.
+  const energyCost = getEnergyCostForAbility(abilityKey);
+  if (energyCost > 0 && player.energy < energyCost) return false;
+
+  const applied = applyAbilityEffect(player, abilityKey, level, now);
+  if (!applied) return false;
+
+  if (energyCost > 0) {
+    player.energy = Math.max(0, player.energy - energyCost);
+  }
+  return true;
+}
+
+function applyAbilityEffect(player: PlayerState, abilityKey: string, level: number, now: number): boolean {
   const timedBuff = getTimedBuffStatsByKey(abilityKey, level);
   if (timedBuff.buffKind) {
     if (!timedBuff.durationMs) return false;
@@ -72,6 +96,18 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
     player.vz = Math.max(player.vz, 0.35);
     return true;
   }
+  if (burst.kind === 'range_dash') {
+    // Same range/pullDuration numbers as range_pull (hook), reused as an
+    // evasive dash — pushes AWAY from aim direction instead of toward it.
+    if (!burst.rangeMeters || !burst.pullDurationMs) return false;
+    player.ability.backflipEndsAt = now + burst.pullDurationMs;
+    const pushX = -Math.cos(player.aimAngle || 0) * burst.rangeMeters;
+    const pushY = -Math.sin(player.aimAngle || 0) * burst.rangeMeters;
+    player.x += pushX;
+    player.y += pushY;
+    player.vz = Math.max(player.vz, 0.5);
+    return true;
+  }
   if (burst.kind === 'radius_damage') {
     if (!burst.radiusMeters || !burst.damage) return false;
     player.ability.thunderEndsAt = now + 250;
@@ -100,6 +136,9 @@ export function tickActiveAbilityTimers(player: PlayerState, now: number): void 
   }
   if (player.ability.thunderEndsAt > 0 && now >= player.ability.thunderEndsAt) {
     player.ability.thunderEndsAt = 0;
+  }
+  if (player.ability.backflipEndsAt > 0 && now >= player.ability.backflipEndsAt) {
+    player.ability.backflipEndsAt = 0;
   }
 }
 

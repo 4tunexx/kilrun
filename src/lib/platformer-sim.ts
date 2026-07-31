@@ -6,6 +6,8 @@
  */
 
 import {
+  APEX_GRAVITY_MULT,
+  APEX_VZ_THRESHOLD,
   COLLISION_SKIN,
   COYOTE_TIME_MS,
   CROUCH_SPEED_MULTIPLIER,
@@ -47,10 +49,12 @@ export interface SimPad {
   width: number;
   depth: number;
   height?: number;
-  /** True analytic ramp support — dz per unit of local x/y (no rotYaw
-   * support client-side yet, matches unrotated ramp usage). 0/0 = flat. */
+  /** True analytic ramp support — dz per unit of local x/y. Ramps are never
+   * authored rotated today, so this stays in world axes regardless of rotYaw. */
   slopeGradX?: number;
   slopeGradY?: number;
+  /** Yaw in radians (sim XY) — mirrors server/src/sim/platforms.ts OBB support. */
+  rotYaw?: number;
   kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor' | 'water' | 'sand';
   boost?: number;
   conveyorSpeed?: number;
@@ -101,6 +105,12 @@ export interface SimScratch {
   wallJumpCooldownNormalY: number;
   /** Moving-platform carry (pad id / entityId under feet). */
   supportPadId: string | null;
+  /** Remaining ms of an active slide (0 = not sliding). */
+  slideMs: number;
+  /** Remaining ms before a new slide can start. */
+  slideCooldownMs: number;
+  /** Edge-detects the crouch button so holding it doesn't retrigger every tick. */
+  wasCrouchHeld: boolean;
 }
 
 export interface SimInput {
@@ -114,6 +124,7 @@ export interface SimInput {
 
 /** === Tunables from shared/sim-constants.ts === */
 const BASE_GRAVITY = GRAVITY;
+const BASE_APEX_GRAVITY_MULT = APEX_GRAVITY_MULT;
 const BASE_JUMP_VELOCITY = JUMP_VELOCITY;
 const BASE_DOUBLE_JUMP_VELOCITY = DOUBLE_JUMP_VELOCITY;
 const BASE_JUMP_CUT = JUMP_CUT_MULTIPLIER;
@@ -168,7 +179,39 @@ export function createSimScratch(): SimScratch {
     wallJumpCooldownNormalX: 0,
     wallJumpCooldownNormalY: 0,
     supportPadId: null,
+    slideMs: 0,
+    slideCooldownMs: 0,
+    wasCrouchHeld: false,
   };
+}
+
+/** World XY → pad-local XY (rotYaw around Z-up sim) — mirrors server/src/sim/platforms.ts. */
+function toPadLocal(
+  x: number,
+  y: number,
+  cx: number,
+  cy: number,
+  rotYaw: number
+): { lx: number; ly: number } {
+  const dx = x - cx;
+  const dy = y - cy;
+  if (!rotYaw) return { lx: dx, ly: dy };
+  const c = Math.cos(-rotYaw);
+  const s = Math.sin(-rotYaw);
+  return { lx: dx * c - dy * s, ly: dx * s + dy * c };
+}
+
+function fromPadLocal(
+  lx: number,
+  ly: number,
+  cx: number,
+  cy: number,
+  rotYaw: number
+): { x: number; y: number } {
+  if (!rotYaw) return { x: cx + lx, y: cy + ly };
+  const c = Math.cos(rotYaw);
+  const s = Math.sin(rotYaw);
+  return { x: cx + lx * c - ly * s, y: cy + lx * s + ly * c };
 }
 
 function findSupport(
@@ -187,8 +230,10 @@ function findSupport(
   for (const pad of pads) {
     const halfW = pad.width / 2;
     const halfD = pad.depth / 2;
-    if (x < pad.x - halfW - radius || x > pad.x + halfW + radius) continue;
-    if (y < pad.y - halfD - radius || y > pad.y + halfD + radius) continue;
+    const yaw = pad.rotYaw || 0;
+    const { lx, ly } = toPadLocal(x, y, pad.x, pad.y, yaw);
+    if (lx < -halfW - radius || lx > halfW + radius) continue;
+    if (ly < -halfD - radius || ly > halfD + radius) continue;
     const topZ = pad.z + (pad.slopeGradX || 0) * (x - pad.x) + (pad.slopeGradY || 0) * (y - pad.y);
     if (z < topZ - maxSnapDown || z > topZ + 0.55) continue;
     if (topZ <= z + 0.05) {
@@ -268,23 +313,31 @@ function resolveSolids(body: SimBody, pads: SimPad[]) {
     if (playerTop <= bottomZ + SKIN || playerBottom >= topZ - SKIN) continue;
     const halfW = pad.width / 2 + PLAYER_RADIUS;
     const halfD = pad.depth / 2 + PLAYER_RADIUS;
-    const dx = x - pad.x;
-    const dy = y - pad.y;
-    if (Math.abs(dx) >= halfW || Math.abs(dy) >= halfD) continue;
-    const pushX = halfW - Math.abs(dx);
-    const pushY = halfD - Math.abs(dy);
+    const yaw = pad.rotYaw || 0;
+    const { lx, ly } = toPadLocal(x, y, pad.x, pad.y, yaw);
+    if (Math.abs(lx) >= halfW || Math.abs(ly) >= halfD) continue;
+    const pushX = halfW - Math.abs(lx);
+    const pushY = halfD - Math.abs(ly);
     touchingWall = true;
+    let outLx = lx;
+    let outLy = ly;
+    let nLx = 0;
+    let nLy = 0;
     if (pushX < pushY) {
-      const sign = Math.sign(dx || 1);
-      x = pad.x + sign * halfW;
-      wallNormalX = sign;
-      wallNormalY = 0;
+      const sign = Math.sign(lx || 1);
+      outLx = sign * halfW;
+      nLx = sign;
     } else {
-      const sign = Math.sign(dy || 1);
-      y = pad.y + sign * halfD;
-      wallNormalX = 0;
-      wallNormalY = sign;
+      const sign = Math.sign(ly || 1);
+      outLy = sign * halfD;
+      nLy = sign;
     }
+    const world = fromPadLocal(outLx, outLy, pad.x, pad.y, yaw);
+    x = world.x;
+    y = world.y;
+    const nWorld = fromPadLocal(nLx, nLy, 0, 0, yaw);
+    wallNormalX = nWorld.x;
+    wallNormalY = nWorld.y;
   }
   return { x, y, touchingWall, wallNormalX, wallNormalY };
 }
@@ -304,6 +357,7 @@ export function stepPlatformer(
 ): SimBody {
   // Resolve tunables — prefer per-map overrides, fall back to base constants.
   const GRAVITY = physOpts?.gravity ?? BASE_GRAVITY;
+  const APEX_GRAV_MULT = physOpts?.apexGravMult ?? BASE_APEX_GRAVITY_MULT;
   const JUMP_VELOCITY = physOpts?.jumpVelocity ?? BASE_JUMP_VELOCITY;
   const DOUBLE_JUMP_VELOCITY = physOpts?.doubleJumpVelocity ?? BASE_DOUBLE_JUMP_VELOCITY;
   const JUMP_CUT = physOpts?.jumpCutMult ?? BASE_JUMP_CUT;
@@ -369,6 +423,37 @@ export function stepPlatformer(
 
   let grounded = !!support && body.vz <= 0.2;
   body.isGrounded = grounded;
+
+  // Slide (crouch while sprinting) — mirrors server/src/sim/movement.ts so
+  // Play Test and live prediction show the same speed-boosted burst instead
+  // of the toggle silently doing nothing. Slide-jump falls out for free:
+  // jumping only ever sets vz, so a jump mid-slide keeps the boosted
+  // velX/velY the player already had.
+  const SLIDE_ENABLED = physOpts?.slideEnabled ?? false;
+  const SLIDE_MULT = physOpts?.slideMult ?? 2.2;
+  const SLIDE_DURATION_MS = physOpts?.slideDurationMs ?? 600;
+  const SLIDE_COOLDOWN_MS = physOpts?.slideCooldownMs ?? 1000;
+  const crouchEdge = input.crouch && !scratch.wasCrouchHeld;
+  scratch.wasCrouchHeld = input.crouch;
+  if (
+    SLIDE_ENABLED &&
+    crouchEdge &&
+    input.sprint &&
+    grounded &&
+    wishMag > 0.2 &&
+    !scratch.exhausted &&
+    scratch.slideMs <= 0 &&
+    scratch.slideCooldownMs <= 0
+  ) {
+    scratch.slideMs = SLIDE_DURATION_MS;
+  }
+  if (scratch.slideMs > 0) {
+    maxSpeed = MAX_GROUND_SPEED * SLIDE_MULT;
+    scratch.slideMs = Math.max(0, scratch.slideMs - dt * 1000);
+    if (scratch.slideMs <= 0) scratch.slideCooldownMs = SLIDE_COOLDOWN_MS;
+  } else if (scratch.slideCooldownMs > 0) {
+    scratch.slideCooldownMs = Math.max(0, scratch.slideCooldownMs - dt * 1000);
+  }
 
   // Soft ground glue (mirrors server movement.ts). Stepped ramp pads change
   // topZ by small amounts each cell — hard-assigning body.z caused one-frame
@@ -530,7 +615,14 @@ export function stepPlatformer(
   if (!body.isGrounded) {
     const slidingOnWall =
       wallJumpEnabled && pushed.touchingWall && body.vz <= 0 && scratch.wallJumpLockoutMs <= 0;
-    const gravityThisTick = slidingOnWall ? GRAVITY * wallSlideGravMult : GRAVITY;
+    // Apex softening — mirrors server/src/sim/movement.ts so Play Test shows
+    // the same floaty-apex feel a map author dials in via apexGravMult.
+    const atApex = Math.abs(body.vz) <= Math.max(APEX_VZ_THRESHOLD, 1.5);
+    const gravityThisTick = slidingOnWall
+      ? GRAVITY * wallSlideGravMult
+      : atApex
+        ? GRAVITY * APEX_GRAV_MULT
+        : GRAVITY;
     body.vz = Math.max(-MAX_FALL, body.vz - gravityThisTick * dt);
     body.z += body.vz * dt;
 

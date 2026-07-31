@@ -41,6 +41,7 @@ export {
   getPowerDefinitionByKey,
   getTimedBuffStatsByKey,
   getBurstEffectStatsByKey,
+  getEnergyCostForAbility,
   STATIC_FALLBACK_POWERS,
   type PowerDefinitionRecord,
   type PowerEffectType,

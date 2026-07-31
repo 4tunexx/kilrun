@@ -61,7 +61,7 @@ function validateRecord(body: unknown): { ok: true; record: PowerDefinitionRecor
     name,
     description: String(b.description ?? ''),
     icon: String(b.icon ?? '✨'),
-    maxLevel: Math.max(1, Math.min(50, Number(b.maxLevel) || 10)),
+    maxLevel: Math.max(1, Math.min(50, Number(b.maxLevel) || 5)),
     unlockLevel: Math.max(0, Number(b.unlockLevel) || 0),
     prerequisites: Array.isArray(b.prerequisites)
       ? (b.prerequisites as { key: string; level: number }[])
