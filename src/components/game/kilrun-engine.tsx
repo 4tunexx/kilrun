@@ -1269,10 +1269,14 @@ export default function KilrunEngine({
           aria-hidden
           style={{
             opacity: 0,
+            backdropFilter: 'blur(7px)',
+            WebkitBackdropFilter: 'blur(7px)',
+            maskImage:
+              'radial-gradient(ellipse at center, transparent 38%, black 72%, black 100%)',
+            WebkitMaskImage:
+              'radial-gradient(ellipse at center, transparent 38%, black 72%, black 100%)',
             background:
-              'radial-gradient(ellipse at center, rgba(90,170,255,0) 38%, rgba(50,120,255,0.16) 72%, rgba(6,16,40,0.6) 100%)',
-            boxShadow: 'inset 0 0 160px 50px rgba(60,140,255,0.35)',
-            mixBlendMode: 'screen',
+              'radial-gradient(ellipse at center, rgba(0,0,0,0) 38%, rgba(4,8,16,0.4) 100%)',
           }}
         />
 
