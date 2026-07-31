@@ -25,6 +25,9 @@ interface LobbyViewProps {
   avatarUrl?: string;
   xpProgress?: number;
   isAdmin?: boolean;
+  /** Admin OR moderator — eligible for the reserved staff join seat
+   * (dev-only fallback path; production uses the verified join token). */
+  isStaff?: boolean;
   /** Competitive KP for Elo snapshot at join. */
   kp?: number;
   /** Premium membership active. */
@@ -43,6 +46,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   avatarUrl,
   xpProgress = 0,
   isAdmin = false,
+  isStaff,
   kp,
   isPremium = false,
   rankedAccess,
@@ -201,6 +205,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       // Privilege fields are unused when a verified token is present; kept for
       // local/dev servers with no join secret (onAuth falls back to options).
       isAdmin,
+      isStaff: isStaff ?? isAdmin,
       kp,
       isPremium,
       rankedAccess: canRanked,
@@ -217,6 +222,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       avatarUrl,
       joinToken,
       isAdmin,
+      isStaff,
       kp,
       isPremium,
       canRanked,

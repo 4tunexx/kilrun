@@ -762,6 +762,7 @@ export default function GameHubInterface({
           avatarUrl: user.avatarUrl,
           xpProgress,
           isAdmin: user.role === 'admin',
+          isStaff: showAdmin,
           kp,
           isPremium,
           rankedAccess,

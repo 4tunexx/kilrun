@@ -54,6 +54,7 @@ import dynamic from 'next/dynamic';
 import {
   findWeaponAttachment,
   resolveWeaponCombat,
+  type WeaponCombatKind,
 } from '@/lib/weapons';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { parseEquippedSkinsJson } from '@/lib/match-loadout';
@@ -1327,7 +1328,13 @@ export default function KilrunEngine({
               room={room}
               gameProgress={gameProgression.progression}
               runnersLeft={runnersLeft}
-              weaponKind={resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind}
+              // Server-authoritative — matches actual combat capability (e.g.
+              // a Deathrun runner is always melee-only regardless of what
+              // weapon skin is equipped in their profile loadout).
+              weaponKind={
+                (localPlayer.weaponKind as WeaponCombatKind | undefined) ??
+                resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind
+              }
             />
             <ModeStatusHud mode={mode} room={room} />
             <KillStreakBanner killStreak={localPlayer.killStreak ?? 0} />

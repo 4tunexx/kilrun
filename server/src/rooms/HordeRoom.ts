@@ -88,6 +88,8 @@ interface JoinOptions {
   username?: string;
   avatarUrl?: string;
   isAdmin?: boolean;
+  /** Admin OR moderator — eligible for the reserved staff join seat. */
+  isStaff?: boolean;
   kp?: number;
   equippedSkinsJson?: string;
   weaponCombat?: {
@@ -212,7 +214,10 @@ const MONSTER_STATS = {
  * Horde co-op — up to 4 survivors clear escalating waves from map monster spawns.
  */
 export class HordeRoom extends Room<RoomState> {
-  maxClients = 4;
+  /** Base capacity (default 4) + 1 reserved staff-only seat — see the
+   * `claims.isStaff` guard in onJoin. */
+  maxClients = 5;
+  private baseCapacity = 4;
 
   private latestInputs = new Map<string, PlayerInput>();
   private simScratch = new Map<string, PlayerSimScratch>();
@@ -224,6 +229,8 @@ export class HordeRoom extends Room<RoomState> {
   private hostSessionId: string | null = null;
   private customMapLoaded = false;
   private adminSessions = new Set<string>();
+  /** Admin OR moderator sessions — eligible for the reserved staff join seat. */
+  private staffSessions = new Set<string>();
   private lastChatAt = new Map<string, number>();
   /** sessionId → mute expiry ms (Date.now()-based). */
   private mutedUntil = new Map<string, number>();
@@ -603,7 +610,9 @@ export class HordeRoom extends Room<RoomState> {
           this.waveClearPauseMs = Math.max(0, settings.intermissionSec) * 1000;
         }
         if (typeof settings.maxPlayers === 'number' && Number.isFinite(settings.maxPlayers)) {
-          this.maxClients = Math.max(1, Math.min(4, Math.floor(settings.maxPlayers)));
+          this.baseCapacity = Math.max(1, Math.min(4, Math.floor(settings.maxPlayers)));
+          // +1 reserved staff-only seat — see the claims.isStaff guard in onJoin.
+          this.maxClients = this.baseCapacity + 1;
         }
         if (
           typeof settings.startingWave === 'number' &&
@@ -851,8 +860,16 @@ export class HordeRoom extends Room<RoomState> {
 
   async onJoin(client: Client, options: JoinOptions) {
     const claims = claimsFromAuth(client.auth, options);
+
+    // The last seat (maxClients = baseCapacity + 1) is reserved for staff —
+    // regular players cap out at baseCapacity even though maxClients is higher.
+    if (!claims.isStaff && this.state.players.size - this.staffSessions.size >= this.baseCapacity) {
+      throw new Error('Room is full');
+    }
+
     if (!this.hostSessionId) this.hostSessionId = client.sessionId;
     if (claims.isAdmin) this.adminSessions.add(client.sessionId);
+    if (claims.isStaff) this.staffSessions.add(client.sessionId);
 
     const player = new PlayerState();
     player.sessionId = client.sessionId;
@@ -885,6 +902,7 @@ export class HordeRoom extends Room<RoomState> {
     this.lastObstacleHitAt.delete(client.sessionId);
     this.lastShotAt.delete(client.sessionId);
     this.adminSessions.delete(client.sessionId);
+    this.staffSessions.delete(client.sessionId);
     this.lastChatAt.delete(client.sessionId);
     this.mutedUntil.delete(client.sessionId);
     if (this.hostSessionId === client.sessionId) {

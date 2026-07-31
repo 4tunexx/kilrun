@@ -34,9 +34,12 @@ import {
 import { isHitByShot, isPlayerHitByObstacle } from '../sim/collision.js';
 import {
   applyLoadoutToPlayer,
+  applySanitizedWeaponToPlayer,
+  sanitizeWeaponCombat,
   tryStartReload,
   finishReloadIfDue,
   tryConsumeShotAmmo,
+  type SanitizedWeapon,
 } from '../sim/loadout.js';
 import {
   applyPlatformCarry,
@@ -80,6 +83,8 @@ interface JoinOptions {
   avatarUrl?: string;
   /** Staff / map publisher — allowed to push MAIN custom maps. */
   isAdmin?: boolean;
+  /** Admin OR moderator — eligible for the reserved staff join seat. */
+  isStaff?: boolean;
   /** Compact SkinAttachment[] JSON for remote cosmetics. */
   equippedSkinsJson?: string;
   /** Optional weapon combat override (clamped server-side). */
@@ -148,7 +153,9 @@ const SURRENDER_VOTE_DURATION_MS = 30_000;
  * Clients send intent only (`input`); never trusted position.
  */
 export class DeathrunRoom extends Room<RoomState> {
-  maxClients = 8;
+  /** Base capacity (`maxRunners`, default 8) + 1 reserved staff-only seat —
+   * see the `claims.isStaff` guard in onJoin. */
+  maxClients = 9;
 
   private latestInputs = new Map<string, PlayerInput>();
   private simScratch = new Map<string, PlayerSimScratch>();
@@ -177,6 +184,13 @@ export class DeathrunRoom extends Room<RoomState> {
   /** First joiner — may load MAIN map; admins always may. */
   private hostSessionId: string | null = null;
   private adminSessions = new Set<string>();
+  /** Admin OR moderator sessions — eligible for the reserved staff join seat. */
+  private staffSessions = new Set<string>();
+  /** Each player's real equipped weapon (from their profile loadout), stashed
+   * at join time. Runners are melee/parkour-only regardless of what's
+   * equipped — this is restored only for whoever is picked as trapper each
+   * round (see `applyRoleWeapon`). */
+  private loadoutWeaponBySession = new Map<string, SanitizedWeapon>();
   private lastChatAt = new Map<string, number>();
   /** sessionId → mute expiry ms (Date.now()-based). */
   private mutedUntil = new Map<string, number>();
@@ -485,7 +499,8 @@ export class DeathrunRoom extends Room<RoomState> {
       }
       if (typeof settings.maxRunners === 'number') {
         this.maxRunners = Math.max(1, Math.min(8, Math.floor(settings.maxRunners)));
-        this.maxClients = this.maxRunners;
+        // +1 reserved staff-only seat — see the claims.isStaff guard in onJoin.
+        this.maxClients = this.maxRunners + 1;
       }
       if (typeof settings.trapperEnabled === 'boolean') {
         this.trapperEnabled = settings.trapperEnabled;
@@ -569,8 +584,16 @@ export class DeathrunRoom extends Room<RoomState> {
 
   async onJoin(client: Client, options: JoinOptions) {
     const claims = claimsFromAuth(client.auth, options);
+
+    // The last seat (maxClients = maxRunners + 1) is reserved for staff —
+    // regular players cap out at maxRunners even though maxClients is higher.
+    if (!claims.isStaff && this.state.players.size - this.staffSessions.size >= this.maxRunners) {
+      throw new Error('Room is full');
+    }
+
     if (!this.hostSessionId) this.hostSessionId = client.sessionId;
     if (claims.isAdmin) this.adminSessions.add(client.sessionId);
+    if (claims.isStaff) this.staffSessions.add(client.sessionId);
 
     const player = new PlayerState();
     player.sessionId = client.sessionId;
@@ -580,6 +603,23 @@ export class DeathrunRoom extends Room<RoomState> {
     player.avatarUrl = claims.avatarUrl || '';
     const trusted = await fetchTrustedLoadout(player.userId);
     applyLoadoutToPlayer(player, trusted ?? options);
+    // Stash the real equipped weapon before forcing melee below — restored
+    // only for whoever becomes trapper each round (see applyRoleWeapon).
+    this.loadoutWeaponBySession.set(client.sessionId, {
+      kind: player.weaponKind as SanitizedWeapon['kind'],
+      range: player.weaponRange,
+      damage: player.weaponDamage,
+      cooldownMs: player.weaponCooldownMs,
+      coneRadians: player.weaponConeRadians,
+      fireMode: (player.weaponFireMode as SanitizedWeapon['fireMode']) || 'semi',
+      pellets: player.weaponPellets,
+      adsZoomFov: player.weaponAdsZoomFov,
+      adsConeScale: player.weaponAdsConeScale,
+      hipfireConeScale: player.weaponHipfireConeScale,
+      magSize: player.weaponMagSize,
+      reserveAmmo: player.reserveAmmo,
+      reloadMs: player.weaponReloadMs,
+    });
     applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
     applyAbilityLevelsToPlayer(player, trusted?.abilityLevels ?? null);
     this.applySpawnPosition(player, this.state.players.size);
@@ -587,6 +627,7 @@ export class DeathrunRoom extends Room<RoomState> {
     player.energy = getMaxEnergyFor(player);
     player.role = 'runner';
     player.bodyColorIndex = BODY_COLOR_NONE;
+    this.applyRoleWeapon(player, client.sessionId);
 
     this.state.players.set(client.sessionId, player);
     this.latestInputs.set(client.sessionId, defaultInput());
@@ -600,6 +641,8 @@ export class DeathrunRoom extends Room<RoomState> {
     this.lastObstacleHitAt.delete(client.sessionId);
     this.lastShotAt.delete(client.sessionId);
     this.adminSessions.delete(client.sessionId);
+    this.staffSessions.delete(client.sessionId);
+    this.loadoutWeaponBySession.delete(client.sessionId);
     this.lastChatAt.delete(client.sessionId);
     this.mutedUntil.delete(client.sessionId);
     if (this.hostSessionId === client.sessionId) {
@@ -608,6 +651,23 @@ export class DeathrunRoom extends Room<RoomState> {
 
     if (this.state.phase === 'playing' && client.sessionId === this.state.trapperSessionId) {
       this.endRound('runner');
+    }
+  }
+
+  /**
+   * Deathrun is a chase/parkour mode — runners never carry a ranged weapon
+   * (no buy menu here either; this is "arms" only, i.e. the punch/melee
+   * ability), regardless of whatever weapon skin is equipped in their
+   * website loadout for Competitive/Horde. Only the trapper (randomly
+   * picked each round in startRound) is armed, using their real equipped
+   * weapon stashed at join time.
+   */
+  protected applyRoleWeapon(player: PlayerState, sessionId: string) {
+    if (player.role === 'trapper') {
+      const stashed = this.loadoutWeaponBySession.get(sessionId);
+      applySanitizedWeaponToPlayer(player, stashed ?? sanitizeWeaponCombat({}));
+    } else {
+      applySanitizedWeaponToPlayer(player, sanitizeWeaponCombat({ kind: 'melee' }));
     }
   }
 
@@ -742,6 +802,7 @@ export class DeathrunRoom extends Room<RoomState> {
         player.bodyColorIndex = colors.get(sessionId) ?? BODY_COLOR_NONE;
         this.resetPlayerOnSpawn(player, i);
         this.resetMatchTelemetry(player);
+        this.applyRoleWeapon(player, sessionId);
         this.simScratch.set(sessionId, createSimScratch());
       });
       this.state.trapperSessionId = '';
@@ -761,6 +822,7 @@ export class DeathrunRoom extends Room<RoomState> {
           player.role === 'runner' ? runnerLaneIndex++ : i
         );
         this.resetMatchTelemetry(player);
+        this.applyRoleWeapon(player, sessionId);
         this.simScratch.set(sessionId, createSimScratch());
       });
     }
