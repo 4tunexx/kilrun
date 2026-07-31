@@ -71,7 +71,7 @@ export interface TimedBuffParams {
   cooldownMs?: number;
 }
 
-export type BurstEffectKind = 'radius_damage' | 'range_pull';
+export type BurstEffectKind = 'radius_damage' | 'range_pull' | 'range_dash';
 
 export interface BurstEffectParams {
   kind: BurstEffectKind;
@@ -80,7 +80,8 @@ export interface BurstEffectParams {
   radiusPerLevelMeters?: number;
   damageBase?: number;
   damagePerLevel?: number;
-  // range_pull (hook-style)
+  // range_pull (hook-style) / range_dash (backflip-style — same numbers,
+  // pushes away from aim instead of toward it)
   rangeBaseMeters?: number;
   rangePerLevelMeters?: number;
   pullDurationBaseSec?: number;
@@ -375,6 +376,26 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
     },
     isCore: true,
     sortOrder: 10,
+  },
+  {
+    key: 'backflip',
+    name: 'Backflip',
+    description: 'Press Q to kick off an evasive backflip dash away from where you’re aiming.',
+    icon: '\u{1F938}',
+    maxLevel: 10,
+    unlockLevel: 32,
+    prerequisites: [{ key: 'jump', level: 3 }],
+    cost: { type: 'ramp', base: 1, step: 1 },
+    effectType: 'burst_effect',
+    effectParams: {
+      kind: 'range_dash',
+      rangeBaseMeters: 5,
+      rangePerLevelMeters: 0.6,
+      pullDurationBaseSec: 0.25,
+      pullDurationPerLevelSec: 0.02,
+    },
+    isCore: true,
+    sortOrder: 11,
   },
 ];
 

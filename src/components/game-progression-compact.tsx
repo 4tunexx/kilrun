@@ -18,6 +18,7 @@ import {
   BerserkIcon,
   BulletIcon,
   ThunderIcon,
+  BackflipIcon,
 } from '@/components/ability-icons';
 import {
   Popover,
@@ -37,6 +38,7 @@ const ABILITY_ICON_MAP: Record<string, React.ComponentType<{ className?: string 
   berserk: BerserkIcon,
   bullet: BulletIcon,
   thunder: ThunderIcon,
+  backflip: BackflipIcon,
 };
 
 /**

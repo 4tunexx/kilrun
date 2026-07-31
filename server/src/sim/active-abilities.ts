@@ -6,7 +6,14 @@ import {
   type AbilityLevels,
 } from '../../../shared/ability-progression.js';
 
-export type ActiveAbilityKey = 'visibility' | 'fly' | 'hook' | 'berserk' | 'bullet' | 'thunder';
+export type ActiveAbilityKey =
+  | 'visibility'
+  | 'fly'
+  | 'hook'
+  | 'berserk'
+  | 'bullet'
+  | 'thunder'
+  | 'backflip';
 
 export function applyAbilityLevelsToPlayer(
   player: PlayerState,
@@ -72,6 +79,18 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
     player.vz = Math.max(player.vz, 0.35);
     return true;
   }
+  if (burst.kind === 'range_dash') {
+    // Same range/pullDuration numbers as range_pull (hook), reused as an
+    // evasive dash — pushes AWAY from aim direction instead of toward it.
+    if (!burst.rangeMeters || !burst.pullDurationMs) return false;
+    player.ability.backflipEndsAt = now + burst.pullDurationMs;
+    const pushX = -Math.cos(player.aimAngle || 0) * burst.rangeMeters;
+    const pushY = -Math.sin(player.aimAngle || 0) * burst.rangeMeters;
+    player.x += pushX;
+    player.y += pushY;
+    player.vz = Math.max(player.vz, 0.5);
+    return true;
+  }
   if (burst.kind === 'radius_damage') {
     if (!burst.radiusMeters || !burst.damage) return false;
     player.ability.thunderEndsAt = now + 250;
@@ -100,6 +119,9 @@ export function tickActiveAbilityTimers(player: PlayerState, now: number): void 
   }
   if (player.ability.thunderEndsAt > 0 && now >= player.ability.thunderEndsAt) {
     player.ability.thunderEndsAt = 0;
+  }
+  if (player.ability.backflipEndsAt > 0 && now >= player.ability.backflipEndsAt) {
+    player.ability.backflipEndsAt = 0;
   }
 }
 

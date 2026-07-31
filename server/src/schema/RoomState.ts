@@ -27,6 +27,7 @@ export class AbilityLoadoutState extends Schema {
   @type('number') berserkEndsAt = 0;
   @type('number') bulletEndsAt = 0;
   @type('number') thunderEndsAt = 0;
+  @type('number') backflipEndsAt = 0;
 }
 
 /** A single networked player -- position/aim are authoritative (server-simulated). */

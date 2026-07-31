@@ -1089,7 +1089,8 @@ export default function KilrunEngine({
           inputManager.consumeAbilityPulse('bullet') ??
           inputManager.consumeAbilityPulse('thunder') ??
           inputManager.consumeAbilityPulse('visibility') ??
-          inputManager.consumeAbilityPulse('fly');
+          inputManager.consumeAbilityPulse('fly') ??
+          inputManager.consumeAbilityPulse('backflip');
         if (abilityPulse && !gameMenuOpenRef.current && localSessionId && localState) {
           connectionRef.current?.sendActivateAbility(abilityPulse);
         }

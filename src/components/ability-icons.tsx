@@ -12,6 +12,7 @@ import {
   PawPrint,
   Target,
   CloudLightning,
+  RotateCcw,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -26,3 +27,4 @@ export const HookIcon: LucideIcon = Anchor;
 export const BerserkIcon: LucideIcon = PawPrint;
 export const BulletIcon: LucideIcon = Target;
 export const ThunderIcon: LucideIcon = CloudLightning;
+export const BackflipIcon: LucideIcon = RotateCcw;

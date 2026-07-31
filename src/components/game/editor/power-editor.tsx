@@ -60,6 +60,7 @@ const BUFF_KIND_OPTIONS: { value: TimedBuffKind; label: string }[] = [
 const BURST_KIND_OPTIONS: { value: BurstEffectKind; label: string }[] = [
   { value: 'radius_damage', label: 'Radius Damage Pulse (thunder-style)' },
   { value: 'range_pull', label: 'Range + Pull (hook-style)' },
+  { value: 'range_dash', label: 'Range + Dash away (backflip-style)' },
 ];
 
 function emptyDraft(sortOrder: number): PowerDefinitionRecord {

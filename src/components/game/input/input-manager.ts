@@ -129,7 +129,9 @@ export class InputManager {
     return true;
   }
 
-  public consumeAbilityPulse(ability: 'hook' | 'berserk' | 'bullet' | 'thunder' | 'visibility' | 'fly'): string | null {
+  public consumeAbilityPulse(
+    ability: 'hook' | 'berserk' | 'bullet' | 'thunder' | 'visibility' | 'fly' | 'backflip'
+  ): string | null {
     const key = this.getAbilityKey(ability);
     const down = this.keyboard.isPressed(key);
     const wasDown = this.abilityWasDown.get(ability) ?? false;
@@ -142,7 +144,9 @@ export class InputManager {
     return ability;
   }
 
-  private getAbilityKey(ability: 'hook' | 'berserk' | 'bullet' | 'thunder' | 'visibility' | 'fly'): string {
+  private getAbilityKey(
+    ability: 'hook' | 'berserk' | 'bullet' | 'thunder' | 'visibility' | 'fly' | 'backflip'
+  ): string {
     switch (ability) {
       case 'hook':
         return 'h';
@@ -156,6 +160,8 @@ export class InputManager {
         return 'z';
       case 'fly':
         return 'x';
+      case 'backflip':
+        return 'q';
     }
   }
 }
