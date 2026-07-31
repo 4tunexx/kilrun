@@ -26,6 +26,7 @@ import {
 } from './utils/constants';
 import { HUD } from './ui/hud';
 import { KillStreakBanner } from './ui/kill-streak-banner';
+import { MultiKillCounter } from './ui/multi-kill-counter';
 import { GameMenu, LevelUpPopup, useGameProgression } from './ui/game-menu';
 import { Scoreboard } from './ui/scoreboard';
 import { PauseMenu, useGameFullscreen } from './ui/pause-menu';
@@ -1304,6 +1305,7 @@ export default function KilrunEngine({
             />
             <ModeStatusHud mode={mode} room={room} />
             <KillStreakBanner killStreak={localPlayer.killStreak ?? 0} />
+            <MultiKillCounter killStreak={localPlayer.killStreak ?? 0} />
           </>
         )}
         {room.phase === 'lobby' &&
