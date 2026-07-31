@@ -16,6 +16,7 @@ import {
   type PowerDefinitionRecord,
 } from '@shared/power-definitions';
 import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
+import { playSound } from '../effects/soundboard';
 
 /** Flat-top hexagon — matches the shape used by the admin Power Editor so
  * both surfaces share a visual language. */
@@ -336,6 +337,11 @@ export function LevelUpPopup({
   event: { fromLevel: number; toLevel: number; unlocked: AbilityDefinition[] } | null;
   onDismiss: () => void;
 }) {
+  useEffect(() => {
+    if (event) playSound('level_up');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event]);
+
   if (!event) return null;
   return (
     <div className="absolute inset-0 z-[270] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto p-4">
@@ -458,6 +464,7 @@ export function useGameProgression(userId: string | null | undefined) {
         .then((snap) => {
           setProgression(snap);
           checkLevelUp(snap);
+          playSound('skill_point_spent');
         })
         .catch((err) => setError(err instanceof Error ? err.message : 'Upgrade failed'))
         .finally(() => setUpgrading(null));

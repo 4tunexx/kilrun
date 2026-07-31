@@ -977,6 +977,7 @@ export class HordeRoom extends Room<RoomState> {
           this.clearMonsters();
           for (const player of this.state.players.values()) {
             player.kills = 0; player.deaths = 0;
+            player.killStreak = 0;
             player.score = 0;
             player.distance = 0;
             player.xpEarned = 0;
@@ -1005,6 +1006,7 @@ export class HordeRoom extends Room<RoomState> {
       player.isAlive = true;
       player.hasFinished = false;
       player.kills = 0; player.deaths = 0;
+      player.killStreak = 0;
       player.score = 0;
       player.distance = 0;
       player.xpEarned = 0;
@@ -1498,10 +1500,26 @@ export class HordeRoom extends Room<RoomState> {
 
     for (const { mon, dmg } of dmgById.values()) {
       mon.hp -= dmg;
+      this.sendHitFx(shooterSessionId, dmg, mon.x, mon.y, (mon.z ?? 0) + 1.4, 'monster');
       if (mon.hp <= 0) {
         this.killMonster(mon.id, shooterSessionId);
       }
     }
+  }
+
+  /** Tells the ATTACKER's own client a hit landed (amount + world position)
+   * so it can pop a floating damage number — a targeted send, not a
+   * broadcast, since only the attacker needs to see their own hit numbers. */
+  private sendHitFx(
+    attackerSessionId: string | undefined,
+    amount: number,
+    x: number,
+    y: number,
+    z: number,
+    kind: 'player' | 'monster' = 'player'
+  ): void {
+    if (!attackerSessionId || amount <= 0) return;
+    this.clients.getById(attackerSessionId)?.send('hitFx', { x, y, z, amount: Math.round(amount), kind });
   }
 
   private killMonster(id: string, shooterSessionId?: string) {
@@ -1515,6 +1533,7 @@ export class HordeRoom extends Room<RoomState> {
       const shooter = this.state.players.get(shooterSessionId);
       if (shooter) {
         shooter.kills += 1;
+        shooter.killStreak += 1;
         shooter.score = shooter.kills;
         shooter.credits = (shooter.credits || 0) + this.creditsPerKill;
       }
@@ -1536,7 +1555,10 @@ export class HordeRoom extends Room<RoomState> {
     player.health = Math.max(0, player.health - dmg);
     if (player.health <= 0) {
       player.isAlive = false;
-      if (wasAlive) player.deaths = (player.deaths || 0) + 1;
+      if (wasAlive) {
+        player.deaths = (player.deaths || 0) + 1;
+        player.killStreak = 0;
+      }
     }
   }
 

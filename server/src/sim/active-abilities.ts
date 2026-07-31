@@ -3,8 +3,11 @@ import {
   getTimedBuffStatsByKey,
   getBurstEffectStatsByKey,
   getEnergyCostForAbility,
+  getCooldownForAbility,
+  getAbilitySlotKind,
   parseAbilityLevels,
   type AbilityLevels,
+  type AbilitySlotKind,
 } from '../../../shared/ability-progression.js';
 
 export type ActiveAbilityKey =
@@ -32,6 +35,53 @@ export function getPlayerAbilityLevels(player: PlayerState): AbilityLevels {
   }
 }
 
+function getSlotCooldownEndsAt(player: PlayerState, slot: AbilitySlotKind): number {
+  switch (slot) {
+    case 'visibility':
+      return player.ability.visibilityCooldownEndsAt;
+    case 'fly':
+      return player.ability.flyCooldownEndsAt;
+    case 'berserk':
+      return player.ability.berserkCooldownEndsAt;
+    case 'bullet':
+      return player.ability.bulletCooldownEndsAt;
+    case 'hook':
+      return player.ability.hookCooldownEndsAt;
+    case 'backflip':
+      return player.ability.backflipCooldownEndsAt;
+    case 'thunder':
+      return player.ability.thunderCooldownEndsAt;
+    default:
+      return 0;
+  }
+}
+
+function setSlotCooldownEndsAt(player: PlayerState, slot: AbilitySlotKind, endsAt: number): void {
+  switch (slot) {
+    case 'visibility':
+      player.ability.visibilityCooldownEndsAt = endsAt;
+      break;
+    case 'fly':
+      player.ability.flyCooldownEndsAt = endsAt;
+      break;
+    case 'berserk':
+      player.ability.berserkCooldownEndsAt = endsAt;
+      break;
+    case 'bullet':
+      player.ability.bulletCooldownEndsAt = endsAt;
+      break;
+    case 'hook':
+      player.ability.hookCooldownEndsAt = endsAt;
+      break;
+    case 'backflip':
+      player.ability.backflipCooldownEndsAt = endsAt;
+      break;
+    case 'thunder':
+      player.ability.thunderCooldownEndsAt = endsAt;
+      break;
+  }
+}
+
 /**
  * Generic activation: dispatches on the power's EFFECT TEMPLATE (timed_buff
  * buffKind / burst_effect kind), not the literal ability key. This means a
@@ -47,6 +97,9 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
   const level = levels[abilityKey] ?? 0;
   if (level <= 0) return false;
 
+  const slot = getAbilitySlotKind(abilityKey);
+  if (slot && getSlotCooldownEndsAt(player, slot) > now) return false;
+
   // Powers draw from the same energy pool as sprinting/jumping — block
   // activation if the player can't afford it, and only spend once the
   // effect actually applies below.
@@ -58,6 +111,10 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
 
   if (energyCost > 0) {
     player.energy = Math.max(0, player.energy - energyCost);
+  }
+  if (slot) {
+    const cooldownMs = getCooldownForAbility(abilityKey);
+    if (cooldownMs > 0) setSlotCooldownEndsAt(player, slot, now + cooldownMs);
   }
   return true;
 }
@@ -139,6 +196,27 @@ export function tickActiveAbilityTimers(player: PlayerState, now: number): void 
   }
   if (player.ability.backflipEndsAt > 0 && now >= player.ability.backflipEndsAt) {
     player.ability.backflipEndsAt = 0;
+  }
+  if (player.ability.visibilityCooldownEndsAt > 0 && now >= player.ability.visibilityCooldownEndsAt) {
+    player.ability.visibilityCooldownEndsAt = 0;
+  }
+  if (player.ability.flyCooldownEndsAt > 0 && now >= player.ability.flyCooldownEndsAt) {
+    player.ability.flyCooldownEndsAt = 0;
+  }
+  if (player.ability.hookCooldownEndsAt > 0 && now >= player.ability.hookCooldownEndsAt) {
+    player.ability.hookCooldownEndsAt = 0;
+  }
+  if (player.ability.berserkCooldownEndsAt > 0 && now >= player.ability.berserkCooldownEndsAt) {
+    player.ability.berserkCooldownEndsAt = 0;
+  }
+  if (player.ability.bulletCooldownEndsAt > 0 && now >= player.ability.bulletCooldownEndsAt) {
+    player.ability.bulletCooldownEndsAt = 0;
+  }
+  if (player.ability.thunderCooldownEndsAt > 0 && now >= player.ability.thunderCooldownEndsAt) {
+    player.ability.thunderCooldownEndsAt = 0;
+  }
+  if (player.ability.backflipCooldownEndsAt > 0 && now >= player.ability.backflipCooldownEndsAt) {
+    player.ability.backflipCooldownEndsAt = 0;
   }
 }
 

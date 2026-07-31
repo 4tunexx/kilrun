@@ -370,6 +370,19 @@ export default function ProfileView({ userId }: { userId: string }) {
             </div>
           )}
 
+          <div>
+            <h3 className="text-base font-semibold text-white mb-1">Power Skill Tree</h3>
+            <p className="text-xs text-slate-400 mb-3">
+              In-match level, Skill Points, and power upgrades — earned by playing. Spend points
+              here or from the in-game menu (press M during a match). Separate from your account
+              level.
+            </p>
+            <PowerSkillTreeLauncher
+              userId={userId}
+              username={user?.username ?? 'Player'}
+              avatarUrl={user?.avatarUrl ?? undefined}
+            />
+          </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
             <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
@@ -551,19 +564,6 @@ export default function ProfileView({ userId }: { userId: string }) {
               </Tabs>
             </CardContent>
           </Card>
-          <div>
-            <h3 className="text-base font-semibold text-white mb-1">Power Skill Tree</h3>
-            <p className="text-xs text-slate-400 mb-3">
-              In-match level, Skill Points, and power upgrades — earned by playing. Spend points
-              here or from the in-game menu (press M during a match). Separate from your account
-              level.
-            </p>
-            <PowerSkillTreeLauncher
-              userId={userId}
-              username={user?.username ?? 'Player'}
-              avatarUrl={user?.avatarUrl ?? undefined}
-            />
-          </div>
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>
               <CardTitle className="text-base">Legacy Deathrun runs</CardTitle>

@@ -92,6 +92,9 @@ export interface BurstEffectParams {
   /** Energy consumed from the shared sprint/jump energy pool on activation
    * (0/undefined = free). Activation is blocked if the player has less. */
   energyCost?: number;
+  /** Cooldown in ms before this power can be activated again (0/undefined =
+   * no cooldown). Drives the HUD's radial recharge ring. */
+  cooldownMs?: number;
 }
 
 export type PowerEffectParams = StatBonusParams | TimedBuffParams | BurstEffectParams;
@@ -177,17 +180,19 @@ export function effectLabelGeneric(def: PowerDefinitionRecord, level: number): s
     const params = def.effectParams as TimedBuffParams;
     const ms = timedBuffDurationMs(params, level);
     const energySuffix = params.energyCost ? ` · ${params.energyCost} energy` : '';
-    return `${(ms / 1000).toFixed(1)}s duration${energySuffix}`;
+    const cooldownSuffix = params.cooldownMs ? ` · ${(params.cooldownMs / 1000).toFixed(0)}s cooldown` : '';
+    return `${(ms / 1000).toFixed(1)}s duration${energySuffix}${cooldownSuffix}`;
   }
   // burst_effect
   if (level <= 0) return 'Locked';
   const stats = burstEffectStats(def.effectParams as BurstEffectParams, level);
   const params = def.effectParams as BurstEffectParams;
   const energySuffix = params.energyCost ? ` · ${params.energyCost} energy` : '';
+  const cooldownSuffix = params.cooldownMs ? ` · ${(params.cooldownMs / 1000).toFixed(0)}s cooldown` : '';
   if (params.kind === 'radius_damage') {
-    return `${stats.radiusMeters.toFixed(1)}m radius · ${stats.damage} dmg${energySuffix}`;
+    return `${stats.radiusMeters.toFixed(1)}m radius · ${stats.damage} dmg${energySuffix}${cooldownSuffix}`;
   }
-  return `${stats.rangeMeters.toFixed(1)}m range · ${(stats.pullDurationMs / 1000).toFixed(2)}s pull${energySuffix}`;
+  return `${stats.rangeMeters.toFixed(1)}m range · ${(stats.pullDurationMs / 1000).toFixed(2)}s pull${energySuffix}${cooldownSuffix}`;
 }
 
 function statLabel(stat: StatBonusStat): string {
@@ -272,7 +277,13 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
     prerequisites: [],
     cost: { type: 'ramp', base: 1, step: 1 },
     effectType: 'timed_buff',
-    effectParams: { buffKind: 'invisibility', durationBaseSec: 2, durationPerLevelSec: 0.8, energyCost: 20 },
+    effectParams: {
+      buffKind: 'invisibility',
+      durationBaseSec: 2,
+      durationPerLevelSec: 0.8,
+      energyCost: 20,
+      cooldownMs: 12000,
+    },
     isCore: true,
     sortOrder: 3,
   },
@@ -286,7 +297,13 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
     prerequisites: [{ key: 'visibility', level: 3 }],
     cost: { type: 'ramp', base: 1, step: 1 },
     effectType: 'timed_buff',
-    effectParams: { buffKind: 'unlimited_ammo', durationBaseSec: 3, durationPerLevelSec: 0.6, energyCost: 20 },
+    effectParams: {
+      buffKind: 'unlimited_ammo',
+      durationBaseSec: 3,
+      durationPerLevelSec: 0.6,
+      energyCost: 20,
+      cooldownMs: 15000,
+    },
     isCore: true,
     sortOrder: 4,
   },
@@ -335,6 +352,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
       pullDurationBaseSec: 0.4,
       pullDurationPerLevelSec: 0.05,
       energyCost: 15,
+      cooldownMs: 6000,
     },
     isCore: true,
     sortOrder: 7,
@@ -349,7 +367,13 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
     prerequisites: [{ key: 'hook', level: 3 }],
     cost: { type: 'ramp', base: 1, step: 1 },
     effectType: 'timed_buff',
-    effectParams: { buffKind: 'fly', durationBaseSec: 1.5, durationPerLevelSec: 0.7, energyCost: 25 },
+    effectParams: {
+      buffKind: 'fly',
+      durationBaseSec: 1.5,
+      durationPerLevelSec: 0.7,
+      energyCost: 25,
+      cooldownMs: 14000,
+    },
     isCore: true,
     sortOrder: 8,
   },
@@ -363,7 +387,13 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
     prerequisites: [{ key: 'punch', level: 5 }],
     cost: { type: 'ramp', base: 2, step: 1 },
     effectType: 'timed_buff',
-    effectParams: { buffKind: 'berserk', durationBaseSec: 3, durationPerLevelSec: 0.6, energyCost: 30 },
+    effectParams: {
+      buffKind: 'berserk',
+      durationBaseSec: 3,
+      durationPerLevelSec: 0.6,
+      energyCost: 30,
+      cooldownMs: 20000,
+    },
     isCore: true,
     sortOrder: 9,
   },
@@ -384,6 +414,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
       damageBase: 20,
       damagePerLevel: 8,
       energyCost: 25,
+      cooldownMs: 10000,
     },
     isCore: true,
     sortOrder: 10,
@@ -405,6 +436,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
       pullDurationBaseSec: 0.25,
       pullDurationPerLevelSec: 0.02,
       energyCost: 15,
+      cooldownMs: 5000,
     },
     isCore: true,
     sortOrder: 11,
@@ -580,6 +612,55 @@ export function getEnergyCostForAbility(key: string): number {
   if (def.effectType === 'timed_buff') return Math.max(0, (def.effectParams as TimedBuffParams).energyCost ?? 0);
   if (def.effectType === 'burst_effect') return Math.max(0, (def.effectParams as BurstEffectParams).energyCost ?? 0);
   return 0;
+}
+
+/** Cooldown (ms) before this power can be activated again. 0 = no cooldown. */
+export function getCooldownForAbility(key: string): number {
+  const def = getPowerDefinitionByKey(key);
+  if (!def) return 0;
+  if (def.effectType === 'timed_buff') return Math.max(0, (def.effectParams as TimedBuffParams).cooldownMs ?? 0);
+  if (def.effectType === 'burst_effect') return Math.max(0, (def.effectParams as BurstEffectParams).cooldownMs ?? 0);
+  return 0;
+}
+
+/** The 7 fixed `PlayerState.ability` field slots (visibilityEndsAt,
+ * hookEndsAt, ...) — every timed_buff/burst_effect power (core or custom)
+ * maps onto exactly one of these based on which mechanic it wraps, same
+ * dispatch-by-mechanism rule `activateAbility()` uses server-side. Kept here
+ * so server (which slot to set) and client (which slot to read for the HUD
+ * cooldown ring) share one mapping instead of two that can drift apart. */
+export type AbilitySlotKind = 'visibility' | 'fly' | 'berserk' | 'bullet' | 'hook' | 'backflip' | 'thunder';
+
+export function getAbilitySlotKind(key: string): AbilitySlotKind | null {
+  const def = getPowerDefinitionByKey(key);
+  if (!def) return null;
+  if (def.effectType === 'timed_buff') {
+    switch ((def.effectParams as TimedBuffParams).buffKind) {
+      case 'invisibility':
+        return 'visibility';
+      case 'fly':
+        return 'fly';
+      case 'berserk':
+        return 'berserk';
+      case 'unlimited_ammo':
+        return 'bullet';
+      default:
+        return null;
+    }
+  }
+  if (def.effectType === 'burst_effect') {
+    switch ((def.effectParams as BurstEffectParams).kind) {
+      case 'range_pull':
+        return 'hook';
+      case 'range_dash':
+        return 'backflip';
+      case 'radius_damage':
+        return 'thunder';
+      default:
+        return null;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

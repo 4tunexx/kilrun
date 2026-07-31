@@ -6,6 +6,30 @@
 export type PlayerRole = 'trapper' | 'runner' | 'survivor' | 'team_a' | 'team_b';
 export type MatchPhase = 'lobby' | 'countdown' | 'playing' | 'results';
 
+/** Mirrors server AbilityLoadoutState — power buff/cooldown timestamps
+ * (Date.now() ms) used to drive the HUD's radial recharge ring. */
+export interface NetAbilityLoadoutState {
+  maxHealthBonus?: number;
+  speedMult?: number;
+  jumpMult?: number;
+  maxEnergyBonus?: number;
+  punchDamageMult?: number;
+  visibilityEndsAt?: number;
+  flyEndsAt?: number;
+  hookEndsAt?: number;
+  berserkEndsAt?: number;
+  bulletEndsAt?: number;
+  thunderEndsAt?: number;
+  backflipEndsAt?: number;
+  visibilityCooldownEndsAt?: number;
+  flyCooldownEndsAt?: number;
+  hookCooldownEndsAt?: number;
+  berserkCooldownEndsAt?: number;
+  bulletCooldownEndsAt?: number;
+  thunderCooldownEndsAt?: number;
+  backflipCooldownEndsAt?: number;
+}
+
 export interface NetPlayerState {
   sessionId: string;
   userId: string;
@@ -67,11 +91,15 @@ export interface NetPlayerState {
   /** Per-match telemetry / server-authored rewards. */
   kills?: number;
   deaths?: number;
+  /** Consecutive kills (any source, including monsters) without dying. */
+  killStreak?: number;
   score?: number;
   distance?: number;
   xpEarned?: number;
   vpEarned?: number;
   kpDelta?: number;
+  /** Power buff/cooldown timestamps — see NetAbilityLoadoutState. */
+  ability?: NetAbilityLoadoutState;
 }
 
 /** Keep in sync with server PlatformState.kind / SimPlatformKind. */
@@ -182,4 +210,14 @@ export interface ChatMessage {
   scope: 'all' | 'team';
   /** Server Date.now() at send time. */
   at: number;
+}
+
+/** Sent to the ATTACKER only (never broadcast) when their hit lands — drives
+ * the floating damage-number popup at the hit's server world position. */
+export interface HitFxMessage {
+  x: number;
+  y: number;
+  z: number;
+  amount: number;
+  kind: 'player' | 'monster';
 }

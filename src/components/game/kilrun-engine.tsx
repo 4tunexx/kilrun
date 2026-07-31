@@ -11,6 +11,8 @@ import { InputManager } from './input/input-manager';
 import type { DualJoystick } from './input/dual-joystick';
 import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
 import { SprintParticles } from './effects/sprint-particles';
+import { DamageNumberFx } from './effects/damage-numbers';
+import { playSound, preloadSoundboard } from './effects/soundboard';
 import { ThreeCharacter } from './entities/three-character';
 import { ThreeMap } from './entities/three-map';
 import { CustomMapOverlay } from './entities/custom-map-overlay';
@@ -24,6 +26,8 @@ import {
   WORLD_HEIGHT,
 } from './utils/constants';
 import { HUD } from './ui/hud';
+import { KillStreakBanner } from './ui/kill-streak-banner';
+import { MultiKillCounter } from './ui/multi-kill-counter';
 import { GameMenu, LevelUpPopup, useGameProgression } from './ui/game-menu';
 import { Scoreboard } from './ui/scoreboard';
 import { PauseMenu, useGameFullscreen } from './ui/pause-menu';
@@ -572,6 +576,9 @@ export default function KilrunEngine({
     charactersRef.current = characters;
     const inputManager = new InputManager(hostElement, isMobile);
     joystickRef.current = inputManager.joystick;
+    const damageNumbers = new DamageNumberFx(hostElement);
+    connectionRef.current?.onHitFx((msg) => damageNumbers.spawn(msg.x, msg.y, msg.z, msg.amount, msg.kind));
+    preloadSoundboard();
     let envHandle: { dispose: () => void } | null = null;
     let envFloor: THREE.Mesh | null = null;
 
@@ -628,6 +635,9 @@ export default function KilrunEngine({
     let shakeAmp = 0;
     let wasGroundedForShake = false;
     let lastHealthForShake: number | null = null;
+    let wasAliveForDeathSound = true;
+    let wasSprintingForSound = false;
+    let wasSlidingForSound = false;
     /** Sprint/slide screen FX intensity, eased toward 0/1 each frame. */
     let sprintFx = 0;
     const sprintParticles = new SprintParticles(world.camera);
@@ -901,6 +911,10 @@ export default function KilrunEngine({
           (predictedBody?.isGrounded ?? true) &&
           horizSpeed > 4.5;
         const sliding = predictedScratch.slideMs > 0;
+        if (sprinting && !wasSprintingForSound) playSound('sprint_start');
+        wasSprintingForSound = sprinting;
+        if (sliding && !wasSlidingForSound) playSound('slide');
+        wasSlidingForSound = sliding;
         const targetFx = sliding ? 1 : sprinting ? Math.min(1, horizSpeed / 9) : 0;
         const rate = targetFx > sprintFx ? 7 : 3.2;
         sprintFx += (targetFx - sprintFx) * Math.min(1, dt * rate);
@@ -910,6 +924,8 @@ export default function KilrunEngine({
           sprintFxRef.current.style.opacity = String(sprintFx);
         }
       }
+
+      damageNumbers.update(dt, world.camera, hostElement.clientWidth, hostElement.clientHeight);
 
       const swayCombat = ensureCombatSettings(
         customDocRef.current ?? ({ combatSettings: {} } as MapDocument)
@@ -926,13 +942,27 @@ export default function KilrunEngine({
         const groundedNow = predictedBody?.isGrounded ?? localState.isGrounded;
         if (!wasGroundedForShake && groundedNow) {
           shakeAmp = Math.max(shakeAmp, swayCombat.shakeOnLand ?? 0);
+          playSound('land');
+        }
+        // Left the ground with upward velocity = jumped (vs. walking off an
+        // edge, which leaves the ground with ~0 initial vz).
+        if (wasGroundedForShake && !groundedNow && (predictedBody?.vz ?? 0) > 0.5) {
+          playSound('jump');
         }
         wasGroundedForShake = groundedNow;
 
         if (lastHealthForShake !== null && localState.health < lastHealthForShake) {
           shakeAmp = Math.max(shakeAmp, swayCombat.shakeOnHit ?? 0);
+          playSound('hit_taken');
         }
         lastHealthForShake = localState.health;
+
+        if (wasAliveForDeathSound && !localState.isAlive) {
+          playSound('player_death');
+        } else if (!wasAliveForDeathSound && localState.isAlive) {
+          playSound('respawn');
+        }
+        wasAliveForDeathSound = localState.isAlive;
       }
       characters.forEach((view, sessionId) => {
         const player = playersRef.current.get(sessionId);
@@ -1100,6 +1130,7 @@ export default function KilrunEngine({
         const mapWeaponDef = customDocRef.current?.weaponDef;
         if (inputManager.consumeReloadPulse()) {
           connectionRef.current?.sendReload();
+          playSound('weapon_reload');
           const localView = localSessionId ? characters.get(localSessionId) : undefined;
           localView?.triggerAttack('punch');
           if (mapWeaponDef?.reloadClip) {
@@ -1118,6 +1149,7 @@ export default function KilrunEngine({
           inputManager.consumeAbilityPulse('backflip');
         if (abilityPulse && !gameMenuOpenRef.current && localSessionId && localState) {
           connectionRef.current?.sendActivateAbility(abilityPulse);
+          playSound(`power_${abilityPulse}`);
         }
         const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
         const localWep = localSessionId ? playersRef.current.get(localSessionId) : undefined;
@@ -1137,6 +1169,7 @@ export default function KilrunEngine({
           const combat = resolveWeaponCombat(weaponAtt);
           const localView = characters.get(localSessionId);
           localView?.triggerAttack(combat.attackStyle ?? 'attack');
+          playSound(combat.kind === 'melee' || localWep?.weaponKind === 'melee' ? 'melee_punch' : 'weapon_fire');
           const kickDeg = combatFeel.recoilKickDeg ?? 2;
           recoilPitch += (kickDeg * Math.PI) / 180;
           shakeAmp = Math.max(shakeAmp, combatFeel.shakeOnFire ?? 0.015);
@@ -1214,6 +1247,7 @@ export default function KilrunEngine({
       if (document.pointerLockElement) document.exitPointerLock?.();
       characters.forEach((c) => c.destroy());
       sprintParticles.dispose();
+      damageNumbers.dispose();
       overlay.destroy();
       map.destroy();
       envHandle?.dispose();
@@ -1269,10 +1303,14 @@ export default function KilrunEngine({
           aria-hidden
           style={{
             opacity: 0,
+            backdropFilter: 'blur(7px)',
+            WebkitBackdropFilter: 'blur(7px)',
+            maskImage:
+              'radial-gradient(ellipse at center, transparent 56%, black 94%, black 100%)',
+            WebkitMaskImage:
+              'radial-gradient(ellipse at center, transparent 56%, black 94%, black 100%)',
             background:
-              'radial-gradient(ellipse at center, rgba(90,170,255,0) 38%, rgba(50,120,255,0.16) 72%, rgba(6,16,40,0.6) 100%)',
-            boxShadow: 'inset 0 0 160px 50px rgba(60,140,255,0.35)',
-            mixBlendMode: 'screen',
+              'radial-gradient(ellipse at center, rgba(0,0,0,0) 56%, rgba(4,8,16,0.35) 100%)',
           }}
         />
 
@@ -1292,6 +1330,8 @@ export default function KilrunEngine({
               weaponKind={resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind}
             />
             <ModeStatusHud mode={mode} room={room} />
+            <KillStreakBanner killStreak={localPlayer.killStreak ?? 0} />
+            <MultiKillCounter killStreak={localPlayer.killStreak ?? 0} />
           </>
         )}
         {room.phase === 'lobby' &&
