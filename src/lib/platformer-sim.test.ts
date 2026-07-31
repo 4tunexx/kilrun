@@ -136,6 +136,41 @@ describe('stepPlatformer (Foundry feel)', () => {
     expect(body.x).toBeLessThan(2.5);
   });
 
+  it('respects rotYaw for OBB wall collision (parity with server platforms.ts)', () => {
+    const bigFloor: SimPad = { x: 0, y: 0, z: 0, width: 20, depth: 20, kind: 'solid', height: 0.25 };
+    // Same thin/wide wall as the unrotated test above, but rotated 90° — the
+    // 4-unit depth now spans world X instead of the 0.2-unit width. Before
+    // this fix, Play Test ignored rotYaw entirely and would have let the
+    // player walk to the old (unrotated) thin-wall surface — a real map
+    // built with an angled wall collided differently in Play Test than in
+    // the live match, which uses server/src/sim/platforms.ts's OBB math.
+    const rotatedWall: SimPad = {
+      x: 2,
+      y: 0,
+      z: 3,
+      width: 0.2,
+      depth: 4,
+      height: 3,
+      kind: 'solid',
+      rotYaw: Math.PI / 2,
+    };
+    const body = groundedBody({ x: 8, y: 0, z: 0 });
+    const scratch = createSimScratch();
+    for (let i = 0; i < 60; i++) {
+      stepPlatformer(
+        body,
+        { moveX: -1, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+        1 / 30,
+        [bigFloor, rotatedWall],
+        scratch,
+        bounds
+      );
+    }
+    // Rotated surface at x = wall.x + depth/2 = 4, plus capsule radius 0.35.
+    expect(body.x).toBeCloseTo(4.35, 1);
+    expect(body.x).toBeGreaterThan(4);
+  });
+
   it('applies constant Foundry gravity (no apex hang)', () => {
     const body = groundedBody({ z: 2, vz: 1, isGrounded: false });
     const scratch = createSimScratch();

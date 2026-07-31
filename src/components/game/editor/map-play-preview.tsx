@@ -302,12 +302,18 @@ export function MapPlayPreview({
     // dedicated spawn placed on this map yet — never a hard failure.
     const spawn = roleSpawn ?? spawnPoints.runner;
     const teleportCooldownUntil = new Map<string, number>();
-    const hazardPulseUntil = new Map<string, number>();
-    const hazardNextToggle = new Map<string, number>();
+    // Mirrors DeathrunRoom's obstacleTimers: an ms-in-current-phase counter
+    // driven by fixed sim dt (not wall clock), so a hazard flips on/off at
+    // the same simulated moment in Play Test as it does in the live match —
+    // wall-clock timing would drift out of sync with match-time-driven
+    // systems (moving platforms, matchElapsedMs-based ghost sampling) any
+    // time a frame hitches.
+    const hazardTimers = new Map<string, number>();
+    const hazardActive = new Map<string, boolean>();
     for (const h of hazards) {
       if (h.alwaysActive || h.buttonControlled) continue;
-      hazardNextToggle.set(h.id, performance.now() + (h.intervalMs || 1500));
-      hazardPulseUntil.set(h.id, 0);
+      hazardTimers.set(h.id, 0);
+      hazardActive.set(h.id, false);
     }
 
     const body: SimBody = {
@@ -661,18 +667,29 @@ export function MapPlayPreview({
     // correct) ramp height while walking uphill, sinking the legs into the
     // ramp. The camera can keep its cinematic lag; the mesh must not.
     let meshY: number | null = null;
+    // Fixed 30 Hz physics timestep, matching the Colyseus server tick — see
+    // TICK_DT_MS in shared/sim-constants.ts. Play Test used to step physics
+    // once per *rendered* frame with a variable dt (0-50ms depending on
+    // framerate), which is a different simulation than the server's fixed
+    // 33.33ms steps: jump arcs, coyote/buffer windows, and platform carry all
+    // integrate differently at a variable rate, so a course that cleared here
+    // could play differently live. Rendering (camera, mesh smoothing,
+    // animation) still runs every frame for visual smoothness — only the
+    // simulation itself is decoupled onto the fixed-rate accumulator below.
+    const FIXED_DT = 1 / 30;
+    let accumulator = 0;
     const tick = () => {
       if (disposed) return;
       raf = requestAnimationFrame(tick);
-      const dt = Math.min(clock.getDelta(), 0.05);
+      const frameDt = Math.min(clock.getDelta(), 0.05);
       const now = performance.now();
 
       const moveStick = joy?.getMoveVector() ?? { x: 0, y: 0 };
       const lookStick = joy?.getAimVector() ?? { x: 0, y: 0 };
       if (lookStick.x || lookStick.y) {
         const liveTps = tpsRef.current;
-        yaw -= lookStick.x * 1.2 * dt;
-        pitch -= lookStick.y * 0.95 * dt;
+        yaw -= lookStick.x * 1.2 * frameDt;
+        pitch -= lookStick.y * 0.95 * frameDt;
         pitch = THREE.MathUtils.clamp(pitch, liveTps.camera.pitchMin, liveTps.camera.pitchMax);
       }
       // Mobile: holding look stick = aim focus (same as RMB)
@@ -702,82 +719,235 @@ export function MapPlayPreview({
       const s = Math.sin(yaw);
       const moveX = wishFwd * c + wishStrafe * s;
       const moveY = wishFwd * s - wishStrafe * c;
+      const jumpPressed = keys.has('Space') || !!joy?.isJumpHeld();
 
-      if (worldReady && hpLocal > 0 && !finishedLocal) {
-        matchElapsedMs += dt * 1000;
+      // --- Fixed-rate simulation: platforms, stepPlatformer, hazards,
+      // checkpoints, finish/void — identical cadence to the server tick, run
+      // as many (or zero) times as needed to catch this frame's real elapsed
+      // time up to sim time. Input above is sampled once per frame (same as
+      // a client polling its keyboard once before sending a tick) and reused
+      // for every catch-up tick this frame produces.
+      accumulator = Math.min(accumulator + frameDt, FIXED_DT * 6);
+      while (accumulator >= FIXED_DT) {
+        accumulator -= FIXED_DT;
+        const dt = FIXED_DT;
 
-        const platformDeltas: { id: string; dx: number; dy: number; dz: number }[] = [];
-        for (const pad of pads) {
-          const ampX = pad.motionAmpX ?? 0;
-          const ampY = pad.motionAmpY ?? 0;
-          const ampZ = pad.motionAmpZ ?? 0;
-          if (!hasMovingAmp({ ampX, ampY, ampZ })) continue;
-          const home = {
-            homeX: pad.homeX ?? pad.x,
-            homeY: pad.homeY ?? pad.y,
-            homeZ: pad.homeZ ?? pad.z,
-            ampX,
-            ampY,
-            ampZ,
-            periodMs: pad.motionPeriodMs || 4000,
-            phaseMs: pad.motionPhaseMs || 0,
-          };
-          const next = movingPlatformPos(home, matchElapsedMs);
-          const dx = next.x - pad.x;
-          const dy = next.y - pad.y;
-          const dz = next.z - pad.z;
-          pad.x = next.x;
-          pad.y = next.y;
-          pad.z = next.z;
-          if (pad.id && (Math.abs(dx) > 1e-8 || Math.abs(dy) > 1e-8 || Math.abs(dz) > 1e-8)) {
-            platformDeltas.push({ id: pad.id, dx, dy, dz });
+        if (worldReady && hpLocal > 0 && !finishedLocal) {
+          matchElapsedMs += dt * 1000;
+
+          const platformDeltas: { id: string; dx: number; dy: number; dz: number }[] = [];
+          for (const pad of pads) {
+            const ampX = pad.motionAmpX ?? 0;
+            const ampY = pad.motionAmpY ?? 0;
+            const ampZ = pad.motionAmpZ ?? 0;
+            if (!hasMovingAmp({ ampX, ampY, ampZ })) continue;
+            const home = {
+              homeX: pad.homeX ?? pad.x,
+              homeY: pad.homeY ?? pad.y,
+              homeZ: pad.homeZ ?? pad.z,
+              ampX,
+              ampY,
+              ampZ,
+              periodMs: pad.motionPeriodMs || 4000,
+              phaseMs: pad.motionPhaseMs || 0,
+            };
+            const next = movingPlatformPos(home, matchElapsedMs);
+            const dx = next.x - pad.x;
+            const dy = next.y - pad.y;
+            const dz = next.z - pad.z;
+            pad.x = next.x;
+            pad.y = next.y;
+            pad.z = next.z;
+            if (pad.id && (Math.abs(dx) > 1e-8 || Math.abs(dy) > 1e-8 || Math.abs(dz) > 1e-8)) {
+              platformDeltas.push({ id: pad.id, dx, dy, dz });
+            }
           }
-        }
-        for (const [id, motion] of motionVisual) {
-          const root = roots.get(id);
-          if (!root) continue;
-          const u = movingPlatformU(matchElapsedMs, motion.periodMs, motion.phaseMs);
-          root.position.set(
-            motion.rest[0] + motion.offset[0] * u,
-            motion.rest[1] + motion.offset[1] * u,
-            motion.rest[2] + motion.offset[2] * u
+          if (body.isGrounded && scratch.supportPadId && platformDeltas.length) {
+            const d = platformDeltas.find((x) => x.id === scratch.supportPadId);
+            if (d) {
+              body.x += d.dx;
+              body.y += d.dy;
+              body.z += d.dz;
+            }
+          }
+
+          stepPlatformer(
+            body,
+            {
+              moveX,
+              moveY,
+              jumpPressed,
+              sprint,
+              crouch,
+              meleeActive: performance.now() < meleeUntil,
+            },
+            dt,
+            pads,
+            scratch,
+            bounds,
+            physOptsRef.current
           );
-        }
-        if (body.isGrounded && scratch.supportPadId && platformDeltas.length) {
-          const d = platformDeltas.find((x) => x.id === scratch.supportPadId);
-          if (d) {
-            body.x += d.dx;
-            body.y += d.dy;
-            body.z += d.dz;
+
+          if (matchElapsedMs - lastGhostSampleAt >= 80) {
+            lastGhostSampleAt = matchElapsedMs;
+            recordedSamples.push({
+              t: Math.round(matchElapsedMs),
+              x: body.x,
+              y: body.y,
+              z: body.z,
+            });
           }
         }
 
-        stepPlatformer(
-          body,
-          {
-            moveX,
-            moveY,
-            jumpPressed: keys.has('Space') || !!joy?.isJumpHeld(),
-            sprint,
-            crouch,
-            meleeActive: performance.now() < meleeUntil,
-          },
-          dt,
-          pads,
-          scratch,
-          bounds,
-          physOptsRef.current
-        );
-
-        if (matchElapsedMs - lastGhostSampleAt >= 80) {
-          lastGhostSampleAt = matchElapsedMs;
-          recordedSamples.push({
-            t: Math.round(matchElapsedMs),
-            x: body.x,
-            y: body.y,
-            z: body.z,
-          });
+        for (const pad of pads) {
+          if (pad.kind !== 'checkpoint') continue;
+          if (
+            Math.abs(body.x - pad.x) <= pad.width / 2 + 0.35 &&
+            Math.abs(body.y - pad.y) <= pad.depth / 2 + 0.35 &&
+            body.z >= pad.z - 0.35 &&
+            body.z <= pad.z + 0.6
+          ) {
+            checkpoint = { x: pad.x, y: pad.y, z: pad.z };
+          }
         }
+        for (const f of finishes) {
+          const halfW = f.width / 2;
+          const halfD = f.depth / 2;
+          if (
+            Math.abs(body.x - f.x) <= halfW + 0.35 &&
+            Math.abs(body.y - f.y) <= halfD + 0.35 &&
+            body.z >= f.z - 0.35 &&
+            body.z <= f.z + Math.max(f.height, 1.2)
+          ) {
+            if (!finishedLocal) {
+              finishedLocal = true;
+              setFinished(true);
+              if (mapId && !ghostSubmitted && recordedSamples.length > 2) {
+                ghostSubmitted = true;
+                const finishMs = Math.round(matchElapsedMs);
+                void (async () => {
+                  try {
+                    const { submitGhostRun } = await import('@/lib/ghost-actions');
+                    const res = await submitGhostRun({
+                      mapId,
+                      finishMs,
+                      samples: recordedSamples,
+                    });
+                    if (disposed) return;
+                    if (res.worldRecord) setGhostResult(`New WR · ${(finishMs / 1000).toFixed(2)}s`);
+                    else if (res.personalBest) setGhostResult(`PB · ${(finishMs / 1000).toFixed(2)}s`);
+                  } catch {
+                    /* not signed in */
+                  }
+                })();
+              }
+            }
+          }
+        }
+        if (body.z < -4) {
+          if (checkpoint) {
+            body.x = checkpoint.x;
+            body.y = checkpoint.y;
+            body.z = checkpoint.z + 0.05;
+            body.vz = 0;
+            body.isGrounded = true;
+            hpLocal = Math.max(hpLocal, 60);
+            setHp(hpLocal);
+          } else if (spawn) {
+            body.x = spawn.x;
+            body.y = spawn.y;
+            body.z = spawn.z;
+            snapBodyToPads(body, pads);
+            body.vz = 0;
+            hpLocal = Math.max(1, hpLocal - 25);
+            setHp(hpLocal);
+          } else if (hpLocal > 0) {
+            hpLocal = 0;
+            setHp(0);
+          }
+        }
+
+        // Timed hazard pulses — same off(intervalMs)/on(activeMs) accumulator
+        // as DeathrunRoom.tickObstacles, driven by fixed tick dt.
+        for (const h of hazards) {
+          if (h.alwaysActive || h.buttonControlled) continue;
+          const elapsed = (hazardTimers.get(h.id) ?? 0) + dt * 1000;
+          const active = hazardActive.get(h.id) ?? false;
+          const intervalMs = Math.max(100, h.intervalMs);
+          const activeMs = Math.max(100, h.activeMs ?? 900);
+          if (!active && elapsed >= intervalMs) {
+            hazardActive.set(h.id, true);
+            hazardTimers.set(h.id, 0);
+          } else if (active && elapsed >= activeMs) {
+            hazardActive.set(h.id, false);
+            hazardTimers.set(h.id, 0);
+          } else {
+            hazardTimers.set(h.id, elapsed);
+          }
+        }
+
+        // Authoritative-style AABB hazards (sim space).
+        for (const h of hazards) {
+          if (h.buttonControlled) continue;
+          const pulsing = !h.alwaysActive && (hazardActive.get(h.id) ?? false);
+          if (!h.alwaysActive && !pulsing) continue;
+          const halfW = h.width / 2 + 0.35;
+          const halfD = h.width / 2 + 0.35;
+          const halfH = h.height / 2;
+          if (
+            Math.abs(body.x - h.x) > halfW ||
+            Math.abs(body.y - h.y) > halfD ||
+            Math.abs(body.z - h.z) > halfH + 0.4
+          ) {
+            continue;
+          }
+          if (h.instantKill) {
+            hpLocal = 0;
+            setHp(0);
+            continue;
+          }
+          const last = lastDamageAt.get(h.id) ?? 0;
+          if (now - last >= Math.max(120, h.intervalMs * 0.35)) {
+            lastDamageAt.set(h.id, now);
+            hpLocal = Math.max(0, hpLocal - h.damage);
+            setHp(hpLocal);
+          }
+        }
+
+        // Teleporters
+        for (const t of teleports) {
+          const cd = teleportCooldownUntil.get(t.id) ?? 0;
+          if (now < cd) continue;
+          const halfW = t.width / 2 + 0.3;
+          const halfD = t.depth / 2 + 0.3;
+          if (
+            Math.abs(body.x - t.x) <= halfW &&
+            Math.abs(body.y - t.y) <= halfD &&
+            body.z >= t.z - 0.4 &&
+            body.z <= t.z + Math.max(t.height, 1.2)
+          ) {
+            body.x = t.targetX;
+            body.y = t.targetY;
+            body.z = t.targetZ;
+            body.vz = 0;
+            snapBodyToPads(body, pads);
+            teleportCooldownUntil.set(t.id, now + t.cooldownMs);
+          }
+        }
+      }
+
+      // --- Variable-rate rendering: camera, mesh smoothing, animation —
+      // runs once per rendered frame regardless of how many physics ticks
+      // the accumulator ran above, using the body's latest simulated state.
+      for (const [id, motion] of motionVisual) {
+        const root = roots.get(id);
+        if (!root) continue;
+        const u = movingPlatformU(matchElapsedMs, motion.periodMs, motion.phaseMs);
+        root.position.set(
+          motion.rest[0] + motion.offset[0] * u,
+          motion.rest[1] + motion.offset[1] * u,
+          motion.rest[2] + motion.offset[2] * u
+        );
       }
 
       if (wrSamples.length && showGhostRef.current) {
@@ -788,80 +958,12 @@ export function MapPlayPreview({
         ghostMesh.visible = false;
       }
 
-      for (const pad of pads) {
-        if (pad.kind !== 'checkpoint') continue;
-        if (
-          Math.abs(body.x - pad.x) <= pad.width / 2 + 0.35 &&
-          Math.abs(body.y - pad.y) <= pad.depth / 2 + 0.35 &&
-          body.z >= pad.z - 0.35 &&
-          body.z <= pad.z + 0.6
-        ) {
-          checkpoint = { x: pad.x, y: pad.y, z: pad.z };
-        }
-      }
-      for (const f of finishes) {
-        const halfW = f.width / 2;
-        const halfD = f.depth / 2;
-        if (
-          Math.abs(body.x - f.x) <= halfW + 0.35 &&
-          Math.abs(body.y - f.y) <= halfD + 0.35 &&
-          body.z >= f.z - 0.35 &&
-          body.z <= f.z + Math.max(f.height, 1.2)
-        ) {
-          if (!finishedLocal) {
-            finishedLocal = true;
-            setFinished(true);
-            if (mapId && !ghostSubmitted && recordedSamples.length > 2) {
-              ghostSubmitted = true;
-              const finishMs = Math.round(matchElapsedMs);
-              void (async () => {
-                try {
-                  const { submitGhostRun } = await import('@/lib/ghost-actions');
-                  const res = await submitGhostRun({
-                    mapId,
-                    finishMs,
-                    samples: recordedSamples,
-                  });
-                  if (disposed) return;
-                  if (res.worldRecord) setGhostResult(`New WR · ${(finishMs / 1000).toFixed(2)}s`);
-                  else if (res.personalBest) setGhostResult(`PB · ${(finishMs / 1000).toFixed(2)}s`);
-                } catch {
-                  /* not signed in */
-                }
-              })();
-            }
-          }
-        }
-      }
-      if (body.z < -4) {
-        if (checkpoint) {
-          body.x = checkpoint.x;
-          body.y = checkpoint.y;
-          body.z = checkpoint.z + 0.05;
-          body.vz = 0;
-          body.isGrounded = true;
-          hpLocal = Math.max(hpLocal, 60);
-          setHp(hpLocal);
-        } else if (spawn) {
-          body.x = spawn.x;
-          body.y = spawn.y;
-          body.z = spawn.z;
-          snapBodyToPads(body, pads);
-          body.vz = 0;
-          hpLocal = Math.max(1, hpLocal - 25);
-          setHp(hpLocal);
-        } else if (hpLocal > 0) {
-          hpLocal = 0;
-          setHp(0);
-        }
-      }
-
       const [tx, ty, tz] = simToThree(body.x, body.y, body.z);
       // Soften visual/camera height on stepped ramps so Play Test matches live feel.
       if (smoothCamY === null || Math.abs(smoothCamY - ty) > 3.5) {
         smoothCamY = ty;
       } else {
-        const yLerp = 1 - Math.pow(0.001, dt * 16);
+        const yLerp = 1 - Math.pow(0.001, frameDt * 16);
         smoothCamY += (ty - smoothCamY) * Math.min(1, yLerp);
       }
       playerPos.set(tx, smoothCamY, tz);
@@ -873,7 +975,7 @@ export function MapPlayPreview({
         meshY = ty;
       } else {
         const meshSharpness = body.isGrounded ? 40 : 16;
-        const meshLerp = 1 - Math.pow(0.001, dt * meshSharpness);
+        const meshLerp = 1 - Math.pow(0.001, frameDt * meshSharpness);
         meshY += (ty - meshY) * Math.min(1, meshLerp);
       }
 
@@ -889,7 +991,7 @@ export function MapPlayPreview({
         playerPos,
         yaw,
         pitch,
-        dt,
+        frameDt,
         aimNow
           ? {
               ...liveTps.camera,
@@ -923,7 +1025,7 @@ export function MapPlayPreview({
         const targetYaw = aimNow
           ? yaw
           : computeLocomotionFacingYaw(yaw, wishFwd, wishStrafe, bodyYaw);
-        bodyYaw = stepBodyYaw(bodyYaw, targetYaw, dt, aimNow ? 18 : 16);
+        bodyYaw = stepBodyYaw(bodyYaw, targetYaw, frameDt, aimNow ? 18 : 16);
         playerRoot.rotation.y =
           bodyYaw + (liveTps.player.yawOffsetDeg * Math.PI) / 180;
         const justLanded = !wasGrounded && body.isGrounded;
@@ -989,68 +1091,8 @@ export function MapPlayPreview({
         director.evaluateTriggers(playDoc.entities, playerPos, true, colliding);
       }
 
-      // Timed hazard pulses (match-like: interval off → activeMs on).
-      for (const h of hazards) {
-        if (h.alwaysActive || h.buttonControlled) continue;
-        const nextAt = hazardNextToggle.get(h.id) ?? now;
-        if (now >= nextAt) {
-          const activeMs = Math.max(100, h.activeMs ?? 900);
-          hazardPulseUntil.set(h.id, now + activeMs);
-          hazardNextToggle.set(h.id, now + activeMs + Math.max(100, h.intervalMs));
-        }
-      }
-
-      // Authoritative-style AABB hazards (sim space).
-      for (const h of hazards) {
-        if (h.buttonControlled) continue;
-        const pulsing = !h.alwaysActive && (hazardPulseUntil.get(h.id) ?? 0) > now;
-        if (!h.alwaysActive && !pulsing) continue;
-        const halfW = h.width / 2 + 0.35;
-        const halfD = h.width / 2 + 0.35;
-        const halfH = h.height / 2;
-        if (
-          Math.abs(body.x - h.x) > halfW ||
-          Math.abs(body.y - h.y) > halfD ||
-          Math.abs(body.z - h.z) > halfH + 0.4
-        ) {
-          continue;
-        }
-        if (h.instantKill) {
-          hpLocal = 0;
-          setHp(0);
-          continue;
-        }
-        const last = lastDamageAt.get(h.id) ?? 0;
-        if (now - last >= Math.max(120, h.intervalMs * 0.35)) {
-          lastDamageAt.set(h.id, now);
-          hpLocal = Math.max(0, hpLocal - h.damage);
-          setHp(hpLocal);
-        }
-      }
-
-      // Teleporters
-      for (const t of teleports) {
-        const cd = teleportCooldownUntil.get(t.id) ?? 0;
-        if (now < cd) continue;
-        const halfW = t.width / 2 + 0.3;
-        const halfD = t.depth / 2 + 0.3;
-        if (
-          Math.abs(body.x - t.x) <= halfW &&
-          Math.abs(body.y - t.y) <= halfD &&
-          body.z >= t.z - 0.4 &&
-          body.z <= t.z + Math.max(t.height, 1.2)
-        ) {
-          body.x = t.targetX;
-          body.y = t.targetY;
-          body.z = t.targetZ;
-          body.vz = 0;
-          snapBodyToPads(body, pads);
-          teleportCooldownUntil.set(t.id, now + t.cooldownMs);
-        }
-      }
-
-      director.update(dt);
-      if (playerRoot) tickSkinAttachments(playerRoot, dt, now * 0.001);
+      director.update(frameDt);
+      if (playerRoot) tickSkinAttachments(playerRoot, frameDt, now * 0.001);
 
       renderer.render(scene, camera);
     };

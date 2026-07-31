@@ -366,70 +366,96 @@ export default function KilrunEngine({
     if (customLoadedRef.current) return;
     if (!connectionRef.current?.sessionId) return;
 
-    const resolveDoc = (): MapDocument | null => {
-      const raw = cloudDocRef.current
-        ? cloudDocRef.current
-        : (() => {
-            const mapId = getActivePlayMapIdForMode(mode);
-            if (!mapId) return null;
-            return loadMapPlayable(mapId);
-          })();
+    let cancelled = false;
+
+    const resolveDoc = async (): Promise<MapDocument | null> => {
+      // Play Test (draftDoc) always reflects the live editor state already —
+      // no network round trip needed. Otherwise, refetch the cloud Active map
+      // fresh instead of trusting the mount-time cache: an admin who publishes
+      // a map edit in another tab and returns to an already-open game tab
+      // must not have their host push re-send the stale doc it loaded at
+      // mount (which would clobber the server's own fresh fetch and bring
+      // back the old wall heights / geometry).
+      if (draftDoc) return prepareDocForPlayTest(draftDoc).doc;
+      const fresh = await getActiveCloudMapDocument(mode).catch(() => null);
+      if (fresh?.document) {
+        cloudDocRef.current = fresh.document;
+        return prepareDocForPlayTest(fresh.document).doc;
+      }
+      const raw =
+        cloudDocRef.current ??
+        (() => {
+          const mapId = getActivePlayMapIdForMode(mode);
+          if (!mapId) return null;
+          return loadMapPlayable(mapId);
+        })();
       if (!raw) return null;
       return prepareDocForPlayTest(raw).doc;
     };
 
-    const doc = resolveDoc();
-    if (!doc) return;
+    const pushCustomMap = (doc: MapDocument) => {
+      // Re-check: the network refetch above may have outlived a disconnect,
+      // a phase change, or a race with another push that already landed.
+      if (cancelled || customLoadedRef.current || !connectionRef.current?.sessionId) return;
+      const platforms = mapDocToSimPlatforms(doc);
+      if (!platforms.length) return;
 
-    const platforms = mapDocToSimPlatforms(doc);
-    if (!platforms.length) return;
+      const obstacles = mapDocToSimHazards(doc);
+      const finishes = mapDocToSimFinishes(doc);
+      const buttons = mapDocToSimButtons(doc);
+      const actions = mapDocToSimActions(doc);
+      const teleports = mapDocToSimTeleports(doc);
+      const spawns = mapDocSpawnPoints(doc);
+      const playerSpawns = mapDocPlayerSpawns(doc);
+      const monsterSpawns = mapDocMonsterSpawns(doc);
+      const teams = mapDocTeamSpawns(doc);
+      const healthFloors = mapDocHealthFloors(doc);
+      const redZones = mapDocRedZones(doc);
+      const revivePads = mapDocRevivePads(doc);
+      const pushPayloads = mapDocPushPayloads(doc);
+      const worldBounds = mapDocToWorldBounds(doc, platforms, finishes);
+      customDocRef.current = doc;
+      customLoadedRef.current = true;
+      connectionRef.current.sendLoadCustomMap({
+        platforms,
+        obstacles,
+        finishes,
+        buttons,
+        actions,
+        teleports,
+        spawn: spawns.runner ?? playerSpawns[0] ?? undefined,
+        trapperSpawn: spawns.trapper ?? undefined,
+        playerSpawns,
+        monsterSpawns,
+        teamASpawns: teams.teamA,
+        teamBSpawns: teams.teamB,
+        healthFloors,
+        redZones,
+        revivePads,
+        pushPayloads,
+        worldBounds,
+        modeSettings: doc.modeSettings as Record<string, unknown> | undefined,
+        combatSettings: doc.combatSettings as Record<string, unknown> | undefined,
+        ...(mode === 'horde' || mode === 'competitive'
+          ? {
+              shopSettings: ensureShopSettings(doc) as unknown as Record<string, unknown>,
+            }
+          : {}),
+      });
+      if (practiceRole) {
+        connectionRef.current.sendPracticeSetRole(practiceRole);
+      }
+    };
 
-    const obstacles = mapDocToSimHazards(doc);
-    const finishes = mapDocToSimFinishes(doc);
-    const buttons = mapDocToSimButtons(doc);
-    const actions = mapDocToSimActions(doc);
-    const teleports = mapDocToSimTeleports(doc);
-    const spawns = mapDocSpawnPoints(doc);
-    const playerSpawns = mapDocPlayerSpawns(doc);
-    const monsterSpawns = mapDocMonsterSpawns(doc);
-    const teams = mapDocTeamSpawns(doc);
-    const healthFloors = mapDocHealthFloors(doc);
-    const redZones = mapDocRedZones(doc);
-    const revivePads = mapDocRevivePads(doc);
-    const pushPayloads = mapDocPushPayloads(doc);
-    const worldBounds = mapDocToWorldBounds(doc, platforms, finishes);
-    customDocRef.current = doc;
-    customLoadedRef.current = true;
-    connectionRef.current.sendLoadCustomMap({
-      platforms,
-      obstacles,
-      finishes,
-      buttons,
-      actions,
-      teleports,
-      spawn: spawns.runner ?? playerSpawns[0] ?? undefined,
-      trapperSpawn: spawns.trapper ?? undefined,
-      playerSpawns,
-      monsterSpawns,
-      teamASpawns: teams.teamA,
-      teamBSpawns: teams.teamB,
-      healthFloors,
-      redZones,
-      revivePads,
-      pushPayloads,
-      worldBounds,
-      modeSettings: doc.modeSettings as Record<string, unknown> | undefined,
-      combatSettings: doc.combatSettings as Record<string, unknown> | undefined,
-      ...(mode === 'horde' || mode === 'competitive'
-        ? {
-            shopSettings: ensureShopSettings(doc) as unknown as Record<string, unknown>,
-          }
-        : {}),
+    void resolveDoc().then((doc) => {
+      if (cancelled || !doc) return;
+      pushCustomMap(doc);
     });
-    if (practiceRole) {
-      connectionRef.current.sendPracticeSetRole(practiceRole);
-    }
-  }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode, practiceRole]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode, practiceRole, draftDoc]);
 
   useEffect(() => {
     pausedRef.current = paused || editorOpen;

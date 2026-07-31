@@ -452,11 +452,12 @@ export class DeathrunRoom extends Room<RoomState> {
       modeSettings?: Record<string, unknown>;
       combatSettings?: Record<string, unknown>;
     },
-    source = 'client'
+    source = 'client',
+    force = false
   ) {
     const platforms = data?.platforms;
     if (!Array.isArray(platforms) || platforms.length === 0) return;
-    if (this.customMapLoaded && source.startsWith('server:')) return;
+    if (this.customMapLoaded && source.startsWith('server:') && !force) return;
 
     while (this.state.platforms.length > 0) this.state.platforms.pop();
     this.state.platforms.push(...createFromBlueprints(platforms));
@@ -1273,6 +1274,18 @@ export class DeathrunRoom extends Room<RoomState> {
         this.resetMatchTelemetry(player);
         this.applySpawnPosition(player, index);
         player.vz = 0;
+      });
+      // Re-sync to whatever is currently published as Active — a room can live
+      // across many rounds, so without this a map edit published mid-session
+      // (e.g. taller walls) never reaches players until an admin manually
+      // restarts Colyseus. Every new round now re-checks the cloud MAIN doc.
+      void fetchActiveMapPayload('deathrun').then((active) => {
+        if (!active) return;
+        this.bootstrapCustomMap(
+          active.payload as Parameters<DeathrunRoom['bootstrapCustomMap']>[0],
+          `server:${active.name}`,
+          true
+        );
       });
     }
   }

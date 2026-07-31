@@ -47,10 +47,12 @@ export interface SimPad {
   width: number;
   depth: number;
   height?: number;
-  /** True analytic ramp support — dz per unit of local x/y (no rotYaw
-   * support client-side yet, matches unrotated ramp usage). 0/0 = flat. */
+  /** True analytic ramp support — dz per unit of local x/y. Ramps are never
+   * authored rotated today, so this stays in world axes regardless of rotYaw. */
   slopeGradX?: number;
   slopeGradY?: number;
+  /** Yaw in radians (sim XY) — mirrors server/src/sim/platforms.ts OBB support. */
+  rotYaw?: number;
   kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor' | 'water' | 'sand';
   boost?: number;
   conveyorSpeed?: number;
@@ -171,6 +173,35 @@ export function createSimScratch(): SimScratch {
   };
 }
 
+/** World XY → pad-local XY (rotYaw around Z-up sim) — mirrors server/src/sim/platforms.ts. */
+function toPadLocal(
+  x: number,
+  y: number,
+  cx: number,
+  cy: number,
+  rotYaw: number
+): { lx: number; ly: number } {
+  const dx = x - cx;
+  const dy = y - cy;
+  if (!rotYaw) return { lx: dx, ly: dy };
+  const c = Math.cos(-rotYaw);
+  const s = Math.sin(-rotYaw);
+  return { lx: dx * c - dy * s, ly: dx * s + dy * c };
+}
+
+function fromPadLocal(
+  lx: number,
+  ly: number,
+  cx: number,
+  cy: number,
+  rotYaw: number
+): { x: number; y: number } {
+  if (!rotYaw) return { x: cx + lx, y: cy + ly };
+  const c = Math.cos(rotYaw);
+  const s = Math.sin(rotYaw);
+  return { x: cx + lx * c - ly * s, y: cy + lx * s + ly * c };
+}
+
 function findSupport(
   x: number,
   y: number,
@@ -187,8 +218,10 @@ function findSupport(
   for (const pad of pads) {
     const halfW = pad.width / 2;
     const halfD = pad.depth / 2;
-    if (x < pad.x - halfW - radius || x > pad.x + halfW + radius) continue;
-    if (y < pad.y - halfD - radius || y > pad.y + halfD + radius) continue;
+    const yaw = pad.rotYaw || 0;
+    const { lx, ly } = toPadLocal(x, y, pad.x, pad.y, yaw);
+    if (lx < -halfW - radius || lx > halfW + radius) continue;
+    if (ly < -halfD - radius || ly > halfD + radius) continue;
     const topZ = pad.z + (pad.slopeGradX || 0) * (x - pad.x) + (pad.slopeGradY || 0) * (y - pad.y);
     if (z < topZ - maxSnapDown || z > topZ + 0.55) continue;
     if (topZ <= z + 0.05) {
@@ -268,23 +301,31 @@ function resolveSolids(body: SimBody, pads: SimPad[]) {
     if (playerTop <= bottomZ + SKIN || playerBottom >= topZ - SKIN) continue;
     const halfW = pad.width / 2 + PLAYER_RADIUS;
     const halfD = pad.depth / 2 + PLAYER_RADIUS;
-    const dx = x - pad.x;
-    const dy = y - pad.y;
-    if (Math.abs(dx) >= halfW || Math.abs(dy) >= halfD) continue;
-    const pushX = halfW - Math.abs(dx);
-    const pushY = halfD - Math.abs(dy);
+    const yaw = pad.rotYaw || 0;
+    const { lx, ly } = toPadLocal(x, y, pad.x, pad.y, yaw);
+    if (Math.abs(lx) >= halfW || Math.abs(ly) >= halfD) continue;
+    const pushX = halfW - Math.abs(lx);
+    const pushY = halfD - Math.abs(ly);
     touchingWall = true;
+    let outLx = lx;
+    let outLy = ly;
+    let nLx = 0;
+    let nLy = 0;
     if (pushX < pushY) {
-      const sign = Math.sign(dx || 1);
-      x = pad.x + sign * halfW;
-      wallNormalX = sign;
-      wallNormalY = 0;
+      const sign = Math.sign(lx || 1);
+      outLx = sign * halfW;
+      nLx = sign;
     } else {
-      const sign = Math.sign(dy || 1);
-      y = pad.y + sign * halfD;
-      wallNormalX = 0;
-      wallNormalY = sign;
+      const sign = Math.sign(ly || 1);
+      outLy = sign * halfD;
+      nLy = sign;
     }
+    const world = fromPadLocal(outLx, outLy, pad.x, pad.y, yaw);
+    x = world.x;
+    y = world.y;
+    const nWorld = fromPadLocal(nLx, nLy, 0, 0, yaw);
+    wallNormalX = nWorld.x;
+    wallNormalY = nWorld.y;
   }
   return { x, y, touchingWall, wallNormalX, wallNormalY };
 }

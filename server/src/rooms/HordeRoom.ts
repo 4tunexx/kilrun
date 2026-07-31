@@ -703,8 +703,22 @@ export class HordeRoom extends Room<RoomState> {
 
     void ensurePowerDefinitionsLoaded();
 
+    this.syncActiveMapFromCloud();
+
+    this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
+  }
+
+  /**
+   * Re-sync platforms/spawns/settings from the cloud Active map. Called at
+   * room creation and again on every results→lobby round reset — a room can
+   * live across many rounds, so without the second call a map republished
+   * mid-session (taller walls, moved spawns) never reaches players until an
+   * admin manually restarts Colyseus.
+   */
+  private syncActiveMapFromCloud(force = false) {
     void fetchActiveMapPayload('horde').then((active) => {
-      if (!active || this.customMapLoaded) return;
+      if (!active) return;
+      if (this.customMapLoaded && !force) return;
       const pads = active.payload.platforms as PlatformBlueprint[] | undefined;
       if (!Array.isArray(pads) || pads.length === 0) return;
       const data = active.payload;
@@ -765,8 +779,6 @@ export class HordeRoom extends Room<RoomState> {
       });
       console.log(`[HordeRoom] MAIN map loaded from server (${active.name}): ${pads.length} pads`);
     });
-
-    this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
   }
 
   onAuth(_client: Client, options: JoinOptions): GameJoinClaims {
@@ -907,6 +919,7 @@ export class HordeRoom extends Room<RoomState> {
             player.vpEarned = 0;
             player.kpDelta = 0;
           }
+          this.syncActiveMapFromCloud(true);
         }
         break;
     }
