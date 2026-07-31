@@ -332,7 +332,7 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     const before = await prisma.powerDefinition.count();
     steps.push(`PowerDefinition collection verified (count=${before})`);
 
-    // Idempotent: only CREATES the 11 core powers if missing (e.g. first sync
+    // Idempotent: only CREATES the 12 core powers if missing (e.g. first sync
     // after this deploy, or a fresh Mongo). Never overwrites an admin's
     // already-tuned numbers — matches prisma/seed.ts's upsert behavior.
     let created = 0;

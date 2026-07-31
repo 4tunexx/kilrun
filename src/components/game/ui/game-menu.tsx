@@ -41,7 +41,7 @@ interface GameMenuProps {
   error?: string | null;
   onUpgrade: (ability: AbilityKey) => void;
   /** Data-driven power list (core + any custom powers from the Power
-   * Editor), fetched at runtime — falls back to the static 11 on failure. */
+   * Editor), fetched at runtime — falls back to the static 12 on failure. */
   powers?: PowerDefinitionRecord[];
   /** Viewing someone else's tree (public profile) — hides the Buy button.
    * Spending is also blocked server-side (assertCanMutateUser), this just
@@ -563,7 +563,7 @@ export function useGameProgression(userId: string | null | undefined) {
   const [, startTransition] = useTransition();
 
   // Fetch the data-driven power list once — core (tuned) + any custom
-  // powers created in the Power Editor. Falls back to the static 11 (the
+  // powers created in the Power Editor. Falls back to the static 12 (the
   // initial state above) on any failure, so the menu never breaks.
   useEffect(() => {
     let cancelled = false;

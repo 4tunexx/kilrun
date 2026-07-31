@@ -84,7 +84,7 @@ export async function getGameProgression(userId: string): Promise<GameProgressio
 
 /** Serializable power list (functions can't cross the server-action boundary
  * — the client re-derives cost/effect labels with the pure helpers exported
- * from `shared/power-definitions.ts`). Falls back to the static 11 on error. */
+ * from `shared/power-definitions.ts`). Falls back to the static 12 on error. */
 export async function getPowerDefinitionsForMenu(): Promise<PowerDefinitionRecord[]> {
   return loadPowerDefinitions().catch(() => STATIC_FALLBACK_POWERS);
 }

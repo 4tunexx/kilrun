@@ -3,7 +3,7 @@
  * the generic engine in `shared/power-definitions.ts`. Every server-side
  * consumer (API routes, server actions) should call `loadPowerDefinitions()`
  * — it's cached for a short TTL, and on any DB error it falls back to the
- * static 11-ability list so a Mongo hiccup can never break the game.
+ * static 12-ability list so a Mongo hiccup can never break the game.
  */
 
 import { prisma } from '@/lib/prisma';
