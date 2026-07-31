@@ -117,6 +117,8 @@ export class PlayerState extends Schema {
   /** Per-match telemetry / server-authored rewards. */
   @type('number') kills = 0;
   @type('number') deaths = 0;
+  /** Consecutive kills (any source, including monsters) without dying — reset to 0 on death. Drives the kill-streak HUD banner. */
+  @type('number') killStreak = 0;
   @type('number') score = 0;
   @type('number') distance = 0;
   @type('number') xpEarned = 0;

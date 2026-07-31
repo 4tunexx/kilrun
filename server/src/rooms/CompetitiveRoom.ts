@@ -1034,6 +1034,7 @@ export class CompetitiveRoom extends Room<RoomState> {
           this.state.rewardsReady = false;
           for (const player of this.state.players.values()) {
             player.kills = 0; player.deaths = 0;
+            player.killStreak = 0;
             player.score = 0;
             player.distance = 0;
             player.xpEarned = 0;
@@ -1057,6 +1058,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.assignTeamsAndSpawn();
     for (const player of this.state.players.values()) {
       player.kills = 0; player.deaths = 0;
+      player.killStreak = 0;
       player.score = 0;
       player.distance = 0;
       player.xpEarned = 0;
@@ -1623,13 +1625,17 @@ export class CompetitiveRoom extends Room<RoomState> {
     }
     if (dmg > 0) player.health = Math.max(0, player.health - dmg);
     if (player.health <= 0) {
-      if (wasAlive) player.deaths = (player.deaths || 0) + 1;
+      if (wasAlive) {
+        player.deaths = (player.deaths || 0) + 1;
+        player.killStreak = 0;
+      }
       if (this.respawnInRound) {
         // Respawn: send back to spawn point at full health after a brief moment.
         player.health = getMaxHealth(player);
         this.applyTeamSpawn(player);
         if (wasAlive && shooter && shooter.sessionId !== player.sessionId) {
           shooter.kills += 1;
+          shooter.killStreak += 1;
           shooter.score = shooter.kills;
           shooter.credits = (shooter.credits || 0) + this.creditsPerKill;
         }
@@ -1637,6 +1643,7 @@ export class CompetitiveRoom extends Room<RoomState> {
         player.isAlive = false;
         if (wasAlive && shooter && shooter.sessionId !== player.sessionId) {
           shooter.kills += 1;
+          shooter.killStreak += 1;
           shooter.score = shooter.kills;
           shooter.credits = (shooter.credits || 0) + this.creditsPerKill;
         }

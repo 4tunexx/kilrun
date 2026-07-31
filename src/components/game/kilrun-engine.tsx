@@ -25,6 +25,7 @@ import {
   WORLD_HEIGHT,
 } from './utils/constants';
 import { HUD } from './ui/hud';
+import { KillStreakBanner } from './ui/kill-streak-banner';
 import { GameMenu, LevelUpPopup, useGameProgression } from './ui/game-menu';
 import { Scoreboard } from './ui/scoreboard';
 import { PauseMenu, useGameFullscreen } from './ui/pause-menu';
@@ -1302,6 +1303,7 @@ export default function KilrunEngine({
               weaponKind={resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind}
             />
             <ModeStatusHud mode={mode} room={room} />
+            <KillStreakBanner killStreak={localPlayer.killStreak ?? 0} />
           </>
         )}
         {room.phase === 'lobby' &&

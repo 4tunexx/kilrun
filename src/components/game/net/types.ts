@@ -91,6 +91,8 @@ export interface NetPlayerState {
   /** Per-match telemetry / server-authored rewards. */
   kills?: number;
   deaths?: number;
+  /** Consecutive kills (any source, including monsters) without dying. */
+  killStreak?: number;
   score?: number;
   distance?: number;
   xpEarned?: number;

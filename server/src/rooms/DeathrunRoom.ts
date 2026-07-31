@@ -720,6 +720,7 @@ export class DeathrunRoom extends Room<RoomState> {
 
   private resetMatchTelemetry(player: PlayerState) {
     player.kills = 0; player.deaths = 0;
+    player.killStreak = 0;
     player.score = 0;
     player.distance = 0;
     player.xpEarned = 0;
@@ -924,7 +925,10 @@ export class DeathrunRoom extends Room<RoomState> {
             player.score = Math.max(0, player.score - 1);
           }
         } else {
-          if (player.isAlive) player.deaths = (player.deaths || 0) + 1;
+          if (player.isAlive) {
+            player.deaths = (player.deaths || 0) + 1;
+            player.killStreak = 0;
+          }
           player.health = 0;
           player.isAlive = false;
         }
@@ -1079,11 +1083,13 @@ export class DeathrunRoom extends Room<RoomState> {
     if (player.health <= 0) {
       if (wasAlive) {
         player.deaths = (player.deaths || 0) + 1;
+        player.killStreak = 0;
         // Trapper gets a kill credit when eliminating a runner.
         if (player.role === 'runner') {
           for (const p of this.state.players.values()) {
             if (p.role === 'trapper' && p.isAlive) {
               p.kills = (p.kills || 0) + 1;
+              p.killStreak += 1;
               break;
             }
           }
