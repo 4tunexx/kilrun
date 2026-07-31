@@ -8,7 +8,11 @@ import {
   computeLocomotionFacingYaw,
   stepBodyYaw,
 } from '../tps/locomotion-facing';
-import { applySkinAttachments, tickSkinAttachments } from '../editor/skin-attachments';
+import {
+  applySkinAttachments,
+  tickSkinAttachments,
+  type WeaponSwayOpts,
+} from '../editor/skin-attachments';
 import { resolveModelSrc } from '../editor/model-scan';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { BODY_COLOR_NONE } from '@/lib/body-colors';
@@ -486,7 +490,8 @@ export class ThreeCharacter {
     cameraYaw?: number,
     moveWish?: { fwd: number; strafe: number },
     /** GTA aim: face camera and strafe — ignore locomotion turn. */
-    aimHeld?: boolean
+    aimHeld?: boolean,
+    weaponSway?: Omit<WeaponSwayOpts, 'moving'>
   ) {
     if (this.disposed) return;
 
@@ -643,7 +648,14 @@ export class ThreeCharacter {
     this.mixer?.update(dt);
     this.weaponMixer?.update(dt);
     this.skinTime += dt;
-    if (this.avatarScene) tickSkinAttachments(this.avatarScene, dt, this.skinTime);
+    if (this.avatarScene) {
+      tickSkinAttachments(
+        this.avatarScene,
+        dt,
+        this.skinTime,
+        weaponSway ? { ...weaponSway, moving: this.speed > 0.3 } : undefined
+      );
+    }
   }
 
   public destroy() {

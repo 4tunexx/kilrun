@@ -195,6 +195,12 @@ export class ObstacleState extends Schema {
   @type('boolean') alwaysActive = false;
   /** When true, only buttons arm this obstacle (no auto pulse). */
   @type('boolean') buttonControlled = false;
+  /** Horde custom monster: GLB to render instead of the generic kind-based prefab. */
+  @type('string') modelUrl = '';
+  /** Horde custom monster: catalog model id (used when modelUrl is a custom upload). */
+  @type('string') modelId = '';
+  /** Horde custom monster: name shown on a floating nameplate above the mesh. */
+  @type('string') displayName = '';
 }
 
 export class RoomState extends Schema {

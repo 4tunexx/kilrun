@@ -18,6 +18,7 @@ import {
   mapDocToSimPlatforms,
   mapDocToSimTeleports,
   mapDocToWorldBounds,
+  mapDocWaveAnchors,
   prepareDocForPlayTest,
 } from '@/components/game/editor/prefab-storage';
 
@@ -66,6 +67,7 @@ export async function GET(req: NextRequest) {
       trapperSpawn: mapDocSpawnPoints(prepared).trapper ?? undefined,
       playerSpawns: mapDocPlayerSpawns(prepared),
       monsterSpawns: mapDocMonsterSpawns(prepared),
+      waveAnchors: mapDocWaveAnchors(prepared),
       teamASpawns: mapDocTeamSpawns(prepared).teamA,
       teamBSpawns: mapDocTeamSpawns(prepared).teamB,
       healthFloors: mapDocHealthFloors(prepared),

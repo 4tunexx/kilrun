@@ -117,6 +117,12 @@ export interface NetObstacleState {
   alwaysActive?: boolean;
   /** When true, hazard only arms while a linked button is held. */
   buttonControlled?: boolean;
+  /** Horde custom monster: GLB to render instead of the generic kind-based prefab. */
+  modelUrl?: string;
+  /** Horde custom monster: catalog model id (used when modelUrl is a custom upload). */
+  modelId?: string;
+  /** Horde custom monster: name shown on a floating nameplate above the mesh. */
+  displayName?: string;
 }
 
 export interface NetRoomState {

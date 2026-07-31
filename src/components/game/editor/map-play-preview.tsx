@@ -1092,7 +1092,16 @@ export function MapPlayPreview({
       }
 
       director.update(frameDt);
-      if (playerRoot) tickSkinAttachments(playerRoot, frameDt, now * 0.001);
+      if (playerRoot) {
+        const swayCombat = ensureCombatSettings(playDoc);
+        tickSkinAttachments(playerRoot, frameDt, now * 0.001, {
+          enabled: swayCombat.swayEnabled,
+          amplitudeDeg: swayCombat.swayAmplitudeDeg,
+          speedHz: swayCombat.swaySpeedHz,
+          moveMult: swayCombat.swayMoveMult,
+          moving: Math.abs(wishFwd) + Math.abs(wishStrafe) > 0.05,
+        });
+      }
 
       renderer.render(scene, camera);
     };

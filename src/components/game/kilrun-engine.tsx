@@ -69,6 +69,7 @@ import {
   mapDocToSimTeleports,
   mapDocToWorldBounds,
   mapDocPushPayloads,
+  mapDocWaveAnchors,
   prepareDocForPlayTest,
   type SimWorldBounds,
 } from './editor/prefab-storage';
@@ -408,6 +409,7 @@ export default function KilrunEngine({
       const spawns = mapDocSpawnPoints(doc);
       const playerSpawns = mapDocPlayerSpawns(doc);
       const monsterSpawns = mapDocMonsterSpawns(doc);
+      const waveAnchors = mapDocWaveAnchors(doc);
       const teams = mapDocTeamSpawns(doc);
       const healthFloors = mapDocHealthFloors(doc);
       const redZones = mapDocRedZones(doc);
@@ -427,6 +429,7 @@ export default function KilrunEngine({
         trapperSpawn: spawns.trapper ?? undefined,
         playerSpawns,
         monsterSpawns,
+        waveAnchors,
         teamASpawns: teams.teamA,
         teamBSpawns: teams.teamB,
         healthFloors,
@@ -621,6 +624,8 @@ export default function KilrunEngine({
     /** Visual-only recoil (does not corrupt aimPitch sent to server). */
     let recoilPitch = 0;
     let shakeAmp = 0;
+    let wasGroundedForShake = false;
+    let lastHealthForShake: number | null = null;
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
     // Smoothed local player position for the camera — follows the interpolated
@@ -881,6 +886,29 @@ export default function KilrunEngine({
         predictedBody = null;
       }
 
+      const swayCombat = ensureCombatSettings(
+        customDocRef.current ?? ({ combatSettings: {} } as MapDocument)
+      );
+      const weaponSway = {
+        enabled: swayCombat.swayEnabled,
+        amplitudeDeg: swayCombat.swayAmplitudeDeg,
+        speedHz: swayCombat.swaySpeedHz,
+        moveMult: swayCombat.swayMoveMult,
+      };
+      // Camera shake on landing / taking damage (shakeOnFire already fires
+      // from the shoot-handling block below) — local player only.
+      if (localSessionId && localState) {
+        const groundedNow = predictedBody?.isGrounded ?? localState.isGrounded;
+        if (!wasGroundedForShake && groundedNow) {
+          shakeAmp = Math.max(shakeAmp, swayCombat.shakeOnLand ?? 0);
+        }
+        wasGroundedForShake = groundedNow;
+
+        if (lastHealthForShake !== null && localState.health < lastHealthForShake) {
+          shakeAmp = Math.max(shakeAmp, swayCombat.shakeOnHit ?? 0);
+        }
+        lastHealthForShake = localState.health;
+      }
       characters.forEach((view, sessionId) => {
         const player = playersRef.current.get(sessionId);
         if (!player) return;
@@ -947,7 +975,8 @@ export default function KilrunEngine({
           dt,
           isLocal ? cameraYaw : player.cameraYaw,
           isLocal && !frozen ? { fwd: wishFwd, strafe: wishStrafe } : undefined,
-          isLocal ? aimHeld : false
+          isLocal ? aimHeld : false,
+          weaponSway
         );
         if (isLocal) {
           const pl = tpsRef.current.player;

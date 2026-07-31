@@ -7,6 +7,7 @@ import {
   ensurePushRail,
   ensureSpinHazard,
   ensurePlatformMotion,
+  ensureWaveAnchor,
   generateId,
   isHammerSolidEntity,
   isInvisibleMarkerKind,
@@ -1072,6 +1073,25 @@ export function mapDocMonsterSpawns(doc: MapDocument) {
         waveMax: ms?.waveMax ?? 0,
         countPerWave: ms?.countPerWave ?? 2,
         spawnIntervalSec: ms?.spawnIntervalSec ?? 1.5,
+      };
+    });
+}
+
+/**
+ * Per-wave difficulty overrides — a Wave Anchor placed in the editor targets
+ * one wave number and scales that wave's monster count/stats on top of the
+ * mode-wide difficultyScale. (Wave gating itself still comes from each
+ * spawn_monster's own waveMin/waveMax — anchors are a difficulty dial, not a
+ * spatial zone.)
+ */
+export function mapDocWaveAnchors(doc: MapDocument): { waveNumber: number; difficultyMultiplier: number }[] {
+  return doc.entities
+    .filter((e) => e.visible !== false && e.kind === 'wave_anchor')
+    .map((e) => {
+      const wa = ensureWaveAnchor(e);
+      return {
+        waveNumber: Math.max(1, Math.round(wa.waveNumber)),
+        difficultyMultiplier: Math.max(0.1, wa.difficultyMultiplier),
       };
     });
 }

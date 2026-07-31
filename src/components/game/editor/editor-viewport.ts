@@ -1712,7 +1712,11 @@ export function createEditorViewport(
                           ? '#34d399'
                           : kind === 'revive_pad'
                             ? '#60a5fa'
-                            : undefined;
+                            : kind === 'push_rail'
+                              ? '#38bdf8'
+                              : kind === 'push_block'
+                                ? '#fbbf24'
+                                : undefined;
 
     // Invisible markers / gameplay entities: no GLB by default (editor shows flag/cone only).
     // Doors always get a real door model so they aren't invisible markers.
@@ -1733,7 +1737,11 @@ export function createEditorViewport(
         ? modelName ?? DEFAULT_DOOR_MODEL
         : kind === 'health_floor'
           ? modelName ?? 'floor-square'
-          : modelName;
+          : kind === 'push_rail'
+            ? modelName ?? 'floor-thick'
+            : kind === 'push_block'
+              ? modelName ?? 'crate'
+              : modelName;
 
     const runnerCount =
       kind === 'start' || kind === 'spawn_runner'

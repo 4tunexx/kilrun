@@ -787,20 +787,53 @@ export async function applySkinAttachments(
   }
 }
 
-/** Soft sway for cloth / cape parts — call each frame from character update. */
-export function tickSkinAttachments(avatarRoot: THREE.Object3D, dt: number, timeSec?: number) {
+export interface WeaponSwayOpts {
+  enabled: boolean;
+  /** Idle sway amplitude (degrees). */
+  amplitudeDeg: number;
+  /** Idle sway speed (Hz). */
+  speedHz: number;
+  /** Extra amplitude multiplier while the player is moving. */
+  moveMult: number;
+  /** Whether the player is currently moving (extra sway kicks in). */
+  moving: boolean;
+}
+
+/**
+ * Soft sway for cloth / cape parts, plus idle weapon sway (CombatSettings
+ * swayEnabled/swayAmplitudeDeg/swaySpeedHz/swayMoveMult) — call each frame
+ * from character update. Weapon sway targets the holder group tagged
+ * `userData.isWeaponSkin` by attachOne() in this file.
+ */
+export function tickSkinAttachments(
+  avatarRoot: THREE.Object3D,
+  dt: number,
+  timeSec?: number,
+  weaponSway?: WeaponSwayOpts
+) {
   const t = timeSec ?? performance.now() * 0.001;
   // Walk whole avatar — bone-parented skins live outside __skin_attachments
   avatarRoot.traverse((o) => {
     const sway = o.userData?.skinSway;
-    if (!sway || typeof sway !== 'number' || sway <= 0) return;
-    const amp = 0.045 * sway;
-    const baseZ = typeof o.userData.baseRotZ === 'number' ? o.userData.baseRotZ : 0;
-    const baseX = typeof o.userData.baseRotX === 'number' ? o.userData.baseRotX : 0;
-    o.rotation.z = baseZ + Math.sin(t * 2.2 + o.id) * amp;
-    o.rotation.x = baseX + Math.sin(t * 1.6 + o.id * 0.7) * amp * 0.55;
-    void dt;
+    if (sway && typeof sway === 'number' && sway > 0) {
+      const amp = 0.045 * sway;
+      const baseZ = typeof o.userData.baseRotZ === 'number' ? o.userData.baseRotZ : 0;
+      const baseX = typeof o.userData.baseRotX === 'number' ? o.userData.baseRotX : 0;
+      o.rotation.z = baseZ + Math.sin(t * 2.2 + o.id) * amp;
+      o.rotation.x = baseX + Math.sin(t * 1.6 + o.id * 0.7) * amp * 0.55;
+    }
+    if (weaponSway?.enabled && o.userData?.isWeaponSkin) {
+      const ampRad =
+        THREE.MathUtils.degToRad(Math.max(0, weaponSway.amplitudeDeg)) *
+        (weaponSway.moving ? Math.max(1, weaponSway.moveMult) : 1);
+      const freq = Math.max(0.05, weaponSway.speedHz) * Math.PI * 2;
+      const baseZ = typeof o.userData.baseRotZ === 'number' ? o.userData.baseRotZ : 0;
+      const baseX = typeof o.userData.baseRotX === 'number' ? o.userData.baseRotX : 0;
+      o.rotation.x = baseX + Math.sin(t * freq) * ampRad;
+      o.rotation.z = baseZ + Math.sin(t * freq * 0.6 + 1.3) * ampRad * 0.6;
+    }
   });
+  void dt;
 }
 
 /**

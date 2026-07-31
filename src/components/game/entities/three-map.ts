@@ -4,6 +4,32 @@ import { loadGltf, cloneGltfScene } from '../renderer/asset-loader';
 import { toThree } from '../renderer/coords';
 import { FINISH_X, WORLD_HEIGHT, WORLD_WIDTH } from '../utils/constants';
 import { modelUrl, textureUrl } from '../editor/prototype-catalog';
+import { resolveModelSrc } from '../editor/model-scan';
+
+/** Floating name label for a custom Horde monster — canvas-texture sprite, always faces camera. */
+function makeNameplateSprite(text: string): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = 'rgba(10, 10, 16, 0.6)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.font = 'bold 32px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fca5a5';
+    ctx.fillText(text.slice(0, 24), canvas.width / 2, canvas.height / 2);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true })
+  );
+  sprite.scale.set(1.6, 0.4, 1);
+  sprite.renderOrder = 999;
+  return sprite;
+}
 
 const HAZARD_MODELS: Record<NetObstacleState['kind'], string> = {
   spike: 'target-a-round',
@@ -87,11 +113,16 @@ export class ThreeMap {
   }
 
   private async getPrefab(name: string): Promise<THREE.Group> {
-    let proto = this.prefabCache.get(name);
+    return this.getPrefabFromUrl(modelUrl(name), name);
+  }
+
+  /** Same cache/clone path as getPrefab, but for an arbitrary GLB URL (custom monster models). */
+  private async getPrefabFromUrl(url: string, cacheKey = url): Promise<THREE.Group> {
+    let proto = this.prefabCache.get(cacheKey);
     if (!proto) {
-      const gltf = await loadGltf(modelUrl(name));
+      const gltf = await loadGltf(url);
       proto = cloneGltfScene(gltf);
-      this.prefabCache.set(name, proto);
+      this.prefabCache.set(cacheKey, proto);
     }
     return proto.clone(true) as THREE.Group;
   }
@@ -250,14 +281,24 @@ export class ThreeMap {
   public async upsertObstacle(index: number, obstacle: NetObstacleState) {
     let node = this.obstacleRoots.get(index);
     if (!node) {
-      const name = HAZARD_MODELS[obstacle.kind] ?? 'crate';
+      // Horde custom monster: a mapper-assigned GLB overrides the generic
+      // kind-based prefab lookup entirely — falls back to it if no custom
+      // model was set, or if the custom model fails to load.
+      const customSrc = resolveModelSrc(obstacle.modelId, obstacle.modelUrl);
       try {
-        node = await this.getPrefab(name);
+        node = customSrc
+          ? await this.getPrefabFromUrl(customSrc)
+          : await this.getPrefab(HAZARD_MODELS[obstacle.kind] ?? 'crate');
       } catch {
         node = new THREE.Mesh(
           new THREE.CylinderGeometry(0.4, 0.4, 1.1, 12),
           new THREE.MeshStandardMaterial({ color: 0xef4444 })
         );
+      }
+      if (obstacle.displayName) {
+        const label = makeNameplateSprite(obstacle.displayName);
+        label.position.y = 1.6;
+        node.add(label);
       }
       this.obstacleRoots.set(index, node);
       this.root.add(node);

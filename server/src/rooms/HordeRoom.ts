@@ -236,6 +236,7 @@ export class HordeRoom extends Room<RoomState> {
 
   private playerSpawns: SpawnPoint[] = [];
   private monsterSpawnPoints: MonsterSpawnBlueprint[] = [];
+  private waveAnchors: { waveNumber: number; difficultyMultiplier: number }[] = [];
   private healthFloors: PadZone[] = [];
   private redZones: PadZone[] = [];
   private revivePads: PadZone[] = [];
@@ -719,6 +720,11 @@ export class HordeRoom extends Room<RoomState> {
       this.monsterSpawnPoints = Array.isArray(data?.monsterSpawns)
         ? (data.monsterSpawns as MonsterSpawnBlueprint[]).map((m) => ({ ...m }))
         : this.monsterSpawnPoints;
+      this.waveAnchors = Array.isArray(data?.waveAnchors)
+        ? (data.waveAnchors as { waveNumber: number; difficultyMultiplier: number }[]).map((w) => ({
+            ...w,
+          }))
+        : [];
 
       this.healthFloors = Array.isArray(data?.healthFloors)
         ? (data.healthFloors as PadZone[])
@@ -783,6 +789,9 @@ export class HordeRoom extends Room<RoomState> {
       if (Array.isArray(data.monsterSpawns)) {
         this.monsterSpawnPoints = data.monsterSpawns as typeof this.monsterSpawnPoints;
       }
+      this.waveAnchors = Array.isArray(data.waveAnchors)
+        ? (data.waveAnchors as typeof this.waveAnchors)
+        : [];
       this.healthFloors = Array.isArray(data.healthFloors)
         ? (data.healthFloors as typeof this.healthFloors)
         : [];
@@ -1013,6 +1022,12 @@ export class HordeRoom extends Room<RoomState> {
     this.beginWave(this.startingWave);
   }
 
+  /** Wave Anchor override for this wave number, on top of the mode-wide difficultyScale. */
+  private waveDifficultyMult(wave: number): number {
+    const anchor = this.waveAnchors.find((w) => w.waveNumber === wave);
+    return anchor ? anchor.difficultyMultiplier : 1;
+  }
+
   private beginWave(wave: number) {
     this.state.wave = wave;
     this.betweenWavesMs = 0;
@@ -1042,9 +1057,10 @@ export class HordeRoom extends Room<RoomState> {
     }
 
     const now = Date.now();
+    const waveMult = this.waveDifficultyMult(wave);
     for (const point of points.length ? points : this.monsterSpawnPoints) {
       const base = point.countPerWave ?? 2;
-      const scale = 1 + (wave - 1) * 0.35 * this.difficultyScale;
+      const scale = (1 + (wave - 1) * 0.35 * this.difficultyScale) * waveMult;
       const count = Math.max(1, Math.round(base * scale));
       const intervalMs = Math.max(400, (point.spawnIntervalSec ?? 1.5) * 1000);
       this.waveSpawnQueue.push({
@@ -1089,11 +1105,23 @@ export class HordeRoom extends Room<RoomState> {
     const base = MONSTER_STATS[type] ?? MONSTER_STATS.basic;
     const level = Math.max(1, point.level ?? 1);
     const levelScale = 1 + (level - 1) * 0.18;
-    const waveScaling = 1 + (this.state.wave - 1) * 0.12 * this.difficultyScale;
+    const waveMult = this.waveDifficultyMult(this.state.wave);
+    const waveScaling = (1 + (this.state.wave - 1) * 0.12 * this.difficultyScale) * waveMult;
     const stats = {
       hp: (point.hp && point.hp > 0 ? point.hp : base.hp * levelScale) * waveScaling,
-      speed: point.speed && point.speed > 0 ? point.speed : base.speed * (1 + (this.state.wave - 1) * 0.04 * this.difficultyScale),
-      damage: point.damage && point.damage > 0 ? point.damage : Math.round(base.damage * levelScale * (1 + (this.state.wave - 1) * 0.08 * this.difficultyScale)),
+      speed:
+        point.speed && point.speed > 0
+          ? point.speed
+          : base.speed * (1 + (this.state.wave - 1) * 0.04 * this.difficultyScale) * waveMult,
+      damage:
+        point.damage && point.damage > 0
+          ? point.damage
+          : Math.round(
+              base.damage *
+                levelScale *
+                (1 + (this.state.wave - 1) * 0.08 * this.difficultyScale) *
+                waveMult
+            ),
       radius: point.radius && point.radius > 0 ? point.radius : base.radius,
     };
     const id = `mon_${Math.random().toString(36).slice(2, 9)}`;
@@ -1110,6 +1138,9 @@ export class HordeRoom extends Room<RoomState> {
     obs.activeMs = 999999;
     obs.alwaysActive = true;
     obs.active = true;
+    obs.modelUrl = point.modelUrl ?? '';
+    obs.modelId = point.modelId ?? '';
+    obs.displayName = point.displayName ?? '';
     this.state.obstacles.push(obs);
 
     this.monsters.push({

@@ -607,6 +607,7 @@ export class GameConnection {
       countPerWave?: number;
       spawnIntervalSec?: number;
     }[];
+    waveAnchors?: { waveNumber: number; difficultyMultiplier: number }[];
     teamASpawns?: { x: number; y: number; z: number }[];
     teamBSpawns?: { x: number; y: number; z: number }[];
     pushPayloads?: {
