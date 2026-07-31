@@ -6,6 +6,8 @@
  */
 
 import {
+  APEX_GRAVITY_MULT,
+  APEX_VZ_THRESHOLD,
   COLLISION_SKIN,
   COYOTE_TIME_MS,
   CROUCH_SPEED_MULTIPLIER,
@@ -103,6 +105,12 @@ export interface SimScratch {
   wallJumpCooldownNormalY: number;
   /** Moving-platform carry (pad id / entityId under feet). */
   supportPadId: string | null;
+  /** Remaining ms of an active slide (0 = not sliding). */
+  slideMs: number;
+  /** Remaining ms before a new slide can start. */
+  slideCooldownMs: number;
+  /** Edge-detects the crouch button so holding it doesn't retrigger every tick. */
+  wasCrouchHeld: boolean;
 }
 
 export interface SimInput {
@@ -116,6 +124,7 @@ export interface SimInput {
 
 /** === Tunables from shared/sim-constants.ts === */
 const BASE_GRAVITY = GRAVITY;
+const BASE_APEX_GRAVITY_MULT = APEX_GRAVITY_MULT;
 const BASE_JUMP_VELOCITY = JUMP_VELOCITY;
 const BASE_DOUBLE_JUMP_VELOCITY = DOUBLE_JUMP_VELOCITY;
 const BASE_JUMP_CUT = JUMP_CUT_MULTIPLIER;
@@ -170,6 +179,9 @@ export function createSimScratch(): SimScratch {
     wallJumpCooldownNormalX: 0,
     wallJumpCooldownNormalY: 0,
     supportPadId: null,
+    slideMs: 0,
+    slideCooldownMs: 0,
+    wasCrouchHeld: false,
   };
 }
 
@@ -345,6 +357,7 @@ export function stepPlatformer(
 ): SimBody {
   // Resolve tunables — prefer per-map overrides, fall back to base constants.
   const GRAVITY = physOpts?.gravity ?? BASE_GRAVITY;
+  const APEX_GRAV_MULT = physOpts?.apexGravMult ?? BASE_APEX_GRAVITY_MULT;
   const JUMP_VELOCITY = physOpts?.jumpVelocity ?? BASE_JUMP_VELOCITY;
   const DOUBLE_JUMP_VELOCITY = physOpts?.doubleJumpVelocity ?? BASE_DOUBLE_JUMP_VELOCITY;
   const JUMP_CUT = physOpts?.jumpCutMult ?? BASE_JUMP_CUT;
@@ -410,6 +423,37 @@ export function stepPlatformer(
 
   let grounded = !!support && body.vz <= 0.2;
   body.isGrounded = grounded;
+
+  // Slide (crouch while sprinting) — mirrors server/src/sim/movement.ts so
+  // Play Test and live prediction show the same speed-boosted burst instead
+  // of the toggle silently doing nothing. Slide-jump falls out for free:
+  // jumping only ever sets vz, so a jump mid-slide keeps the boosted
+  // velX/velY the player already had.
+  const SLIDE_ENABLED = physOpts?.slideEnabled ?? false;
+  const SLIDE_MULT = physOpts?.slideMult ?? 2.2;
+  const SLIDE_DURATION_MS = physOpts?.slideDurationMs ?? 600;
+  const SLIDE_COOLDOWN_MS = physOpts?.slideCooldownMs ?? 1000;
+  const crouchEdge = input.crouch && !scratch.wasCrouchHeld;
+  scratch.wasCrouchHeld = input.crouch;
+  if (
+    SLIDE_ENABLED &&
+    crouchEdge &&
+    input.sprint &&
+    grounded &&
+    wishMag > 0.2 &&
+    !scratch.exhausted &&
+    scratch.slideMs <= 0 &&
+    scratch.slideCooldownMs <= 0
+  ) {
+    scratch.slideMs = SLIDE_DURATION_MS;
+  }
+  if (scratch.slideMs > 0) {
+    maxSpeed = MAX_GROUND_SPEED * SLIDE_MULT;
+    scratch.slideMs = Math.max(0, scratch.slideMs - dt * 1000);
+    if (scratch.slideMs <= 0) scratch.slideCooldownMs = SLIDE_COOLDOWN_MS;
+  } else if (scratch.slideCooldownMs > 0) {
+    scratch.slideCooldownMs = Math.max(0, scratch.slideCooldownMs - dt * 1000);
+  }
 
   // Soft ground glue (mirrors server movement.ts). Stepped ramp pads change
   // topZ by small amounts each cell — hard-assigning body.z caused one-frame
@@ -571,7 +615,14 @@ export function stepPlatformer(
   if (!body.isGrounded) {
     const slidingOnWall =
       wallJumpEnabled && pushed.touchingWall && body.vz <= 0 && scratch.wallJumpLockoutMs <= 0;
-    const gravityThisTick = slidingOnWall ? GRAVITY * wallSlideGravMult : GRAVITY;
+    // Apex softening — mirrors server/src/sim/movement.ts so Play Test shows
+    // the same floaty-apex feel a map author dials in via apexGravMult.
+    const atApex = Math.abs(body.vz) <= Math.max(APEX_VZ_THRESHOLD, 1.5);
+    const gravityThisTick = slidingOnWall
+      ? GRAVITY * wallSlideGravMult
+      : atApex
+        ? GRAVITY * APEX_GRAV_MULT
+        : GRAVITY;
     body.vz = Math.max(-MAX_FALL, body.vz - gravityThisTick * dt);
     body.z += body.vz * dt;
 

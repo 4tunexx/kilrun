@@ -237,6 +237,34 @@ function pushCreatorEngineChecks(doc: MapDocument, issues: MapValidationIssue[])
       message: `${invisibleSolids.length} solid entity(ies) have no model assigned — they'll render as a plain gray placeholder box in-game (e.g. “${invisibleSolids[0].name || invisibleSolids[0].kind}”). Assign a model or texture.`,
     });
   }
+
+  // Dangling cross-entity references: a teleporter target or button/trap
+  // wiring that points at an id no longer in the map (e.g. from an older
+  // imported save, or a JSON edit). The editor scrubs these on delete, but
+  // this catches anything that slipped through another path — a dangling
+  // teleport target is silently dropped by mapDocToSimTeleports with no
+  // other warning, so it'd otherwise ship as a dead, unusable pad.
+  const idSet = new Set(ents.map((e) => e.id));
+  const danglingTeleports = ents.filter(
+    (e) => e.teleport?.enabled && e.teleport.targetEntityId && !idSet.has(e.teleport.targetEntityId)
+  );
+  if (danglingTeleports.length > 0) {
+    issues.push({
+      level: 'warn',
+      message: `${danglingTeleports.length} teleporter(s) target a deleted entity and won't work (e.g. “${danglingTeleports[0].name}”). Re-link them.`,
+    });
+  }
+  const danglingWiring = ents.filter(
+    (e) =>
+      (e.animation?.listenToEntityId && !idSet.has(e.animation.listenToEntityId)) ||
+      e.animation?.activatesEntityIds?.some((id) => !idSet.has(id))
+  );
+  if (danglingWiring.length > 0) {
+    issues.push({
+      level: 'warn',
+      message: `${danglingWiring.length} button/trap wiring reference(s) point at a deleted entity (e.g. “${danglingWiring[0].name}”). Re-link them.`,
+    });
+  }
 }
 
 export function formatValidationSummary(issues: MapValidationIssue[]): string {

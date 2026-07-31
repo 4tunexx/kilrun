@@ -189,6 +189,85 @@ describe('stepPlatformer (Foundry feel)', () => {
     expect(vzBefore - body.vz).toBeCloseTo(20 / 60, 2);
   });
 
+  it('slide (crouch while sprinting) boosts speed when enabled, no-ops when not', () => {
+    const physOpts = {
+      slideEnabled: true,
+      slideMult: 2.2,
+      slideDurationMs: 600,
+      slideCooldownMs: 1000,
+    };
+
+    // Enabled: sprinting forward, then a crouch *edge* while still sprinting
+    // triggers a slide burst well above plain sprint speed.
+    const body = groundedBody();
+    const scratch = createSimScratch();
+    stepPlatformer(
+      body,
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds,
+      physOpts
+    );
+    stepPlatformer(
+      body,
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: true },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds,
+      physOpts
+    );
+    expect(scratch.velX).toBeCloseTo(5 * 2.2, 5);
+    expect(scratch.slideMs).toBeGreaterThan(0);
+
+    // Cooldown gates an immediate retrigger even if crouch is released/re-pressed.
+    scratch.slideMs = 0;
+    scratch.slideCooldownMs = 500;
+    stepPlatformer(
+      body,
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds,
+      physOpts
+    );
+    stepPlatformer(
+      body,
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: true },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds,
+      physOpts
+    );
+    expect(scratch.slideMs).toBe(0);
+
+    // Disabled (default): the same crouch-while-sprinting input is plain
+    // crouch-reduced speed, matching pre-existing behavior exactly.
+    const plainBody = groundedBody();
+    const plainScratch = createSimScratch();
+    stepPlatformer(
+      plainBody,
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: false },
+      1 / 30,
+      [floor],
+      plainScratch,
+      bounds
+    );
+    stepPlatformer(
+      plainBody,
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: true },
+      1 / 30,
+      [floor],
+      plainScratch,
+      bounds
+    );
+    expect(plainScratch.velX).toBeCloseTo(5 * 0.55, 5);
+  });
+
   it('sets horizontal velocity directly to wish * speed', () => {
     const body = groundedBody();
     const scratch = createSimScratch();

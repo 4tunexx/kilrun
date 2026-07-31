@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { EditorEntity, EditorLayer, MapDocument, MapEnvironment } from './map-document';
+import { scrubDanglingReferences } from './map-document';
 import {
   DEFAULT_ENVIRONMENT,
   HAMMER_SOLID_MODEL,
@@ -2907,6 +2908,16 @@ export function createEditorViewport(
       const copies: EditorEntity[] = [];
       /** Old groupId → new groupId so each copied cluster stays a group. */
       const groupMap = new Map<string, string>();
+      // Old entity id → new copy id, for every entity actually being
+      // duplicated — used below to re-target teleport/button/trap wiring
+      // between COPIES so a duplicated pair references its own sibling
+      // instead of the original entities (which would otherwise mean
+      // pressing the new button arms the old trap, and the new trap is only
+      // ever armed by the old button).
+      const idMap = new Map<string, string>();
+      for (const sid of ids) {
+        if (doc.entities.some((e) => e.id === sid)) idMap.set(sid, generateId());
+      }
       const offset: [number, number, number] = [
         axis === 'x' ? gridSize : 0,
         axis === 'y' ? gridSize : 0,
@@ -2928,9 +2939,24 @@ export function createEditorViewport(
           }
           newGroupId = groupMap.get('__selection__');
         }
+        const animation = src.animation
+          ? { ...src.animation, availableClips: [...src.animation.availableClips] }
+          : defaultAnimation();
+        if (animation.listenToEntityId && idMap.has(animation.listenToEntityId)) {
+          animation.listenToEntityId = idMap.get(animation.listenToEntityId);
+        }
+        if (animation.activatesEntityIds?.length) {
+          animation.activatesEntityIds = animation.activatesEntityIds.map(
+            (id) => idMap.get(id) ?? id
+          );
+        }
+        const teleport =
+          src.teleport?.targetEntityId && idMap.has(src.teleport.targetEntityId)
+            ? { ...src.teleport, targetEntityId: idMap.get(src.teleport.targetEntityId) }
+            : src.teleport;
         copies.push({
           ...src,
-          id: generateId(),
+          id: idMap.get(sid) ?? generateId(),
           name: `${src.name} Copy`,
           locked: false,
           groupId: newGroupId,
@@ -2939,9 +2965,8 @@ export function createEditorViewport(
             src.position[1] + offset[1],
             src.position[2] + offset[2],
           ] as [number, number, number],
-          animation: src.animation
-            ? { ...src.animation, availableClips: [...src.animation.availableClips] }
-            : defaultAnimation(),
+          animation,
+          teleport,
         });
       }
       doc = { ...doc, entities: [...doc.entities, ...copies] };
@@ -3245,7 +3270,9 @@ export function createEditorViewport(
         );
         return;
       }
-      doc = { ...doc, entities: doc.entities.filter((e) => !ids.includes(e.id)) };
+      const removedIds = new Set(ids);
+      const remaining = doc.entities.filter((e) => !removedIds.has(e.id));
+      doc = { ...doc, entities: scrubDanglingReferences(remaining, removedIds) };
       transform.detach();
       ids.forEach((id) => disposeRoot(id));
       select(null);

@@ -140,6 +140,35 @@ interface PushPayloadSim {
   winEpsilon: number;
 }
 
+interface ButtonZone {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  activatesObstacleIds: string[];
+  holdMs: number;
+  cooldownMs: number;
+}
+
+interface ActionZone extends ButtonZone {
+  trigger: 'proximity' | 'interact' | 'collide' | 'always';
+}
+
+interface TeleportZone {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  depth: number;
+  height: number;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+  cooldownMs: number;
+}
+
 const RESULTS_DISPLAY_MS = 10000;
 const ROUND_COUNTDOWN_MS = 4000;
 const MAX_ROUNDS = 6;
@@ -243,6 +272,12 @@ export class CompetitiveRoom extends Room<RoomState> {
   }> = [];
   private startingCredits = 500;
   private creditsPerKill = 75;
+  private customButtons: ButtonZone[] = [];
+  private customActions: ActionZone[] = [];
+  private customTeleports: TeleportZone[] = [];
+  private buttonArmRemaining = new Map<string, number>();
+  private lastButtonPressAt = new Map<string, number>();
+  private lastTeleportAt = new Map<string, number>();
 
   onCreate(options: JoinOptions = {}) {
     this.setState(new RoomState());
@@ -681,6 +716,13 @@ export class CompetitiveRoom extends Room<RoomState> {
         : [];
       this.pushWinPending = null;
 
+      this.customButtons = Array.isArray(data?.buttons) ? (data.buttons as ButtonZone[]) : [];
+      this.customActions = Array.isArray(data?.actions) ? (data.actions as ActionZone[]) : [];
+      this.customTeleports = Array.isArray(data?.teleports)
+        ? (data.teleports as TeleportZone[])
+        : [];
+      this.buttonArmRemaining.clear();
+
       if (data.worldBounds) {
         this.worldBounds = { ...(data.worldBounds as WorldBounds) };
       }
@@ -701,6 +743,10 @@ export class CompetitiveRoom extends Room<RoomState> {
           crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
           maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
           apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+          slideEnabled: typeof cs.slideEnabled === 'boolean' ? cs.slideEnabled : undefined,
+          slideMult: typeof cs.slideMult === 'number' ? cs.slideMult : undefined,
+          slideDurationMs: typeof cs.slideDurationMs === 'number' ? cs.slideDurationMs : undefined,
+          slideCooldownMs: typeof cs.slideCooldownMs === 'number' ? cs.slideCooldownMs : undefined,
           wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
           wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
           wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
@@ -761,6 +807,12 @@ export class CompetitiveRoom extends Room<RoomState> {
           }))
         : [];
       this.pushWinPending = null;
+      this.customButtons = Array.isArray(data.buttons) ? (data.buttons as ButtonZone[]) : [];
+      this.customActions = Array.isArray(data.actions) ? (data.actions as ActionZone[]) : [];
+      this.customTeleports = Array.isArray(data.teleports)
+        ? (data.teleports as TeleportZone[])
+        : [];
+      this.buttonArmRemaining.clear();
       if (data.worldBounds) {
         this.worldBounds = { ...(data.worldBounds as WorldBounds) };
       }
@@ -781,6 +833,10 @@ export class CompetitiveRoom extends Room<RoomState> {
           crouchMult: typeof cs.crouchMult === 'number' ? cs.crouchMult : undefined,
           maxFallSpeed: typeof cs.maxFallSpeed === 'number' ? cs.maxFallSpeed : undefined,
           apexGravMult: typeof cs.apexGravMult === 'number' ? cs.apexGravMult : undefined,
+          slideEnabled: typeof cs.slideEnabled === 'boolean' ? cs.slideEnabled : undefined,
+          slideMult: typeof cs.slideMult === 'number' ? cs.slideMult : undefined,
+          slideDurationMs: typeof cs.slideDurationMs === 'number' ? cs.slideDurationMs : undefined,
+          slideCooldownMs: typeof cs.slideCooldownMs === 'number' ? cs.slideCooldownMs : undefined,
           wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
           wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
           wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
@@ -1051,6 +1107,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       this.platformMotion,
       this.matchElapsedMs
     );
+    this.tickButtonArming(dtMs);
     this.tickPlayers(dtMs, platformDeltas);
     this.tickPushPayloads(dtMs / 1000);
 
@@ -1360,6 +1417,87 @@ export class CompetitiveRoom extends Room<RoomState> {
     return Math.floor(this.maxRounds / 2) + 1;
   }
 
+  /** Decays button-armed obstacle activations. Mirrors DeathrunRoom.tickObstacles. */
+  private tickButtonArming(dtMs: number) {
+    for (const [id, remaining] of Array.from(this.buttonArmRemaining.entries())) {
+      const next = remaining - dtMs;
+      if (next <= 0) {
+        this.buttonArmRemaining.delete(id);
+        const obs = this.state.obstacles.find((o) => o.id === id);
+        if (obs?.buttonControlled) obs.active = false;
+      } else {
+        this.buttonArmRemaining.set(id, next);
+      }
+    }
+    for (const obstacle of this.state.obstacles) {
+      if (obstacle.buttonControlled && this.buttonArmRemaining.has(obstacle.id)) {
+        obstacle.active = true;
+      }
+    }
+  }
+
+  private tryPressButtons(player: PlayerState, sessionId: string, now: number) {
+    for (const btn of this.customButtons) {
+      if (!this.isPlayerInActivationRadius(player, btn)) continue;
+      this.activateObstacleZone(btn, `button:${sessionId}:${btn.id}`, now);
+    }
+  }
+
+  private tryTriggerActions(
+    player: PlayerState,
+    sessionId: string,
+    now: number,
+    interactPressed: boolean
+  ) {
+    for (const action of this.customActions) {
+      if (action.trigger === 'interact' && !interactPressed) continue;
+      if (!this.isPlayerInActivationRadius(player, action)) continue;
+      this.activateObstacleZone(action, `action:${sessionId}:${action.id}`, now);
+    }
+  }
+
+  private isPlayerInActivationRadius(player: PlayerState, zone: ButtonZone): boolean {
+    const dx = player.x - zone.x;
+    const dy = player.y - zone.y;
+    const dz = player.z - zone.z;
+    return Math.hypot(dx, dy) <= zone.radius + PLAYER_RADIUS && Math.abs(dz) <= 2.2;
+  }
+
+  private activateObstacleZone(zone: ButtonZone, cooldownKey: string, now: number) {
+    const last = this.lastButtonPressAt.get(cooldownKey) ?? 0;
+    if (now - last < zone.cooldownMs) return;
+    this.lastButtonPressAt.set(cooldownKey, now);
+    for (const oid of zone.activatesObstacleIds) {
+      const obs = this.state.obstacles.find((o) => o.id === oid);
+      if (!obs) continue;
+      obs.active = true;
+      const hold = zone.holdMs > 0 ? zone.holdMs : obs.activeMs || 1500;
+      this.buttonArmRemaining.set(oid, hold);
+    }
+  }
+
+  private tryTeleport(player: PlayerState, sessionId: string, now: number) {
+    for (const portal of this.customTeleports) {
+      const halfW = portal.width / 2 + PLAYER_RADIUS;
+      const halfD = portal.depth / 2 + PLAYER_RADIUS;
+      if (Math.abs(player.x - portal.x) > halfW || Math.abs(player.y - portal.y) > halfD) {
+        continue;
+      }
+      if (player.z < portal.z - 0.4 || player.z > portal.z + Math.max(portal.height, 1.2)) {
+        continue;
+      }
+      const key = `${sessionId}:${portal.id}`;
+      const last = this.lastTeleportAt.get(key) ?? 0;
+      if (now - last < portal.cooldownMs) continue;
+      this.lastTeleportAt.set(key, now);
+      player.x = portal.targetX;
+      player.y = portal.targetY;
+      player.z = portal.targetZ;
+      player.vz = 0;
+      break;
+    }
+  }
+
   private tickPlayers(dtMs: number, platformDeltas: PlatformDelta[] = []) {
     const dtSeconds = dtMs / 1000;
     const now = Date.now();
@@ -1378,6 +1516,10 @@ export class CompetitiveRoom extends Room<RoomState> {
       tickActiveAbilityTimers(player, now);
       applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
       finishReloadIfDue(player, now);
+
+      if (input.interactPressed) this.tryPressButtons(player, sessionId, now);
+      this.tryTriggerActions(player, sessionId, now, input.interactPressed);
+      this.tryTeleport(player, sessionId, now);
 
       for (const obstacle of this.state.obstacles) {
         if (!isPlayerHitByObstacle(player, obstacle)) continue;
