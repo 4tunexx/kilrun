@@ -1280,11 +1280,11 @@ export default function KilrunEngine({
             backdropFilter: 'blur(7px)',
             WebkitBackdropFilter: 'blur(7px)',
             maskImage:
-              'radial-gradient(ellipse at center, transparent 38%, black 72%, black 100%)',
+              'radial-gradient(ellipse at center, transparent 56%, black 94%, black 100%)',
             WebkitMaskImage:
-              'radial-gradient(ellipse at center, transparent 38%, black 72%, black 100%)',
+              'radial-gradient(ellipse at center, transparent 56%, black 94%, black 100%)',
             background:
-              'radial-gradient(ellipse at center, rgba(0,0,0,0) 38%, rgba(4,8,16,0.4) 100%)',
+              'radial-gradient(ellipse at center, rgba(0,0,0,0) 56%, rgba(4,8,16,0.35) 100%)',
           }}
         />
 
