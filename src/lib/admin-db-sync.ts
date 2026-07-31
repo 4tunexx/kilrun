@@ -18,7 +18,7 @@ import { STATIC_FALLBACK_WEAPONS } from '@/lib/weapon-catalog';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-30-site-secrets-vault';
+const DB_SCHEMA_SYNC_VERSION = '2026-07-31-sound-board';
 
 async function requireAdmin() {
   const session = await auth();
@@ -410,6 +410,20 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`WeaponDefinition verify/seed failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — WeaponDefinition not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify: SoundDefinition (Sound Board admin panel). No static
+  // fallback data to seed — every row is an admin-uploaded clip, so this
+  // just confirms the collection is reachable/writable on this Mongo.
+  try {
+    const before = await prisma.soundDefinition.count();
+    steps.push(`SoundDefinition collection verified (count=${before})`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`SoundDefinition verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — SoundDefinition not available. Run db push. (${msg})`
     );
   }
 
