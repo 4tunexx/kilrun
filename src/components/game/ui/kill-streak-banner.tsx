@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { getKillStreakTierLabel, getKillStreakEscalation } from '../effects/kill-streak-tiers';
+import { getKillStreakTierLabel, getKillStreakEscalation, getSoundEventForTierLabel } from '../effects/kill-streak-tiers';
+import { playSound } from '../effects/soundboard';
 
 const BANNER_MS = 2200;
 
@@ -40,6 +41,8 @@ export const KillStreakBanner: React.FC<{ killStreak: number }> = ({ killStreak 
       const label = getKillStreakTierLabel(s);
       if (label) {
         queueRef.current.push({ key: nextKeyRef.current++, label, escalation: getKillStreakEscalation(s) });
+        const soundEvent = getSoundEventForTierLabel(label);
+        if (soundEvent) playSound(soundEvent);
       }
     }
     lastSeenRef.current = killStreak;

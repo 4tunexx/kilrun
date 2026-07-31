@@ -710,6 +710,22 @@ model PowerDefinition {
   @@index([isCore])
 }
 
+/// One uploaded sound clip per game-engine event (see shared/sound-events.ts
+/// for the canonical event catalog — that list lives in code, not the DB;
+/// this table only stores which file (if any) is bound to each event key).
+/// Admin-managed from the Sound Board panel in the map editor.
+model SoundDefinition {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  /// Matches a key in shared/sound-events.ts SOUND_EVENTS (e.g. "land", "power_hook").
+  eventKey  String   @unique
+  /// Public URL (Vercel Blob, /uploads/sounds/..., or a data: URL fallback).
+  fileUrl   String
+  /// Original uploaded filename, for display in the admin panel.
+  fileName  String   @default("")
+  volume    Float    @default(1)
+  updatedAt DateTime @updatedAt
+}
+
 /// Data-driven GLOBAL weapon catalog definition — replaces the hardcoded
 /// CATALOG_WEAPONS array in src/lib/weapon-catalog.ts. The original 8 catalog
 /// weapons are seeded with isCore=true (see prisma/seed.ts) so they can be

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { playSound } from '../effects/soundboard';
 
 const COMBO_WINDOW_MS = 4000;
 const FADE_MS = 900;
@@ -55,6 +56,7 @@ export const MultiKillCounter: React.FC<{ killStreak: number }> = ({ killStreak 
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     if (comboRef.current >= 2) {
       setDisplay({ combo: comboRef.current, key: nextKeyRef.current++, visible: true });
+      playSound('multi_kill_combo');
       hideTimerRef.current = setTimeout(() => {
         setDisplay((d) => (d ? { ...d, visible: false } : d));
       }, COMBO_WINDOW_MS);

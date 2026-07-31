@@ -69,6 +69,7 @@ import {
   Combine,
   Route,
   Package,
+  Volume2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -161,6 +162,7 @@ import { TpsViewStudio } from './tps-view-studio';
 import { WeaponEditor } from './weapon-editor';
 import { CombatEditor } from './combat-editor';
 import { PowerEditor } from './power-editor';
+import { SoundBoardEditor } from './sound-board-editor';
 import { MapShopPanel } from './map-shop-panel';
 import { ensureMapPlayerEntity } from './player-avatar';
 import type { TpsViewSettings } from '../tps/tps-view-settings';
@@ -216,6 +218,7 @@ type SidebarTab =
   | 'weapon'
   | 'combat'
   | 'powers'
+  | 'sound'
   | 'shop';
 
 const STUDIO_SIDEBAR_TABS: SidebarTab[] = [
@@ -225,6 +228,7 @@ const STUDIO_SIDEBAR_TABS: SidebarTab[] = [
   'weapon',
   'combat',
   'powers',
+  'sound',
   'shop',
 ];
 
@@ -402,6 +406,7 @@ export function MapEditor({
   const weaponEditorOpen = tab === 'weapon';
   const combatEditorOpen = tab === 'combat';
   const powersEditorOpen = tab === 'powers';
+  const soundEditorOpen = tab === 'sound';
   const shopEditorOpen = tab === 'shop';
   const anyStudioOpen = isStudioSidebarTab(tab);
   const [mapListTick, setMapListTick] = useState(0);
@@ -1372,6 +1377,14 @@ export function MapEditor({
     setToolsOpen(false);
   };
 
+  const openSoundEditor = () => {
+    setTab('sound');
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(true);
+    setToolsOpen(false);
+  };
+
   const saveShopSettings = (settings: MapShopSettings) => {
     scheduleHistory();
     setDirty(true);
@@ -2011,6 +2024,7 @@ export function MapEditor({
               ['weapon', Sword, 'Weapon Editor'],
               ['combat', Swords, 'Combat Editor'],
               ['powers', Sparkles, 'Power Editor'],
+              ['sound', Volume2, 'Sound Board'],
               ['shop', ShoppingCart, 'Buy Menu'],
               ['settings', Settings2, 'Settings'],
               ['help', HelpCircle, 'Help'],
@@ -2046,6 +2060,10 @@ export function MapEditor({
                 }
                 if (id === 'powers') {
                   if (powersEditorOpen) { closeStudioPanels(); } else { openPowersEditor(); }
+                  return;
+                }
+                if (id === 'sound') {
+                  if (soundEditorOpen) { closeStudioPanels(); } else { openSoundEditor(); }
                   return;
                 }
                 if (id === 'shop') {
@@ -2217,6 +2235,11 @@ export function MapEditor({
           {tab === 'powers' && (
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
               <PowerEditor embedded onClose={closeStudioPanels} />
+            </div>
+          )}
+          {tab === 'sound' && (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <SoundBoardEditor embedded onClose={closeStudioPanels} />
             </div>
           )}
           {tab === 'shop' && (

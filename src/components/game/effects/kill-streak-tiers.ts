@@ -41,3 +41,19 @@ export function getKillStreakEscalation(streak: number): number {
   if (streak >= 3) return 1;
   return 0;
 }
+
+const TIER_LABEL_TO_SOUND_EVENT: Record<string, string> = {
+  'First Blood': 'streak_first_blood',
+  'Double Kill': 'streak_double_kill',
+  'Triple Kill': 'streak_triple_kill',
+  'Multi Kill': 'streak_multi_kill',
+  'Mega Kill': 'streak_mega_kill',
+  'Monster Kill': 'streak_monster_kill',
+  Unstoppable: 'streak_unstoppable',
+  Rampage: 'streak_rampage',
+};
+
+/** Sound Board event key for a tier label (see shared/sound-events.ts). */
+export function getSoundEventForTierLabel(label: string): string | null {
+  return TIER_LABEL_TO_SOUND_EVENT[label] ?? null;
+}

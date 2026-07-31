@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { toThree } from '../renderer/coords';
+import { playSound } from './soundboard';
 
 /**
  * Floating hit-damage number popups — DOM text (not Three.js sprites, no
@@ -58,6 +59,7 @@ export class DamageNumberFx {
     slot.el.style.fontSize = rounded >= 40 ? '30px' : rounded >= 20 ? '24px' : '19px';
     slot.el.style.display = 'block';
     slot.el.style.opacity = '0';
+    playSound('hit_dealt');
   }
 
   update(dt: number, camera: THREE.PerspectiveCamera, width: number, height: number): void {
