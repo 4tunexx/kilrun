@@ -10,6 +10,7 @@ import type { ChatMessage, NetObstacleState, NetPlatformState, NetPlayerState, P
 import { InputManager } from './input/input-manager';
 import type { DualJoystick } from './input/dual-joystick';
 import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
+import { SprintParticles } from './effects/sprint-particles';
 import { ThreeCharacter } from './entities/three-character';
 import { ThreeMap } from './entities/three-map';
 import { CustomMapOverlay } from './entities/custom-map-overlay';
@@ -149,6 +150,7 @@ export default function KilrunEngine({
 }: KilrunEngineProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  const sprintFxRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const pausedRef = useRef(false);
   const gameMenuOpenRef = useRef(false);
@@ -626,6 +628,9 @@ export default function KilrunEngine({
     let shakeAmp = 0;
     let wasGroundedForShake = false;
     let lastHealthForShake: number | null = null;
+    /** Sprint/slide screen FX intensity, eased toward 0/1 each frame. */
+    let sprintFx = 0;
+    const sprintParticles = new SprintParticles(world.camera);
     const targetPos = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     const overlayPlayerPos = new THREE.Vector3();
     // Smoothed local player position for the camera — follows the interpolated
@@ -884,6 +889,26 @@ export default function KilrunEngine({
         }
       } else {
         predictedBody = null;
+      }
+
+      // Sprint/slide screen FX — eases in while actually moving fast with
+      // sprint held (or sliding), eases back out otherwise.
+      {
+        const horizSpeed = Math.hypot(predictedScratch.velX, predictedScratch.velY);
+        const sprinting =
+          !frozen &&
+          inputManager.isSprintPressed() &&
+          (predictedBody?.isGrounded ?? true) &&
+          horizSpeed > 4.5;
+        const sliding = predictedScratch.slideMs > 0;
+        const targetFx = sliding ? 1 : sprinting ? Math.min(1, horizSpeed / 9) : 0;
+        const rate = targetFx > sprintFx ? 7 : 3.2;
+        sprintFx += (targetFx - sprintFx) * Math.min(1, dt * rate);
+        if (sprintFx < 0.001) sprintFx = 0;
+        sprintParticles.update(dt, sprintFx);
+        if (sprintFxRef.current) {
+          sprintFxRef.current.style.opacity = String(sprintFx);
+        }
       }
 
       const swayCombat = ensureCombatSettings(
@@ -1188,6 +1213,7 @@ export default function KilrunEngine({
       window.clearInterval(syncTimer);
       if (document.pointerLockElement) document.exitPointerLock?.();
       characters.forEach((c) => c.destroy());
+      sprintParticles.dispose();
       overlay.destroy();
       map.destroy();
       envHandle?.dispose();
@@ -1236,6 +1262,19 @@ export default function KilrunEngine({
     >
       <MobilePlayGate containerRef={rootRef}>
         <div ref={hostRef} className="absolute inset-0 w-full h-full" />
+
+        <div
+          ref={sprintFxRef}
+          className="pointer-events-none absolute inset-0 z-[119]"
+          aria-hidden
+          style={{
+            opacity: 0,
+            background:
+              'radial-gradient(ellipse at center, rgba(90,170,255,0) 38%, rgba(50,120,255,0.16) 72%, rgba(6,16,40,0.6) 100%)',
+            boxShadow: 'inset 0 0 160px 50px rgba(60,140,255,0.35)',
+            mixBlendMode: 'screen',
+          }}
+        />
 
         {!assetsReady && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 z-[105] pointer-events-none">
