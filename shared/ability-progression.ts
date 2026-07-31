@@ -14,7 +14,7 @@
  * mutable singletons that `applyDynamicPowerDefinitions()` (re-exported from
  * `power-definitions.ts`) hot-swaps in place once dynamic data has loaded,
  * so every existing import of this module keeps working unchanged. Until
- * then (or if the DB is unreachable), they hold the original 11 hardcoded
+ * then (or if the DB is unreachable), they hold the original 12 hardcoded
  * abilities as a safe static fallback.
  */
 

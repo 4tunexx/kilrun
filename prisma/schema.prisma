@@ -675,7 +675,7 @@ model MapGhostRun {
 
 /// Data-driven "Power" (in-game ability) definition — replaces the old
 /// hardcoded ABILITY_DEFINITIONS object in shared/ability-progression.ts.
-/// The original 11 abilities are seeded with isCore=true (see
+/// The original 12 abilities are seeded with isCore=true (see
 /// scripts/seed-power-definitions.ts) so they can be tuned but not deleted.
 /// See shared/power-definitions.ts for the generic effect-template engine
 /// that interprets `costJson` / `effectParamsJson` at runtime (client,
@@ -700,7 +700,7 @@ model PowerDefinition {
   effectType  String   @default("stat_bonus")
   /// JSON matching the shape for `effectType` (StatBonusParams / TimedBuffParams / BurstEffectParams).
   effectParamsJson String @default("{\"bonuses\":[]}")
-  /// True for the original 11 — deletable=false in the API/editor, only tunable.
+  /// True for the original 12 — deletable=false in the API/editor, only tunable.
   isCore      Boolean  @default(false)
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())

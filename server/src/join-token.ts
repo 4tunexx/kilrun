@@ -9,6 +9,9 @@ export type GameJoinClaims = {
   username: string;
   avatarUrl: string;
   isAdmin: boolean;
+  /** Admin OR moderator — grants the reserved staff join slot (see rooms'
+   * onJoin), separate from `isAdmin`'s in-room kick/ban/forceStart powers. */
+  isStaff: boolean;
   isPremium: boolean;
   rankedAccess: boolean;
   kp: number;
@@ -22,6 +25,7 @@ export type JoinAuthOptions = {
   username?: string;
   avatarUrl?: string;
   isAdmin?: boolean;
+  isStaff?: boolean;
   isPremium?: boolean;
   rankedAccess?: boolean;
   kp?: number;
@@ -81,6 +85,7 @@ export function verifyGameJoinToken(token: string): GameJoinClaims | null {
       username: String(raw.username || 'Player'),
       avatarUrl: String(raw.avatarUrl || ''),
       isAdmin: !!raw.isAdmin,
+      isStaff: !!raw.isStaff || !!raw.isAdmin,
       isPremium: !!raw.isPremium,
       rankedAccess: !!raw.rankedAccess,
       kp: typeof raw.kp === 'number' && Number.isFinite(raw.kp) ? raw.kp : 1000,
@@ -126,6 +131,7 @@ export function authenticateJoin(
     username: String(options.username || 'Player'),
     avatarUrl: String(options.avatarUrl || ''),
     isAdmin: !!options.isAdmin,
+    isStaff: !!options.isStaff || !!options.isAdmin,
     isPremium: !!options.isPremium,
     rankedAccess: !!options.rankedAccess,
     kp:
@@ -148,6 +154,7 @@ export function claimsFromAuth(
       username: String(a.username || 'Player'),
       avatarUrl: String(a.avatarUrl || ''),
       isAdmin: !!a.isAdmin,
+      isStaff: !!a.isStaff || !!a.isAdmin,
       isPremium: !!a.isPremium,
       rankedAccess: !!a.rankedAccess,
       kp: typeof a.kp === 'number' && Number.isFinite(a.kp) ? a.kp : 1000,
@@ -158,6 +165,7 @@ export function claimsFromAuth(
     username: String(options.username || 'Player'),
     avatarUrl: String(options.avatarUrl || ''),
     isAdmin: !!options.isAdmin,
+    isStaff: !!options.isStaff || !!options.isAdmin,
     isPremium: !!options.isPremium,
     rankedAccess: !!options.rankedAccess,
     kp:

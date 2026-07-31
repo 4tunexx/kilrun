@@ -37,6 +37,7 @@ export class DeathrunPracticeRoom extends DeathrunRoom {
         const role = payload?.role === 'trapper' ? 'trapper' : 'runner';
         player.role = role;
         player.bodyColorIndex = role === 'trapper' ? 0 : 1;
+        this.applyRoleWeapon(player, client.sessionId);
       }
     );
   }

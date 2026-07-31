@@ -21,6 +21,8 @@ export interface JoinOptions {
   token?: string;
   /** Allows pushing MAIN custom maps into the room. */
   isAdmin?: boolean;
+  /** Admin OR moderator — eligible for the reserved staff join seat. */
+  isStaff?: boolean;
   /** Competitive KP snapshot (optional). */
   kp?: number;
   /** Premium membership — required for Ranked Competitive. */

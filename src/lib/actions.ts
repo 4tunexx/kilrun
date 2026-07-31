@@ -861,6 +861,10 @@ export async function mintMyGameJoinToken(): Promise<string | null> {
       username: user.username || 'Player',
       avatarUrl: user.avatarUrl || '',
       isAdmin: user.role === 'admin',
+      // Admin OR moderator — grants the reserved staff join slot in every
+      // mode's room (see rooms' onJoin), separate from isAdmin's in-room
+      // kick/ban/forceStart powers which stay admin-only as before.
+      isStaff: canAccessAdmin(user.role),
       isPremium,
       rankedAccess,
       kp,

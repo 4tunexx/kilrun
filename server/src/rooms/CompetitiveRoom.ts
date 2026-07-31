@@ -89,6 +89,8 @@ interface JoinOptions {
   username?: string;
   avatarUrl?: string;
   isAdmin?: boolean;
+  /** Admin OR moderator — eligible for the reserved staff join seat. */
+  isStaff?: boolean;
   kp?: number;
   /** Premium / VIP — required for competitive_ranked (unless free week client flag). */
   isPremium?: boolean;
@@ -185,7 +187,9 @@ const SURRENDER_VOTE_DURATION_MS = 30_000;
  * Match rewards / KP are posted to Next.js via reportMatchResults when the match ends.
  */
 export class CompetitiveRoom extends Room<RoomState> {
-  maxClients = 8;
+  /** Base capacity (maxPlayersPerTeam * 2) + 1 reserved staff-only seat —
+   * see the `claims.isStaff` guard in onJoin. */
+  maxClients = 9;
 
   private latestInputs = new Map<string, PlayerInput>();
   private simScratch = new Map<string, PlayerSimScratch>();
@@ -196,6 +200,8 @@ export class CompetitiveRoom extends Room<RoomState> {
   private hostSessionId: string | null = null;
   private customMapLoaded = false;
   private adminSessions = new Set<string>();
+  /** Admin OR moderator sessions — eligible for the reserved staff join seat. */
+  private staffSessions = new Set<string>();
   private lastChatAt = new Map<string, number>();
   /** sessionId → mute expiry ms (Date.now()-based). */
   private mutedUntil = new Map<string, number>();
@@ -634,7 +640,8 @@ export class CompetitiveRoom extends Room<RoomState> {
           Number.isFinite(settings.maxPlayersPerTeam)
         ) {
           this.maxPlayersPerTeam = Math.max(1, Math.min(8, Math.floor(settings.maxPlayersPerTeam)));
-          this.maxClients = this.maxPlayersPerTeam * 2;
+          // +1 reserved staff-only seat — see the claims.isStaff guard in onJoin.
+          this.maxClients = this.maxPlayersPerTeam * 2 + 1;
         }
         if (typeof settings.friendlyFire === 'boolean') {
           this.friendlyFire = settings.friendlyFire;
@@ -868,8 +875,17 @@ export class CompetitiveRoom extends Room<RoomState> {
       throw new Error('Premium required for Ranked Competitive');
     }
 
+    // The last seat (maxClients = maxPlayersPerTeam*2 + 1) is reserved for
+    // staff — regular players cap out at maxPlayersPerTeam*2 even though
+    // maxClients is higher.
+    const baseCapacity = this.maxPlayersPerTeam * 2;
+    if (!claims.isStaff && this.state.players.size - this.staffSessions.size >= baseCapacity) {
+      throw new Error('Room is full');
+    }
+
     if (!this.hostSessionId) this.hostSessionId = client.sessionId;
     if (claims.isAdmin) this.adminSessions.add(client.sessionId);
+    if (claims.isStaff) this.staffSessions.add(client.sessionId);
 
     const player = new PlayerState();
     player.sessionId = client.sessionId;
@@ -907,6 +923,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.lastObstacleHitAt.delete(client.sessionId);
     this.lastShotAt.delete(client.sessionId);
     this.adminSessions.delete(client.sessionId);
+    this.staffSessions.delete(client.sessionId);
     this.lastChatAt.delete(client.sessionId);
     this.mutedUntil.delete(client.sessionId);
     if (this.hostSessionId === client.sessionId) {

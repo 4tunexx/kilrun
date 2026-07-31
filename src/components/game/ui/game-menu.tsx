@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useMemo, useState, useTransition } from 'react';
-import { X, Sparkles } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { X, Sparkles, Plus, Minus, Maximize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   getNewlyUnlockedAbilities,
@@ -22,6 +22,12 @@ import { playSound } from '../effects/soundboard';
  * both surfaces share a visual language. */
 const HEX_CLIP = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
 
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.5;
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 interface GameMenuProps {
   open: boolean;
   onClose: () => void;
@@ -35,7 +41,7 @@ interface GameMenuProps {
   error?: string | null;
   onUpgrade: (ability: AbilityKey) => void;
   /** Data-driven power list (core + any custom powers from the Power
-   * Editor), fetched at runtime — falls back to the static 11 on failure. */
+   * Editor), fetched at runtime — falls back to the static 12 on failure. */
   powers?: PowerDefinitionRecord[];
   /** Viewing someone else's tree (public profile) — hides the Buy button.
    * Spending is also blocked server-side (assertCanMutateUser), this just
@@ -77,6 +83,92 @@ export function GameMenu({
     [activePowers]
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  // --- Pan/zoom viewport (touch pinch + drag on mobile, wheel + drag on
+  // desktop) so the full radial tree doesn't have to fit on screen at once. ---
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const gestureRef = useRef<{
+    mode: 'none' | 'pan' | 'pinch';
+    lastX: number;
+    lastY: number;
+    startDist: number;
+    startZoom: number;
+  }>({ mode: 'none', lastX: 0, lastY: 0, startDist: 0, startZoom: 1 });
+
+  const fitToView = useCallback(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    if (!width || !height) return;
+    const fit = Math.min(1, (width - 24) / tree.width, (height - 24) / tree.height);
+    setZoom(clamp(fit, MIN_ZOOM, 1));
+    setPan({ x: 0, y: 0 });
+  }, [tree.width, tree.height]);
+
+  useEffect(() => {
+    if (!open) return;
+    // Layout needs a frame to settle (dialog just mounted) before measuring.
+    const raf = requestAnimationFrame(fitToView);
+    return () => cancelAnimationFrame(raf);
+  }, [open, fitToView]);
+
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selectedKey && panelRef.current) {
+      panelRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedKey]);
+
+  const onTreePointerDown = (e: React.PointerEvent) => {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointersRef.current.size === 1) {
+      gestureRef.current.mode = 'pan';
+      gestureRef.current.lastX = e.clientX;
+      gestureRef.current.lastY = e.clientY;
+    } else if (pointersRef.current.size === 2) {
+      const [a, b] = Array.from(pointersRef.current.values());
+      gestureRef.current.mode = 'pinch';
+      gestureRef.current.startDist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      gestureRef.current.startZoom = zoom;
+    }
+  };
+
+  const onTreePointerMove = (e: React.PointerEvent) => {
+    if (!pointersRef.current.has(e.pointerId)) return;
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (gestureRef.current.mode === 'pan' && pointersRef.current.size === 1) {
+      const dx = e.clientX - gestureRef.current.lastX;
+      const dy = e.clientY - gestureRef.current.lastY;
+      gestureRef.current.lastX = e.clientX;
+      gestureRef.current.lastY = e.clientY;
+      setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
+    } else if (gestureRef.current.mode === 'pinch' && pointersRef.current.size === 2) {
+      const [a, b] = Array.from(pointersRef.current.values());
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      setZoom(clamp(gestureRef.current.startZoom * (dist / gestureRef.current.startDist), MIN_ZOOM, MAX_ZOOM));
+    }
+  };
+
+  const onTreePointerEnd = (e: React.PointerEvent) => {
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size === 1) {
+      const [[, pt]] = Array.from(pointersRef.current.entries());
+      gestureRef.current.mode = 'pan';
+      gestureRef.current.lastX = pt.x;
+      gestureRef.current.lastY = pt.y;
+    } else if (pointersRef.current.size === 0) {
+      gestureRef.current.mode = 'none';
+    }
+  };
+
+  const onTreeWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    setZoom((z) => clamp(z - e.deltaY * 0.001, MIN_ZOOM, MAX_ZOOM));
+  };
 
   if (!open) return null;
 
@@ -136,12 +228,52 @@ export function GameMenu({
         )}
 
         <div className="flex flex-col lg:flex-row gap-4 p-6">
-          <div className="flex-1 min-w-0 overflow-auto">
-            <p className="text-[10px] font-black uppercase tracking-wide text-white/30 mb-3">
-              Power Tree — click a hex to inspect it · lines show prerequisite links
-            </p>
-            <div className="relative mx-auto" style={{ width: tree.width, height: tree.height, minWidth: tree.width }}>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <p className="text-[10px] font-black uppercase tracking-wide text-white/30">
+                Power Tree — tap a hex to inspect it · pinch or scroll to zoom · drag to pan
+              </p>
+            </div>
+            <div
+              ref={viewportRef}
+              className="relative mx-auto w-full h-[380px] sm:h-[460px] overflow-hidden rounded-xl border border-white/10 bg-black/20 touch-none select-none cursor-grab active:cursor-grabbing"
+              onPointerDown={onTreePointerDown}
+              onPointerMove={onTreePointerMove}
+              onPointerUp={onTreePointerEnd}
+              onPointerCancel={onTreePointerEnd}
+              onPointerLeave={onTreePointerEnd}
+              onWheel={onTreeWheel}
+              onDoubleClick={fitToView}
+            >
+            <div
+              className="absolute left-1/2 top-1/2"
+              style={{
+                width: tree.width,
+                height: tree.height,
+                transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: 'center center',
+              }}
+            >
               <svg className="absolute inset-0 pointer-events-none" width={tree.width} height={tree.height}>
+                {/* Root powers (no prerequisites) link straight to the player
+                    hub so every branch visibly connects to the center. */}
+                {activePowers.map((p) => {
+                  if ((p.prerequisites ?? []).length > 0) return null;
+                  const to = tree.positions.get(p.key);
+                  if (!to) return null;
+                  const unlocked = level >= p.unlockLevel;
+                  return (
+                    <line
+                      key={`center->${p.key}`}
+                      x1={tree.centerX}
+                      y1={tree.centerY}
+                      x2={tree.centerX + to.x}
+                      y2={tree.centerY + to.y}
+                      stroke={unlocked ? 'rgba(251,191,36,0.45)' : 'rgba(255,255,255,0.12)'}
+                      strokeWidth={2}
+                    />
+                  );
+                })}
                 {activePowers.map((p) =>
                   (p.prerequisites ?? []).map((prereq) => {
                     const from = tree.positions.get(prereq.key);
@@ -239,10 +371,39 @@ export function GameMenu({
                 );
               })}
             </div>
+
+            {/* Zoom controls — fixed to the viewport corner, unaffected by pan/zoom. */}
+            <div className="absolute bottom-2 right-2 z-10 flex flex-col gap-1.5">
+              <button
+                type="button"
+                onClick={() => setZoom((z) => clamp(z + 0.25, MIN_ZOOM, MAX_ZOOM))}
+                className="w-8 h-8 rounded-lg bg-black/60 border border-white/15 text-white flex items-center justify-center hover:bg-black/80 transition"
+                aria-label="Zoom in"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoom((z) => clamp(z - 0.25, MIN_ZOOM, MAX_ZOOM))}
+                className="w-8 h-8 rounded-lg bg-black/60 border border-white/15 text-white flex items-center justify-center hover:bg-black/80 transition"
+                aria-label="Zoom out"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={fitToView}
+                className="w-8 h-8 rounded-lg bg-black/60 border border-white/15 text-white flex items-center justify-center hover:bg-black/80 transition"
+                aria-label="Reset view"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+            </div>
+            </div>
           </div>
 
           {/* Side panel — selected node detail, WayneTech-style */}
-          <div className="w-full lg:w-[260px] shrink-0 rounded-xl border border-white/10 bg-black/30 p-4">
+          <div ref={panelRef} className="w-full lg:w-[260px] shrink-0 rounded-xl border border-white/10 bg-black/30 p-4">
             {!selectedPower ? (
               <p className="text-[11px] text-white/40">Click a power hex to see its details here.</p>
             ) : (
@@ -402,7 +563,7 @@ export function useGameProgression(userId: string | null | undefined) {
   const [, startTransition] = useTransition();
 
   // Fetch the data-driven power list once — core (tuned) + any custom
-  // powers created in the Power Editor. Falls back to the static 11 (the
+  // powers created in the Power Editor. Falls back to the static 12 (the
   // initial state above) on any failure, so the menu never breaks.
   useEffect(() => {
     let cancelled = false;

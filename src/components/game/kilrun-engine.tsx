@@ -27,6 +27,7 @@ import {
 } from './utils/constants';
 import { HUD } from './ui/hud';
 import { KillStreakBanner } from './ui/kill-streak-banner';
+import { MatchIntroBanner } from './ui/match-intro-banner';
 import { MultiKillCounter } from './ui/multi-kill-counter';
 import { GameMenu, LevelUpPopup, useGameProgression } from './ui/game-menu';
 import { Scoreboard } from './ui/scoreboard';
@@ -54,6 +55,7 @@ import dynamic from 'next/dynamic';
 import {
   findWeaponAttachment,
   resolveWeaponCombat,
+  type WeaponCombatKind,
 } from '@/lib/weapons';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { parseEquippedSkinsJson } from '@/lib/match-loadout';
@@ -1320,6 +1322,15 @@ export default function KilrunEngine({
           </div>
         )}
 
+        {!editorOpen && (
+          <MatchIntroBanner
+            phase={room.phase}
+            mode={mode}
+            localRole={localPlayer?.role}
+            competitiveQueue={competitiveQueue}
+          />
+        )}
+
         {room.phase === 'playing' && localPlayer && !editorOpen && (
           <>
             <HUD
@@ -1327,7 +1338,13 @@ export default function KilrunEngine({
               room={room}
               gameProgress={gameProgression.progression}
               runnersLeft={runnersLeft}
-              weaponKind={resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind}
+              // Server-authoritative — matches actual combat capability (e.g.
+              // a Deathrun runner is always melee-only regardless of what
+              // weapon skin is equipped in their profile loadout).
+              weaponKind={
+                (localPlayer.weaponKind as WeaponCombatKind | undefined) ??
+                resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind
+              }
             />
             <ModeStatusHud mode={mode} room={room} />
             <KillStreakBanner killStreak={localPlayer.killStreak ?? 0} />

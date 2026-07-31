@@ -9,6 +9,9 @@ export type GameJoinClaims = {
   username: string;
   avatarUrl: string;
   isAdmin: boolean;
+  /** Admin OR moderator — grants the reserved staff join slot (see rooms'
+   * onJoin), separate from `isAdmin`'s in-room kick/ban/forceStart powers. */
+  isStaff: boolean;
   isPremium: boolean;
   rankedAccess: boolean;
   kp: number;
@@ -84,6 +87,7 @@ export function verifyGameJoinToken(token: string): GameJoinClaims | null {
       username: String(raw.username || 'Player'),
       avatarUrl: String(raw.avatarUrl || ''),
       isAdmin: !!raw.isAdmin,
+      isStaff: !!raw.isStaff || !!raw.isAdmin,
       isPremium: !!raw.isPremium,
       rankedAccess: !!raw.rankedAccess,
       kp: typeof raw.kp === 'number' && Number.isFinite(raw.kp) ? raw.kp : 1000,

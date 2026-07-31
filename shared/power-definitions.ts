@@ -22,7 +22,7 @@
  * have access to the persisted rows (Next.js API routes, the Colyseus boot
  * sequence) calls `applyDynamicPowerDefinitions()` to hot-swap the active
  * list; everyone else just calls the getters below, which always fall back
- * to `STATIC_FALLBACK_POWERS` (the original 11 hardcoded balance numbers)
+ * to `STATIC_FALLBACK_POWERS` (the original 12 hardcoded balance numbers)
  * if nothing dynamic has been loaded yet.
  */
 
@@ -118,7 +118,7 @@ export interface PowerDefinitionRecord {
   cost: CostFormula;
   effectType: PowerEffectType;
   effectParams: PowerEffectParams;
-  /** True for the original 11 — deletable=false, only tunable, in the editor. */
+  /** True for the original 12 — deletable=false, only tunable, in the editor. */
   isCore: boolean;
   sortOrder: number;
 }
@@ -217,7 +217,7 @@ function statLabel(stat: StatBonusStat): string {
 }
 
 // ---------------------------------------------------------------------------
-// The 11 original abilities, re-encoded losslessly in the new JSON shape.
+// The 12 original abilities, re-encoded losslessly in the new JSON shape.
 // This is the safe static fallback used whenever nothing dynamic has been
 // loaded (SSR without DB access, Colyseus boot race, DB unreachable, etc).
 // Keys MUST stay exactly as they were so old `User.gameAbilities` JSON blobs
@@ -454,7 +454,7 @@ export const STATIC_FALLBACK_POWERS: PowerDefinitionRecord[] = [
 let activeDefs: PowerDefinitionRecord[] = STATIC_FALLBACK_POWERS;
 
 /** Replace the active power list (called after loading from Prisma / HTTP).
- * Always guarantees the original 11 core keys are present (falls back to the
+ * Always guarantees the original 12 core keys are present (falls back to the
  * static definition for any core key missing from `records`) so a bad or
  * partial dynamic payload can never brick core gameplay. */
 export function applyDynamicPowerDefinitions(records: PowerDefinitionRecord[]): void {
