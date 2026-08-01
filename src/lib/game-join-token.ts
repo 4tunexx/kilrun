@@ -6,6 +6,9 @@ import { createHmac, timingSafeEqual } from 'crypto';
 
 export type GameJoinClaims = {
   userId: string;
+  /** Steam64 ID — carried through to PlayerState so admin tooling (Live
+   * Matches panel) can show/report it without a DB round-trip. */
+  steamId: string;
   username: string;
   avatarUrl: string;
   isAdmin: boolean;
@@ -84,6 +87,7 @@ export function verifyGameJoinToken(token: string): GameJoinClaims | null {
     if (raw.exp < Math.floor(Date.now() / 1000)) return null;
     return {
       userId: String(raw.userId),
+      steamId: String(raw.steamId || ''),
       username: String(raw.username || 'Player'),
       avatarUrl: String(raw.avatarUrl || ''),
       isAdmin: !!raw.isAdmin,

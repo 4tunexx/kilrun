@@ -858,6 +858,7 @@ export async function mintMyGameJoinToken(): Promise<string | null> {
   try {
     return mintGameJoinToken({
       userId: user.id,
+      steamId: user.steamId || '',
       username: user.username || 'Player',
       avatarUrl: user.avatarUrl || '',
       isAdmin: user.role === 'admin',

@@ -343,6 +343,9 @@ model SiteSettings {
   /// JSON: admin-tunable global TPS camera/crosshair/player-view default — see tps-view-settings.ts.
   /// Empty = use the hardcoded DEFAULT_TPS_VIEW. Never overrides a per-map `tpsView`.
   defaultTpsViewJson String @default("{}")
+  /// JSON: { backgroundUrl?, backgroundColor? } for the Power Editor / in-game
+  /// skill tree canvas — see src/lib/power-tree-config.ts.
+  powerTreeConfigJson String @default("{}")
 }
 
 model GlobalChatMessage {
@@ -686,7 +689,7 @@ model PowerDefinition {
   key         String   @unique
   name        String
   description String
-  /// Emoji/icon glyph for compact UI.
+  /// Emoji glyph OR an uploaded icon image URL (see shared/power-definitions.ts isImageIcon).
   icon        String   @default("✨")
   maxLevel    Int      @default(10)
   /// Flat in-game account level required before ANY skill points can go in.
@@ -703,6 +706,10 @@ model PowerDefinition {
   /// True for the original 12 — deletable=false in the API/editor, only tunable.
   isCore      Boolean  @default(false)
   sortOrder   Int      @default(0)
+  /// Manual skill-tree node position (px, relative to tree center) set by
+  /// dragging in the editor. null = auto radial layout.
+  posX        Float?
+  posY        Float?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

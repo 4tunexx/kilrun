@@ -17,14 +17,16 @@
  *                 hook (range+pull) — fully wired.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { X, Save, Trash2, Plus, Sparkles, Lock, RefreshCw } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { X, Save, Trash2, Plus, Sparkles, Lock, RefreshCw, Upload, Image as ImageIcon, Eraser } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import { getPowerTreeConfig, updatePowerTreeConfig, type PowerTreeConfig } from '@/lib/power-tree-config';
 import {
   costForLevelFormula,
   effectLabelGeneric,
   computeRadialHexLayout,
+  isImageIcon,
   type PowerDefinitionRecord,
   type PowerEffectType,
   type StatBonusEntry,
@@ -35,6 +37,25 @@ import {
   type TimedBuffParams,
   type BurstEffectParams,
 } from '@shared/power-definitions';
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Renders a power's `icon` as an uploaded image when it's a URL, else as
+ * the plain emoji glyph — same convention used in-game (game-menu.tsx). */
+function PowerIcon({ icon, className }: { icon: string; className?: string }) {
+  if (isImageIcon(icon)) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={icon} alt="" className={className ?? 'w-5 h-5 object-contain'} />;
+  }
+  return <span className={className ?? 'text-base leading-none'}>{icon}</span>;
+}
 
 /** Flat-top hexagon — same shape used by the in-game skill menu so both
  * surfaces share a visual language. */
@@ -92,6 +113,56 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const inputCls =
   'rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-[12px] text-white focus:outline-none focus:border-sky-400/50';
 
+/** Emoji text input + image-upload button, sharing one `icon` field — the
+ * field holds either a short emoji glyph or an image URL/data URL
+ * (persisted server-side on save, see resolveIcon in the API route). */
+function IconField({ icon, onChange }: { icon: string; onChange: (icon: string) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="w-8 h-8 shrink-0 rounded-lg border border-white/10 bg-black/30 flex items-center justify-center overflow-hidden">
+        <PowerIcon icon={icon} className={isImageIcon(icon) ? 'w-full h-full object-cover' : 'text-lg leading-none'} />
+      </div>
+      <input
+        className={inputCls + ' flex-1'}
+        value={isImageIcon(icon) ? '' : icon}
+        placeholder={isImageIcon(icon) ? 'Uploaded image' : '✨'}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="text-white/50 hover:text-white/80 gap-1 shrink-0"
+        onClick={() => fileRef.current?.click()}
+      >
+        <Upload className="w-3.5 h-3.5" />
+      </Button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (!file) return;
+          if (file.size > 2_500_000) {
+            toast({ title: 'Image too large (max ~2.5MB)', variant: 'destructive' });
+            return;
+          }
+          try {
+            onChange(await fileToDataUrl(file));
+          } catch {
+            toast({ title: 'Could not read image', variant: 'destructive' });
+          }
+        }}
+      />
+    </div>
+  );
+}
+
 export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedded?: boolean }) {
   const { toast } = useToast();
   const [powers, setPowers] = useState<PowerDefinitionRecord[]>([]);
@@ -99,6 +170,11 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<PowerDefinitionRecord | null>(null);
   const [saving, setSaving] = useState(false);
+  const treeRef = useRef<HTMLDivElement>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [treeConfig, setTreeConfig] = useState<PowerTreeConfig | null>(null);
+  const bgFileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,9 +191,106 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
 
   useEffect(() => {
     load();
+    getPowerTreeConfig().then(setTreeConfig).catch(() => setTreeConfig(null));
   }, [load]);
 
+  const saveTreeConfig = useCallback(
+    async (partial: Partial<PowerTreeConfig>) => {
+      try {
+        const next = await updatePowerTreeConfig(partial);
+        setTreeConfig(next);
+      } catch (err) {
+        toast({
+          title: err instanceof Error ? err.message : 'Failed to save background',
+          variant: 'destructive',
+        });
+      }
+    },
+    [toast]
+  );
+
   const tree = useMemo(() => computeRadialHexLayout(powers), [powers]);
+
+  // Live-preview position while dragging a node, so the connecting lines
+  // follow the cursor before the drag commits (see startDragNode).
+  const positions = useMemo(() => {
+    if (!dragKey || !dragPos) return tree.positions;
+    const next = new Map(tree.positions);
+    const base = next.get(dragKey);
+    next.set(dragKey, { x: dragPos.x, y: dragPos.y, tier: base?.tier ?? 0 });
+    return next;
+  }, [tree.positions, dragKey, dragPos]);
+
+  const persistPosition = useCallback(
+    async (key: string, x: number | null, y: number | null) => {
+      const record = powers.find((p) => p.key === key);
+      if (!record) return;
+      const updated: PowerDefinitionRecord = { ...record, posX: x, posY: y };
+      try {
+        const res = await fetch('/api/game/power-definitions', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(updated),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          toast({ title: data.error ?? 'Failed to save position', variant: 'destructive' });
+          return;
+        }
+        setPowers((prev) => prev.map((p) => (p.key === key ? updated : p)));
+        setDraft((d) => (d && d.key === key ? { ...d, posX: x, posY: y } : d));
+      } catch {
+        toast({ title: 'Failed to save position', variant: 'destructive' });
+      }
+    },
+    [powers, toast]
+  );
+
+  const resetPosition = useCallback(
+    (key: string) => {
+      void persistPosition(key, null, null);
+    },
+    [persistPosition]
+  );
+
+  /** Pointer-drag a hex node to a new spot on the tree. A tap (no meaningful
+   * movement) still opens it for editing instead of persisting a position. */
+  const startDragNode = (e: React.PointerEvent, p: PowerDefinitionRecord) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    e.preventDefault();
+    const el = treeRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const downX = e.clientX;
+    const downY = e.clientY;
+    let moved = false;
+
+    const toTreeSpace = (clientX: number, clientY: number) => ({
+      x: clientX - rect.left - tree.centerX,
+      y: clientY - rect.top - tree.centerY,
+    });
+
+    const onMove = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - downX, ev.clientY - downY) > 4) moved = true;
+      if (!moved) return;
+      setDragKey(p.key);
+      setDragPos(toTreeSpace(ev.clientX, ev.clientY));
+    };
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (!moved) {
+        selectForEdit(p);
+        return;
+      }
+      const final = toTreeSpace(ev.clientX, ev.clientY);
+      setDragKey(null);
+      setDragPos(null);
+      void persistPosition(p.key, final.x, final.y);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp, { once: true });
+  };
 
   const selectForEdit = (p: PowerDefinitionRecord) => {
     setSelectedKey(p.key);
@@ -220,16 +393,99 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* Tree view */}
-        <div className="flex-1 min-w-0 overflow-auto p-6">
+        <div className="flex-1 min-w-0 overflow-auto p-6 relative">
+          {treeConfig && (treeConfig.backgroundUrl || treeConfig.backgroundColor) && (
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                backgroundImage: treeConfig.backgroundUrl ? `url(${treeConfig.backgroundUrl})` : undefined,
+                backgroundColor: treeConfig.backgroundColor || undefined,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                opacity: treeConfig.backgroundOpacity,
+              }}
+            />
+          )}
+          <div className="relative">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <p className="text-[10px] text-white/30">
+                Drag a node to rearrange the skill tree — connecting lines follow live and the new
+                position saves the moment you let go. Tap a node (no drag) to edit it.
+              </p>
+              {treeConfig && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <input
+                    type="color"
+                    value={treeConfig.backgroundColor || '#000000'}
+                    onChange={(e) => void saveTreeConfig({ backgroundColor: e.target.value })}
+                    className="w-6 h-6 rounded border border-white/10 bg-transparent cursor-pointer"
+                    title="Background color"
+                  />
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={treeConfig.backgroundOpacity}
+                    onChange={(e) => void saveTreeConfig({ backgroundOpacity: Number(e.target.value) })}
+                    className="w-16"
+                    title="Background opacity"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 text-[10px] px-2 text-white/50 hover:text-white/80 gap-1"
+                    onClick={() => bgFileRef.current?.click()}
+                  >
+                    <ImageIcon className="w-3 h-3" />
+                    Background
+                  </Button>
+                  {(treeConfig.backgroundUrl || treeConfig.backgroundColor) && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 w-6 p-0 text-white/40 hover:text-white/70"
+                      title="Clear background"
+                      onClick={() => void saveTreeConfig({ backgroundUrl: '', backgroundColor: '' })}
+                    >
+                      <Eraser className="w-3 h-3" />
+                    </Button>
+                  )}
+                  <input
+                    ref={bgFileRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!file) return;
+                      if (file.size > 2_500_000) {
+                        toast({ title: 'Image too large (max ~2.5MB)', variant: 'destructive' });
+                        return;
+                      }
+                      try {
+                        const dataUrl = await fileToDataUrl(file);
+                        await saveTreeConfig({ backgroundUrl: dataUrl });
+                      } catch {
+                        toast({ title: 'Could not read image', variant: 'destructive' });
+                      }
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           {loading ? (
             <p className="text-white/40 text-sm">Loading…</p>
           ) : (
-            <div className="relative" style={{ width: tree.width, height: tree.height }}>
+            <div ref={treeRef} className="relative" style={{ width: tree.width, height: tree.height }}>
               <svg className="absolute inset-0 pointer-events-none" width={tree.width} height={tree.height}>
                 {powers.map((p) =>
                   (p.prerequisites ?? []).map((prereq) => {
-                    const from = tree.positions.get(prereq.key);
-                    const to = tree.positions.get(p.key);
+                    const from = positions.get(prereq.key);
+                    const to = positions.get(p.key);
                     if (!from || !to) return null;
                     return (
                       <line
@@ -265,17 +521,24 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
               </div>
 
               {powers.map((p) => {
-                const pos = tree.positions.get(p.key);
+                const pos = positions.get(p.key);
                 if (!pos) return null;
                 const selected = selectedKey === p.key;
+                const dragging = dragKey === p.key;
                 return (
                   <div
                     key={p.key}
-                    onClick={() => selectForEdit(p)}
-                    className={`absolute cursor-pointer flex flex-col items-center justify-center gap-0.5 border-2 p-1.5 transition text-center ${
-                      selected
+                    onPointerDown={(e) => startDragNode(e, p)}
+                    className={`absolute flex flex-col items-center justify-center gap-0.5 border-2 p-1.5 transition text-center touch-none ${
+                      dragging
+                        ? 'cursor-grabbing border-emerald-400/80 bg-emerald-500/15 shadow-[0_0_18px_rgba(52,211,153,0.35)] z-10'
+                        : 'cursor-grab'
+                    } ${
+                      !dragging && selected
                         ? 'border-sky-400/80 bg-sky-500/15 shadow-[0_0_18px_rgba(56,189,248,0.35)]'
-                        : 'border-white/15 bg-white/[0.05] hover:border-white/35'
+                        : !dragging
+                          ? 'border-white/15 bg-white/[0.05] hover:border-white/35'
+                          : ''
                     }`}
                     style={{
                       left: tree.centerX + pos.x - tree.hexWidth / 2,
@@ -286,7 +549,7 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
                     }}
                   >
                     <div className="flex items-center gap-1 min-w-0">
-                      <span className="text-base leading-none">{p.icon}</span>
+                      <PowerIcon icon={p.icon} />
                       {p.isCore ? (
                         <span title="Core power — tunable, not deletable" className="shrink-0 inline-flex">
                           <Lock className="w-2.5 h-2.5 text-white/30" />
@@ -317,6 +580,7 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
               })}
             </div>
           )}
+          </div>
         </div>
 
         {/* Edit form */}
@@ -334,6 +598,7 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
               onChange={patchDraft}
               onSave={save}
               saving={saving}
+              onResetPosition={selectedKey ? () => resetPosition(draft.key) : undefined}
             />
           )}
         </div>
@@ -349,6 +614,7 @@ function PowerForm({
   onChange,
   onSave,
   saving,
+  onResetPosition,
 }: {
   draft: PowerDefinitionRecord;
   isNew: boolean;
@@ -356,8 +622,10 @@ function PowerForm({
   onChange: (partial: Partial<PowerDefinitionRecord>) => void;
   onSave: () => void;
   saving: boolean;
+  onResetPosition?: () => void;
 }) {
   const locked = draft.isCore; // effectType/key immutable once core
+  const hasManualPosition = typeof draft.posX === 'number' && typeof draft.posY === 'number';
 
   return (
     <div className="space-y-3">
@@ -373,8 +641,8 @@ function PowerForm({
       <Field label="Name">
         <input className={inputCls} value={draft.name} onChange={(e) => onChange({ name: e.target.value })} />
       </Field>
-      <Field label="Icon (emoji)">
-        <input className={inputCls} value={draft.icon} onChange={(e) => onChange({ icon: e.target.value })} />
+      <Field label="Icon (emoji or uploaded image)">
+        <IconField icon={draft.icon} onChange={(icon) => onChange({ icon })} />
       </Field>
       <Field label="Description">
         <textarea
@@ -450,6 +718,27 @@ function PowerForm({
           onChange={(prerequisites) => onChange({ prerequisites })}
         />
       </Field>
+
+      {onResetPosition && (
+        <Field label="Skill-tree node position">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-white/40">
+              {hasManualPosition ? 'Manually placed (dragged)' : 'Auto-arranged'}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={!hasManualPosition}
+              onClick={onResetPosition}
+              className="text-white/50 hover:text-white/80 gap-1 h-6 text-[10px] px-2"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Reset to auto
+            </Button>
+          </div>
+        </Field>
+      )}
 
       <Field label="Effect Template">
         <select

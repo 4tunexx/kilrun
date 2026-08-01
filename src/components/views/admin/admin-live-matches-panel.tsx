@@ -7,18 +7,43 @@
  * access to the live Room instance, see that file's comment for why no
  * cross-process remoteRoomCall is needed).
  *
- * Pause/Cancel/Message are admin-only (mods can view, matching the same
- * admin-only boundary as the in-game X-panel's kick/mute/ban). Cancel never
- * grants rewards or touches Ranked KP — see adminCancelMatch() on each Room
- * class and the results-screen wasCancelled guards.
+ * Pause/Cancel/Message and the per-player Kick/Mute/Ban menu are admin-only
+ * (mods can view, matching the same admin-only boundary as the in-game
+ * X-panel's kick/mute/ban). Cancel never grants rewards or touches Ranked
+ * KP — see adminCancelMatch() on each Room class and the results-screen
+ * wasCancelled guards. Per-player actions reuse the exact same room-side
+ * kick/mute/ban logic as the in-game X-panel, just triggered over HTTP
+ * instead of a Colyseus message from an in-room admin client.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Pause, Play, Ban, Send, RefreshCw, Radio } from 'lucide-react';
+import {
+  Loader2,
+  Pause,
+  Play,
+  Ban,
+  Send,
+  RefreshCw,
+  Radio,
+  MoreVertical,
+  UserX,
+  VolumeX,
+  Copy,
+  Check,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { PlayerAvatar } from '@/components/ui/player-avatar';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import {
   adminListLiveMatches,
@@ -26,6 +51,9 @@ import {
   adminResumeLiveMatch,
   adminCancelLiveMatch,
   adminSendLiveMatchMessage,
+  adminKickLiveMatchPlayer,
+  adminMuteLiveMatchPlayer,
+  adminBanLiveMatchPlayer,
   type LiveMatch,
 } from '@/lib/live-match-actions';
 
@@ -36,14 +64,27 @@ const MODE_LABEL: Record<string, string> = {
   competitive_ranked: 'Competitive (Ranked)',
 };
 
+const ROLE_LABEL: Record<string, string> = {
+  trapper: 'Trapper',
+  runner: 'Runner',
+  survivor: 'Survivor',
+  team_a: 'Team A',
+  team_b: 'Team B',
+};
+
+const MUTE_DURATIONS = [5, 15, 60] as const;
+
 export function AdminLiveMatchesPanel() {
   const { toast } = useToast();
   const [matches, setMatches] = useState<LiveMatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [busyRoomId, setBusyRoomId] = useState<string | null>(null);
+  const [busyPlayerKey, setBusyPlayerKey] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState<Record<string, string>>({});
   const [confirmCancel, setConfirmCancel] = useState<string | null>(null);
+  const [confirmBanPlayer, setConfirmBanPlayer] = useState<string | null>(null);
+  const [copiedSteamId, setCopiedSteamId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const result = await adminListLiveMatches();
@@ -62,6 +103,10 @@ export function AdminLiveMatchesPanel() {
     return () => window.clearInterval(id);
   }, [refresh]);
 
+  useEffect(() => {
+    setConfirmBanPlayer(null);
+  }, [matches.length]);
+
   const withBusy = async (roomId: string, fn: () => Promise<{ ok: boolean; error?: string }>) => {
     setBusyRoomId(roomId);
     try {
@@ -73,6 +118,35 @@ export function AdminLiveMatchesPanel() {
       }
     } finally {
       setBusyRoomId(null);
+    }
+  };
+
+  const withPlayerBusy = async (
+    key: string,
+    successTitle: string,
+    fn: () => Promise<{ ok: boolean; error?: string }>
+  ) => {
+    setBusyPlayerKey(key);
+    try {
+      const result = await fn();
+      if (!result.ok) {
+        toast({ title: result.error || 'Action failed', variant: 'destructive' });
+      } else {
+        toast({ title: successTitle });
+        await refresh();
+      }
+    } finally {
+      setBusyPlayerKey(null);
+    }
+  };
+
+  const copySteamId = async (steamId: string) => {
+    try {
+      await navigator.clipboard.writeText(steamId);
+      setCopiedSteamId(steamId);
+      window.setTimeout(() => setCopiedSteamId((c) => (c === steamId ? null : c)), 1500);
+    } catch {
+      toast({ title: 'Could not copy to clipboard', variant: 'destructive' });
     }
   };
 
@@ -106,7 +180,7 @@ export function AdminLiveMatchesPanel() {
             return (
               <div
                 key={m.roomId}
-                className="rounded-lg border border-border/60 p-3 space-y-2"
+                className="rounded-lg border border-border/60 p-3 space-y-3"
               >
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
@@ -171,9 +245,119 @@ export function AdminLiveMatchesPanel() {
                 </div>
 
                 {m.players.length > 0 && (
-                  <p className="text-xs text-muted-foreground truncate">
-                    {m.players.map((p) => `${p.username} (${p.role})`).join(', ')}
-                  </p>
+                  <div className="space-y-1">
+                    {m.players.map((p) => {
+                      const playerKey = `${m.roomId}:${p.sessionId}`;
+                      const playerBusy = busyPlayerKey === playerKey;
+                      return (
+                        <div
+                          key={p.sessionId}
+                          className="flex items-center gap-2 rounded-md bg-muted/30 px-2 py-1.5"
+                        >
+                          <PlayerAvatar
+                            src={p.avatarUrl}
+                            name={p.username}
+                            className="h-6 w-6"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-medium truncate">{p.username}</span>
+                              <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                                {ROLE_LABEL[p.role] ?? (p.role || '—')}
+                              </Badge>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => p.steamId && void copySteamId(p.steamId)}
+                              disabled={!p.steamId}
+                              title={p.steamId ? 'Click to copy Steam ID' : 'Steam ID unavailable'}
+                              className="flex items-center gap-1 text-[10px] text-muted-foreground font-mono truncate hover:text-foreground disabled:cursor-default disabled:hover:text-muted-foreground"
+                            >
+                              {p.steamId || 'Steam ID unavailable'}
+                              {p.steamId &&
+                                (copiedSteamId === p.steamId ? (
+                                  <Check className="w-2.5 h-2.5 shrink-0" />
+                                ) : (
+                                  <Copy className="w-2.5 h-2.5 shrink-0" />
+                                ))}
+                            </button>
+                          </div>
+
+                          {confirmBanPlayer === playerKey ? (
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-7 text-xs shrink-0"
+                              disabled={playerBusy}
+                              onClick={() => {
+                                setConfirmBanPlayer(null);
+                                void withPlayerBusy(playerKey, `Banned ${p.username}`, () =>
+                                  adminBanLiveMatchPlayer(m.roomId, p.sessionId)
+                                );
+                              }}
+                            >
+                              Confirm ban?
+                            </Button>
+                          ) : (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0 shrink-0"
+                                  disabled={playerBusy}
+                                >
+                                  {playerBusy ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <MoreVertical className="w-3.5 h-3.5" />
+                                  )}
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuLabel className="text-[10px] text-muted-foreground">
+                                  Mute
+                                </DropdownMenuLabel>
+                                {MUTE_DURATIONS.map((mins) => (
+                                  <DropdownMenuItem
+                                    key={mins}
+                                    onClick={() =>
+                                      void withPlayerBusy(
+                                        playerKey,
+                                        `Muted ${p.username} for ${mins}m`,
+                                        () => adminMuteLiveMatchPlayer(m.roomId, p.sessionId, mins)
+                                      )
+                                    }
+                                  >
+                                    <VolumeX className="w-3.5 h-3.5 mr-2 text-amber-400" />
+                                    {mins} minutes
+                                  </DropdownMenuItem>
+                                ))}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    void withPlayerBusy(playerKey, `Kicked ${p.username}`, () =>
+                                      adminKickLiveMatchPlayer(m.roomId, p.sessionId)
+                                    )
+                                  }
+                                >
+                                  <UserX className="w-3.5 h-3.5 mr-2 text-orange-400" />
+                                  Kick
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => setConfirmBanPlayer(playerKey)}
+                                >
+                                  <Ban className="w-3.5 h-3.5 mr-2" />
+                                  Ban account…
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
 
                 <div className="flex items-center gap-2">

@@ -18,6 +18,14 @@ interface AdminControllableRoom {
   adminResume(): void;
   adminCancelMatch(): void;
   adminBroadcastMessage(text: string): void;
+  adminGetPlayerSteamId(sessionId: string): string;
+  adminKickPlayer(targetSessionId: string): boolean;
+  adminMutePlayer(targetSessionId: string, minutes?: number): boolean;
+  adminBanPlayer(
+    targetSessionId: string,
+    actor: { userId: string; username: string },
+    reason?: string
+  ): Promise<{ ok: boolean; error?: string }>;
 }
 
 const PORT = Number(process.env.PORT ?? 2567);
@@ -108,15 +116,18 @@ app.get('/admin/live-matches', async (req, res) => {
             phase?: string;
             modeTag?: string;
             adminPaused?: boolean;
-            players?: Map<string, { username?: string; role?: string }>;
+            players?: Map<string, { username?: string; role?: string; avatarUrl?: string }>;
           };
         })
       | undefined;
     const state = room?.state;
     const players = state?.players
-      ? Array.from(state.players.values()).map((p) => ({
+      ? Array.from(state.players.entries()).map(([sessionId, p]) => ({
+          sessionId,
           username: p.username ?? 'Player',
           role: p.role ?? '',
+          avatarUrl: p.avatarUrl ?? '',
+          steamId: room?.adminGetPlayerSteamId(sessionId) ?? '',
         }))
       : [];
     return {
@@ -187,6 +198,72 @@ app.post('/admin/live-matches/:roomId/message', (req, res) => {
   }
   room.adminBroadcastMessage(text);
   res.json({ ok: true });
+});
+
+app.post('/admin/live-matches/:roomId/kick', (req, res) => {
+  if (!requireAdminSecret(req, res)) return;
+  const targetSessionId =
+    typeof req.body?.targetSessionId === 'string' ? req.body.targetSessionId : '';
+  if (!targetSessionId) {
+    res.status(400).json({ ok: false, error: 'targetSessionId is required' });
+    return;
+  }
+  const room = matchMaker.getLocalRoomById(req.params.roomId) as unknown as
+    | AdminControllableRoom
+    | undefined;
+  if (!room) {
+    res.status(404).json({ ok: false, error: 'Match not found on this process' });
+    return;
+  }
+  const ok = room.adminKickPlayer(targetSessionId);
+  res.json({ ok, error: ok ? undefined : 'Player not connected' });
+});
+
+app.post('/admin/live-matches/:roomId/mute', (req, res) => {
+  if (!requireAdminSecret(req, res)) return;
+  const targetSessionId =
+    typeof req.body?.targetSessionId === 'string' ? req.body.targetSessionId : '';
+  const minutes = Number(req.body?.minutes) || 5;
+  if (!targetSessionId) {
+    res.status(400).json({ ok: false, error: 'targetSessionId is required' });
+    return;
+  }
+  const room = matchMaker.getLocalRoomById(req.params.roomId) as unknown as
+    | AdminControllableRoom
+    | undefined;
+  if (!room) {
+    res.status(404).json({ ok: false, error: 'Match not found on this process' });
+    return;
+  }
+  const ok = room.adminMutePlayer(targetSessionId, minutes);
+  res.json({ ok, error: ok ? undefined : 'Player not in this match' });
+});
+
+app.post('/admin/live-matches/:roomId/ban', async (req, res) => {
+  if (!requireAdminSecret(req, res)) return;
+  const targetSessionId =
+    typeof req.body?.targetSessionId === 'string' ? req.body.targetSessionId : '';
+  const actorUserId = typeof req.body?.actorUserId === 'string' ? req.body.actorUserId : '';
+  const actorUsername =
+    typeof req.body?.actorUsername === 'string' ? req.body.actorUsername : 'Admin';
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+  if (!targetSessionId || !actorUserId) {
+    res.status(400).json({ ok: false, error: 'targetSessionId and actorUserId are required' });
+    return;
+  }
+  const room = matchMaker.getLocalRoomById(req.params.roomId) as unknown as
+    | AdminControllableRoom
+    | undefined;
+  if (!room) {
+    res.status(404).json({ ok: false, error: 'Match not found on this process' });
+    return;
+  }
+  const result = await room.adminBanPlayer(
+    targetSessionId,
+    { userId: actorUserId, username: actorUsername },
+    reason
+  );
+  res.json(result);
 });
 
 // Lightweight room-state dashboard for local debugging; not linked from the game itself.
