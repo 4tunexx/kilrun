@@ -16,7 +16,15 @@ async function requireStaff() {
   return user;
 }
 
-export type LiveMatchPlayer = { username: string; role: string };
+export type LiveMatchPlayer = {
+  sessionId: string;
+  username: string;
+  role: string;
+  avatarUrl: string;
+  /** Steam64 ID — resolved server-side from a private per-room map, never
+   * broadcast to game clients. Empty string if unavailable. */
+  steamId: string;
+};
 
 export type LiveMatch = {
   roomId: string;
@@ -158,6 +166,64 @@ export async function adminSendLiveMatchMessage(
   });
   if (result.ok) {
     void auditLiveMatchAction(actor.id, actor.username, 'live_match_message', roomId, trimmed);
+  }
+  return result;
+}
+
+/** Disconnects the target player from this match only — they can rejoin. */
+export async function adminKickLiveMatchPlayer(
+  roomId: string,
+  targetSessionId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const actor = await requireAdminActor();
+  const result = await callGameServer(`/admin/live-matches/${roomId}/kick`, 'POST', {
+    targetSessionId,
+  });
+  if (result.ok) {
+    void auditLiveMatchAction(actor.id, actor.username, 'live_match_kick_player', roomId, targetSessionId);
+  }
+  return result;
+}
+
+/** Silences the target's in-match chat for `minutes` (default 5, max 120). */
+export async function adminMuteLiveMatchPlayer(
+  roomId: string,
+  targetSessionId: string,
+  minutes = 5
+): Promise<{ ok: boolean; error?: string }> {
+  const actor = await requireAdminActor();
+  const result = await callGameServer(`/admin/live-matches/${roomId}/mute`, 'POST', {
+    targetSessionId,
+    minutes,
+  });
+  if (result.ok) {
+    void auditLiveMatchAction(
+      actor.id,
+      actor.username,
+      'live_match_mute_player',
+      roomId,
+      `${targetSessionId} (${minutes}m)`
+    );
+  }
+  return result;
+}
+
+/** Bans the target's account (same as the in-game X-panel's ban) and
+ * disconnects them from this match. */
+export async function adminBanLiveMatchPlayer(
+  roomId: string,
+  targetSessionId: string,
+  reason?: string
+): Promise<{ ok: boolean; error?: string }> {
+  const actor = await requireAdminActor();
+  const result = await callGameServer(`/admin/live-matches/${roomId}/ban`, 'POST', {
+    targetSessionId,
+    actorUserId: actor.id,
+    actorUsername: actor.username,
+    reason,
+  });
+  if (result.ok) {
+    void auditLiveMatchAction(actor.id, actor.username, 'live_match_ban_player', roomId, targetSessionId);
   }
   return result;
 }

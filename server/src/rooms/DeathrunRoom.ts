@@ -79,6 +79,7 @@ import { reportAdminBan } from '../lib/admin-actions.js';
 interface JoinOptions {
   token?: string;
   userId?: string;
+  steamId?: string;
   username?: string;
   avatarUrl?: string;
   /** Staff / map publisher — allowed to push MAIN custom maps. */
@@ -194,6 +195,10 @@ export class DeathrunRoom extends Room<RoomState> {
   private lastChatAt = new Map<string, number>();
   /** sessionId → mute expiry ms (Date.now()-based). */
   private mutedUntil = new Map<string, number>();
+  /** sessionId → Steam64 ID. Deliberately NOT a schema field — PlayerState
+   * syncs to every client in the room, and Steam IDs are admin-only info
+   * (see adminGetPlayerSteamId, used by the website's Live Matches panel). */
+  private steamIdBySession = new Map<string, string>();
   /** Player-facing @timeout / @surrender — see handle*Command below. */
   private teamTimeoutsUsed = new Map<string, number>();
   private teamTimeoutResumeAt: number | null = null;
@@ -334,8 +339,7 @@ export class DeathrunRoom extends Room<RoomState> {
       if (!this.adminSessions.has(client.sessionId)) return;
       const targetSessionId = payload?.targetSessionId;
       if (!targetSessionId || targetSessionId === client.sessionId) return;
-      const target = this.clients.getById(targetSessionId);
-      target?.leave(4000, 'kicked_by_admin');
+      this.adminKickPlayer(targetSessionId);
     });
 
     this.onMessage(
@@ -344,9 +348,7 @@ export class DeathrunRoom extends Room<RoomState> {
         if (!this.adminSessions.has(client.sessionId)) return;
         const targetSessionId = payload?.targetSessionId;
         if (!targetSessionId || targetSessionId === client.sessionId) return;
-        if (!this.state.players.has(targetSessionId)) return;
-        const minutes = Math.min(120, Math.max(1, Math.floor(payload?.minutes ?? 5)));
-        this.mutedUntil.set(targetSessionId, Date.now() + minutes * 60_000);
+        this.adminMutePlayer(targetSessionId, payload?.minutes ?? 5);
       }
     );
 
@@ -357,18 +359,12 @@ export class DeathrunRoom extends Room<RoomState> {
         const admin = this.state.players.get(client.sessionId);
         const targetSessionId = payload?.targetSessionId;
         if (!admin || !targetSessionId || targetSessionId === client.sessionId) return;
-        const target = this.state.players.get(targetSessionId);
-        if (!target) return;
-        const result = await reportAdminBan({
-          actorUserId: admin.userId,
-          actorUsername: admin.username,
-          targetUserId: target.userId,
-          mode: 'deathrun',
-          detail: payload?.reason,
-        });
-        if (result.ok) {
-          this.clients.getById(targetSessionId)?.leave(4001, 'banned_by_admin');
-        } else {
+        const result = await this.adminBanPlayer(
+          targetSessionId,
+          { userId: admin.userId, username: admin.username },
+          payload?.reason
+        );
+        if (!result.ok) {
           console.error('[DeathrunRoom] adminBan failed:', result.error);
         }
       }
@@ -601,6 +597,7 @@ export class DeathrunRoom extends Room<RoomState> {
     player.username =
       claims.username || `Player${client.sessionId.slice(0, 4)}`;
     player.avatarUrl = claims.avatarUrl || '';
+    this.steamIdBySession.set(client.sessionId, claims.steamId || '');
     const trusted = await fetchTrustedLoadout(player.userId);
     applyLoadoutToPlayer(player, trusted ?? options);
     // Stash the real equipped weapon before forcing melee below — restored
@@ -645,6 +642,7 @@ export class DeathrunRoom extends Room<RoomState> {
     this.loadoutWeaponBySession.delete(client.sessionId);
     this.lastChatAt.delete(client.sessionId);
     this.mutedUntil.delete(client.sessionId);
+    this.steamIdBySession.delete(client.sessionId);
     if (this.hostSessionId === client.sessionId) {
       this.hostSessionId = this.state.players.keys().next().value ?? null;
     }
@@ -1188,6 +1186,49 @@ export class DeathrunRoom extends Room<RoomState> {
   public adminBroadcastMessage(text: string): void {
     this.state.adminMessage = text;
     this.state.adminMessageSeq += 1;
+  }
+
+  /** Steam64 ID for a connected session — never synced via schema, see
+   * steamIdBySession's declaration. Empty string if unknown/disconnected. */
+  public adminGetPlayerSteamId(sessionId: string): string {
+    return this.steamIdBySession.get(sessionId) ?? '';
+  }
+
+  /** Same kick used by the in-room X-panel's adminKick message, also callable
+   * from the website's Live Matches panel with no in-room admin client
+   * required. Returns false if the target isn't connected. */
+  public adminKickPlayer(targetSessionId: string): boolean {
+    const target = this.clients.getById(targetSessionId);
+    if (!target) return false;
+    target.leave(4000, 'kicked_by_admin');
+    return true;
+  }
+
+  public adminMutePlayer(targetSessionId: string, minutes = 5): boolean {
+    if (!this.state.players.has(targetSessionId)) return false;
+    const clamped = Math.min(120, Math.max(1, Math.floor(minutes)));
+    this.mutedUntil.set(targetSessionId, Date.now() + clamped * 60_000);
+    return true;
+  }
+
+  public async adminBanPlayer(
+    targetSessionId: string,
+    actor: { userId: string; username: string },
+    reason?: string
+  ): Promise<{ ok: boolean; error?: string }> {
+    const target = this.state.players.get(targetSessionId);
+    if (!target) return { ok: false, error: 'Player not found in this match' };
+    const result = await reportAdminBan({
+      actorUserId: actor.userId,
+      actorUsername: actor.username,
+      targetUserId: target.userId,
+      mode: 'deathrun',
+      detail: reason,
+    });
+    if (result.ok) {
+      this.clients.getById(targetSessionId)?.leave(4001, 'banned_by_admin');
+    }
+    return result;
   }
 
   /** Server-authored info line, same 'chat' channel, distinct sender so

@@ -29,6 +29,7 @@ import {
   ListChecks,
   Radio,
   KeyRound,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,6 +53,7 @@ import { CosmeticsStudio } from '@/components/views/admin/cosmetics-studio';
 import { LogoStyleEditor } from '@/components/views/admin/logo-style-editor';
 import { AdminDashboardPanel } from '@/components/views/admin/admin-dashboard-panel';
 import { AdminMapEditorPanel } from '@/components/views/admin/admin-map-editor-panel';
+import { AdminPowersPanel } from '@/components/views/admin/admin-powers-panel';
 import { AdminSiteLayoutPanel } from '@/components/views/admin/admin-site-layout-panel';
 import { AdminNewsPanel } from '@/components/views/admin/admin-news-panel';
 import { AdminPremiumPanel } from '@/components/views/admin/admin-premium-panel';
@@ -138,6 +140,7 @@ const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   premium: { label: 'Premium', icon: <Gem className="h-3.5 w-3.5 text-amber-300 fill-amber-400/30" /> },
   ranks: { label: 'Ranks', icon: <Trophy className="h-3.5 w-3.5" /> },
   maps: { label: 'Map Editor', icon: <MapIcon className="h-3.5 w-3.5" /> },
+  powers: { label: 'Powers', icon: <Sparkles className="h-3.5 w-3.5" /> },
   weapons: { label: 'Weapons', icon: <Target className="h-3.5 w-3.5" /> },
   balance: { label: 'Game Balance', icon: <Flame className="h-3.5 w-3.5" /> },
   content: { label: 'Content', icon: <FileText className="h-3.5 w-3.5" /> },
@@ -164,6 +167,7 @@ const ADMIN_TABS = [
   'premium',
   'ranks',
   'maps',
+  'powers',
   'weapons',
   'balance',
   'content',
@@ -2292,6 +2296,12 @@ export default function AdminView({
         {isAdmin && (
           <TabsContent value="maps" className="mt-4">
             <AdminMapEditorPanel />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="powers" className="mt-4">
+            <AdminPowersPanel />
           </TabsContent>
         )}
 

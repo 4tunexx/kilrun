@@ -121,6 +121,23 @@ export interface PowerDefinitionRecord {
   /** True for the original 12 — deletable=false, only tunable, in the editor. */
   isCore: boolean;
   sortOrder: number;
+  /** Manual skill-tree node position (px, relative to the tree center),
+   * set by dragging a node in the editor. null/undefined = auto radial
+   * layout — see computeRadialHexLayout's override handling below. */
+  posX?: number | null;
+  posY?: number | null;
+}
+
+/** `icon` doubles as either an emoji glyph (default) or an admin-uploaded
+ * image (persisted via persistSiteImage, so a `/uploads/...` or blob URL —
+ * data: URLs are also accepted transiently before the server round-trip). */
+export function isImageIcon(icon: string): boolean {
+  return (
+    icon.startsWith('http://') ||
+    icon.startsWith('https://') ||
+    icon.startsWith('/uploads/') ||
+    icon.startsWith('data:image/')
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -753,6 +770,16 @@ export function computeRadialHexLayout(
       const angle = (i / list.length) * Math.PI * 2 + rotationOffset - Math.PI / 2;
       positions.set(p.key, { x: radius * Math.cos(angle), y: radius * Math.sin(angle), tier });
     });
+  }
+
+  // Manual overrides (dragged in the editor) replace their computed slot —
+  // applied after the auto layout so the bounding box below still accounts
+  // for nodes dragged further out than their ring would normally reach.
+  for (const p of powers) {
+    if (typeof p.posX !== 'number' || typeof p.posY !== 'number') continue;
+    const tier = positions.get(p.key)?.tier ?? tiers.get(p.key) ?? 0;
+    positions.set(p.key, { x: p.posX, y: p.posY, tier });
+    maxRadius = Math.max(maxRadius, Math.hypot(p.posX, p.posY));
   }
 
   const half = maxRadius + hexWidth / 2 + 28;

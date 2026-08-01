@@ -13,14 +13,26 @@ import {
   costForLevelFormula,
   effectLabelGeneric,
   computeRadialHexLayout,
+  isImageIcon,
   type PowerDefinitionRecord,
 } from '@shared/power-definitions';
 import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
+import { getPowerTreeConfig, type PowerTreeConfig } from '@/lib/power-tree-config';
 import { playSound } from '../effects/soundboard';
 
 /** Flat-top hexagon — matches the shape used by the admin Power Editor so
  * both surfaces share a visual language. */
 const HEX_CLIP = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
+
+/** Renders a power's `icon` as an uploaded image when it's a URL, else as
+ * the plain emoji glyph — mirrors the admin Power Editor's PowerIcon. */
+function PowerIcon({ icon, className }: { icon: string; className?: string }) {
+  if (isImageIcon(icon)) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={icon} alt="" className={(className ?? '') + ' object-contain'} />;
+  }
+  return <span className={className}>{icon}</span>;
+}
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
@@ -83,6 +95,20 @@ export function GameMenu({
     [activePowers]
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [treeBackground, setTreeBackground] = useState<PowerTreeConfig | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    getPowerTreeConfig()
+      .then((cfg) => {
+        if (!cancelled) setTreeBackground(cfg);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   // --- Pan/zoom viewport (touch pinch + drag on mobile, wheel + drag on
   // desktop) so the full radial tree doesn't have to fit on screen at once. ---
@@ -245,6 +271,20 @@ export function GameMenu({
               onWheel={onTreeWheel}
               onDoubleClick={fitToView}
             >
+            {treeBackground && (treeBackground.backgroundUrl || treeBackground.backgroundColor) && (
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  backgroundImage: treeBackground.backgroundUrl
+                    ? `url(${treeBackground.backgroundUrl})`
+                    : undefined,
+                  backgroundColor: treeBackground.backgroundColor || undefined,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  opacity: treeBackground.backgroundOpacity,
+                }}
+              />
+            )}
             <div
               className="absolute left-1/2 top-1/2"
               style={{
@@ -358,7 +398,11 @@ export function GameMenu({
                     }}
                     title={locked ? 'Locked' : p.name}
                   >
-                    <span className="text-xl leading-none">{locked ? '🔒' : p.icon}</span>
+                    {locked ? (
+                      <span className="text-xl leading-none">🔒</span>
+                    ) : (
+                      <PowerIcon icon={p.icon} className="text-xl leading-none w-6 h-6" />
+                    )}
                     <p className="text-white font-black text-[10px] leading-tight truncate w-full px-1">{p.name}</p>
                     <span
                       className={`rounded-full px-1.5 py-0 text-[9px] font-black ${
@@ -421,7 +465,7 @@ export function GameMenu({
                 return (
                   <div className="flex flex-col gap-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-2xl leading-none">{p.icon}</span>
+                      <PowerIcon icon={p.icon} className="text-2xl leading-none w-8 h-8" />
                       <div className="min-w-0">
                         <p className="text-white font-black text-sm leading-tight truncate">{p.name}</p>
                         <p className="text-[10px] font-bold tracking-wide text-white/40 uppercase">
@@ -525,7 +569,7 @@ export function LevelUpPopup({
                   key={def.key}
                   className="flex items-center gap-3 rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2"
                 >
-                  <span className="text-2xl leading-none">{def.icon}</span>
+                  <PowerIcon icon={def.icon} className="text-2xl leading-none w-8 h-8" />
                   <div className="text-left">
                     <p className="text-white font-black text-sm leading-tight">{def.name}</p>
                     <p className="text-[11px] text-white/50">{def.description}</p>

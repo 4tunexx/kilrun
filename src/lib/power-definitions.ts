@@ -30,6 +30,8 @@ type PowerDefinitionRow = {
   effectParamsJson: string;
   isCore: boolean;
   sortOrder: number;
+  posX?: number | null;
+  posY?: number | null;
 };
 
 function safeParse<T>(json: string, fallback: T): T {
@@ -55,6 +57,8 @@ export function rowToRecord(row: PowerDefinitionRow): PowerDefinitionRecord {
     effectParams: safeParse<PowerEffectParams>(row.effectParamsJson, { bonuses: [] } as never),
     isCore: row.isCore,
     sortOrder: row.sortOrder,
+    posX: row.posX ?? null,
+    posY: row.posY ?? null,
   };
 }
 
@@ -72,6 +76,8 @@ export function recordToRowData(record: PowerDefinitionRecord) {
     effectParamsJson: JSON.stringify(record.effectParams),
     isCore: record.isCore,
     sortOrder: record.sortOrder,
+    posX: typeof record.posX === 'number' ? record.posX : null,
+    posY: typeof record.posY === 'number' ? record.posY : null,
   };
 }
 

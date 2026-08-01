@@ -73,8 +73,19 @@ function validateRecord(body: unknown): { ok: true; record: PowerDefinitionRecor
     effectParams: (b.effectParams ?? {}) as PowerDefinitionRecord['effectParams'],
     isCore: false,
     sortOrder: Number(b.sortOrder) || 0,
+    posX: typeof b.posX === 'number' && Number.isFinite(b.posX) ? b.posX : null,
+    posY: typeof b.posY === 'number' && Number.isFinite(b.posY) ? b.posY : null,
   };
   return { ok: true, record };
+}
+
+/** Uploaded icons arrive as data: URLs — persist to durable storage (Blob
+ * or /public/uploads) so the DB row stays a short URL, not megabytes of
+ * base64. Emoji glyphs and already-hosted URLs pass through untouched. */
+async function resolveIcon(icon: string): Promise<string> {
+  if (!icon.startsWith('data:image/')) return icon;
+  const { persistSiteImage } = await import('@/lib/site-asset-upload');
+  return persistSiteImage(icon, 'misc');
 }
 
 /** Create a new custom power. */
@@ -89,6 +100,15 @@ export async function POST(req: NextRequest) {
   const existing = await prisma.powerDefinition.findUnique({ where: { key: validated.record.key } });
   if (existing) {
     return NextResponse.json({ ok: false, error: 'A power with this key already exists' }, { status: 409 });
+  }
+
+  try {
+    validated.record.icon = await resolveIcon(validated.record.icon);
+  } catch (err) {
+    return NextResponse.json(
+      { ok: false, error: err instanceof Error ? err.message : 'Icon upload failed' },
+      { status: 400 }
+    );
   }
 
   const count = await prisma.powerDefinition.count();
@@ -116,6 +136,15 @@ export async function PATCH(req: NextRequest) {
 
   const validated = validateRecord({ ...body, key });
   if (!validated.ok) return NextResponse.json({ ok: false, error: validated.error }, { status: 400 });
+
+  try {
+    validated.record.icon = await resolveIcon(validated.record.icon);
+  } catch (err) {
+    return NextResponse.json(
+      { ok: false, error: err instanceof Error ? err.message : 'Icon upload failed' },
+      { status: 400 }
+    );
+  }
 
   const data = recordToRowData(validated.record);
   // isCore / effectType / key are immutable for core powers once seeded —

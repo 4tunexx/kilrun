@@ -6,6 +6,9 @@ import { createHmac, timingSafeEqual } from 'crypto';
 
 export type GameJoinClaims = {
   userId: string;
+  /** Steam64 ID — carried through to PlayerState so admin tooling (Live
+   * Matches panel) can show/report it without a DB round-trip. */
+  steamId: string;
   username: string;
   avatarUrl: string;
   isAdmin: boolean;
@@ -22,6 +25,7 @@ export type GameJoinClaims = {
 export type JoinAuthOptions = {
   token?: string;
   userId?: string;
+  steamId?: string;
   username?: string;
   avatarUrl?: string;
   isAdmin?: boolean;
@@ -82,6 +86,7 @@ export function verifyGameJoinToken(token: string): GameJoinClaims | null {
     if (raw.exp < Math.floor(Date.now() / 1000)) return null;
     return {
       userId: String(raw.userId),
+      steamId: String(raw.steamId || ''),
       username: String(raw.username || 'Player'),
       avatarUrl: String(raw.avatarUrl || ''),
       isAdmin: !!raw.isAdmin,
@@ -128,6 +133,7 @@ export function authenticateJoin(
 
   return {
     userId: String(options.userId || ''),
+    steamId: String(options.steamId || ''),
     username: String(options.username || 'Player'),
     avatarUrl: String(options.avatarUrl || ''),
     isAdmin: !!options.isAdmin,
@@ -151,6 +157,7 @@ export function claimsFromAuth(
   if (a && typeof a.userId === 'string' && a.userId.length > 0) {
     return {
       userId: a.userId,
+      steamId: String(a.steamId || ''),
       username: String(a.username || 'Player'),
       avatarUrl: String(a.avatarUrl || ''),
       isAdmin: !!a.isAdmin,
@@ -162,6 +169,7 @@ export function claimsFromAuth(
   }
   return {
     userId: String(options.userId || ''),
+    steamId: String(options.steamId || ''),
     username: String(options.username || 'Player'),
     avatarUrl: String(options.avatarUrl || ''),
     isAdmin: !!options.isAdmin,
