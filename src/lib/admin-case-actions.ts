@@ -201,6 +201,40 @@ export async function adminRemoveCaseItem(caseItemId: string) {
   return { ok: true as const };
 }
 
+/** Award an unopened crate to a specific player — lands directly in their
+ *  Inventory (itemCategory "crate") where they can open, sell, or delete it. */
+export async function adminGrantCaseToUser(userId: string, caseId: string) {
+  const staff = await requireAdmin();
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new Error('User not found');
+
+  const { grantCrateToInventory } = await import('@/lib/case-actions');
+  const invItem = await grantCrateToInventory(userId, caseId, 'admin_grant');
+
+  await writeAuditLog({
+    action: 'admin_case_grant',
+    detail: `caseId=${caseId} userId=${userId} inventoryItemId=${invItem.id} by=${staff.id}`,
+  }).catch(() => {});
+
+  return invItem;
+}
+
+/** Recent crate grants/purchases/rewards for a given user — shown in their admin detail sheet. */
+export async function adminListUserCaseGrants(userId: string) {
+  await requireAdmin();
+  const items = await prisma.inventoryItem.findMany({
+    where: { userId, itemCategory: 'crate' },
+    orderBy: { acquiredAt: 'desc' },
+    take: 50,
+  });
+  return items.map((i) => ({
+    id: i.id,
+    caseName: i.itemName,
+    source: i.crateSource ?? 'unknown',
+    acquiredAt: i.acquiredAt,
+  }));
+}
+
 /** Lightweight pickers for the "add item" dialog — store cosmetics + assets. */
 export async function adminSearchStoreItemsForCase(query?: string) {
   await requireAdmin();

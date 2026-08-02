@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Coins, Flame, Loader2, Trophy } from 'lucide-react';
+import { Coins, Flame, Gift, Loader2, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { getStoreItems } from '@/lib/actions';
 import { purchaseStoreItem } from '@/lib/social-actions';
 import type { StoreItem } from '@/generated/prisma';
@@ -28,6 +29,8 @@ import {
   type ShopTabId,
 } from '@/lib/shop-catalog';
 import { StoreItemPreview } from '@/components/store-item-preview';
+import { getAvailableCases, purchaseCrateFromShop, type CaseDto } from '@/lib/case-actions';
+import { CrateContentsPreview } from '@/components/crate-contents-preview';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -68,6 +71,9 @@ export default function StoreView({
   const [buyingId, setBuyingId] = useState<string | null>(null);
   const [tab, setTab] = useState<ShopTabId>('all');
   const [sort, setSort] = useState<ShopSortId>('popular');
+  const [crates, setCrates] = useState<CaseDto[]>([]);
+  const [cratesLoading, setCratesLoading] = useState(true);
+  const [buyingCrateId, setBuyingCrateId] = useState<string | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -90,6 +96,34 @@ export default function StoreView({
       isMounted = false;
     };
   }, [userId, toast]);
+
+  const reloadCrates = () => {
+    setCratesLoading(true);
+    return getAvailableCases()
+      .then((data) => setCrates(data.filter((c) => c.acquireType === 'vp_purchase')))
+      .catch(() => setCrates([]))
+      .finally(() => setCratesLoading(false));
+  };
+
+  useEffect(() => {
+    void reloadCrates();
+  }, [userId]);
+
+  const buyCrate = async (c: CaseDto) => {
+    setBuyingCrateId(c.id);
+    try {
+      await purchaseCrateFromShop(c.id);
+      toast({ title: `Purchased ${c.name}`, description: 'Open it from your Inventory.' });
+      await reloadCrates();
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Purchase failed',
+        variant: 'destructive',
+      });
+    } finally {
+      setBuyingCrateId(null);
+    }
+  };
 
   const fireCount = useMemo(
     () => items.filter((i) => isFireSaleActive(i)).length,
@@ -155,6 +189,69 @@ export default function StoreView({
           </SelectContent>
         </Select>
       </div>
+
+      {!cratesLoading && crates.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
+            <Gift className="h-4 w-4 text-amber-400" /> Crates
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {crates.map((c) => (
+              <Card
+                key={c.id}
+                className="bg-slate-900/60 backdrop-blur-md border-amber-500/20 hover:border-amber-400/50 transition-all overflow-hidden"
+              >
+                <CardContent className="p-4 space-y-3">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button type="button" className="flex items-center gap-3 w-full text-left">
+                        {c.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={c.imageUrl}
+                            alt=""
+                            className="h-14 w-14 rounded object-cover border border-amber-500/30"
+                          />
+                        ) : (
+                          <div className="h-14 w-14 rounded bg-slate-800 border border-amber-500/30 flex items-center justify-center">
+                            <Gift className="h-7 w-7 text-amber-400" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-100 truncate">{c.name}</p>
+                          {c.description && (
+                            <p className="text-[11px] text-slate-500 truncate">{c.description}</p>
+                          )}
+                        </div>
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72 bg-slate-900 border-slate-700 p-3">
+                      <CrateContentsPreview name={c.name} items={c.items} />
+                    </PopoverContent>
+                  </Popover>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-bold text-yellow-400 flex items-center gap-1">
+                      <Coins className="h-3.5 w-3.5" />
+                      {c.vpPrice} VP
+                    </p>
+                    <Button
+                      size="sm"
+                      disabled={buyingCrateId === c.id}
+                      onClick={() => void buyCrate(c)}
+                    >
+                      {buyingCrateId === c.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        'Buy'
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center h-[40vh] text-slate-400">

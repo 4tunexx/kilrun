@@ -140,6 +140,23 @@ export async function grantXp(userId: string, amount: number, reason?: string) {
   return { xpProgress: updated.xpProgress, level: nextLevel, prevLevel };
 }
 
+/** Grants an unopened crate to inventory for a mission/achievement `rewardCaseId`.
+ *  Best-effort — dynamic import avoids a circular dependency with case-actions.ts,
+ *  which itself imports grantXp from this file. */
+async function grantRewardCaseIfAny(
+  userId: string,
+  rewardCaseId: string | null | undefined,
+  source: 'mission' | 'achievement'
+) {
+  if (!rewardCaseId) return;
+  try {
+    const { grantCrateToInventory } = await import('@/lib/case-actions');
+    await grantCrateToInventory(userId, rewardCaseId, source);
+  } catch {
+    /* best-effort — don't block the XP reward / completion on this */
+  }
+}
+
 /**
  * Apply a KP delta, sync `currentRank` from the new KP, and optionally notify
  * on rank-up / rank-down.
@@ -315,6 +332,7 @@ export async function ensurePlayerMissions(userId: string) {
               currentCount: 0,
               isCompleted: false,
               iconImageUrl: t.iconImageUrl,
+              rewardCaseId: t.rewardCaseId,
             },
           });
         } catch {
@@ -334,6 +352,7 @@ export async function ensurePlayerMissions(userId: string) {
             currentCount: 0,
             isCompleted: false,
             iconImageUrl: t.iconImageUrl,
+            rewardCaseId: t.rewardCaseId,
           },
         });
       } else if (current.category !== 'daily') {
@@ -361,6 +380,7 @@ export async function ensurePlayerMissions(userId: string) {
             currentCount: 0,
             isCompleted: false,
             iconImageUrl: t.iconImageUrl,
+            rewardCaseId: t.rewardCaseId,
           },
         });
       } catch {
@@ -397,6 +417,7 @@ export async function progressMissions(
       });
       if (claimed.count !== 1) continue;
       await grantXp(userId, m.rewardXp, `Mission: ${m.title}`);
+      await grantRewardCaseIfAny(userId, m.rewardCaseId, 'mission');
       await notify(
         userId,
         'Mission complete',
@@ -776,6 +797,7 @@ export async function tryUnlockAchievement(
     if (def.xpReward > 0) {
       await grantXp(userId, def.xpReward, `Achievement: ${def.title}`);
     }
+    await grantRewardCaseIfAny(userId, def.rewardCaseId, 'achievement');
     await notify(
       userId,
       'Achievement unlocked',
@@ -934,6 +956,7 @@ export async function processMatchProgression(input: {
         });
         if (claimed.count !== 1) continue;
         await grantXp(input.userId, m.rewardXp, `Mission: ${m.title}`);
+        await grantRewardCaseIfAny(input.userId, m.rewardCaseId, 'mission');
         await notify(
           input.userId,
           'Mission complete',
@@ -1024,6 +1047,7 @@ async function syncMissionProgressFromCount(userId: string, metric: string) {
       });
       if (claimed.count !== 1) continue;
       await grantXp(userId, m.rewardXp, `Mission: ${m.title}`);
+      await grantRewardCaseIfAny(userId, m.rewardCaseId, 'mission');
       await notify(
         userId,
         'Mission complete',
@@ -1900,6 +1924,8 @@ export async function adminUpsertMissionTemplate(input: {
   category: string;
   isActive?: boolean;
   iconImageUrl?: string;
+  /** Optional CaseDefinition.id — completing this mission also grants a crate. */
+  rewardCaseId?: string | null;
 }) {
   await requireStaff();
   if (input.id) {
@@ -1915,6 +1941,7 @@ export async function adminUpsertMissionTemplate(input: {
         category: input.category,
         isActive: input.isActive ?? true,
         iconImageUrl: input.iconImageUrl || null,
+        rewardCaseId: input.rewardCaseId || null,
       },
     });
   }
@@ -1929,6 +1956,7 @@ export async function adminUpsertMissionTemplate(input: {
       category: input.category,
       isActive: input.isActive ?? true,
       iconImageUrl: input.iconImageUrl || null,
+      rewardCaseId: input.rewardCaseId || null,
     },
   });
 }
@@ -1950,13 +1978,20 @@ export async function adminUpsertAchievement(input: {
   icon?: string;
   iconImageUrl?: string;
   isActive?: boolean;
+  /** Optional CaseDefinition.id — unlocking this achievement also grants a crate. */
+  rewardCaseId?: string | null;
 }) {
   await requireStaff();
   if (input.id) {
     const { id, ...data } = input;
     return prisma.achievementDefinition.update({
       where: { id },
-      data: { ...data, isActive: input.isActive ?? true, iconImageUrl: input.iconImageUrl || null },
+      data: {
+        ...data,
+        isActive: input.isActive ?? true,
+        iconImageUrl: input.iconImageUrl || null,
+        rewardCaseId: input.rewardCaseId || null,
+      },
     });
   }
   return prisma.achievementDefinition.create({
@@ -1971,6 +2006,7 @@ export async function adminUpsertAchievement(input: {
       icon: input.icon ?? 'trophy',
       iconImageUrl: input.iconImageUrl || null,
       isActive: input.isActive ?? true,
+      rewardCaseId: input.rewardCaseId || null,
     },
   });
 }

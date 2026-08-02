@@ -2,10 +2,135 @@
 
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@/generated/prisma';
 import { processWebsiteAction, grantXp } from '@/lib/progression-actions';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
+
+/**
+ * Weighted expected VP value of a case's contents — used as the crate's
+ * `vpValue` in the inventory so resale reflects "value of items inside" via
+ * the normal inventory resellRate fee, rather than a flat admin-set number.
+ * Currency items use their VP amount (XP is not converted); cosmetic items
+ * use the referenced StoreItem/Asset price.
+ */
+export async function computeCaseExpectedValue(
+  items: {
+    rewardType: string;
+    vpAmount: number;
+    storeItemSku: string | null;
+    assetId: string | null;
+    dropWeight: number;
+  }[]
+): Promise<number> {
+  if (items.length === 0) return 0;
+  const totalWeight = items.reduce((sum, i) => sum + i.dropWeight, 0) || 1;
+
+  const storeSkus = items.filter((i) => i.storeItemSku).map((i) => i.storeItemSku!);
+  const assetIds = items.filter((i) => i.assetId).map((i) => i.assetId!);
+  const [storeItems, assets] = await Promise.all([
+    storeSkus.length
+      ? prisma.storeItem.findMany({ where: { itemSku: { in: storeSkus } } })
+      : Promise.resolve([]),
+    assetIds.length
+      ? prisma.asset.findMany({ where: { id: { in: assetIds } } })
+      : Promise.resolve([]),
+  ]);
+  const storeMap = new Map(storeItems.map((s) => [s.itemSku, s.vpPrice]));
+  const assetMap = new Map(assets.map((a) => [a.id, a.price]));
+
+  let expected = 0;
+  for (const item of items) {
+    let value = 0;
+    if (item.rewardType === 'currency') {
+      value = item.vpAmount;
+    } else if (item.storeItemSku) {
+      value = storeMap.get(item.storeItemSku) ?? 0;
+    } else if (item.assetId) {
+      value = assetMap.get(item.assetId) ?? 0;
+    }
+    expected += value * (item.dropWeight / totalWeight);
+  }
+  return Math.round(expected);
+}
+
+/** Grants an unopened crate into a player's inventory (admin award, shop purchase, or mission/achievement reward). */
+export async function grantCrateToInventory(
+  userId: string,
+  caseId: string,
+  source: 'admin_grant' | 'vp_purchase' | 'mission' | 'achievement'
+) {
+  const def = await prisma.caseDefinition.findUnique({
+    where: { id: caseId },
+    include: { items: true },
+  });
+  if (!def) throw new Error('Case not found');
+
+  const vpValue = await computeCaseExpectedValue(def.items);
+
+  const created = await prisma.inventoryItem.create({
+    data: {
+      userId,
+      itemSku: `crate:${def.id}`,
+      itemName: def.name,
+      itemCategory: 'crate',
+      imageUrl: def.imageUrl || null,
+      vpValue,
+      caseDefId: def.id,
+      crateSource: source,
+    },
+  });
+
+  await prisma.notification.create({
+    data: {
+      userId,
+      title: source === 'admin_grant' ? 'You were awarded a crate' : 'You received a crate',
+      body: `${def.name} — head to your Inventory to open it.`,
+      type: 'case_granted',
+    },
+  }).catch(() => {});
+
+  return created;
+}
+
+/** Buys an unopened crate with VP for the shop's Crates section — lands in
+ *  inventory instead of opening immediately, same as openCase's vp_purchase
+ *  path but without auto-resolving a reward. */
+export async function purchaseCrateFromShop(caseId: string) {
+  const session = await auth();
+  const steamId = (session?.user as { steamId?: string } | undefined)?.steamId;
+  if (!steamId) throw new Error('Not authenticated');
+  const user = await prisma.user.findUnique({ where: { steamId } });
+  if (!user) throw new Error('User not found');
+  if (user.isBanned) throw new Error('Account banned');
+
+  const def = await prisma.caseDefinition.findUnique({ where: { id: caseId } });
+  if (!def || !def.isActive) throw new Error('Case not available');
+  if (def.acquireType !== 'vp_purchase') throw new Error('This case is not purchasable');
+  if (def.vpPrice <= 0) throw new Error('This case has no price configured');
+
+  const paid = await prisma.user.updateMany({
+    where: { id: user.id, vpCurrency: { gte: def.vpPrice } },
+    data: { vpCurrency: { decrement: def.vpPrice } },
+  });
+  if (paid.count === 0) throw new Error('Not enough VP');
+
+  try {
+    return await grantCrateToInventory(user.id, caseId, 'vp_purchase');
+  } catch (err) {
+    // Refund if the inventory grant failed after the VP debit.
+    try {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { vpCurrency: { increment: def.vpPrice } },
+      });
+    } catch {
+      /* ignore refund failure */
+    }
+    throw err;
+  }
+}
 
 export type CaseItemPublic = {
   id: string;
@@ -92,7 +217,9 @@ function freeCooldownMs(acquireType: string): number | null {
 export async function getAvailableCases(): Promise<CaseDto[]> {
   const user = await requireSessionUser();
   const cases = await prisma.caseDefinition.findMany({
-    where: { isActive: true },
+    // "admin_grant" cases are never opened directly from this listing — they
+    // land in the player's inventory when granted and are opened from there.
+    where: { isActive: true, acquireType: { not: 'admin_grant' } },
     include: { items: true },
     orderBy: { sortOrder: 'asc' },
   });
@@ -113,8 +240,6 @@ export async function getAvailableCases(): Promise<CaseDto[]> {
       nextFreeAt = canOpen ? null : new Date(readyAt).toISOString();
     } else if (c.acquireType === 'vp_purchase') {
       canOpen = user.vpCurrency >= c.vpPrice;
-    } else if (c.acquireType === 'admin_grant') {
-      canOpen = false; // only opened via admin-granted access, not shown as directly openable
     }
 
     return {
@@ -143,40 +268,17 @@ function weightedPick<T extends { dropWeight: number }>(items: T[]): T {
   return items[items.length - 1];
 }
 
-export async function openCase(caseId: string): Promise<CaseOpenResultDto> {
-  const user = await requireSessionUser();
-  const def = await prisma.caseDefinition.findUnique({
-    where: { id: caseId },
-    include: { items: true },
-  });
-  if (!def || !def.isActive) throw new Error('Case not available');
-  if (def.items.length === 0) throw new Error('This case has no items configured');
+type CaseDefWithItems = Prisma.CaseDefinitionGetPayload<{ include: { items: true } }>;
 
-  const cooldownMs = freeCooldownMs(def.acquireType);
-  const lastFreeMap = { ...((user.lastFreeCaseAt as Record<string, string> | null) ?? {}) };
-
-  if (cooldownMs) {
-    const last = lastFreeMap[def.id] ? new Date(lastFreeMap[def.id]).getTime() : 0;
-    if (Date.now() < last + cooldownMs) {
-      throw new Error('This free case is on cooldown');
-    }
-  } else if (def.acquireType === 'vp_purchase') {
-    if (def.vpPrice > 0) {
-      const paid = await prisma.user.updateMany({
-        where: { id: user.id, vpCurrency: { gte: def.vpPrice } },
-        data: { vpCurrency: { decrement: def.vpPrice } },
-      });
-      if (paid.count === 0) throw new Error('Not enough VP');
-    }
-  } else if (def.acquireType === 'admin_grant') {
-    throw new Error('This case can only be granted by staff');
-  }
-
+/** Picks the won item, applies its reward, logs the open, and builds the unboxing reel/result. Shared by openCase and openCaseFromInventory. */
+async function resolveCaseWin(
+  user: { id: string },
+  def: CaseDefWithItems
+): Promise<CaseOpenResultDto> {
   const won = weightedPick(def.items);
 
-  try {
-    // Currency reward — credit VP/XP directly, no inventory item.
-    if (won.rewardType === 'currency') {
+  // Currency reward — credit VP/XP directly, no inventory item.
+  if (won.rewardType === 'currency') {
       if (won.vpAmount > 0) {
         await prisma.user.update({
           where: { id: user.id },
@@ -190,82 +292,60 @@ export async function openCase(caseId: string): Promise<CaseOpenResultDto> {
     // Grant into inventory if it references a StoreItem cosmetic — same
     // snapshot pattern as a normal purchase, so later catalog edits don't
     // retroactively change what the player already won.
-    else if (won.storeItemSku) {
-      const storeItem = await prisma.storeItem.findUnique({ where: { itemSku: won.storeItemSku } });
-      if (storeItem) {
-        const owned = await prisma.inventoryItem.findFirst({
-          where: { userId: user.id, itemSku: storeItem.itemSku },
-        });
-        if (!owned) {
-          await prisma.inventoryItem.create({
-            data: {
-              userId: user.id,
-              itemSku: storeItem.itemSku,
-              itemName: storeItem.itemName,
-              itemCategory: storeItem.itemCategory,
-              cosmeticSlot: storeItem.cosmeticSlot ?? null,
-              bannerConfig: storeItem.bannerConfig ?? undefined,
-              cosmeticConfig: storeItem.cosmeticConfig ?? undefined,
-              imageUrl: storeItem.imageUrl ?? null,
-              vpValue: 0,
-            },
-          });
-        }
-      }
-    } else if (won.assetId) {
-      const asset = await prisma.asset.findUnique({ where: { id: won.assetId } });
-      if (asset) {
-        const owned = await prisma.inventoryItem.findFirst({
-          where: { userId: user.id, itemSku: asset.assetId },
-        });
-        if (!owned) {
-          await prisma.inventoryItem.create({
-            data: {
-              userId: user.id,
-              itemSku: asset.assetId,
-              itemName: asset.displayName,
-              itemCategory: asset.category,
-              cosmeticSlot: asset.equipSlot,
-              imageUrl: asset.thumbnailUrl ?? asset.previewUrl ?? null,
-              vpValue: 0,
-            },
-          });
-        }
-      }
-    }
-
-    await prisma.caseOpenLog.create({
-      data: {
-        userId: user.id,
-        caseId: def.id,
-        caseItemId: won.id,
-        wonName: won.displayName,
-        wonImage: won.displayImage,
-        wonRarity: won.rarity,
-      },
-    });
-
-    if (cooldownMs) {
-      lastFreeMap[def.id] = new Date().toISOString();
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { lastFreeCaseAt: lastFreeMap },
+  else if (won.storeItemSku) {
+    const storeItem = await prisma.storeItem.findUnique({ where: { itemSku: won.storeItemSku } });
+    if (storeItem) {
+      const owned = await prisma.inventoryItem.findFirst({
+        where: { userId: user.id, itemSku: storeItem.itemSku },
       });
-    }
-  } catch (err) {
-    // Best-effort VP refund if the grant/log write fails after debit.
-    if (def.acquireType === 'vp_purchase' && def.vpPrice > 0) {
-      try {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { vpCurrency: { increment: def.vpPrice } },
+      if (!owned) {
+        await prisma.inventoryItem.create({
+          data: {
+            userId: user.id,
+            itemSku: storeItem.itemSku,
+            itemName: storeItem.itemName,
+            itemCategory: storeItem.itemCategory,
+            cosmeticSlot: storeItem.cosmeticSlot ?? null,
+            bannerConfig: storeItem.bannerConfig ?? undefined,
+            cosmeticConfig: storeItem.cosmeticConfig ?? undefined,
+            imageUrl: storeItem.imageUrl ?? null,
+            vpValue: 0,
+          },
         });
-      } catch {
-        /* ignore refund failure */
       }
     }
-    throw err;
+  } else if (won.assetId) {
+    const asset = await prisma.asset.findUnique({ where: { id: won.assetId } });
+    if (asset) {
+      const owned = await prisma.inventoryItem.findFirst({
+        where: { userId: user.id, itemSku: asset.assetId },
+      });
+      if (!owned) {
+        await prisma.inventoryItem.create({
+          data: {
+            userId: user.id,
+            itemSku: asset.assetId,
+            itemName: asset.displayName,
+            itemCategory: asset.category,
+            cosmeticSlot: asset.equipSlot,
+            imageUrl: asset.thumbnailUrl ?? asset.previewUrl ?? null,
+            vpValue: 0,
+          },
+        });
+      }
+    }
   }
+
+  await prisma.caseOpenLog.create({
+    data: {
+      userId: user.id,
+      caseId: def.id,
+      caseItemId: won.id,
+      wonName: won.displayName,
+      wonImage: won.displayImage,
+      wonRarity: won.rarity,
+    },
+  });
 
   await prisma.notification.create({
     data: {
@@ -298,6 +378,108 @@ export async function openCase(caseId: string): Promise<CaseOpenResultDto> {
     reel,
     wonIndex: wonIndex >= 0 ? wonIndex : 0,
   };
+}
+
+/** Opens a free/daily/weekly or VP-purchase case directly (not from inventory). */
+export async function openCase(caseId: string): Promise<CaseOpenResultDto> {
+  const user = await requireSessionUser();
+  const def = await prisma.caseDefinition.findUnique({
+    where: { id: caseId },
+    include: { items: true },
+  });
+  if (!def || !def.isActive) throw new Error('Case not available');
+  if (def.acquireType === 'admin_grant') {
+    throw new Error('Open this crate from your Inventory');
+  }
+  if (def.items.length === 0) throw new Error('This case has no items configured');
+
+  const cooldownMs = freeCooldownMs(def.acquireType);
+  const lastFreeMap = { ...((user.lastFreeCaseAt as Record<string, string> | null) ?? {}) };
+
+  if (cooldownMs) {
+    const last = lastFreeMap[def.id] ? new Date(lastFreeMap[def.id]).getTime() : 0;
+    if (Date.now() < last + cooldownMs) {
+      throw new Error('This free case is on cooldown');
+    }
+  } else if (def.acquireType === 'vp_purchase' && def.vpPrice > 0) {
+    const paid = await prisma.user.updateMany({
+      where: { id: user.id, vpCurrency: { gte: def.vpPrice } },
+      data: { vpCurrency: { decrement: def.vpPrice } },
+    });
+    if (paid.count === 0) throw new Error('Not enough VP');
+  }
+
+  try {
+    const result = await resolveCaseWin(user, def);
+    if (cooldownMs) {
+      lastFreeMap[def.id] = new Date().toISOString();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { lastFreeCaseAt: lastFreeMap },
+      });
+    }
+    return result;
+  } catch (err) {
+    // Best-effort VP refund if the reward grant/log write fails after debit.
+    if (def.acquireType === 'vp_purchase' && def.vpPrice > 0) {
+      try {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { vpCurrency: { increment: def.vpPrice } },
+        });
+      } catch {
+        /* ignore refund failure */
+      }
+    }
+    throw err;
+  }
+}
+
+/** Opens an unopened crate the player already owns in their inventory (admin-awarded, purchased, or earned from a mission/achievement). */
+export async function openCaseFromInventory(inventoryItemId: string): Promise<CaseOpenResultDto> {
+  const user = await requireSessionUser();
+  const invItem = await prisma.inventoryItem.findUnique({ where: { id: inventoryItemId } });
+  if (!invItem || invItem.userId !== user.id) throw new Error('Crate not found');
+  if (invItem.itemCategory !== 'crate' || !invItem.caseDefId) {
+    throw new Error('This item is not an unopened crate');
+  }
+
+  const def = await prisma.caseDefinition.findUnique({
+    where: { id: invItem.caseDefId },
+    include: { items: true },
+  });
+  if (!def) throw new Error('Case not found');
+  if (def.items.length === 0) throw new Error('This case has no items configured');
+
+  // Consume the crate up front — if resolveCaseWin fails partway, we don't
+  // want the player able to open the same inventory row twice.
+  const claimed = await prisma.inventoryItem.deleteMany({
+    where: { id: invItem.id, userId: user.id },
+  });
+  if (claimed.count === 0) throw new Error('That crate was already opened');
+
+  try {
+    return await resolveCaseWin(user, def);
+  } catch (err) {
+    // Restore the crate to inventory if opening failed after it was consumed.
+    try {
+      await prisma.inventoryItem.create({
+        data: {
+          userId: user.id,
+          itemSku: invItem.itemSku,
+          itemName: invItem.itemName,
+          itemCategory: 'crate',
+          imageUrl: invItem.imageUrl,
+          vpValue: invItem.vpValue,
+          caseDefId: invItem.caseDefId,
+          crateSource: invItem.crateSource,
+        },
+      });
+    } catch {
+      /* ignore rollback failure */
+    }
+    throw err;
+  }
 }
 
 export async function getCaseOpenHistory(limit = 20) {

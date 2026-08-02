@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Package, ShoppingBag, Trophy, Target, Sparkles } from 'lucide-react';
+import { Loader2, Package, ShoppingBag, Trophy, Target, Sparkles, Gift } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
@@ -12,16 +12,31 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { adminGetUserDetail } from '@/lib/social-actions';
 import {
   adminGrantGameXp,
   adminAdjustGameSkillPoints,
   adminResetGameAbilities,
 } from '@/lib/game-progression-actions';
+import {
+  adminListCases,
+  adminGrantCaseToUser,
+  adminListUserCaseGrants,
+} from '@/lib/admin-case-actions';
 import { getRoleTextColorClass } from '@/lib/role-colors';
 import { getLevelFromXp } from '@/lib/progression';
 import { getGameLevelProgress, parseAbilityLevels } from '@shared/ability-progression';
 import { useToast } from '@/hooks/use-toast';
+
+type CaseOption = Awaited<ReturnType<typeof adminListCases>>[number];
+type CaseGrant = Awaited<ReturnType<typeof adminListUserCaseGrants>>[number];
 
 type Detail = Awaited<ReturnType<typeof adminGetUserDetail>>;
 
@@ -39,6 +54,11 @@ export function AdminUserDetailSheet({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const { toast } = useToast();
 
+  const [caseOptions, setCaseOptions] = useState<CaseOption[]>([]);
+  const [caseGrants, setCaseGrants] = useState<CaseGrant[]>([]);
+  const [selectedCaseId, setSelectedCaseId] = useState<string>('');
+  const [awarding, setAwarding] = useState(false);
+
   const reloadDetail = () => {
     if (!userId) return Promise.resolve();
     return adminGetUserDetail(userId)
@@ -46,13 +66,23 @@ export function AdminUserDetailSheet({
       .catch(() => setDetail(null));
   };
 
+  const reloadCaseGrants = () => {
+    if (!userId) return Promise.resolve();
+    return adminListUserCaseGrants(userId)
+      .then((g) => setCaseGrants(g))
+      .catch(() => setCaseGrants([]));
+  };
+
   useEffect(() => {
     if (!open || !userId) return;
     let cancelled = false;
     setLoading(true);
-    adminGetUserDetail(userId)
-      .then((d) => {
-        if (!cancelled) setDetail(d);
+    Promise.all([adminGetUserDetail(userId), adminListCases(), adminListUserCaseGrants(userId)])
+      .then(([d, cases, grants]) => {
+        if (cancelled) return;
+        setDetail(d);
+        setCaseOptions(cases.filter((c) => c.isActive));
+        setCaseGrants(grants);
       })
       .catch(() => {
         if (!cancelled) setDetail(null);
@@ -64,6 +94,23 @@ export function AdminUserDetailSheet({
       cancelled = true;
     };
   }, [open, userId]);
+
+  const awardCrate = async () => {
+    if (!userId || !selectedCaseId) return;
+    setAwarding(true);
+    try {
+      await adminGrantCaseToUser(userId, selectedCaseId);
+      toast({ title: 'Crate awarded' });
+      await reloadCaseGrants();
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Could not award crate',
+        variant: 'destructive',
+      });
+    } finally {
+      setAwarding(false);
+    }
+  };
 
   const u = detail?.user;
   const level = u ? getLevelFromXp(u.xpProgress) : 0;
@@ -221,6 +268,56 @@ export function AdminUserDetailSheet({
               </TabsContent>
 
               <TabsContent value="awards" className="mt-3 space-y-3">
+                <div className="rounded-md border border-amber-500/30 bg-amber-950/10 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-amber-400 flex items-center gap-1">
+                    <Gift className="h-3.5 w-3.5" /> Award a crate
+                  </p>
+                  <div className="flex gap-2">
+                    <Select value={selectedCaseId} onValueChange={setSelectedCaseId}>
+                      <SelectTrigger className="bg-slate-900/50 border-slate-700 text-xs h-8">
+                        <SelectValue placeholder="Choose a case…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {caseOptions.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="sm"
+                      className="h-8 shrink-0"
+                      disabled={!selectedCaseId || awarding}
+                      onClick={() => void awardCrate()}
+                    >
+                      {awarding && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
+                      Award
+                    </Button>
+                  </div>
+                  {caseGrants.length > 0 && (
+                    <div className="pt-1 space-y-1">
+                      <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                        Recent crates (unopened, in their inventory)
+                      </p>
+                      {caseGrants.slice(0, 5).map((g) => (
+                        <div
+                          key={g.id}
+                          className="flex items-center justify-between text-[11px] text-slate-400"
+                        >
+                          <span className="truncate">{g.caseName}</span>
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] ml-2 shrink-0 text-amber-400 capitalize"
+                          >
+                            {g.source.replace('_', ' ')}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div>
                   <p className="text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1">
                     <Trophy className="h-3.5 w-3.5" /> Badges

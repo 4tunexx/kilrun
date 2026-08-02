@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { Loader2, Package, ShieldCheck, ShoppingBag, Trash2, Upload } from 'lucide-react';
+import { Coins, Gift, Loader2, Package, ShieldCheck, ShoppingBag, Sparkles, Trash2, Upload } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
@@ -37,6 +37,8 @@ import {
   resellInventoryItem,
   unequipCosmeticSlot,
 } from '@/lib/social-actions';
+import { openCaseFromInventory, type CaseOpenResultDto } from '@/lib/case-actions';
+import { CrateUnboxModal } from '@/components/crate-unbox-modal';
 import { normalizeBannerConfig } from '@/lib/banner';
 import { BannerFill } from '@/components/banner-fill';
 import { ProfileHeroBanner } from '@/components/profile-hero-banner';
@@ -67,7 +69,7 @@ import { cn } from '@/lib/utils';
 type InventoryRow = Awaited<ReturnType<typeof getMyInventory>>[number];
 type SortMode = 'newest' | 'oldest' | 'name' | 'value';
 
-type PageTabId = 'skins' | 'cosmetics' | 'powers';
+type PageTabId = 'skins' | 'cosmetics' | 'powers' | 'crates';
 type SubTabId = ShopTabId | 'equipped';
 
 const PAGE_TABS: { id: PageTabId; label: string; includes: ShopTabId[] }[] = [
@@ -85,6 +87,13 @@ const PAGE_TABS: { id: PageTabId; label: string; includes: ShopTabId[] }[] = [
     id: 'powers',
     label: 'Powers',
     includes: ['perks', 'boosts'],
+  },
+  {
+    // Crates are not equippable — this page bypasses the equip-slot UI
+    // entirely and renders a simple grid with Open / Sell / Delete.
+    id: 'crates',
+    label: 'Crates',
+    includes: [],
   },
 ];
 
@@ -508,6 +517,7 @@ export function InventoryDrawer({
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
   const [skinsLoad, setSkinsLoad] = useState<SkinAttachment[]>([]);
   const [invCfg, setInvCfg] = useState<InventoryConfig>(DEFAULT_INVENTORY_CONFIG);
+  const [unboxResult, setUnboxResult] = useState<CaseOpenResultDto | null>(null);
   const { toast } = useToast();
 
   const resellRate = invCfg.resellRate > 0 ? invCfg.resellRate : INVENTORY_RESELL_RATE;
@@ -635,6 +645,26 @@ export function InventoryDrawer({
     () => (selectedItemId ? items.find((i) => i.id === selectedItemId) ?? null : null),
     [items, selectedItemId]
   );
+
+  const crateItems = useMemo(
+    () => items.filter((i) => i.itemCategory === 'crate'),
+    [items]
+  );
+
+  const handleOpenCrate = async (item: InventoryRow) => {
+    setBusyId(item.id);
+    try {
+      const res = await openCaseFromInventory(item.id);
+      setUnboxResult(res);
+      await reload();
+      onEquipChange?.();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Could not open crate';
+      toast({ title: message, variant: 'destructive' });
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const withBusy = async (id: string, action: () => Promise<void>) => {
     setBusyId(id);
@@ -779,12 +809,113 @@ export function InventoryDrawer({
           <div
             className={cn(
               'flex-1 min-h-0 grid gap-0 overflow-y-auto md:overflow-hidden overscroll-contain',
-              invCfg.showPreviewColumn
+              invCfg.showPreviewColumn && pageTab !== 'crates'
                 ? 'grid-cols-1 md:grid-cols-[1.15fr_0.95fr] md:grid-rows-[minmax(0,1fr)]'
                 : 'grid-cols-1 md:grid-rows-[minmax(0,1fr)]'
             )}
           >
             <section className="flex flex-col md:min-h-0 border-b md:border-b-0 md:border-r border-slate-700/30 p-4 sm:p-5 gap-4">
+              {pageTab === 'crates' ? (
+                <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:pr-1 md:-mr-1 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400 font-bold">
+                      Unopened crates
+                    </p>
+                    <Badge className="bg-slate-800/60 text-slate-200 border-slate-700/40 text-[10px] h-5">
+                      {crateItems.length} crate{crateItems.length === 1 ? '' : 's'}
+                    </Badge>
+                  </div>
+                  {loading ? (
+                    <div className="py-12 flex items-center justify-center text-slate-400">
+                      <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading inventory...
+                    </div>
+                  ) : crateItems.length === 0 ? (
+                    <div className="py-12 text-center text-slate-400 space-y-2">
+                      <Gift className="w-10 h-10 mx-auto opacity-40" />
+                      <p>No crates yet. Buy one from the shop or earn one from missions.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pb-1">
+                      {crateItems.map((item) => (
+                        <Card
+                          key={item.id}
+                          className="bg-slate-900/60 border-slate-700/40 overflow-hidden"
+                        >
+                          <CardContent className="p-3 space-y-2">
+                            <div className="aspect-square rounded-lg bg-slate-950/60 border border-amber-500/20 flex items-center justify-center overflow-hidden">
+                              {item.imageUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={item.imageUrl}
+                                  alt=""
+                                  className="h-16 w-16 object-contain drop-shadow-[0_0_20px_rgba(251,191,36,0.35)]"
+                                />
+                              ) : (
+                                <Gift className="h-14 w-14 text-amber-300" />
+                              )}
+                            </div>
+                            <p className="text-xs font-semibold text-slate-100 truncate">
+                              {item.itemName}
+                            </p>
+                            <p className="text-[10px] text-slate-500 capitalize truncate flex items-center gap-1">
+                              <Sparkles className="h-3 w-3 text-amber-400" />
+                              {(item.crateSource ?? 'unknown').replace('_', ' ')}
+                            </p>
+                            <div className="flex gap-1">
+                              <Button
+                                size="sm"
+                                className="h-7 text-[10px] flex-1 px-1.5"
+                                disabled={busyId === item.id}
+                                onClick={() => void handleOpenCrate(item)}
+                              >
+                                {busyId === item.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  'Open'
+                                )}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-[10px] flex-1 px-1.5"
+                                disabled={busyId === item.id}
+                                onClick={() =>
+                                  void withBusy(item.id, () =>
+                                    resellInventoryItem(item.id).then((r) => {
+                                      toast({ title: `Sold for ${r.refund} VP` });
+                                    })
+                                  )
+                                }
+                              >
+                                Sell {Math.floor(item.vpValue * resellRate)} VP
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-red-400 shrink-0"
+                                disabled={busyId === item.id}
+                                title="Discard"
+                                onClick={() =>
+                                  void withBusy(item.id, () =>
+                                    deleteInventoryItem(item.id).then(() => {})
+                                  )
+                                }
+                              >
+                                {busyId === item.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                )}
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+              <>
               <Tabs
                 value={subTab}
                 onValueChange={(v) => {
@@ -1150,9 +1281,11 @@ export function InventoryDrawer({
                   </p>
                 )}
               </div>
+              </>
+              )}
             </section>
 
-            {invCfg.showPreviewColumn && (
+            {invCfg.showPreviewColumn && pageTab !== 'crates' && (
             <section className="relative md:min-h-0 flex flex-col p-4 sm:p-5 gap-4 md:overflow-y-auto bg-gradient-to-br from-slate-900/70 via-slate-800/50 to-slate-900/70">
               <div className="absolute inset-0 pointer-events-none opacity-40">
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(239,68,68,0.14),transparent_60%)]" />
@@ -1334,6 +1467,10 @@ export function InventoryDrawer({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {unboxResult && (
+        <CrateUnboxModal result={unboxResult} onClose={() => setUnboxResult(null)} />
+      )}
     </>
   );
 }

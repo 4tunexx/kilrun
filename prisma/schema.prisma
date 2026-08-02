@@ -216,6 +216,9 @@ model MissionTemplate {
   isActive    Boolean @default(true)
   /// Optional custom icon image uploaded/set in the admin panel.
   iconImageUrl String?
+  /// Optional CaseDefinition.id — completing this mission also grants an
+  /// unopened crate to the player's inventory alongside the XP reward.
+  rewardCaseId String? @db.ObjectId
 }
 
 model ActiveMission {
@@ -234,6 +237,8 @@ model ActiveMission {
   periodKey    String  @default("")
   isCompleted  Boolean @default(false)
   iconImageUrl String?
+  /// Copied from MissionTemplate.rewardCaseId — crate granted on completion.
+  rewardCaseId String? @db.ObjectId
 
   user User @relation(fields: [userId], references: [id])
 
@@ -257,6 +262,9 @@ model AchievementDefinition {
   /// Optional custom icon image uploaded in the admin panel (overrides `icon`).
   iconImageUrl String?
   isActive    Boolean @default(true)
+  /// Optional CaseDefinition.id — unlocking this achievement also grants an
+  /// unopened crate to the player's inventory alongside the XP reward.
+  rewardCaseId String? @db.ObjectId
 
   unlocks UserAchievement[]
 }
@@ -512,18 +520,26 @@ model InventoryItem {
   userId       String   @db.ObjectId
   itemSku      String
   itemName     String
+  /// Cosmetic category (skin/banner/etc), or "crate" for an unopened case.
   itemCategory String
   cosmeticSlot String?
   bannerConfig Json?
   /// Frame / nickname effect config snapshot at purchase time.
   cosmeticConfig Json?
   imageUrl     String?
-  /// Original VP price paid; resale refunds a fraction of this.
+  /// Original VP price paid; resale refunds a fraction of this. For crates,
+  /// this is the pre-computed weighted expected value of its contents.
   vpValue      Int      @default(0)
   isEquipped   Boolean  @default(false)
   /// Player-marked favorite for inventory filtering.
   isFavorite   Boolean  @default(false)
   acquiredAt   DateTime @default(now())
+
+  /// Set when itemCategory = "crate" — the CaseDefinition to open when the
+  /// player hits "Open" on this inventory row. Consumed (row deleted) on open.
+  caseDefId String? @db.ObjectId
+  /// How this crate was obtained — "admin_grant" | "vp_purchase" | "mission" | "achievement".
+  crateSource String?
 
   user User @relation(fields: [userId], references: [id])
 

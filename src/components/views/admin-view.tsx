@@ -108,6 +108,7 @@ import {
   adminUpsertBadge,
   adminClearGlobalChat,
 } from '@/lib/progression-actions';
+import { adminListCases } from '@/lib/admin-case-actions';
 import { adminListAuditLogs } from '@/lib/audit';
 import { syncClerkBrandingToKilrun } from '@/lib/clerk-branding';
 import { normalizeLandingSlides, type LandingHeroSlide } from '@/lib/cosmetics';
@@ -281,6 +282,7 @@ export default function AdminView({
     category: 'game',
     iconImageUrl: '',
     isActive: true,
+    rewardCaseId: '' as string,
   };
   const [missionForm, setMissionForm] = useState(emptyMissionForm);
   const emptyAchForm = {
@@ -295,8 +297,12 @@ export default function AdminView({
     icon: 'trophy',
     iconImageUrl: '',
     isActive: true,
+    rewardCaseId: '' as string,
   };
   const [achForm, setAchForm] = useState(emptyAchForm);
+  const [rewardCaseOptions, setRewardCaseOptions] = useState<
+    Awaited<ReturnType<typeof adminListCases>>
+  >([]);
   const emptyBadgeForm = {
     id: '' as string,
     key: '',
@@ -315,7 +321,7 @@ export default function AdminView({
     const ticketStatus =
       ticketFilter === 'all' ? undefined : ticketFilter;
     if (isAdmin) {
-      const [u, t, store, settings, m, a, b, logs] = await Promise.all([
+      const [u, t, store, settings, m, a, b, logs, cases] = await Promise.all([
         adminListUsers(200),
         adminListTickets(ticketStatus),
         adminGetAllStoreItems(),
@@ -324,6 +330,7 @@ export default function AdminView({
         adminListAchievements(),
         adminListBadges(),
         adminListAuditLogs(),
+        adminListCases(),
       ]);
       setUsers(u);
       setTickets(t);
@@ -332,6 +339,7 @@ export default function AdminView({
       setAchievements(a);
       setBadges(b);
       setAuditLogs(logs);
+      setRewardCaseOptions(cases.filter((c) => c.isActive));
       let landingHeroSlides = normalizeLandingSlides(
         (settings as { landingHeroSlides?: string }).landingHeroSlides
       );
@@ -1433,6 +1441,30 @@ export default function AdminView({
                     className="bg-slate-900/50 border-slate-700"
                   />
                 </div>
+                <div className="space-y-1">
+                  <Label>Reward crate (optional)</Label>
+                  <Select
+                    value={missionForm.rewardCaseId || '__none__'}
+                    onValueChange={(v) =>
+                      setMissionForm((f) => ({
+                        ...f,
+                        rewardCaseId: v === '__none__' ? '' : v,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">None</SelectItem>
+                      {rewardCaseOptions.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <ImageUploadField
                   label="Icon image (optional)"
                   value={missionForm.iconImageUrl}
@@ -1459,6 +1491,7 @@ export default function AdminView({
                           category,
                           isActive: missionForm.isActive,
                           iconImageUrl: missionForm.iconImageUrl || undefined,
+                          rewardCaseId: missionForm.rewardCaseId || null,
                         });
                         setMissionForm(emptyMissionForm);
                         toast({
@@ -1526,6 +1559,7 @@ export default function AdminView({
                           category: m.category === 'daily' ? 'game' : m.category,
                           iconImageUrl: m.iconImageUrl || '',
                           isActive: m.isActive,
+                          rewardCaseId: m.rewardCaseId || '',
                         })
                       }
                     >
@@ -1610,6 +1644,30 @@ export default function AdminView({
                     className="bg-slate-900/50 border-slate-700"
                   />
                 </div>
+                <div className="space-y-1">
+                  <Label>Reward crate (optional)</Label>
+                  <Select
+                    value={achForm.rewardCaseId || '__none__'}
+                    onValueChange={(v) =>
+                      setAchForm((f) => ({
+                        ...f,
+                        rewardCaseId: v === '__none__' ? '' : v,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">None</SelectItem>
+                      {rewardCaseOptions.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <ImageUploadField
                   label="Icon image (optional, overrides icon keyword)"
                   value={achForm.iconImageUrl}
@@ -1625,6 +1683,7 @@ export default function AdminView({
                           ...achForm,
                           id: achForm.id || undefined,
                           iconImageUrl: achForm.iconImageUrl || undefined,
+                          rewardCaseId: achForm.rewardCaseId || null,
                         });
                         setAchForm(emptyAchForm);
                         toast({
@@ -1691,6 +1750,7 @@ export default function AdminView({
                           icon: a.icon || 'trophy',
                           iconImageUrl: a.iconImageUrl || '',
                           isActive: a.isActive,
+                          rewardCaseId: a.rewardCaseId || '',
                         })
                       }
                     >
