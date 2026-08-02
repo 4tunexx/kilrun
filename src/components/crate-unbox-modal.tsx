@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Coins, Gift, Sparkles } from 'lucide-react';
+import { Coins, Gift, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import type { CaseOpenResultDto } from '@/lib/case-actions';
@@ -139,7 +139,13 @@ function UnboxingReel({
   useEffect(() => {
     const el = trackRef.current;
     if (!el) return;
-    const pitch = REEL_ITEM_WIDTH + 8; // item width + flex gap
+    // Each item div is REEL_ITEM_WIDTH - 8 wide (see style below) plus the
+    // gap-2 (8px) flex gap between items, so the true center-to-center pitch
+    // is exactly REEL_ITEM_WIDTH. Using REEL_ITEM_WIDTH + 8 here previously
+    // over-counted the gap and drifted the landing position further off with
+    // every item, so the reel visually stopped next to the actual prize
+    // instead of on it.
+    const pitch = REEL_ITEM_WIDTH;
     // Track is left-padded by 50% of its own width (pl-[50%]), so item i's
     // center sits at `i * pitch + pitch / 2` from the track's own left edge
     // — which is itself offset by +50%-of-container from the container's
@@ -226,8 +232,21 @@ export function CrateUnboxModal({
   if (typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4">
-      <div className="w-full max-w-xl space-y-4">
+    <div
+      className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="relative w-full max-w-xl space-y-4">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute -top-3 -right-3 z-10 rounded-full bg-slate-800 border border-slate-600 p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
         {phase === 'shaking' && <ShakingCrate imageUrl={result.caseImageUrl} active />}
         {phase === 'opening' && (
           <OpeningCrate imageUrl={result.caseOpenImageUrl || result.caseImageUrl} />

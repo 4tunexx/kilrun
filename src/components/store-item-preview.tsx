@@ -107,21 +107,22 @@ export function StoreItemPreview({
   const imageSrc = resolveShopImageUrl(item.imageUrl);
   if (imageSrc) {
     return (
-      <Image
-        src={imageSrc}
-        alt={item.itemName}
-        fill
-        sizes="(max-width: 640px) 40vw, 160px"
-        className={cn(
-          'object-cover group-hover:scale-110 transition-transform duration-300',
-          className
-        )}
-        unoptimized={
-          imageSrc.includes('placehold.co') ||
-          imageSrc.endsWith('.svg') ||
-          !/^https?:\/\//i.test(imageSrc)
-        }
-      />
+      <div className={cn('absolute inset-0 flex items-center justify-center p-4', className)}>
+        <div className="relative h-full w-full">
+          <Image
+            src={imageSrc}
+            alt={item.itemName}
+            fill
+            sizes="(max-width: 640px) 40vw, 160px"
+            className="object-contain group-hover:scale-110 transition-transform duration-300"
+            unoptimized={
+              imageSrc.includes('placehold.co') ||
+              imageSrc.endsWith('.svg') ||
+              !/^https?:\/\//i.test(imageSrc)
+            }
+          />
+        </div>
+      </div>
     );
   }
   return (

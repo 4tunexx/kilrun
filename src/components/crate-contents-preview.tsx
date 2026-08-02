@@ -38,7 +38,6 @@ export function CrateContentsPreview({
                 </p>
                 <p className={`text-[9px] uppercase tracking-wide ${style.text}`}>{item.rarity}</p>
               </div>
-              <span className="text-[10px] text-slate-400 shrink-0">{item.chancePercent}%</span>
             </div>
           );
         })}

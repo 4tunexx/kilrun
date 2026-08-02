@@ -120,7 +120,7 @@ async function healStoreItemDefaults() {
 export async function getStoreItems() {
   try {
     const items = await prisma.storeItem.findMany({
-      where: { isAvailable: true, itemCategory: { not: 'slot_pack' } },
+      where: { isAvailable: true, itemCategory: { not: 'slot_pack' }, caseOnly: { not: true } },
       orderBy: { vpPrice: 'asc' },
     });
     return items.map((item) => ({
@@ -136,7 +136,7 @@ export async function getStoreItems() {
     ) {
       await healStoreItemDefaults();
       const items = await prisma.storeItem.findMany({
-        where: { isAvailable: true, itemCategory: { not: 'slot_pack' } },
+        where: { isAvailable: true, itemCategory: { not: 'slot_pack' }, caseOnly: { not: true } },
         orderBy: { vpPrice: 'asc' },
       });
       return items.map((item) => ({

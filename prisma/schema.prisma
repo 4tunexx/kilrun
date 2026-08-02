@@ -181,6 +181,9 @@ model StoreItem {
   vpPrice      Int
   imageUrl     String?
   isAvailable  Boolean @default(true)
+  /// When true, hidden from the public shop grid — only selectable from the
+  /// admin case-item picker, so it can be a crate-exclusive drop.
+  caseOnly     Boolean @default(false)
 
   /// Which equip slot this cosmetic occupies: banner | frame | nickname | skin_*.
   /// Null for non-equippable items (boosts, emotes, consumables, ...).

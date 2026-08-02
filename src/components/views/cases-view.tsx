@@ -96,7 +96,7 @@ export default function CasesView() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {cases.map((c) => (
-            <Card key={c.id} className="bg-slate-900/50 border-slate-700/50 overflow-hidden">
+            <Card key={c.id} className="bg-slate-900/50 border-slate-700/50 overflow-hidden transition-transform duration-200 hover:-translate-y-1 hover:shadow-xl hover:shadow-amber-500/10">
               <CardContent className="p-4 space-y-3">
                 <Popover>
                   <PopoverTrigger asChild>
@@ -105,13 +105,13 @@ export default function CasesView() {
                       className="block w-full text-left group"
                       title="Tap to see what's inside"
                     >
-                      <div className="aspect-square w-full rounded-lg bg-slate-950/60 border border-slate-700 flex items-center justify-center overflow-hidden p-3 group-hover:border-amber-500/50 transition-colors">
+                      <div className="aspect-square w-full rounded-lg bg-slate-950/60 border border-slate-700 flex items-center justify-center overflow-hidden p-3 transition-all duration-200 group-hover:border-amber-500/50 group-hover:scale-[1.03] group-active:scale-95">
                         {c.imageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={c.imageUrl}
                             alt=""
-                            className="h-full w-full object-contain drop-shadow-[0_0_20px_rgba(251,191,36,0.25)]"
+                            className="h-full w-full object-contain drop-shadow-[0_0_20px_rgba(251,191,36,0.25)] transition-transform duration-300 group-hover:scale-110"
                           />
                         ) : (
                           <Gift className="h-14 w-14 text-slate-500" />

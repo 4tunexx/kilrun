@@ -386,7 +386,7 @@ function InventoryPreview({
   if (imageSrc) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={imageSrc} alt="" className="h-16 w-full object-cover" />
+      <img src={imageSrc} alt="" className="h-16 w-full object-contain p-2 bg-slate-950/40" />
     );
   }
   return (
@@ -410,7 +410,7 @@ function InventoryPreviewSmall({
       <img
         src={imageSrc}
         alt=""
-        className={cn('h-full w-full object-cover', className)}
+        className={cn('h-full w-full object-contain p-1 bg-slate-950/40', className)}
       />
     );
   }

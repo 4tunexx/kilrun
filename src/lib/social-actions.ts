@@ -2534,6 +2534,7 @@ export async function adminQuickUpdateStoreItem(
     itemCategory?: string;
     vpPrice?: number;
     isAvailable?: boolean;
+    caseOnly?: boolean;
     unlockType?: string | null;
     unlockRef?: string | null;
     eventEndsAt?: string | null;
@@ -2547,6 +2548,7 @@ export async function adminQuickUpdateStoreItem(
   if (patch.itemCategory !== undefined) data.itemCategory = patch.itemCategory;
   if (patch.vpPrice !== undefined) data.vpPrice = Math.max(0, Math.round(patch.vpPrice));
   if (patch.isAvailable !== undefined) data.isAvailable = patch.isAvailable;
+  if (patch.caseOnly !== undefined) data.caseOnly = patch.caseOnly;
   if (patch.unlockType !== undefined) {
     data.unlockType =
       patch.unlockType && patch.unlockType !== 'purchase' ? patch.unlockType : null;

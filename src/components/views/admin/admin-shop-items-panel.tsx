@@ -5,6 +5,7 @@ import {
   CalendarClock,
   ChevronDown,
   Flame,
+  Gift,
   LayoutGrid,
   List,
   Loader2,
@@ -91,6 +92,7 @@ function QuickEdit({
   const [price, setPrice] = useState(item.vpPrice);
   const [category, setCategory] = useState(item.itemCategory);
   const [available, setAvailable] = useState(item.isAvailable);
+  const [caseOnly, setCaseOnly] = useState(Boolean(item.caseOnly));
   const [unlockType, setUnlockType] = useState(item.unlockType || 'purchase');
   const [unlockRef, setUnlockRef] = useState(item.unlockRef || '');
   const [eventEndsAt, setEventEndsAt] = useState(toLocalDatetimeValue(item.eventEndsAt));
@@ -105,6 +107,7 @@ function QuickEdit({
         vpPrice: price,
         itemCategory: category,
         isAvailable: available,
+        caseOnly,
         unlockType,
         unlockRef: unlockRef || null,
         eventEndsAt: eventEndsAt ? new Date(eventEndsAt).toISOString() : null,
@@ -210,6 +213,10 @@ function QuickEdit({
           Visible in shop
         </label>
         <label className="flex items-center gap-2 text-xs text-slate-300">
+          <Switch checked={caseOnly} onCheckedChange={setCaseOnly} />
+          <Gift className="h-3 w-3 text-amber-400" /> Case-only (hidden from shop, usable in Crates)
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-300">
           <Switch checked={promoted} onCheckedChange={setPromoted} />
           <Megaphone className="h-3 w-3 text-fuchsia-400" /> Dashboard promo
         </label>
@@ -284,6 +291,11 @@ export function AdminShopItemsPanel({
         {!item.isAvailable && (
           <Badge variant="outline" className="text-[9px] px-1.5 py-0">
             Hidden
+          </Badge>
+        )}
+        {item.caseOnly && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-amber-500/50 text-amber-300">
+            Case-only
           </Badge>
         )}
         {item.unlockType && item.unlockType !== 'purchase' && (

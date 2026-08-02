@@ -362,9 +362,9 @@ async function resolveCaseWin(
     // snapshot pattern as a normal purchase, so later catalog edits don't
     // retroactively change what the player already won. Re-winning an
     // already-owned *stackable* item (no unique equip slot/config) adds a
-    // quantity instead of creating a duplicate row; unique cosmetics that
-    // are already owned just top up a small VP consolation via re-roll is
-    // not applied here — the drop still logs, but no duplicate row/points.
+    // quantity instead of creating a duplicate row; re-winning an already-owned
+    // *unique* cosmetic (skin/banner/frame/nickname) can't stack, so it's
+    // paid out as VP equal to the item's shop price instead of vanishing.
   else if (won.storeItemSku) {
     const storeItem = await prisma.storeItem.findUnique({ where: { itemSku: won.storeItemSku } });
     if (storeItem) {
@@ -377,7 +377,12 @@ async function resolveCaseWin(
           where: { id: owned.id },
           data: { quantity: { increment: 1 } },
         });
-      } else if (!owned) {
+      } else if (owned) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { vpCurrency: { increment: storeItem.vpPrice } },
+        });
+      } else {
         await assertSlotAvailable(user.id);
         await prisma.inventoryItem.create({
           data: {
@@ -389,7 +394,7 @@ async function resolveCaseWin(
             bannerConfig: storeItem.bannerConfig ?? undefined,
             cosmeticConfig: storeItem.cosmeticConfig ?? undefined,
             imageUrl: storeItem.imageUrl ?? null,
-            vpValue: 0,
+            vpValue: storeItem.vpPrice,
           },
         });
       }
@@ -400,10 +405,16 @@ async function resolveCaseWin(
       const owned = await prisma.inventoryItem.findFirst({
         where: { userId: user.id, itemSku: asset.assetId },
       });
-      if (owned) {
+      const stackable = !asset.equipSlot;
+      if (owned && stackable) {
         await prisma.inventoryItem.update({
           where: { id: owned.id },
           data: { quantity: { increment: 1 } },
+        });
+      } else if (owned) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { vpCurrency: { increment: asset.price } },
         });
       } else {
         await assertSlotAvailable(user.id);
@@ -415,7 +426,7 @@ async function resolveCaseWin(
             itemCategory: asset.category,
             cosmeticSlot: asset.equipSlot,
             imageUrl: asset.thumbnailUrl ?? asset.previewUrl ?? null,
-            vpValue: 0,
+            vpValue: asset.price,
           },
         });
       }
