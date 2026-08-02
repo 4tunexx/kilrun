@@ -59,7 +59,7 @@ export async function adminCreateCase(input: {
   });
   await writeAuditLog({
     action: 'admin_case_create',
-    detail: `caseId=${created.id} name=${name}`,
+    detail: `caseId=${created.id} name=${name} by=${staff.id}`,
   }).catch(() => {});
   return created;
 }
