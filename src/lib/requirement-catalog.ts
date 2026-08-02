@@ -90,6 +90,11 @@ export const WIRED_METRIC_KEYS: readonly string[] = [
   'daily_horde',
   'daily_competitive',
   'daily_leaderboard',
+  'cases_opened',
+  'legendary_cases_opened',
+  'clan_joined',
+  'clan_wars_played',
+  'clan_wars_won',
 ];
 
 export const DEFAULT_UNLOCK_CHANNELS: UnlockChannel[] = [

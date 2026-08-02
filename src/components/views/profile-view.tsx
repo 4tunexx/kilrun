@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import {
   Save,
@@ -100,9 +100,17 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [deactivatingEmail, setDeactivatingEmail] = useState(false);
   const { toast } = useToast();
   const isAdmin = user?.role === 'admin';
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const reloadCosmetics = () => {
     Promise.all([getSessionUser(), getMyInventory()]).then(([u, inv]) => {
+      if (!mountedRef.current) return;
       setUser(u);
       setInventory(inv);
     });

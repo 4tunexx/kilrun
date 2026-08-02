@@ -422,6 +422,13 @@ async function resolveCaseWin(
     }
   }
 
+  // The reward itself (VP/XP credit or inventory item, above) is already
+  // granted at this point — a failure past this line must NOT bubble up to
+  // the caller's catch block, since both openCase() and
+  // openCaseFromInventory() treat a thrown error here as "grant the refund /
+  // restore the crate", which would double-dip the player (keep the reward
+  // AND get the money/crate back). Log/notification are non-critical, so
+  // swallow failures instead of throwing.
   await prisma.caseOpenLog.create({
     data: {
       userId: user.id,
@@ -431,7 +438,7 @@ async function resolveCaseWin(
       wonImage: won.displayImage,
       wonRarity: won.rarity,
     },
-  });
+  }).catch(() => {});
 
   await prisma.notification.create({
     data: {
@@ -440,7 +447,7 @@ async function resolveCaseWin(
       body: `You won ${won.displayName} (${won.rarity}) from ${def.name}.`,
       type: 'case_opened',
     },
-  });
+  }).catch(() => {});
 
   await processWebsiteAction(user.id, 'cases_opened').catch(() => {});
   if (won.rarity === 'legendary') {

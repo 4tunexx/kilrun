@@ -9,7 +9,12 @@ import { SKIN_ATTACH_SLOTS, isSkinCosmeticSlot } from '@/lib/player-skins';
 export type SkinCosmeticSlot =
   | 'skin'
   | 'skin_hat'
+  | 'skin_hair'
   | 'skin_face'
+  | 'skin_glasses'
+  | 'skin_eyebrow'
+  | 'skin_mustache'
+  | 'skin_body'
   | 'skin_torso'
   | 'skin_pants'
   | 'skin_boots'
@@ -18,7 +23,8 @@ export type SkinCosmeticSlot =
   | 'skin_back'
   | 'skin_tail'
   | 'skin_horn'
-  | 'skin_addon';
+  | 'skin_addon'
+  | 'skin_fullbody';
 
 export type CosmeticSlot = 'banner' | 'frame' | 'nickname' | SkinCosmeticSlot;
 

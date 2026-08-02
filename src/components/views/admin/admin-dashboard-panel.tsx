@@ -18,7 +18,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import {
   adminGetDashboardOverview,
   adminRestartColyseus,
@@ -587,12 +586,15 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
             </p>
             {isAdmin && (
               <div className="flex items-center gap-2 mt-2">
-                <Label className="text-xs text-amber-100/70">Re-open game</Label>
-                <Switch
-                  checked={false}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs border-amber-500/40 text-amber-100 hover:bg-amber-500/10"
                   disabled={busy === 'toggle-game'}
-                  onCheckedChange={() => void toggle('game', true)}
-                />
+                  onClick={() => void toggle('game', true)}
+                >
+                  Re-open game
+                </Button>
               </div>
             )}
           </div>

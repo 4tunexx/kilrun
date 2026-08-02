@@ -423,11 +423,19 @@ export async function recordClanWarResult(input: {
   }
 
   const allMemberIds = [...lobbyA.memberIds, ...lobbyB.memberIds];
+  await prisma.user.updateMany({
+    where: { id: { in: allMemberIds } },
+    data: { clanWarsPlayedCount: { increment: 1 } },
+  }).catch(() => {});
   await Promise.all(
     allMemberIds.map((uid) => processWebsiteAction(uid, 'clan_wars_played').catch(() => {}))
   );
   if (winnerClanId) {
     const winningMemberIds = winnerClanId === lobbyA.clanId ? lobbyA.memberIds : lobbyB.memberIds;
+    await prisma.user.updateMany({
+      where: { id: { in: winningMemberIds } },
+      data: { clanWarsWonCount: { increment: 1 } },
+    }).catch(() => {});
     await Promise.all(
       winningMemberIds.map((uid) => processWebsiteAction(uid, 'clan_wars_won').catch(() => {}))
     );

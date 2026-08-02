@@ -977,6 +977,7 @@ export default function AdminView({
             onOpenChange={(o) => {
               if (!o) setDetailUserId(null);
             }}
+            isAdmin={isAdmin}
           />
         </TabsContent>
 

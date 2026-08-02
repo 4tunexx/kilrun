@@ -1739,6 +1739,9 @@ export function scrubDanglingReferences(
     if (e.teleport?.targetEntityId && removedIds.has(e.teleport.targetEntityId)) {
       next = { ...next, teleport: { ...next.teleport!, targetEntityId: undefined } };
     }
+    if (e.pushBlock?.railEntityId && removedIds.has(e.pushBlock.railEntityId)) {
+      next = { ...next, pushBlock: { ...next.pushBlock!, railEntityId: undefined } };
+    }
     if (e.animation) {
       const listenDangling =
         e.animation.listenToEntityId && removedIds.has(e.animation.listenToEntityId);

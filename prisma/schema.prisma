@@ -60,6 +60,12 @@ model User {
   cosmeticDeleteCount Int @default(0)
   cosmeticResellCount Int @default(0)
 
+  /// Lifetime Clan War participation/win counters for the clan_wars_played /
+  /// clan_wars_won requirement metrics — incremented in recordClanWarResult()
+  /// (clan-lobby-actions.ts) since ClanWarResult itself doesn't store member ids.
+  clanWarsPlayedCount Int @default(0)
+  clanWarsWonCount    Int @default(0)
+
   /// Admin/custom requirement counters (metric key → count). Used by custom requirement types.
   customMetrics Json?
 

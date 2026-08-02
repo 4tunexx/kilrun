@@ -103,7 +103,11 @@ export async function getAnnouncementCarouselItems(): Promise<{
 
             case 'user_earn_vp': {
               const results = await prisma.matchResult.findMany({
-                where: { vpEarned: { gt: 0 }, playedAt: { gt: cutoff } },
+                where: {
+                  vpEarned: { gt: 0 },
+                  playedAt: { gt: cutoff },
+                  user: { profilePrivate: false },
+                },
                 orderBy: [{ vpEarned: 'desc' }, { playedAt: 'desc' }],
                 take: PER_TYPE_LIMIT,
                 include: { user: { select: userSelect } },
@@ -123,7 +127,11 @@ export async function getAnnouncementCarouselItems(): Promise<{
 
             case 'user_won_match': {
               const results = await prisma.matchResult.findMany({
-                where: { outcome: 'win', playedAt: { gt: cutoff } },
+                where: {
+                  outcome: 'win',
+                  playedAt: { gt: cutoff },
+                  user: { profilePrivate: false },
+                },
                 orderBy: { playedAt: 'desc' },
                 take: PER_TYPE_LIMIT,
                 include: { user: { select: userSelect } },
@@ -143,7 +151,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
 
             case 'user_registered': {
               const users = await prisma.user.findMany({
-                where: { createdAt: { gt: cutoff } },
+                where: { createdAt: { gt: cutoff }, profilePrivate: false },
                 orderBy: { createdAt: 'desc' },
                 take: PER_TYPE_LIMIT,
                 select: { ...userSelect, createdAt: true },
@@ -166,6 +174,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
                 where: {
                   itemSku: { startsWith: 'premium' },
                   createdAt: { gt: cutoff },
+                  user: { profilePrivate: false },
                 },
                 orderBy: { createdAt: 'desc' },
                 take: PER_TYPE_LIMIT,
@@ -186,7 +195,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
 
             case 'user_got_vip': {
               const users = await prisma.user.findMany({
-                where: { isVip: true, createdAt: { gt: cutoff } },
+                where: { isVip: true, createdAt: { gt: cutoff }, profilePrivate: false },
                 orderBy: { createdAt: 'desc' },
                 take: PER_TYPE_LIMIT,
                 select: { ...userSelect, createdAt: true },
@@ -206,7 +215,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
 
             case 'user_got_badge': {
               const userBadges = await prisma.userBadge.findMany({
-                where: { earnedAt: { gt: cutoff } },
+                where: { earnedAt: { gt: cutoff }, user: { profilePrivate: false } },
                 orderBy: { earnedAt: 'desc' },
                 take: PER_TYPE_LIMIT,
                 include: {
@@ -229,7 +238,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
 
             case 'user_earn_achievement': {
               const userAchievements = await prisma.userAchievement.findMany({
-                where: { unlockedAt: { gt: cutoff } },
+                where: { unlockedAt: { gt: cutoff }, user: { profilePrivate: false } },
                 orderBy: { unlockedAt: 'desc' },
                 take: PER_TYPE_LIMIT,
                 include: {
@@ -259,7 +268,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               if (opens.length === 0) break;
               const userIds = [...new Set(opens.map((o) => o.userId))];
               const users = await prisma.user.findMany({
-                where: { id: { in: userIds } },
+                where: { id: { in: userIds }, profilePrivate: false },
                 select: userSelect,
               });
               const userMap = new Map(users.map((u) => [u.id, u]));

@@ -712,12 +712,13 @@ async function metricCount(userId: string, metric: string): Promise<number> {
       const membership = await prisma.clanMember.findUnique({ where: { userId } });
       return membership ? 1 : 0;
     }
-    case 'clan_wars_played':
+    case 'clan_wars_played': {
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      return (u as { clanWarsPlayedCount?: number } | null)?.clanWarsPlayedCount ?? 0;
+    }
     case 'clan_wars_won': {
-      // Wired ahead of the Clan Wars feature build — returns 0 until
-      // ClanWarResult exists; safe fallback so missions/achievements can
-      // already reference these metrics without erroring.
-      return 0;
+      const u = await prisma.user.findUnique({ where: { id: userId } });
+      return (u as { clanWarsWonCount?: number } | null)?.clanWarsWonCount ?? 0;
     }
     default: {
       // Custom requirement types created in Admin → Requirement types.

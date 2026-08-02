@@ -138,11 +138,12 @@ export default function PremiumView({
         return;
       }
       const spent = result.vpSpent ?? vpCost;
-      setBalance((b) => b - spent);
+      const nextBalance = result.vpBalance ?? Math.max(0, balance - spent);
+      setBalance(nextBalance);
       if (result.premiumExpiresAt) {
         setExpiresAt(result.premiumExpiresAt);
         onPurchased?.({
-          vpBalance: balance - spent,
+          vpBalance: nextBalance,
           premiumExpiresAt: result.premiumExpiresAt,
         });
       }

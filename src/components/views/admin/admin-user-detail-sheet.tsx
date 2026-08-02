@@ -44,10 +44,17 @@ export function AdminUserDetailSheet({
   userId,
   open,
   onOpenChange,
+  isAdmin = false,
 }: {
   userId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** These actions (game XP/skill points, respec, crate grants) are gated
+   *  `admin`-only server-side (requireAdmin / requireAdminStaff) — the sheet
+   *  is also reachable by moderators (Users tab is in MODERATOR_TABS), so
+   *  hide the controls entirely for them instead of showing a button that
+   *  always fails with "Admin only". */
+  isAdmin?: boolean;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -268,55 +275,57 @@ export function AdminUserDetailSheet({
               </TabsContent>
 
               <TabsContent value="awards" className="mt-3 space-y-3">
-                <div className="rounded-md border border-amber-500/30 bg-amber-950/10 p-3 space-y-2">
-                  <p className="text-xs font-semibold text-amber-400 flex items-center gap-1">
-                    <Gift className="h-3.5 w-3.5" /> Award a crate
-                  </p>
-                  <div className="flex gap-2">
-                    <Select value={selectedCaseId} onValueChange={setSelectedCaseId}>
-                      <SelectTrigger className="bg-slate-900/50 border-slate-700 text-xs h-8">
-                        <SelectValue placeholder="Choose a case…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {caseOptions.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      size="sm"
-                      className="h-8 shrink-0"
-                      disabled={!selectedCaseId || awarding}
-                      onClick={() => void awardCrate()}
-                    >
-                      {awarding && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
-                      Award
-                    </Button>
-                  </div>
-                  {caseGrants.length > 0 && (
-                    <div className="pt-1 space-y-1">
-                      <p className="text-[10px] uppercase tracking-wide text-slate-500">
-                        Recent crates (unopened, in their inventory)
-                      </p>
-                      {caseGrants.slice(0, 5).map((g) => (
-                        <div
-                          key={g.id}
-                          className="flex items-center justify-between text-[11px] text-slate-400"
-                        >
-                          <span className="truncate">{g.caseName}</span>
-                          <Badge
-                            variant="outline"
-                            className="text-[9px] ml-2 shrink-0 text-amber-400 capitalize"
-                          >
-                            {g.source.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                      ))}
+                {isAdmin && (
+                  <div className="rounded-md border border-amber-500/30 bg-amber-950/10 p-3 space-y-2">
+                    <p className="text-xs font-semibold text-amber-400 flex items-center gap-1">
+                      <Gift className="h-3.5 w-3.5" /> Award a crate
+                    </p>
+                    <div className="flex gap-2">
+                      <Select value={selectedCaseId} onValueChange={setSelectedCaseId}>
+                        <SelectTrigger className="bg-slate-900/50 border-slate-700 text-xs h-8">
+                          <SelectValue placeholder="Choose a case…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {caseOptions.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        size="sm"
+                        className="h-8 shrink-0"
+                        disabled={!selectedCaseId || awarding}
+                        onClick={() => void awardCrate()}
+                      >
+                        {awarding && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />}
+                        Award
+                      </Button>
                     </div>
-                  )}
-                </div>
+                    {caseGrants.length > 0 && (
+                      <div className="pt-1 space-y-1">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                          Recent crates (unopened, in their inventory)
+                        </p>
+                        {caseGrants.slice(0, 5).map((g) => (
+                          <div
+                            key={g.id}
+                            className="flex items-center justify-between text-[11px] text-slate-400"
+                          >
+                            <span className="truncate">{g.caseName}</span>
+                            <Badge
+                              variant="outline"
+                              className="text-[9px] ml-2 shrink-0 text-amber-400 capitalize"
+                            >
+                              {g.source.replace('_', ' ')}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <p className="text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1">
@@ -399,6 +408,12 @@ export function AdminUserDetailSheet({
                     </div>
 
                     <div className="flex flex-wrap gap-2">
+                      {!isAdmin && (
+                        <p className="text-[11px] text-slate-500 w-full">
+                          Game XP / Skill Point / respec controls are admin-only.
+                        </p>
+                      )}
+                      {isAdmin && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -417,6 +432,8 @@ export function AdminUserDetailSheet({
                         )}
                         Grant/remove game XP
                       </Button>
+                      )}
+                      {isAdmin && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -438,6 +455,8 @@ export function AdminUserDetailSheet({
                         )}
                         Grant/remove Skill Points
                       </Button>
+                      )}
+                      {isAdmin && (
                       <Button
                         size="sm"
                         variant="destructive"
@@ -460,6 +479,7 @@ export function AdminUserDetailSheet({
                         )}
                         Respec (reset abilities)
                       </Button>
+                      )}
                     </div>
                   </>
                 ) : (

@@ -1,5 +1,5 @@
 import type { MapDocument } from './map-document';
-import { entityExportsAsPlatform, getMapGameMode } from './map-document';
+import { entityExportsAsPlatform, ensureHordeSettings, getMapGameMode } from './map-document';
 
 export interface MapValidationIssue {
   level: 'error' | 'warn';
@@ -113,6 +113,44 @@ function validateHordeMap(doc: MapDocument): MapValidationIssue[] {
     issues.push({ level: 'warn', message: 'No Revive Pad — teammates cannot revive without one.' });
   }
 
+  if (monsters.length > 0) {
+    const totalWaves = ensureHordeSettings(doc).totalWaves;
+    // waveMax: 0 means "infinite" (no upper bound) — see defaultMonsterSpawn().
+    // A spawn where waveMax is set but below waveMin is permanently inactive;
+    // that gap is otherwise invisible to the author since nothing errors at
+    // runtime, HordeRoom just silently falls back to spawning from every
+    // point once wave-filtering produces zero eligible spawns.
+    const deadSpawns = monsters.filter((e) => {
+      const ms = e.monsterSpawn;
+      if (!ms) return false;
+      return ms.waveMax !== 0 && ms.waveMax < ms.waveMin;
+    });
+    if (deadSpawns.length > 0) {
+      issues.push({
+        level: 'warn',
+        message: `${deadSpawns.length} monster spawn(s) have Last Wave < First Wave — they'll never activate.`,
+      });
+    }
+
+    const coveredWaves = new Set<number>();
+    for (const e of monsters) {
+      const ms = e.monsterSpawn;
+      if (!ms) continue;
+      const max = ms.waveMax === 0 ? totalWaves : Math.min(ms.waveMax, totalWaves);
+      for (let w = Math.max(1, ms.waveMin); w <= max; w++) coveredWaves.add(w);
+    }
+    const uncovered: number[] = [];
+    for (let w = 1; w <= totalWaves; w++) {
+      if (!coveredWaves.has(w)) uncovered.push(w);
+    }
+    if (uncovered.length > 0) {
+      issues.push({
+        level: 'warn',
+        message: `Wave(s) ${uncovered.join(', ')} have no eligible monster spawn — HordeRoom will fall back to spawning from every point on those waves instead of respecting your wave gating.`,
+      });
+    }
+  }
+
   pushOrphanWarnings(ents, issues);
   pushCreatorEngineChecks(doc, issues);
   return issues;
@@ -148,6 +186,30 @@ function validateCompetitiveMap(doc: MapDocument): MapValidationIssue[] {
     });
   }
 
+  // Payload push blocks silently fall back to alive-count team-elimination
+  // scoring server-side if unwired — warn the author so a map that was meant
+  // to be a payload match doesn't ship without anyone noticing it never
+  // actually pushes.
+  const pushRails = ents.filter((e) => e.kind === 'push_rail');
+  const pushBlocks = ents.filter((e) => e.kind === 'push_block');
+  if (pushBlocks.length > 0 && pushRails.length === 0) {
+    issues.push({
+      level: 'error',
+      message: 'Push block(s) present with no push_rail — the payload has nothing to ride on.',
+    });
+  } else if (pushBlocks.length > 0) {
+    const railIds = new Set(pushRails.map((r) => r.id));
+    const unlinked = pushBlocks.filter(
+      (b) => !b.pushBlock?.railEntityId || !railIds.has(b.pushBlock.railEntityId)
+    );
+    if (unlinked.length > 0) {
+      issues.push({
+        level: 'warn',
+        message: `${unlinked.length} push block(s) aren't linked to a push_rail — they'll auto-attach to the nearest rail at match start, which may not be the one you intended.`,
+      });
+    }
+  }
+
   pushOrphanWarnings(ents, issues);
   pushCreatorEngineChecks(doc, issues);
   return issues;
@@ -157,16 +219,25 @@ function pushOrphanWarnings(
   ents: MapDocument['entities'],
   issues: MapValidationIssue[]
 ) {
-  const orphans = ents.filter(
-    (e) =>
-      e.kind === 'prop' &&
-      !e.model?.includes('floor') &&
-      Math.abs(e.position[1]) > 40
-  );
+  // Flag anything sitting far from the play area on any axis, not just Y —
+  // the message says "far from origin", so a prop 500 units away on X/Z
+  // (but at ground level) needs the same warning as one floating high up.
+  // Also don't limit this to `kind === 'prop'`: hazards, doors, spinners,
+  // and other placeable entities can be misplaced the same way.
+  const ORPHAN_DISTANCE = 40;
+  const orphans = ents.filter((e) => {
+    if (e.kind === 'prop' && e.model?.includes('floor')) return false;
+    const [x, y, z] = e.position;
+    return (
+      Math.abs(x) > ORPHAN_DISTANCE ||
+      Math.abs(y) > ORPHAN_DISTANCE ||
+      Math.abs(z) > ORPHAN_DISTANCE
+    );
+  });
   if (orphans.length > 0) {
     issues.push({
       level: 'warn',
-      message: `${orphans.length} prop(s) are very far from origin — check heights.`,
+      message: `${orphans.length} entity(ies) are very far from origin — check positions.`,
     });
   }
 }

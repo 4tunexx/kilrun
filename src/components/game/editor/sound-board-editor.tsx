@@ -77,22 +77,35 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
     }
   };
 
-  const handleVolumeCommit = async (v: number) => {
+  // Dragging the slider fires onChange on every tick — without a debounce
+  // this sent one PATCH per pixel of drag, and since each request was
+  // fire-and-forget with no sequencing, an earlier request that happened to
+  // resolve last could overwrite a later value (last *response* wins instead
+  // of last *drag position*). Debounce the network write and use a sequence
+  // number so a stale response is ignored once a newer request has gone out.
+  const volumeCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const volumeCommitSeq = useRef(0);
+
+  const handleVolumeCommit = (v: number) => {
     setVolumeDraft(v);
     if (!bound) return;
-    try {
-      const res = await fetch('/api/admin/sound-definitions', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ eventKey: selectedKey, volume: v }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setSounds((s) => ({ ...s, [selectedKey]: { ...s[selectedKey], volume: v } }));
+    if (volumeCommitTimer.current) clearTimeout(volumeCommitTimer.current);
+    const seq = ++volumeCommitSeq.current;
+    volumeCommitTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/admin/sound-definitions', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ eventKey: selectedKey, volume: v }),
+        });
+        const data = await res.json();
+        if (data.ok && seq === volumeCommitSeq.current) {
+          setSounds((s) => ({ ...s, [selectedKey]: { ...s[selectedKey], volume: v } }));
+        }
+      } catch {
+        // Best-effort — a failed volume tweak isn't worth a toast.
       }
-    } catch {
-      // Best-effort — a failed volume tweak isn't worth a toast.
-    }
+    }, 250);
   };
 
   const handleRemove = async () => {

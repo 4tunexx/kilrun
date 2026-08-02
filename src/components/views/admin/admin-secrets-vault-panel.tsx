@@ -295,11 +295,15 @@ function UnlockedVault({
     void refresh();
   }, [refresh]);
 
-  const handleSave = async (key: string, value: string) => {
+  const handleSave = async (rawKey: string, value: string) => {
     if (!value) return;
+    // Normalize the same way setSecret() does server-side so busyKey always
+    // matches what the "Add secret" button's disabled check compares against.
+    const key = rawKey.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    if (!key) return;
     setBusyKey(key);
     try {
-      const result = await setSecret(key, value);
+      const result = await setSecret(rawKey, value);
       if (!result.ok) {
         toast({ title: result.error || 'Failed to save', variant: 'destructive' });
         return;

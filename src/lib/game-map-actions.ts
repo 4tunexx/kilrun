@@ -33,33 +33,49 @@ export type CloudMapListItem = {
 };
 
 /** Strip oversized inline data-URLs so cloud publish stays under the size cap.
- * Prefer `/game/...` asset paths or uploaded URLs instead of embedding GLBs. */
-function stripInlineDataUrls(doc: MapDocument): MapDocument {
+ * Prefer `/game/...` asset paths or uploaded URLs instead of embedding GLBs.
+ *
+ * This walks the ENTIRE document tree rather than special-casing specific
+ * fields (customModelUrl / playerSkins[].textureUrl, etc). The previous
+ * version only stripped those two spots, silently leaving every other
+ * data-URL-bearing field untouched — entity.textureUrl, spinHazard model/
+ * texture, monsterSpawn.modelUrl, weaponDef custom model/texture, shop item/
+ * skin textures, environment sky textures. Any of those can independently
+ * hold a multi-MB inline data URL and blow the size cap with no way for the
+ * strip step to help, since it never looked at them. A generic walk means
+ * newly-added fields are covered automatically instead of needing this
+ * function updated every time the schema grows. */
+function stripInlineDataUrls(doc: MapDocument): { doc: MapDocument; strippedKeys: string[] } {
   const clone = JSON.parse(JSON.stringify(doc)) as MapDocument;
-  const strip = (url: unknown): string | undefined => {
-    if (typeof url !== 'string') return undefined;
-    if (url.startsWith('data:') && url.length > 8_000) return undefined;
-    return url;
-  };
-  for (const ent of clone.entities ?? []) {
-    if (ent.customModelUrl?.startsWith('data:') && ent.customModelUrl.length > 8_000) {
-      delete ent.customModelUrl;
+  const isStrippableDataUrl = (v: unknown): v is string =>
+    typeof v === 'string' && v.startsWith('data:') && v.length > 8_000;
+  const strippedKeys = new Set<string>();
+
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
     }
-    if (Array.isArray(ent.playerSkins)) {
-      for (const skin of ent.playerSkins) {
-        if (skin && typeof skin === 'object') {
-          const s = skin as { customModelUrl?: string; textureUrl?: string };
-          const cm = strip(s.customModelUrl);
-          if (cm === undefined) delete s.customModelUrl;
-          else s.customModelUrl = cm;
-          const tx = strip(s.textureUrl);
-          if (tx === undefined) delete s.textureUrl;
-          else s.textureUrl = tx;
-        }
+    for (const key of Object.keys(node as Record<string, unknown>)) {
+      const rec = node as Record<string, unknown>;
+      const value = rec[key];
+      if (isStrippableDataUrl(value)) {
+        // Some of these fields (e.g. MapShopSkin.textureUrl) are required —
+        // deleting them entirely would break rendering worse than leaving an
+        // oversized value in place. Report which field names got stripped so
+        // the size-cap error (below) can point staff at the actual cause
+        // instead of always blaming "GLBs".
+        strippedKeys.add(key);
+        delete rec[key];
+      } else if (value && typeof value === 'object') {
+        walk(value);
       }
     }
-  }
-  return clone;
+  };
+
+  walk(clone);
+  return { doc: clone, strippedKeys: [...strippedKeys] };
 }
 
 /** Publish (or update) a map document to Mongo and optionally mark it Active for the mode. */
@@ -73,11 +89,14 @@ export async function publishCloudMap(input: {
 }): Promise<CloudMapListItem> {
   const staff = await requireStaff();
   const mode = normalizeKilrunMode(input.mode);
-  const cleaned = stripInlineDataUrls(input.document);
+  const { doc: cleaned, strippedKeys } = stripInlineDataUrls(input.document);
   const documentJson = JSON.stringify(cleaned);
   if (documentJson.length > 4_500_000) {
+    const hint = strippedKeys.length
+      ? ` Large inline data (${strippedKeys.join(', ')}) was already stripped from optional fields and it's still too big — some of those may be on required fields (e.g. shop skin textures) that couldn't be removed.`
+      : '';
     throw new Error(
-      'Map is too large to publish. Move custom GLBs to /public/game/... URLs (not inline data URLs), then retry.'
+      `Map is too large to publish. Move custom GLBs/textures to /public/game/... URLs (not inline data URLs), then retry.${hint}`
     );
   }
 
@@ -96,13 +115,6 @@ export async function publishCloudMap(input: {
         where: { localId: input.localId, mode },
       })
     : null;
-
-  if (input.setActive) {
-    await prisma.gameMap.updateMany({
-      where: { mode, isActive: true },
-      data: { isActive: false },
-    });
-  }
 
   // IMPORTANT: `setActive: false` means "don't explicitly activate this save" —
   // it must NEVER deactivate a map that is already the live Active map for its
@@ -124,20 +136,29 @@ export async function publishCloudMap(input: {
     localId: input.localId ?? existing?.localId ?? null,
   };
 
-  const row = existing
-    ? await prisma.gameMap.update({
-        where: { id: existing.id },
-        data: {
-          ...data,
-          isActive: resolvedIsActive,
-        },
+  // The "deactivate every other map for this mode" step and the upsert of
+  // this row must be atomic — two staff publishing/activating for the same
+  // mode at the same time could otherwise interleave and leave the mode with
+  // zero or two active maps (getActiveCloudMapDocument only ever returns one,
+  // so a match could silently get no map, or the wrong one). $transaction
+  // runs both statements against the same session so they can't interleave
+  // with another concurrent call's statements.
+  const row = input.setActive
+    ? await prisma.$transaction(async (tx) => {
+        await tx.gameMap.updateMany({
+          where: { mode, isActive: true },
+          data: { isActive: false },
+        });
+        return existing
+          ? tx.gameMap.update({ where: { id: existing.id }, data: { ...data, isActive: true } })
+          : tx.gameMap.create({ data: { ...data, isActive: true } });
       })
-    : await prisma.gameMap.create({
-        data: {
-          ...data,
-          isActive: Boolean(input.setActive),
-        },
-      });
+    : existing
+      ? await prisma.gameMap.update({
+          where: { id: existing.id },
+          data: { ...data, isActive: resolvedIsActive },
+        })
+      : await prisma.gameMap.create({ data: { ...data, isActive: false } });
 
   return {
     id: row.id,
@@ -157,14 +178,16 @@ export async function setActiveCloudMap(mapId: string, mode: string): Promise<{ 
   if (!map || normalizeKilrunMode(map.mode) !== normalized) {
     throw new Error('Map not found for this mode');
   }
-  await prisma.gameMap.updateMany({
-    where: { mode: normalized, isActive: true },
-    data: { isActive: false },
-  });
-  await prisma.gameMap.update({
-    where: { id: mapId },
-    data: { isActive: true },
-  });
+  await prisma.$transaction([
+    prisma.gameMap.updateMany({
+      where: { mode: normalized, isActive: true },
+      data: { isActive: false },
+    }),
+    prisma.gameMap.update({
+      where: { id: mapId },
+      data: { isActive: true },
+    }),
+  ]);
   return { ok: true };
 }
 
@@ -219,8 +242,12 @@ export async function listCloudMapDocuments(
         updatedAt: row.updatedAt.toISOString(),
         document,
       });
-    } catch {
-      /* skip corrupt rows */
+    } catch (err) {
+      // A corrupt row used to disappear from the list with zero trace —
+      // the admin panel would then tell staff "No cloud maps for this mode
+      // yet", actively misleading them into thinking nothing was ever
+      // published when in fact a row exists but failed to parse.
+      console.warn(`[listCloudMapDocuments] corrupt documentJson for map ${row.id}`, err);
     }
   }
   return out;
@@ -244,7 +271,8 @@ export async function getCloudMapDocument(
       updatedAt: row.updatedAt.toISOString(),
       document: JSON.parse(row.documentJson) as MapDocument,
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[getCloudMapDocument] corrupt documentJson for map ${mapId}`, err);
     return null;
   }
 }
@@ -267,13 +295,26 @@ export async function getActiveCloudMapDocument(
       document,
       thumbnailUrl: row.thumbnailUrl,
     };
-  } catch {
+  } catch (err) {
+    // This is the LIVE map served to match clients — a corrupt row here
+    // means the mode silently has no active map for every player, with
+    // nothing surfaced anywhere. Log loudly so it's actually discoverable.
+    console.error(
+      `[getActiveCloudMapDocument] corrupt documentJson for active map ${row.id} (mode=${normalized}) — matches for this mode have no map right now`,
+      err
+    );
     return null;
   }
 }
 
-export async function deleteCloudMap(mapId: string): Promise<{ ok: true }> {
+export async function deleteCloudMap(mapId: string, force = false): Promise<{ ok: true }> {
   await requireStaff();
+  const map = await prisma.gameMap.findUnique({ where: { id: mapId } });
+  if (map?.isActive && !force) {
+    throw new Error(
+      `"${map.name}" is the live Active map for ${map.mode} — matches would have no map until another is activated. Pass force to delete anyway.`
+    );
+  }
   await prisma.gameMap.delete({ where: { id: mapId } });
   return { ok: true };
 }
@@ -290,11 +331,26 @@ export async function forkCloudMap(
   const src = await prisma.gameMap.findUnique({ where: { id: mapId } });
   if (!src) throw new Error('Map not found');
   const localId = `fork_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+  const name = (newName?.trim() || `${src.name} (fork)`).slice(0, 120);
+
+  // Keep the embedded MapDocument.name in sync with the row's `name` column —
+  // otherwise anything reading `document.name` out of the JSON blob (as
+  // opposed to the row field) after a fork shows the original map's name
+  // forever, even though the row itself was renamed.
+  let documentJson = src.documentJson;
+  try {
+    const parsed = JSON.parse(src.documentJson) as MapDocument & { name?: string };
+    parsed.name = name;
+    documentJson = JSON.stringify(parsed);
+  } catch {
+    /* if the source doc is already corrupt, fall back to copying it as-is */
+  }
+
   const row = await prisma.gameMap.create({
     data: {
-      name: (newName?.trim() || `${src.name} (fork)`).slice(0, 120),
+      name,
       mode: src.mode,
-      documentJson: src.documentJson,
+      documentJson,
       thumbnailUrl: src.thumbnailUrl,
       isActive: false,
       createdById: staff.id,

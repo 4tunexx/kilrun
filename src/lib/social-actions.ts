@@ -350,8 +350,16 @@ export async function unlockVipWithVp() {
 
   try {
     await grantVipCosmetics(user.id);
-  } catch {
-    // Cosmetics are best-effort — VIP flag already applied.
+  } catch (err) {
+    // Cosmetics are best-effort — VIP flag already applied and the VP has
+    // been spent, so don't fail the purchase. But silently swallowing this
+    // meant a failed grant left the user VIP with no visible perks and no
+    // record anywhere. Log it so support/admins can spot and re-grant.
+    const { writeAuditLog } = await import('@/lib/audit');
+    await writeAuditLog({
+      action: 'vip_cosmetic_grant_failed',
+      detail: `userId=${user.id} error=${err instanceof Error ? err.message : String(err)}`,
+    }).catch(() => {});
   }
   await prisma.notification.create({
     data: {
@@ -431,10 +439,19 @@ export async function purchasePremiumWithVp(offerId?: string) {
       type: 'system',
     },
   });
+
+  // Read back the authoritative post-purchase balance rather than trusting
+  // the caller to compute it from a possibly-stale client-side value.
+  const fresh = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { vpCurrency: true },
+  });
+
   return {
     ok: true as const,
     already: false,
     vpSpent: vpCost,
+    vpBalance: fresh?.vpCurrency ?? Math.max(0, user.vpCurrency - vpCost),
     premiumExpiresAt: nextExpires.toISOString(),
   };
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Gift, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -31,14 +31,24 @@ export default function CasesView() {
   const [cases, setCases] = useState<CaseDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<CaseOpenResultDto | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Per-case-id busy tracking — opening one case must not disable the
+  // buttons on every other case card in the grid.
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const refresh = async () => {
     setLoading(true);
     try {
-      setCases(await getAvailableCases('cases'));
+      const data = await getAvailableCases('cases');
+      if (mountedRef.current) setCases(data);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -47,17 +57,19 @@ export default function CasesView() {
   }, []);
 
   const handleOpen = async (c: CaseDto) => {
-    setBusy(true);
+    setBusyId(c.id);
     try {
       const res = await openCase(c.id);
-      setResult(res);
+      if (mountedRef.current) setResult(res);
     } catch (e: unknown) {
-      toast({
-        title: e instanceof Error ? e.message : 'Could not open case',
-        variant: 'destructive',
-      });
+      if (mountedRef.current) {
+        toast({
+          title: e instanceof Error ? e.message : 'Could not open case',
+          variant: 'destructive',
+        });
+      }
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusyId(null);
     }
   };
 
@@ -122,10 +134,16 @@ export default function CasesView() {
                 <Button
                   size="sm"
                   className="w-full"
-                  disabled={busy || !c.canOpen}
+                  disabled={busyId === c.id || !c.canOpen}
                   onClick={() => void handleOpen(c)}
                 >
-                  {c.canOpen ? 'Open free case' : `Available in ${timeUntil(c.nextFreeAt)}`}
+                  {busyId === c.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : c.canOpen ? (
+                    'Open free case'
+                  ) : (
+                    `Available in ${timeUntil(c.nextFreeAt)}`
+                  )}
                 </Button>
               </CardContent>
             </Card>

@@ -113,13 +113,52 @@ export async function adminUpdateCase(
 
 export async function adminDeleteCase(caseId: string) {
   await requireAdmin();
+
+  // Any unopened crate already sitting in a player's inventory points at
+  // this caseDefId — once the definition is gone, openCaseFromInventory()
+  // would fail with "Case not found" and strand that row forever. Refund
+  // each one's stored vpValue (same amount its own resell would return, at
+  // 100% since this is an admin removal, not a player choice) instead of
+  // leaving a broken crate players can never open or get rid of.
+  const strandedCrates = await prisma.inventoryItem.findMany({
+    where: { itemCategory: 'crate', caseDefId: caseId },
+  });
+  for (const crate of strandedCrates) {
+    try {
+      // vpValue is stored per unit — a stacked row (quantity > 1) must refund
+      // the full owned amount, not just one copy's worth.
+      const refundAmount = crate.vpValue * Math.max(1, crate.quantity ?? 1);
+      await prisma.$transaction([
+        prisma.inventoryItem.delete({ where: { id: crate.id } }),
+        prisma.user.update({
+          where: { id: crate.userId },
+          data: { vpCurrency: { increment: refundAmount } },
+        }),
+      ]);
+      await prisma.notification.create({
+        data: {
+          userId: crate.userId,
+          title: 'Crate refunded',
+          body: `${crate.itemName} was removed by an admin — you were refunded ${refundAmount} VP.`,
+          type: 'case_granted',
+        },
+      }).catch(() => {});
+    } catch {
+      /* best-effort per-row refund — don't let one failure block the rest */
+    }
+  }
+
+  // Dedup rows for the now-deleted "auto_requirement" grant tracking would
+  // otherwise reference a caseId that no longer resolves to anything.
+  await prisma.userCaseAutoGrant.deleteMany({ where: { caseId } }).catch(() => {});
+
   await prisma.caseItem.deleteMany({ where: { caseId } });
   await prisma.caseDefinition.delete({ where: { id: caseId } });
   await writeAuditLog({
     action: 'admin_case_delete',
-    detail: `caseId=${caseId}`,
+    detail: `caseId=${caseId}${strandedCrates.length ? ` refunded=${strandedCrates.length}` : ''}`,
   }).catch(() => {});
-  return { ok: true as const };
+  return { ok: true as const, refundedCrateCount: strandedCrates.length };
 }
 
 /** Add an item to a case — a cosmetic (StoreItem/Asset) or a VP/XP currency reward. */

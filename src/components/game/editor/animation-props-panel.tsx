@@ -145,7 +145,7 @@ export function AnimationPropsPanel({
               >
                 <option value="">—</option>
                 {allEntities
-                  .filter((e) => e.kind === 'button' || e.id !== entity.id)
+                  .filter((e) => e.kind === 'button' && e.id !== entity.id)
                   .map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.name} ({e.kind})
