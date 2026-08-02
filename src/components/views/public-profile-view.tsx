@@ -609,12 +609,6 @@ export default function PublicProfileView({
               </div>
             </CardContent>
           </Card>
-          <PowerSkillTreeLauncher
-            userId={userId}
-            username={profile.username}
-            avatarUrl={profile.avatarUrl}
-            readOnly
-          />
         </div>
       </div>
 

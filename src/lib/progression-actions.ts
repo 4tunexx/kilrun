@@ -1009,6 +1009,24 @@ export async function processMatchProgression(input: {
   await tryUnlockBadge(input.userId, 'competitive_kills');
   await tryUnlockBadge(input.userId, 'competitive_ranked_wins');
   await tryUnlockBadge(input.userId, 'kp');
+
+  // Admin-configured "auto_requirement" cases keyed to in-game metrics
+  // (runs/wins/kp/etc.) — these don't flow through processWebsiteAction,
+  // so check them here too. Best-effort, mirrors grantRewardCaseIfAny.
+  try {
+    const { tryAutoGrantCases } = await import('@/lib/case-actions');
+    const gameMetrics = [
+      'runs', 'wins', 'distance', 'score', 'level', 'trapper_wins', 'runner_survives',
+      'losses', 'eliminated', 'horde_runs', 'horde_wins', 'horde_waves', 'horde_kills',
+      'deathrun_kills', 'competitive_kills', 'deaths', 'competitive_runs', 'competitive_wins',
+      'competitive_ranked_runs', 'competitive_ranked_wins', 'competitive_casual_wins', 'kp',
+    ];
+    for (const m of gameMetrics) {
+      await tryAutoGrantCases(input.userId, m);
+    }
+  } catch {
+    /* best-effort */
+  }
 }
 
 const SYNC_FROM_TOTAL_METRICS = new Set<WebsiteActionMetric>([
@@ -1082,6 +1100,16 @@ export async function processWebsiteAction(
   if (metric === 'email' || metric === 'vip') {
     await tryUnlockAchievement(userId, 'level');
     await tryUnlockBadge(userId, 'level');
+  }
+  // Admin-configured "auto_requirement" cases (Admin → Cases) — grants a
+  // crate to inventory the first time a player crosses the configured
+  // metric threshold. Dynamic import avoids a circular dependency since
+  // case-actions.ts imports grantXp/processWebsiteAction from this file.
+  try {
+    const { tryAutoGrantCases } = await import('@/lib/case-actions');
+    await tryAutoGrantCases(userId, metric);
+  } catch {
+    /* best-effort */
   }
 }
 

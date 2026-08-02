@@ -31,10 +31,15 @@ export async function adminCreateCase(input: {
   description?: string;
   acquireType: string;
   vpPrice?: number;
+  requirementMetric?: string;
+  requirementTarget?: number;
 }) {
   const staff = await requireAdmin();
   const name = input.name.trim();
   if (name.length < 2) throw new Error('Case name is too short');
+  if (input.acquireType === 'auto_requirement' && !input.requirementMetric?.trim()) {
+    throw new Error('Pick a requirement type for an auto-grant case');
+  }
 
   const created = await prisma.caseDefinition.create({
     data: {
@@ -44,6 +49,12 @@ export async function adminCreateCase(input: {
       description: (input.description ?? '').trim().slice(0, 500),
       acquireType: input.acquireType,
       vpPrice: Math.max(0, Math.floor(input.vpPrice ?? 0)),
+      requirementMetric:
+        input.acquireType === 'auto_requirement' ? input.requirementMetric!.trim() : null,
+      requirementTarget:
+        input.acquireType === 'auto_requirement'
+          ? Math.max(1, Math.floor(input.requirementTarget ?? 1))
+          : null,
     },
   });
   await writeAuditLog({
@@ -64,6 +75,8 @@ export async function adminUpdateCase(
     vpPrice?: number;
     isActive?: boolean;
     sortOrder?: number;
+    requirementMetric?: string | null;
+    requirementTarget?: number | null;
   }
 ) {
   await requireAdmin();
@@ -72,10 +85,23 @@ export async function adminUpdateCase(
   if (input.imageUrl !== undefined) data.imageUrl = input.imageUrl.trim();
   if (input.openImageUrl !== undefined) data.openImageUrl = input.openImageUrl.trim();
   if (input.description !== undefined) data.description = input.description.trim().slice(0, 500);
-  if (input.acquireType !== undefined) data.acquireType = input.acquireType;
+  if (input.acquireType !== undefined) {
+    data.acquireType = input.acquireType;
+    if (input.acquireType !== 'auto_requirement') {
+      data.requirementMetric = null;
+      data.requirementTarget = null;
+    }
+  }
   if (input.vpPrice !== undefined) data.vpPrice = Math.max(0, Math.floor(input.vpPrice));
   if (input.isActive !== undefined) data.isActive = input.isActive;
   if (input.sortOrder !== undefined) data.sortOrder = Math.floor(input.sortOrder);
+  if (input.requirementMetric !== undefined) {
+    data.requirementMetric = input.requirementMetric?.trim() || null;
+  }
+  if (input.requirementTarget !== undefined) {
+    data.requirementTarget =
+      input.requirementTarget == null ? null : Math.max(1, Math.floor(input.requirementTarget));
+  }
 
   const updated = await prisma.caseDefinition.update({ where: { id: caseId }, data });
   await writeAuditLog({

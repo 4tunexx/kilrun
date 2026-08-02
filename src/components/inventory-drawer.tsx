@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -34,6 +35,7 @@ import {
   equipInventoryItem,
   getMyEquippedSkinAttachments,
   getMyInventory,
+  getMyInventorySlots,
   resellInventoryItem,
   unequipCosmeticSlot,
 } from '@/lib/social-actions';
@@ -226,6 +228,14 @@ type PendingClash = {
   itemId: string;
   itemName: string;
   reasons: string[];
+};
+
+type PendingQuantityAction = {
+  itemId: string;
+  itemName: string;
+  owned: number;
+  mode: 'sell' | 'delete';
+  unitRefund: number;
 };
 
 const CATEGORY_BY_KIND: Record<
@@ -514,10 +524,13 @@ export function InventoryDrawer({
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingClash, setPendingClash] = useState<PendingClash | null>(null);
+  const [pendingQty, setPendingQty] = useState<PendingQuantityAction | null>(null);
+  const [qtyInput, setQtyInput] = useState('1');
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
   const [skinsLoad, setSkinsLoad] = useState<SkinAttachment[]>([]);
   const [invCfg, setInvCfg] = useState<InventoryConfig>(DEFAULT_INVENTORY_CONFIG);
   const [unboxResult, setUnboxResult] = useState<CaseOpenResultDto | null>(null);
+  const [slots, setSlots] = useState<{ used: number; cap: number } | null>(null);
   const { toast } = useToast();
 
   const resellRate = invCfg.resellRate > 0 ? invCfg.resellRate : INVENTORY_RESELL_RATE;
@@ -550,13 +563,15 @@ export function InventoryDrawer({
     return async () => {
       setLoading(true);
       try {
-        const [next, skins, settings] = await Promise.all([
+        const [next, skins, settings, slotInfo] = await Promise.all([
           getMyInventory(),
           getMyEquippedSkinAttachments().catch(() => [] as SkinAttachment[]),
           getSiteSettings().catch(() => null),
+          getMyInventorySlots().catch(() => null),
         ]);
         setItems(next);
         setSkinsLoad(skins);
+        if (slotInfo) setSlots({ used: slotInfo.used, cap: slotInfo.cap });
         if (settings) {
           const cfg = parseInventoryConfig(
             (settings as { inventoryConfigJson?: string }).inventoryConfigJson ?? '{}'
@@ -705,6 +720,62 @@ export function InventoryDrawer({
     }
   };
 
+  const startSell = (item: InventoryRow) => {
+    const owned = item.quantity ?? 1;
+    if (owned <= 1) {
+      void withBusy(item.id, () =>
+        resellInventoryItem(item.id).then((r) => {
+          toast({ title: `Sold for ${r.refund} VP` });
+        })
+      );
+      return;
+    }
+    setPendingQty({
+      itemId: item.id,
+      itemName: item.itemName,
+      owned,
+      mode: 'sell',
+      unitRefund: Math.floor(item.vpValue * resellRate),
+    });
+    setQtyInput(String(owned));
+  };
+
+  const startDelete = (item: InventoryRow) => {
+    const owned = item.quantity ?? 1;
+    if (owned <= 1) {
+      void withBusy(item.id, () => deleteInventoryItem(item.id).then(() => {}));
+      return;
+    }
+    setPendingQty({
+      itemId: item.id,
+      itemName: item.itemName,
+      owned,
+      mode: 'delete',
+      unitRefund: 0,
+    });
+    setQtyInput(String(owned));
+  };
+
+  const confirmPendingQty = async () => {
+    const pending = pendingQty;
+    if (!pending) return;
+    const n = Math.max(1, Math.min(pending.owned, Math.floor(Number(qtyInput)) || 1));
+    setPendingQty(null);
+    if (pending.mode === 'sell') {
+      await withBusy(pending.itemId, () =>
+        resellInventoryItem(pending.itemId, n).then((r) => {
+          toast({ title: `Sold ${r.soldCount} for ${r.refund} VP` });
+        })
+      );
+    } else {
+      await withBusy(pending.itemId, () =>
+        deleteInventoryItem(pending.itemId, n).then((r) => {
+          toast({ title: `Discarded ${r.removedCount}` });
+        })
+      );
+    }
+  };
+
   const handleDropOnSlot = async (
     slot: (typeof EQUIP_SLOTS)[number],
     payload: InventoryRow | null
@@ -761,6 +832,19 @@ export function InventoryDrawer({
                       : `${items.length} item${items.length === 1 ? '' : 's'}`}
                   </span>
                 </div>
+                {slots && (
+                  <Badge
+                    className={cn(
+                      'ml-1 text-[10px] h-5 border',
+                      slots.used >= slots.cap
+                        ? 'bg-red-500/15 text-red-300 border-red-500/40'
+                        : 'bg-slate-800/60 text-slate-300 border-slate-700/40'
+                    )}
+                    title="Inventory slots used"
+                  >
+                    {slots.used}/{slots.cap} slots
+                  </Badge>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                 <Tabs
@@ -842,16 +926,21 @@ export function InventoryDrawer({
                           className="bg-slate-900/60 border-slate-700/40 overflow-hidden"
                         >
                           <CardContent className="p-3 space-y-2">
-                            <div className="aspect-square rounded-lg bg-slate-950/60 border border-amber-500/20 flex items-center justify-center overflow-hidden">
+                            <div className="relative aspect-square rounded-lg bg-slate-950/60 border border-amber-500/20 flex items-center justify-center overflow-hidden p-2">
                               {item.imageUrl ? (
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img
                                   src={item.imageUrl}
                                   alt=""
-                                  className="h-16 w-16 object-contain drop-shadow-[0_0_20px_rgba(251,191,36,0.35)]"
+                                  className="h-full w-full object-contain drop-shadow-[0_0_20px_rgba(251,191,36,0.35)]"
                                 />
                               ) : (
                                 <Gift className="h-14 w-14 text-amber-300" />
+                              )}
+                              {(item.quantity ?? 1) > 1 && (
+                                <span className="absolute bottom-1 right-1 min-w-[20px] h-5 px-1 rounded-md bg-black/80 border border-amber-500/40 text-[10px] font-bold text-amber-300 flex items-center justify-center">
+                                  x{item.quantity}
+                                </span>
                               )}
                             </div>
                             <p className="text-xs font-semibold text-slate-100 truncate">
@@ -1128,11 +1217,18 @@ export function InventoryDrawer({
                                 <Upload className="h-3 w-3" />
                               </div>
                             )}
-                            <InventoryPreview
-                              item={item}
-                              viewerName={username}
-                              viewerAvatar={avatarUrl}
-                            />
+                            <div className="relative">
+                              <InventoryPreview
+                                item={item}
+                                viewerName={username}
+                                viewerAvatar={avatarUrl}
+                              />
+                              {(item.quantity ?? 1) > 1 && (
+                                <span className="absolute bottom-1 right-1 z-10 min-w-[20px] h-5 px-1 rounded-md bg-black/80 border border-primary/40 text-[10px] font-bold text-primary flex items-center justify-center">
+                                  x{item.quantity}
+                                </span>
+                              )}
+                            </div>
                             <CardContent className="p-2 space-y-1.5">
                               <div className="flex items-center justify-between gap-1">
                                 <p className="font-semibold text-xs truncate">
@@ -1196,11 +1292,7 @@ export function InventoryDrawer({
                                   disabled={busyId === item.id}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    void withBusy(item.id, () =>
-                                      resellInventoryItem(item.id).then((r) => {
-                                        toast({ title: `Sold for ${r.refund} VP` });
-                                      })
-                                    );
+                                    startSell(item);
                                   }}
                                 >
                                   {busyId === item.id ? (
@@ -1208,7 +1300,7 @@ export function InventoryDrawer({
                                   ) : (
                                     `Sell ${Math.floor(
                                       item.vpValue * resellRate
-                                    )} VP`
+                                    )} VP${(item.quantity ?? 1) > 1 ? ' ea' : ''}`
                                   )}
                                 </Button>
                                 <Button
@@ -1219,9 +1311,7 @@ export function InventoryDrawer({
                                   title="Discard"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    void withBusy(item.id, () =>
-                                      deleteInventoryItem(item.id).then(() => {})
-                                    );
+                                    startDelete(item);
                                   }}
                                 >
                                   {busyId === item.id ? (
@@ -1463,6 +1553,71 @@ export function InventoryDrawer({
               }}
             >
               Unequip &amp; Equip
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(pendingQty)}
+        onOpenChange={(open) => {
+          if (!open) setPendingQty(null);
+        }}
+      >
+        <AlertDialogContent className="bg-slate-900 border-slate-700 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingQty?.mode === 'sell' ? 'Sell how many?' : 'Discard how many?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-slate-300 text-sm">
+                <p>
+                  You own{' '}
+                  <span className="font-semibold text-white">{pendingQty?.owned}</span>{' '}
+                  of <span className="font-semibold text-white">{pendingQty?.itemName}</span>.
+                  {pendingQty?.mode === 'sell' && pendingQty.unitRefund > 0 && (
+                    <> Refund is {pendingQty.unitRefund} VP each.</>
+                  )}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={pendingQty?.owned ?? 1}
+                    value={qtyInput}
+                    onChange={(e) => setQtyInput(e.target.value)}
+                    className="bg-slate-800 border-slate-600 text-white w-24"
+                  />
+                  <span className="text-xs text-slate-400">/ {pendingQty?.owned}</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto h-8 text-xs"
+                    onClick={() => setQtyInput(String(pendingQty?.owned ?? 1))}
+                  >
+                    Max
+                  </Button>
+                </div>
+                {pendingQty?.mode === 'sell' && (
+                  <p className="text-xs text-slate-400">
+                    Total refund:{' '}
+                    {Math.floor(
+                      (pendingQty.unitRefund || 0) *
+                        Math.max(1, Math.min(pendingQty.owned, Math.floor(Number(qtyInput)) || 1))
+                    )}{' '}
+                    VP
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-slate-800 border-slate-600 text-white">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmPendingQty()}>
+              {pendingQty?.mode === 'sell' ? 'Sell' : 'Discard'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

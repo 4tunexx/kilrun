@@ -250,6 +250,34 @@ export async function getAnnouncementCarouselItems(): Promise<{
               break;
             }
 
+            case 'crate_opened': {
+              const opens = await prisma.caseOpenLog.findMany({
+                where: { openedAt: { gt: cutoff } },
+                orderBy: { openedAt: 'desc' },
+                take: PER_TYPE_LIMIT,
+              });
+              if (opens.length === 0) break;
+              const userIds = [...new Set(opens.map((o) => o.userId))];
+              const users = await prisma.user.findMany({
+                where: { id: { in: userIds } },
+                select: userSelect,
+              });
+              const userMap = new Map(users.map((u) => [u.id, u]));
+              for (const o of opens) {
+                const u = userMap.get(o.userId);
+                if (!u) continue;
+                items.push({
+                  id: `crate_opened-${o.id}`,
+                  type: 'crate_opened',
+                  label: 'Crate Opened',
+                  user: u,
+                  detail: `opened a crate and got ${o.wonName} (${o.wonRarity})`,
+                  createdAt: o.openedAt.toISOString(),
+                });
+              }
+              break;
+            }
+
             case 'news': {
               const posts = await prisma.newsPost.findMany({
                 where: { published: true },

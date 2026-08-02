@@ -11,6 +11,7 @@ import {
   Award,
   Target,
   Newspaper,
+  Gift,
   type LucideIcon,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -28,6 +29,7 @@ const TYPE_ICONS: Record<AnnouncementType, LucideIcon> = {
   user_got_vip: Crown,
   user_got_badge: Award,
   user_earn_achievement: Target,
+  crate_opened: Gift,
   news: Newspaper,
 };
 

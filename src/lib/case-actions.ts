@@ -3,7 +3,9 @@
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@/generated/prisma';
-import { processWebsiteAction, grantXp } from '@/lib/progression-actions';
+import { processWebsiteAction, grantXp, metricCountPublic } from '@/lib/progression-actions';
+import { getLevelFromXp } from '@/lib/progression';
+import { getInventorySlotCap } from '@/lib/inventory-slots';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -55,6 +57,26 @@ export async function computeCaseExpectedValue(
   return Math.round(expected);
 }
 
+/** Throws if the player has no free inventory row for one more distinct
+ *  item (crates, and non-stacking cosmetic wins, each cost one row). */
+async function assertSlotAvailable(userId: string) {
+  const [user, rowCount] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { xpProgress: true, extraInventorySlots: true },
+    }),
+    prisma.inventoryItem.count({ where: { userId } }),
+  ]);
+  if (!user) throw new Error('User not found');
+  const level = getLevelFromXp(user.xpProgress);
+  const cap = getInventorySlotCap(level, user.extraInventorySlots);
+  if (rowCount >= cap) {
+    throw new Error(
+      `Inventory full (${rowCount}/${cap} slots). Sell/delete items, level up, or buy more slots.`
+    );
+  }
+}
+
 /** Grants an unopened crate into a player's inventory (admin award, shop purchase, or mission/achievement reward). */
 export async function grantCrateToInventory(
   userId: string,
@@ -66,6 +88,8 @@ export async function grantCrateToInventory(
     include: { items: true },
   });
   if (!def) throw new Error('Case not found');
+
+  await assertSlotAvailable(userId);
 
   const vpValue = await computeCaseExpectedValue(def.items);
 
@@ -129,6 +153,44 @@ export async function purchaseCrateFromShop(caseId: string) {
       /* ignore refund failure */
     }
     throw err;
+  }
+}
+
+/**
+ * Checks all active "auto_requirement" CaseDefinitions against a player's
+ * current metric counts and grants any newly-crossed ones exactly once
+ * (tracked in UserCaseAutoGrant). Called from processWebsiteAction so it
+ * piggybacks on the same event hooks missions/achievements already use —
+ * pass the metric that just changed to avoid scanning every case on every
+ * action; cases whose requirementMetric doesn't match are skipped cheaply.
+ */
+export async function tryAutoGrantCases(userId: string, metric: string) {
+  try {
+    const candidates = await prisma.caseDefinition.findMany({
+      where: { isActive: true, acquireType: 'auto_requirement', requirementMetric: metric },
+    });
+    if (candidates.length === 0) return;
+
+    for (const def of candidates) {
+      if (!def.requirementTarget || def.requirementTarget <= 0) continue;
+      const already = await prisma.userCaseAutoGrant.findUnique({
+        where: { userId_caseId: { userId, caseId: def.id } },
+      });
+      if (already) continue;
+
+      const count = await metricCountPublic(userId, metric);
+      if (count < def.requirementTarget) continue;
+
+      try {
+        await grantCrateToInventory(userId, def.id, 'mission');
+        await prisma.userCaseAutoGrant.create({ data: { userId, caseId: def.id } });
+      } catch {
+        // Slot full / grant failed — don't record it as granted, retry next
+        // time this metric fires.
+      }
+    }
+  } catch {
+    /* best-effort — never block the underlying action on this */
   }
 }
 
@@ -214,12 +276,19 @@ function freeCooldownMs(acquireType: string): number | null {
   return null;
 }
 
-export async function getAvailableCases(): Promise<CaseDto[]> {
+/**
+ * @param scope
+ *  - 'cases' (default): the Cases page — free_daily / free_weekly crates
+ *    only. VP-purchase crates live in the Shop instead, and admin_grant /
+ *    auto_requirement crates never appear in a listing (they land directly
+ *    in inventory).
+ *  - 'shop': the Store's Crates section — vp_purchase crates only.
+ */
+export async function getAvailableCases(scope: 'cases' | 'shop' = 'cases'): Promise<CaseDto[]> {
   const user = await requireSessionUser();
+  const acquireTypes = scope === 'shop' ? ['vp_purchase'] : ['free_daily', 'free_weekly'];
   const cases = await prisma.caseDefinition.findMany({
-    // "admin_grant" cases are never opened directly from this listing — they
-    // land in the player's inventory when granted and are opened from there.
-    where: { isActive: true, acquireType: { not: 'admin_grant' } },
+    where: { isActive: true, acquireType: { in: acquireTypes } },
     include: { items: true },
     orderBy: { sortOrder: 'asc' },
   });
@@ -291,14 +360,25 @@ async function resolveCaseWin(
     }
     // Grant into inventory if it references a StoreItem cosmetic — same
     // snapshot pattern as a normal purchase, so later catalog edits don't
-    // retroactively change what the player already won.
+    // retroactively change what the player already won. Re-winning an
+    // already-owned *stackable* item (no unique equip slot/config) adds a
+    // quantity instead of creating a duplicate row; unique cosmetics that
+    // are already owned just top up a small VP consolation via re-roll is
+    // not applied here — the drop still logs, but no duplicate row/points.
   else if (won.storeItemSku) {
     const storeItem = await prisma.storeItem.findUnique({ where: { itemSku: won.storeItemSku } });
     if (storeItem) {
       const owned = await prisma.inventoryItem.findFirst({
         where: { userId: user.id, itemSku: storeItem.itemSku },
       });
-      if (!owned) {
+      const stackable = !storeItem.cosmeticSlot && !storeItem.bannerConfig && !storeItem.cosmeticConfig;
+      if (owned && stackable) {
+        await prisma.inventoryItem.update({
+          where: { id: owned.id },
+          data: { quantity: { increment: 1 } },
+        });
+      } else if (!owned) {
+        await assertSlotAvailable(user.id);
         await prisma.inventoryItem.create({
           data: {
             userId: user.id,
@@ -320,7 +400,13 @@ async function resolveCaseWin(
       const owned = await prisma.inventoryItem.findFirst({
         where: { userId: user.id, itemSku: asset.assetId },
       });
-      if (!owned) {
+      if (owned) {
+        await prisma.inventoryItem.update({
+          where: { id: owned.id },
+          data: { quantity: { increment: 1 } },
+        });
+      } else {
+        await assertSlotAvailable(user.id);
         await prisma.inventoryItem.create({
           data: {
             userId: user.id,

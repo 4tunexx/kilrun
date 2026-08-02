@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Coins, Flame, Gift, Loader2, Trophy } from 'lucide-react';
+import { Coins, Flame, Gift, Loader2, PackagePlus, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -15,7 +15,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { getStoreItems } from '@/lib/actions';
-import { purchaseStoreItem } from '@/lib/social-actions';
+import { getAvailableSlotPacks, purchaseSlotPack, purchaseStoreItem } from '@/lib/social-actions';
 import type { StoreItem } from '@/generated/prisma';
 import {
   filterByShopTab,
@@ -74,6 +74,8 @@ export default function StoreView({
   const [crates, setCrates] = useState<CaseDto[]>([]);
   const [cratesLoading, setCratesLoading] = useState(true);
   const [buyingCrateId, setBuyingCrateId] = useState<string | null>(null);
+  const [slotPacks, setSlotPacks] = useState<Awaited<ReturnType<typeof getAvailableSlotPacks>>>([]);
+  const [buyingSlotPackId, setBuyingSlotPackId] = useState<string | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -99,8 +101,8 @@ export default function StoreView({
 
   const reloadCrates = () => {
     setCratesLoading(true);
-    return getAvailableCases()
-      .then((data) => setCrates(data.filter((c) => c.acquireType === 'vp_purchase')))
+    return getAvailableCases('shop')
+      .then(setCrates)
       .catch(() => setCrates([]))
       .finally(() => setCratesLoading(false));
   };
@@ -108,6 +110,37 @@ export default function StoreView({
   useEffect(() => {
     void reloadCrates();
   }, [userId]);
+
+  useEffect(() => {
+    let mounted = true;
+    getAvailableSlotPacks()
+      .then((data) => {
+        if (mounted) setSlotPacks(data);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [userId]);
+
+  const buySlotPack = async (packId: string) => {
+    setBuyingSlotPackId(packId);
+    try {
+      const res = await purchaseSlotPack(packId);
+      if (!res.ok) {
+        toast({ title: res.error ?? 'Purchase failed', variant: 'destructive' });
+      } else {
+        toast({ title: `+${res.slotsAdded} inventory slots`, description: `${res.price} VP` });
+      }
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Purchase failed',
+        variant: 'destructive',
+      });
+    } finally {
+      setBuyingSlotPackId(null);
+    }
+  };
 
   const buyCrate = async (c: CaseDto) => {
     setBuyingCrateId(c.id);
@@ -240,6 +273,51 @@ export default function StoreView({
                       onClick={() => void buyCrate(c)}
                     >
                       {buyingCrateId === c.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        'Buy'
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {slotPacks.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
+            <PackagePlus className="h-4 w-4 text-emerald-400" /> Inventory Slots
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {slotPacks.map((pack) => (
+              <Card
+                key={pack.id}
+                className="bg-slate-900/60 backdrop-blur-md border-emerald-500/20 hover:border-emerald-400/50 transition-all overflow-hidden"
+              >
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="h-14 w-14 rounded bg-slate-800 border border-emerald-500/30 flex items-center justify-center">
+                      <PackagePlus className="h-7 w-7 text-emerald-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-100 truncate">{pack.itemName}</p>
+                      <p className="text-[11px] text-slate-500">+{pack.slotAmount} inventory slots</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-bold text-yellow-400 flex items-center gap-1">
+                      <Coins className="h-3.5 w-3.5" />
+                      {pack.vpPrice} VP
+                    </p>
+                    <Button
+                      size="sm"
+                      disabled={buyingSlotPackId === pack.id}
+                      onClick={() => void buySlotPack(pack.id)}
+                    >
+                      {buyingSlotPackId === pack.id ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
                         'Buy'

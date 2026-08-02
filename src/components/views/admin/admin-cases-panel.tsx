@@ -9,7 +9,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -26,16 +28,20 @@ import {
   adminUpdateCase,
   adminUpdateCaseItem,
 } from '@/lib/admin-case-actions';
+import { groupRequirementTypes, REQUIREMENT_CATEGORY_LABELS } from '@/lib/requirement-types';
 
 type CaseRow = Awaited<ReturnType<typeof adminListCases>>[number];
 
 const RARITIES = ['common', 'rare', 'epic', 'legendary'] as const;
 const ACQUIRE_TYPES = [
-  { value: 'vp_purchase', label: 'Buy with VP' },
-  { value: 'free_daily', label: 'Free — daily' },
-  { value: 'free_weekly', label: 'Free — weekly' },
+  { value: 'vp_purchase', label: 'Buy with VP (Shop)' },
+  { value: 'free_daily', label: 'Free — daily (Cases page)' },
+  { value: 'free_weekly', label: 'Free — weekly (Cases page)' },
   { value: 'admin_grant', label: 'Admin grant only' },
+  { value: 'auto_requirement', label: 'Auto-grant on requirement' },
 ];
+
+const REQUIREMENT_GROUPS = groupRequirementTypes();
 
 export function AdminCasesPanel() {
   const { toast } = useToast();
@@ -50,8 +56,24 @@ export function AdminCasesPanel() {
   const [assetResults, setAssetResults] = useState<Awaited<ReturnType<typeof adminSearchAssetsForCase>>>([]);
   const [currencyDraft, setCurrencyDraft] = useState({ vpAmount: '0', xpAmount: '0', displayName: '' });
 
-  const [newCase, setNewCase] = useState({ name: '', imageUrl: '', openImageUrl: '', description: '', acquireType: 'vp_purchase', vpPrice: '0' });
+  const [newCase, setNewCase] = useState({
+    name: '',
+    imageUrl: '',
+    openImageUrl: '',
+    description: '',
+    acquireType: 'vp_purchase',
+    vpPrice: '0',
+    requirementMetric: '',
+    requirementTarget: '1',
+  });
   const [editingImagesFor, setEditingImagesFor] = useState<string | null>(null);
+  const [editingTypeFor, setEditingTypeFor] = useState<string | null>(null);
+  const [typeDraft, setTypeDraft] = useState<{
+    acquireType: string;
+    vpPrice: string;
+    requirementMetric: string;
+    requirementTarget: string;
+  }>({ acquireType: 'vp_purchase', vpPrice: '0', requirementMetric: '', requirementTarget: '1' });
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -129,6 +151,52 @@ export function AdminCasesPanel() {
               />
             )}
           </div>
+          {newCase.acquireType === 'auto_requirement' && (
+            <div className="grid sm:grid-cols-2 gap-3 rounded-lg border border-slate-700/50 bg-slate-950/40 p-3">
+              <div className="space-y-1">
+                <label className="text-[11px] text-slate-400">Requirement type</label>
+                <Select
+                  value={newCase.requirementMetric}
+                  onValueChange={(v) => setNewCase((f) => ({ ...f, requirementMetric: v }))}
+                >
+                  <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                    <SelectValue placeholder="Pick a requirement…" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {Object.entries(REQUIREMENT_GROUPS).map(([cat, types]) =>
+                      types.length === 0 ? null : (
+                        <SelectGroup key={cat}>
+                          <SelectLabel className="text-[10px] uppercase tracking-wide text-slate-500">
+                            {REQUIREMENT_CATEGORY_LABELS[cat as keyof typeof REQUIREMENT_CATEGORY_LABELS]}
+                          </SelectLabel>
+                          {types.map((t) => (
+                            <SelectItem key={t.value} value={t.value}>
+                              {t.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] text-slate-400">Target amount</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={newCase.requirementTarget}
+                  onChange={(e) => setNewCase((f) => ({ ...f, requirementTarget: e.target.value }))}
+                  placeholder="e.g. 10"
+                  className="bg-slate-900/50 border-slate-700"
+                />
+              </div>
+              <p className="text-[10px] text-slate-500 sm:col-span-2">
+                Grants this crate automatically, once, the first time a player's metric reaches
+                this amount. Not shown on the Cases page or Shop — it's a hidden milestone reward.
+              </p>
+            </div>
+          )}
           <div className="grid sm:grid-cols-2 gap-3">
             <ImageUploadField
               label="Closed case image"
@@ -151,7 +219,11 @@ export function AdminCasesPanel() {
           />
           <Button
             size="sm"
-            disabled={busy || newCase.name.trim().length < 2}
+            disabled={
+              busy ||
+              newCase.name.trim().length < 2 ||
+              (newCase.acquireType === 'auto_requirement' && !newCase.requirementMetric)
+            }
             onClick={() =>
               void run(async () => {
                 await adminCreateCase({
@@ -161,8 +233,19 @@ export function AdminCasesPanel() {
                   description: newCase.description,
                   acquireType: newCase.acquireType,
                   vpPrice: Number(newCase.vpPrice) || 0,
+                  requirementMetric: newCase.requirementMetric || undefined,
+                  requirementTarget: Number(newCase.requirementTarget) || 1,
                 });
-                setNewCase({ name: '', imageUrl: '', openImageUrl: '', description: '', acquireType: 'vp_purchase', vpPrice: '0' });
+                setNewCase({
+                  name: '',
+                  imageUrl: '',
+                  openImageUrl: '',
+                  description: '',
+                  acquireType: 'vp_purchase',
+                  vpPrice: '0',
+                  requirementMetric: '',
+                  requirementTarget: '1',
+                });
               }, 'Case created')
             }
           >
@@ -198,9 +281,33 @@ export function AdminCasesPanel() {
                       </p>
                       <p className="text-[11px] text-slate-500">
                         {ACQUIRE_TYPES.find((a) => a.value === c.acquireType)?.label ?? c.acquireType}
-                        {c.acquireType === 'vp_purchase' ? ` · ${c.vpPrice} VP` : ''} · {c.items.length} items
+                        {c.acquireType === 'vp_purchase' ? ` · ${c.vpPrice} VP` : ''}
+                        {c.acquireType === 'auto_requirement' && c.requirementMetric
+                          ? ` · ${c.requirementMetric} ≥ ${c.requirementTarget ?? 1}`
+                          : ''}{' '}
+                        · {c.items.length} items
                       </p>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setEditingTypeFor((id) => {
+                          const next = id === c.id ? null : c.id;
+                          if (next) {
+                            setTypeDraft({
+                              acquireType: c.acquireType,
+                              vpPrice: String(c.vpPrice ?? 0),
+                              requirementMetric: c.requirementMetric ?? '',
+                              requirementTarget: String(c.requirementTarget ?? 1),
+                            });
+                          }
+                          return next;
+                        });
+                      }}
+                    >
+                      {editingTypeFor === c.id ? 'Hide type' : 'Edit type'}
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"
@@ -239,6 +346,109 @@ export function AdminCasesPanel() {
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
+
+                  {editingTypeFor === c.id && (
+                    <div className="pt-2 border-t border-slate-800 space-y-3">
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <Select
+                          value={typeDraft.acquireType}
+                          onValueChange={(v) => setTypeDraft((f) => ({ ...f, acquireType: v }))}
+                        >
+                          <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ACQUIRE_TYPES.map((a) => (
+                              <SelectItem key={a.value} value={a.value}>
+                                {a.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {typeDraft.acquireType === 'vp_purchase' && (
+                          <Input
+                            type="number"
+                            min={0}
+                            value={typeDraft.vpPrice}
+                            onChange={(e) => setTypeDraft((f) => ({ ...f, vpPrice: e.target.value }))}
+                            placeholder="VP price"
+                            className="bg-slate-900/50 border-slate-700"
+                          />
+                        )}
+                      </div>
+                      {typeDraft.acquireType === 'auto_requirement' && (
+                        <div className="grid sm:grid-cols-2 gap-3 rounded-lg border border-slate-700/50 bg-slate-950/40 p-3">
+                          <div className="space-y-1">
+                            <label className="text-[11px] text-slate-400">Requirement type</label>
+                            <Select
+                              value={typeDraft.requirementMetric}
+                              onValueChange={(v) =>
+                                setTypeDraft((f) => ({ ...f, requirementMetric: v }))
+                              }
+                            >
+                              <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                                <SelectValue placeholder="Pick a requirement…" />
+                              </SelectTrigger>
+                              <SelectContent className="max-h-72">
+                                {Object.entries(REQUIREMENT_GROUPS).map(([cat, types]) =>
+                                  types.length === 0 ? null : (
+                                    <SelectGroup key={cat}>
+                                      <SelectLabel className="text-[10px] uppercase tracking-wide text-slate-500">
+                                        {REQUIREMENT_CATEGORY_LABELS[cat as keyof typeof REQUIREMENT_CATEGORY_LABELS]}
+                                      </SelectLabel>
+                                      {types.map((t) => (
+                                        <SelectItem key={t.value} value={t.value}>
+                                          {t.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectGroup>
+                                  )
+                                )}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[11px] text-slate-400">Target amount</label>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={typeDraft.requirementTarget}
+                              onChange={(e) =>
+                                setTypeDraft((f) => ({ ...f, requirementTarget: e.target.value }))
+                              }
+                              className="bg-slate-900/50 border-slate-700"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <Button
+                        size="sm"
+                        disabled={
+                          busy ||
+                          (typeDraft.acquireType === 'auto_requirement' && !typeDraft.requirementMetric)
+                        }
+                        onClick={() =>
+                          void run(async () => {
+                            await adminUpdateCase(c.id, {
+                              acquireType: typeDraft.acquireType,
+                              vpPrice: Number(typeDraft.vpPrice) || 0,
+                              requirementMetric:
+                                typeDraft.acquireType === 'auto_requirement'
+                                  ? typeDraft.requirementMetric
+                                  : null,
+                              requirementTarget:
+                                typeDraft.acquireType === 'auto_requirement'
+                                  ? Number(typeDraft.requirementTarget) || 1
+                                  : null,
+                            });
+                            setEditingTypeFor(null);
+                          }, 'Case type updated')
+                        }
+                      >
+                        Save type
+                      </Button>
+                    </div>
+                  )}
 
                   {editingImagesFor === c.id && (
                     <div className="pt-2 border-t border-slate-800 grid sm:grid-cols-2 gap-3">

@@ -12,6 +12,7 @@ export type AnnouncementType =
   | 'user_got_vip'
   | 'user_got_badge'
   | 'user_earn_achievement'
+  | 'crate_opened'
   | 'news';
 
 export type CarouselDirection = 'left' | 'right';
@@ -37,6 +38,7 @@ export const ALL_ANNOUNCEMENT_TYPES: { value: AnnouncementType; label: string; e
     { value: 'user_got_vip', label: 'User Got VIP', emoji: '👑' },
     { value: 'user_got_badge', label: 'User Got Badge', emoji: '🎖️' },
     { value: 'user_earn_achievement', label: 'User Earned Achievement', emoji: '🎯' },
+    { value: 'crate_opened', label: 'Crate Opened', emoji: '🎁' },
     { value: 'news', label: 'News', emoji: '📰' },
   ];
 

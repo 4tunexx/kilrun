@@ -85,6 +85,34 @@ function OpeningCrate({ imageUrl }: { imageUrl: string }) {
   );
 }
 
+/** Renders an item's real shop image (any aspect/size — banners, small
+ *  cosmetics like eyebrows, etc) scaled to fit its slot without cropping. */
+function ReelItemThumb({
+  item,
+  style,
+  imgClassName,
+}: {
+  item: CaseOpenResultDto['reel'][number];
+  style: { text: string };
+  imgClassName: string;
+}) {
+  if (item.rewardType === 'currency') {
+    return <Coins className={`${imgClassName} ${style.text}`} />;
+  }
+  if (item.displayImage) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={item.displayImage}
+        alt=""
+        className={`${imgClassName} object-contain`}
+        draggable={false}
+      />
+    );
+  }
+  return <Gift className={`${imgClassName} ${style.text}`} />;
+}
+
 function UnboxingReel({
   items,
   wonIndex,
@@ -97,14 +125,31 @@ function UnboxingReel({
   const trackRef = useRef<HTMLDivElement>(null);
   const [spinning, setSpinning] = useState(true);
 
-  // Build a long repeated strip so the reel has room to spin, ending on the won item.
-  const strip = Array.from({ length: REEL_LANDING_INDEX + 8 }, (_, i) => items[(wonIndex + i * 7) % items.length]);
+  // Build a long repeated strip so the reel has room to spin, ending on the
+  // won item at a fixed index. Using a step coprime-ish offset just varies
+  // the run-up visually — the actual reward always comes from `items[wonIndex]`
+  // and is placed at `REEL_LANDING_INDEX`, which is where the math below
+  // guarantees the marker will land.
+  const strip = Array.from(
+    { length: REEL_LANDING_INDEX + 8 },
+    (_, i) => items[(wonIndex + i * 7) % items.length]
+  );
   strip[REEL_LANDING_INDEX] = items[wonIndex];
 
   useEffect(() => {
     const el = trackRef.current;
     if (!el) return;
-    const targetX = -(REEL_LANDING_INDEX * REEL_ITEM_WIDTH) + REEL_ITEM_WIDTH * 1.5;
+    const pitch = REEL_ITEM_WIDTH + 8; // item width + flex gap
+    // Track is left-padded by 50% of its own width (pl-[50%]), so item i's
+    // center sits at `i * pitch + pitch / 2` from the track's own left edge
+    // — which is itself offset by +50%-of-container from the container's
+    // left edge. The center marker sits at the container's horizontal
+    // center. Translating the track by exactly `-(landingCenter)` (in the
+    // track's own coordinate space) puts that item's center under the
+    // marker regardless of container width, since the 50% padding already
+    // cancels the container-width term.
+    const landingCenter = REEL_LANDING_INDEX * pitch + pitch / 2;
+    const targetX = -landingCenter;
     el.style.transition = 'none';
     el.style.transform = 'translateX(0px)';
     // Force reflow before starting the transition.
@@ -130,18 +175,13 @@ function UnboxingReel({
           return (
             <div
               key={i}
-              className={`shrink-0 w-24 h-24 rounded-lg bg-slate-900 border border-slate-700 flex flex-col items-center justify-center ring-2 ${style.ring} shadow-lg ${style.glow}`}
+              className={`shrink-0 h-24 rounded-lg bg-slate-900 border border-slate-700 flex flex-col items-center justify-center gap-1 p-1.5 ring-2 ${style.ring} shadow-lg ${style.glow}`}
               style={{ width: REEL_ITEM_WIDTH - 8 }}
             >
-              {item.rewardType === 'currency' ? (
-                <Coins className={`h-8 w-8 ${style.text}`} />
-              ) : item.displayImage ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={item.displayImage} alt="" className="h-12 w-12 object-contain" />
-              ) : (
-                <Gift className={`h-8 w-8 ${style.text}`} />
-              )}
-              <span className="text-[9px] mt-1 px-1 truncate max-w-full text-slate-300">
+              <div className="flex-1 min-h-0 w-full flex items-center justify-center">
+                <ReelItemThumb item={item} style={style} imgClassName="max-h-14 max-w-full h-auto w-auto" />
+              </div>
+              <span className="text-[9px] px-1 truncate max-w-full text-slate-300 shrink-0">
                 {item.displayName}
               </span>
             </div>

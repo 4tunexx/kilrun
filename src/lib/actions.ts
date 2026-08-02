@@ -114,11 +114,13 @@ async function healStoreItemDefaults() {
   });
 }
 
-/** Live item-shop catalog, replacing the old hardcoded `shopItems` array. */
+/** Live item-shop catalog, replacing the old hardcoded `shopItems` array.
+ *  Excludes "slot_pack" items — those are shown in their own Inventory
+ *  Slots shop section (see getAvailableSlotPacks / purchaseSlotPack). */
 export async function getStoreItems() {
   try {
     const items = await prisma.storeItem.findMany({
-      where: { isAvailable: true },
+      where: { isAvailable: true, itemCategory: { not: 'slot_pack' } },
       orderBy: { vpPrice: 'asc' },
     });
     return items.map((item) => ({
@@ -134,7 +136,7 @@ export async function getStoreItems() {
     ) {
       await healStoreItemDefaults();
       const items = await prisma.storeItem.findMany({
-        where: { isAvailable: true },
+        where: { isAvailable: true, itemCategory: { not: 'slot_pack' } },
         orderBy: { vpPrice: 'asc' },
       });
       return items.map((item) => ({

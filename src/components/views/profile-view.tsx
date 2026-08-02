@@ -370,9 +370,15 @@ export default function ProfileView({ userId }: { userId: string }) {
             <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
               <CardContent className="pt-5 text-center">
                 <p className="text-xs text-slate-400 mb-1">Rank</p>
-                <p className="text-xl font-black text-yellow-400">
-                  {user?.currentRank || 'Unranked'}
-                </p>
+                <div className="flex items-center justify-center">
+                  <RankLabel
+                    rank={ranked?.currentRank || user?.currentRank || 'Unranked'}
+                    imageUrl={ranked?.rankImage}
+                    color={ranked?.rankColor}
+                    size={22}
+                    textClassName="text-xl font-black"
+                  />
+                </div>
               </CardContent>
             </Card>
             <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">

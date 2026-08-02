@@ -128,6 +128,10 @@ model User {
 
   /// Map of CaseDefinition.id -> ISO timestamp of last free open (daily/weekly cooldowns).
   lastFreeCaseAt Json?
+
+  /// Extra inventory slots purchased from the shop (slot_pack StoreItems),
+  /// stacked on top of the level-derived base cap. See inventory-slots.ts.
+  extraInventorySlots Int @default(0)
 }
 
 model MatchStat {
@@ -190,6 +194,10 @@ model StoreItem {
   /// How players obtain it: null/'purchase' = buy with VP;
   /// 'event' | 'mission' | 'achievement' | 'badge' = earned, not buyable.
   unlockType String?
+  /// Set when itemCategory = "slot_pack" — how many extra inventory slots
+  /// this grants on purchase. Never creates an InventoryItem row (so the
+  /// pack itself doesn't consume a slot); see purchaseSlotPack().
+  slotAmount Int?
   /// For earned unlocks — which event/mission/achievement/badge grants it (shown to players).
   unlockRef String?
   /// Optional event window end (live countdown on shop card + dashboard promo).
@@ -533,6 +541,12 @@ model InventoryItem {
   isEquipped   Boolean  @default(false)
   /// Player-marked favorite for inventory filtering.
   isFavorite   Boolean  @default(false)
+  /// How many copies of this exact item the player owns, stacked into one
+  /// inventory row (shown as an "xN" badge). Crates and equipped cosmetics
+  /// still occupy exactly one inventory slot regardless of quantity.
+  /// Duplicate non-stackable acquisitions (e.g. re-winning an already-owned
+  /// cosmetic) increment this instead of creating a new row.
+  quantity     Int      @default(1)
   acquiredAt   DateTime @default(now())
 
   /// Set when itemCategory = "crate" — the CaseDefinition to open when the
@@ -919,15 +933,35 @@ model CaseDefinition {
   /// Opened crate artwork, revealed after the shake + spin, before the won item is shown.
   openImageUrl String  @default("")
   description String   @default("")
-  /// "free_daily" | "free_weekly" | "vp_purchase" | "admin_grant"
+  /// "free_daily" | "free_weekly" | "vp_purchase" | "admin_grant" | "auto_requirement"
   acquireType String   @default("vp_purchase")
   vpPrice     Int      @default(0)
   isActive    Boolean  @default(true)
   sortOrder   Int      @default(0)
+  /// Set when acquireType = "auto_requirement" — a requirement-types.ts metric
+  /// key (e.g. "cases_opened", "clan_wars_won"). Checked via metricCount() the
+  /// same way missions/achievements are; crossing requirementTarget grants
+  /// this crate to the player's inventory exactly once (see UserCaseAutoGrant).
+  requirementMetric String?
+  /// Threshold the metric must reach/exceed to trigger the auto-grant.
+  requirementTarget Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   items CaseItem[]
+}
+
+/// Dedup record — a player can only auto-receive a given "auto_requirement"
+/// CaseDefinition once, even if the underlying metric keeps climbing past
+/// the threshold (e.g. cases_opened never resets).
+model UserCaseAutoGrant {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  caseId    String   @db.ObjectId
+  grantedAt DateTime @default(now())
+
+  @@unique([userId, caseId])
+  @@index([userId])
 }
 
 model CaseItem {

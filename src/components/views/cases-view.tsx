@@ -12,7 +12,7 @@ import {
   type CaseDto,
   type CaseOpenResultDto,
 } from '@/lib/case-actions';
-import { CrateUnboxModal, rarityStyle } from '@/components/crate-unbox-modal';
+import { CrateUnboxModal } from '@/components/crate-unbox-modal';
 import { CrateContentsPreview } from '@/components/crate-contents-preview';
 
 function timeUntil(iso: string | null): string {
@@ -36,7 +36,7 @@ export default function CasesView() {
   const refresh = async () => {
     setLoading(true);
     try {
-      setCases(await getAvailableCases());
+      setCases(await getAvailableCases('cases'));
     } finally {
       setLoading(false);
     }
@@ -82,30 +82,35 @@ export default function CasesView() {
       ) : cases.length === 0 ? (
         <p className="text-sm text-slate-500 py-12 text-center">No cases available right now.</p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {cases.map((c) => (
-            <Card key={c.id} className="bg-slate-900/50 border-slate-700/50">
+            <Card key={c.id} className="bg-slate-900/50 border-slate-700/50 overflow-hidden">
               <CardContent className="p-4 space-y-3">
                 <Popover>
                   <PopoverTrigger asChild>
-                    <button type="button" className="flex items-center gap-3 w-full text-left">
-                      {c.imageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={c.imageUrl}
-                          alt=""
-                          className="h-12 w-12 rounded object-cover border border-slate-700"
-                        />
-                      ) : (
-                        <div className="h-12 w-12 rounded bg-slate-800 border border-slate-700 flex items-center justify-center">
-                          <Gift className="h-6 w-6 text-slate-500" />
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
+                    <button
+                      type="button"
+                      className="block w-full text-left group"
+                      title="Tap to see what's inside"
+                    >
+                      <div className="aspect-square w-full rounded-lg bg-slate-950/60 border border-slate-700 flex items-center justify-center overflow-hidden p-3 group-hover:border-amber-500/50 transition-colors">
+                        {c.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={c.imageUrl}
+                            alt=""
+                            className="h-full w-full object-contain drop-shadow-[0_0_20px_rgba(251,191,36,0.25)]"
+                          />
+                        ) : (
+                          <Gift className="h-14 w-14 text-slate-500" />
+                        )}
+                      </div>
+                      <div className="mt-2">
                         <p className="text-sm font-semibold text-slate-100 truncate">{c.name}</p>
                         {c.description && (
                           <p className="text-[11px] text-slate-500 truncate">{c.description}</p>
                         )}
+                        <p className="text-[10px] text-amber-400/80 mt-0.5">Tap to view contents</p>
                       </div>
                     </button>
                   </PopoverTrigger>
@@ -114,32 +119,13 @@ export default function CasesView() {
                   </PopoverContent>
                 </Popover>
 
-                <div className="flex flex-wrap gap-1">
-                  {c.items.slice(0, 6).map((item) => (
-                    <span
-                      key={item.id}
-                      className={`text-[9px] px-1.5 py-0.5 rounded border ${rarityStyle(item.rarity).ring} ${rarityStyle(item.rarity).text} bg-slate-950/50`}
-                      title={`${item.chancePercent}% chance`}
-                    >
-                      {item.displayName}
-                    </span>
-                  ))}
-                  {c.items.length > 6 && (
-                    <span className="text-[9px] text-slate-500">+{c.items.length - 6} more</span>
-                  )}
-                </div>
-
                 <Button
                   size="sm"
                   className="w-full"
                   disabled={busy || !c.canOpen}
                   onClick={() => void handleOpen(c)}
                 >
-                  {c.acquireType === 'vp_purchase'
-                    ? `Open — ${c.vpPrice} VP`
-                    : c.canOpen
-                      ? 'Open free case'
-                      : `Available in ${timeUntil(c.nextFreeAt)}`}
+                  {c.canOpen ? 'Open free case' : `Available in ${timeUntil(c.nextFreeAt)}`}
                 </Button>
               </CardContent>
             </Card>

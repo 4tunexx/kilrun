@@ -22,6 +22,8 @@ import {
 import { flattenEquippedSkinsMap, parseSkinConfig } from '@/lib/player-skins';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { persistSiteImage } from '@/lib/site-asset-upload';
+import { getLevelFromXp } from '@/lib/progression';
+import { getInventorySlotCap } from '@/lib/inventory-slots';
 
 async function requireSessionUser() {
   const session = await auth();
@@ -1200,10 +1202,21 @@ export async function deleteAllNotifications() {
   return { ok: true as const };
 }
 
+/** Items that stack (quantity++) instead of creating a new inventory row
+ *  when the player already owns one — anything without a unique equip slot
+ *  or per-item cosmetic config (boosts, consumable perks, emotes, etc). */
+function isStackableCategory(item: { cosmeticSlot: string | null; bannerConfig: unknown; cosmeticConfig: unknown }) {
+  return !item.cosmeticSlot && !item.bannerConfig && !item.cosmeticConfig;
+}
+
 export async function purchaseStoreItem(itemId: string) {
   const user = await requireSessionUser();
   const item = await prisma.storeItem.findUnique({ where: { id: itemId } });
   if (!item || !item.isAvailable) throw new Error('Item unavailable');
+
+  if (item.itemCategory === 'slot_pack') {
+    throw new Error('Use purchaseSlotPack() for slot packs');
+  }
 
   // Earned items (event / mission / achievement / badge rewards) are not buyable.
   if (item.unlockType && item.unlockType !== 'purchase') {
@@ -1222,12 +1235,32 @@ export async function purchaseStoreItem(itemId: string) {
   }
 
   // Skins / cosmetics are one-copy — don't let players buy duplicates.
-  if (item.cosmeticSlot || item.bannerConfig || item.cosmeticConfig) {
-    const owned = await prisma.inventoryItem.findFirst({
-      where: { userId: user.id, itemSku: item.itemSku },
-      select: { id: true },
-    });
-    if (owned) return { ok: false as const, error: 'You already own this item' };
+  const stackable = isStackableCategory(item);
+  const existing = await prisma.inventoryItem.findFirst({
+    where: { userId: user.id, itemSku: item.itemSku },
+  });
+  if (existing && !stackable) {
+    return { ok: false as const, error: 'You already own this item' };
+  }
+
+  // Buying a fresh (non-stacking) row needs a free inventory slot; adding
+  // to an existing stack does not.
+  if (!existing) {
+    const [freshUser, rowCount] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: user.id },
+        select: { xpProgress: true, extraInventorySlots: true },
+      }),
+      prisma.inventoryItem.count({ where: { userId: user.id } }),
+    ]);
+    const level = getLevelFromXp(freshUser?.xpProgress ?? user.xpProgress);
+    const cap = getInventorySlotCap(level, freshUser?.extraInventorySlots ?? user.extraInventorySlots);
+    if (rowCount >= cap) {
+      return {
+        ok: false as const,
+        error: `Inventory full (${rowCount}/${cap} slots). Sell/delete items, level up, or buy more slots.`,
+      };
+    }
   }
 
   const { getEffectiveVpPrice } = await import('@/lib/shop-catalog');
@@ -1250,21 +1283,29 @@ export async function purchaseStoreItem(itemId: string) {
         vpSpent: price,
       },
     });
-    // Snapshot cosmetic data onto a personal inventory copy so later admin
-    // edits to the shop catalog never retroactively change owned items.
-    await prisma.inventoryItem.create({
-      data: {
-        userId: user.id,
-        itemSku: item.itemSku,
-        itemName: item.itemName,
-        itemCategory: item.itemCategory,
-        cosmeticSlot: item.cosmeticSlot ?? null,
-        bannerConfig: item.bannerConfig ?? undefined,
-        cosmeticConfig: item.cosmeticConfig ?? undefined,
-        imageUrl: item.imageUrl ?? null,
-        vpValue: price,
-      },
-    });
+    if (existing && stackable) {
+      // Stack onto the existing row instead of adding a new one.
+      await prisma.inventoryItem.update({
+        where: { id: existing.id },
+        data: { quantity: { increment: 1 } },
+      });
+    } else {
+      // Snapshot cosmetic data onto a personal inventory copy so later admin
+      // edits to the shop catalog never retroactively change owned items.
+      await prisma.inventoryItem.create({
+        data: {
+          userId: user.id,
+          itemSku: item.itemSku,
+          itemName: item.itemName,
+          itemCategory: item.itemCategory,
+          cosmeticSlot: item.cosmeticSlot ?? null,
+          bannerConfig: item.bannerConfig ?? undefined,
+          cosmeticConfig: item.cosmeticConfig ?? undefined,
+          imageUrl: item.imageUrl ?? null,
+          vpValue: price,
+        },
+      });
+    }
   } catch (err) {
     // Best-effort refund if inventory/purchase write fails after debit.
     if (price > 0) {
@@ -1304,6 +1345,70 @@ export async function purchaseStoreItem(itemId: string) {
     }
   }
   return { ok: true as const, price };
+}
+
+/** Buys a "slot_pack" StoreItem — grants extra inventory slots directly on
+ *  the user record instead of creating an InventoryItem (so the pack itself
+ *  never occupies a slot, and is never subject to the slot cap). */
+export async function purchaseSlotPack(itemId: string) {
+  const user = await requireSessionUser();
+  const item = await prisma.storeItem.findUnique({ where: { id: itemId } });
+  if (!item || !item.isAvailable) throw new Error('Item unavailable');
+  if (item.itemCategory !== 'slot_pack') throw new Error('Not a slot pack');
+  const amount = Math.max(1, Math.floor(item.slotAmount ?? 0));
+  if (amount <= 0) throw new Error('This slot pack has no configured slot amount');
+
+  const { getEffectiveVpPrice } = await import('@/lib/shop-catalog');
+  const price = getEffectiveVpPrice(item);
+
+  if (price > 0) {
+    const paid = await prisma.user.updateMany({
+      where: { id: user.id, vpCurrency: { gte: price } },
+      data: { vpCurrency: { decrement: price } },
+    });
+    if (paid.count === 0) return { ok: false as const, error: 'Not enough VP' };
+  }
+
+  try {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { extraInventorySlots: { increment: amount } },
+    });
+    await prisma.purchase.create({
+      data: {
+        userId: user.id,
+        itemSku: item.itemSku,
+        itemName: item.itemName,
+        vpSpent: price,
+      },
+    });
+  } catch (err) {
+    if (price > 0) {
+      try {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { vpCurrency: { increment: price } },
+        });
+      } catch {
+        /* ignore refund failure */
+      }
+    }
+    throw err;
+  }
+
+  await prisma.storeItem.update({
+    where: { id: item.id },
+    data: { purchaseCount: { increment: 1 } },
+  });
+  await prisma.notification.create({
+    data: {
+      userId: user.id,
+      title: 'Inventory expanded',
+      body: `+${amount} inventory slots from ${item.itemName}.`,
+      type: 'store',
+    },
+  });
+  return { ok: true as const, price, slotsAdded: amount };
 }
 
 /** Put selected catalog items on a timed fire sale. */
@@ -1358,6 +1463,41 @@ export async function getMyInventory() {
     where: { userId: user.id },
     orderBy: [{ isEquipped: 'desc' }, { acquiredAt: 'desc' }],
   });
+}
+
+/** Slot usage summary for the inventory drawer header / purchase gating. */
+export async function getMyInventorySlots() {
+  const user = await requireSessionUser();
+  const rowCount = await prisma.inventoryItem.count({ where: { userId: user.id } });
+  const level = getLevelFromXp(user.xpProgress);
+  const cap = getInventorySlotCap(level, user.extraInventorySlots);
+  return {
+    used: rowCount,
+    cap,
+    level,
+    extraSlots: user.extraInventorySlots,
+  };
+}
+
+/** Throws if the player has no free inventory row left. Call before any
+ *  action that would add a new distinct row (not needed for stacking onto
+ *  an existing row, or for equip/unequip which don't change row count). */
+export async function assertInventorySlotAvailable(userId: string) {
+  const [user, rowCount] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { xpProgress: true, extraInventorySlots: true },
+    }),
+    prisma.inventoryItem.count({ where: { userId } }),
+  ]);
+  if (!user) throw new Error('User not found');
+  const level = getLevelFromXp(user.xpProgress);
+  const cap = getInventorySlotCap(level, user.extraInventorySlots);
+  if (rowCount >= cap) {
+    throw new Error(
+      `Inventory full (${rowCount}/${cap} slots). Sell or delete items, level up, or buy more slots in the shop.`
+    );
+  }
 }
 
 /** Flatten equipped shop skins for the local match avatar. */
@@ -1658,11 +1798,16 @@ async function clearEquippedSnapshot(
   }
 }
 
-/** Sells an owned item back for a fraction of its original VP price. */
-export async function resellInventoryItem(inventoryItemId: string) {
+/** Sells an owned item back for a fraction of its original VP price.
+ *  `count` sells that many copies out of a stacked row (default: all of
+ *  them). The row is only deleted once its quantity reaches zero. */
+export async function resellInventoryItem(inventoryItemId: string, count?: number) {
   const user = await requireSessionUser();
   const item = await prisma.inventoryItem.findUnique({ where: { id: inventoryItemId } });
   if (!item || item.userId !== user.id) throw new Error('Item not found');
+
+  const ownedQty = Math.max(1, item.quantity ?? 1);
+  const sellQty = Math.max(1, Math.min(ownedQty, Math.floor(count ?? ownedQty)));
 
   const { getSiteSettings } = await import('@/lib/progression-actions');
   const { parseInventoryConfig } = await import('@/lib/inventory-config');
@@ -1670,9 +1815,16 @@ export async function resellInventoryItem(inventoryItemId: string) {
   const invCfg = parseInventoryConfig(
     (settings as { inventoryConfigJson?: string }).inventoryConfigJson ?? '{}'
   );
-  const refund = Math.floor(item.vpValue * invCfg.resellRate);
+  const refund = Math.floor(item.vpValue * invCfg.resellRate) * sellQty;
+  const remaining = ownedQty - sellQty;
+
   await prisma.$transaction([
-    prisma.inventoryItem.delete({ where: { id: item.id } }),
+    remaining > 0
+      ? prisma.inventoryItem.update({
+          where: { id: item.id },
+          data: { quantity: remaining },
+        })
+      : prisma.inventoryItem.delete({ where: { id: item.id } }),
     prisma.user.update({
       where: { id: user.id },
       data: {
@@ -1684,25 +1836,37 @@ export async function resellInventoryItem(inventoryItemId: string) {
     }),
   ]);
 
-  if (item.isEquipped) {
+  if (remaining <= 0 && item.isEquipped) {
     await clearEquippedSnapshot(user.id, item.cosmeticSlot);
   }
   if (item.cosmeticSlot) {
     await processWebsiteAction(user.id, 'cosmetics_resold');
     await processWebsiteAction(user.id, 'cosmetic_owned');
   }
-  return { ok: true as const, refund };
+  return { ok: true as const, refund, soldCount: sellQty, remaining };
 }
 
-/** Permanently discards an owned item with no refund (inventory cleanup). */
-export async function deleteInventoryItem(inventoryItemId: string) {
+/** Permanently discards an owned item with no refund (inventory cleanup).
+ *  `count` removes that many copies out of a stacked row (default: all). */
+export async function deleteInventoryItem(inventoryItemId: string, count?: number) {
   const user = await requireSessionUser();
   const item = await prisma.inventoryItem.findUnique({ where: { id: inventoryItemId } });
   if (!item || item.userId !== user.id) throw new Error('Item not found');
 
-  await prisma.inventoryItem.delete({ where: { id: item.id } });
+  const ownedQty = Math.max(1, item.quantity ?? 1);
+  const removeQty = Math.max(1, Math.min(ownedQty, Math.floor(count ?? ownedQty)));
+  const remaining = ownedQty - removeQty;
 
-  if (item.isEquipped) {
+  if (remaining > 0) {
+    await prisma.inventoryItem.update({
+      where: { id: item.id },
+      data: { quantity: remaining },
+    });
+  } else {
+    await prisma.inventoryItem.delete({ where: { id: item.id } });
+  }
+
+  if (remaining <= 0 && item.isEquipped) {
     await clearEquippedSnapshot(user.id, item.cosmeticSlot);
   }
   if (item.cosmeticSlot) {
@@ -1713,7 +1877,7 @@ export async function deleteInventoryItem(inventoryItemId: string) {
     await processWebsiteAction(user.id, 'cosmetics_deleted');
     await processWebsiteAction(user.id, 'cosmetic_owned');
   }
-  return { ok: true as const };
+  return { ok: true as const, removedCount: removeQty, remaining };
 }
 
 // --- Reputation (+rep / -rep) ---
@@ -2260,6 +2424,76 @@ export async function adminDeleteStoreItem(id: string) {
   await requireStaff();
   await prisma.storeItem.delete({ where: { id } });
   return { ok: true };
+}
+
+// --- Inventory slot packs (admin CRUD + player-facing list) ---
+
+/** Admin: list all slot_pack StoreItems (live + hidden). */
+export async function adminGetSlotPacks() {
+  await requireStaff();
+  return prisma.storeItem.findMany({
+    where: { itemCategory: 'slot_pack' },
+    orderBy: { vpPrice: 'asc' },
+  });
+}
+
+/** Admin: create or update a slot pack ("+N Slots" for X VP). */
+export async function adminUpsertSlotPack(input: {
+  id?: string;
+  itemName: string;
+  vpPrice: number;
+  slotAmount: number;
+  isAvailable?: boolean;
+}) {
+  await requireStaff();
+  const itemName = input.itemName.trim() || `+${Math.max(1, Math.round(input.slotAmount))} Slots`;
+  const vpPrice = Math.max(0, Math.round(input.vpPrice));
+  const slotAmount = Math.max(1, Math.round(input.slotAmount));
+
+  if (input.id) {
+    return prisma.storeItem.update({
+      where: { id: input.id },
+      data: {
+        itemName,
+        vpPrice,
+        slotAmount,
+        isAvailable: input.isAvailable ?? true,
+      },
+    });
+  }
+  const itemSku = `slot_pack:${slotAmount}:${Date.now().toString(36)}`;
+  return prisma.storeItem.create({
+    data: {
+      itemName,
+      itemCategory: 'slot_pack',
+      itemSku,
+      vpPrice,
+      slotAmount,
+      isAvailable: input.isAvailable ?? true,
+    },
+  });
+}
+
+export async function adminDeleteSlotPack(id: string) {
+  await requireStaff();
+  const item = await prisma.storeItem.findUnique({ where: { id } });
+  if (!item || item.itemCategory !== 'slot_pack') throw new Error('Slot pack not found');
+  await prisma.storeItem.delete({ where: { id } });
+  return { ok: true };
+}
+
+/** Player-facing: available slot packs shown in the shop's Inventory Slots section. */
+export async function getAvailableSlotPacks() {
+  const items = await prisma.storeItem.findMany({
+    where: { itemCategory: 'slot_pack', isAvailable: true },
+    orderBy: { vpPrice: 'asc' },
+  });
+  return items.map((i) => ({
+    id: i.id,
+    itemName: i.itemName,
+    vpPrice: i.vpPrice,
+    slotAmount: i.slotAmount ?? 0,
+  }));
 }
 
 /** Admin: full catalog including unavailable/hidden items. */
