@@ -123,7 +123,7 @@ export async function getStoreItems() {
       where: {
         isAvailable: true,
         itemCategory: { not: 'slot_pack' },
-        OR: [{ caseOnly: false }, { caseOnly: null }],
+        caseOnly: { not: true },
       },
       orderBy: { vpPrice: 'asc' },
     });
@@ -143,7 +143,7 @@ export async function getStoreItems() {
         where: {
           isAvailable: true,
           itemCategory: { not: 'slot_pack' },
-          OR: [{ caseOnly: false }, { caseOnly: null }],
+          caseOnly: { not: true },
         },
         orderBy: { vpPrice: 'asc' },
       });
