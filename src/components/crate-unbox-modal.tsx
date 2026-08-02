@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Coins, Gift, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -178,7 +179,13 @@ export function CrateUnboxModal({
     };
   }, [result]);
 
-  return (
+  // Portal to document.body — this can be mounted deep inside a rail/panel
+  // that has its own backdrop-blur or transform (e.g. the Inventory drawer's
+  // nav rail), which would otherwise trap a plain `fixed` element inside that
+  // ancestor instead of covering the real viewport.
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <div className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4">
       <div className="w-full max-w-xl space-y-4">
         {phase === 'shaking' && <ShakingCrate imageUrl={result.caseImageUrl} active />}
@@ -233,6 +240,7 @@ export function CrateUnboxModal({
           </Card>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

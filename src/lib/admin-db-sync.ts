@@ -18,7 +18,7 @@ import { STATIC_FALLBACK_WEAPONS } from '@/lib/weapon-catalog';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-08-02-clans';
+const DB_SCHEMA_SYNC_VERSION = '2026-08-02-crates';
 
 async function requireAdmin() {
   const session = await auth();
@@ -492,6 +492,26 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`Clan verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — Clan/ClanMember/ClanJoinRequest not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify: crate fields (InventoryItem.caseDefId/crateSource,
+  // Mission/Achievement rewardCaseId) added for admin/shop/mission crate awards.
+  try {
+    await prisma.inventoryItem.findFirst({
+      select: { id: true, caseDefId: true, crateSource: true, itemCategory: true },
+    });
+    steps.push('InventoryItem.caseDefId/crateSource fields readable');
+    await prisma.missionTemplate.findFirst({ select: { id: true, rewardCaseId: true } });
+    await prisma.achievementDefinition.findFirst({ select: { id: true, rewardCaseId: true } });
+    steps.push('Mission/Achievement rewardCaseId fields readable');
+    const caseCount = await prisma.caseDefinition.count();
+    steps.push(`CaseDefinition collection verified (count=${caseCount})`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`Crate fields verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — crate fields not available. Run db push. (${msg})`
     );
   }
 
