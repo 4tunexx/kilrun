@@ -115,17 +115,17 @@ export default function PlayView({
   };
 
   return (
-    <div className="space-y-6">
-      <div>
+    <div className="max-w-6xl mx-auto space-y-8 px-1 sm:px-2 pb-6 animate-in fade-in duration-500">
+      <div className="pt-1">
         <h2 className="text-2xl font-bold tracking-tight text-slate-100">Play</h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-slate-400 mt-1.5 max-w-2xl leading-relaxed">
           Casual Competitive never touches KP. Ranked Competitive requires Premium and moves your
           Elo rank. Competitive needs Pulsar anticheat online.
         </p>
       </div>
 
       {gameDisabled && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 flex gap-2">
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3.5 text-sm text-amber-100 flex gap-2.5 items-start animate-in fade-in slide-in-from-top-2 duration-300">
           <Ban className="h-4 w-4 shrink-0 mt-0.5" />
           <span>{disabledMsg || 'Matches are temporarily disabled.'}</span>
         </div>
@@ -135,7 +135,7 @@ export default function PlayView({
         <button
           type="button"
           onClick={() => onOpenPulsar?.()}
-          className="w-full rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100 flex gap-2 text-left hover:bg-emerald-500/15 transition-colors"
+          className="w-full rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3.5 text-sm text-emerald-100 flex gap-2.5 items-start text-left transition-all duration-200 hover:bg-emerald-500/15 hover:border-emerald-400/60 hover:shadow-[0_0_0_1px_rgba(52,211,153,0.15),0_8px_20px_-8px_rgba(16,185,129,0.35)] active:scale-[0.99]"
         >
           <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
@@ -149,7 +149,7 @@ export default function PlayView({
         <PartyPanel userId={userId} onFollowLeader={onPartyFollow ?? onPlay} />
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-5 md:grid-cols-3">
         {modes.map((mode) => {
           const info = KILRUN_MODE_INFO[mode.id];
           const Icon = mode.icon;
@@ -160,7 +160,7 @@ export default function PlayView({
             return (
               <Card
                 key={mode.id}
-                className={`bg-gradient-to-br border ${info.accentClass} bg-slate-900/60 md:col-span-1`}
+                className={`bg-gradient-to-br border ${info.accentClass} bg-slate-900/60 md:col-span-1 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/30 hover:border-opacity-80`}
               >
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2">
@@ -171,9 +171,9 @@ export default function PlayView({
                     4v4 · 6 rounds. Pick Casual (XP / KD only) or Premium Ranked (KP Elo).
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-2">
+                <CardContent className="space-y-2.5">
                   <Button
-                    className="w-full"
+                    className="w-full transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
                     variant="secondary"
                     disabled={!canComp}
                     onClick={() => {
@@ -193,7 +193,7 @@ export default function PlayView({
                     <ArrowRight className="h-4 w-4 ml-auto" />
                   </Button>
                   <Button
-                    className="w-full bg-amber-600 hover:bg-amber-500 text-black font-bold"
+                    className="w-full bg-amber-600 hover:bg-amber-500 text-black font-bold transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
                     disabled={!canPlay}
                     onClick={() => {
                       if (!pulsarOn) {
@@ -221,7 +221,7 @@ export default function PlayView({
                         : 'Ranked · Go Premium'}
                     <ArrowRight className="h-4 w-4 ml-auto" />
                   </Button>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-slate-500 pt-0.5">
                     Casual: XP, VP, achievements — no rank change. Ranked: KP moves your ladder
                     rank
                     {freeRankedWeek ? ' (free week open)' : ''}.
@@ -234,7 +234,11 @@ export default function PlayView({
           return (
             <Card
               key={mode.id}
-              className={`bg-gradient-to-br border ${info.accentClass} bg-slate-900/60`}
+              className={`bg-gradient-to-br border ${info.accentClass} bg-slate-900/60 transition-all duration-300 ${
+                canPlay
+                  ? 'hover:-translate-y-1 hover:shadow-xl hover:shadow-black/30 hover:border-opacity-80'
+                  : 'opacity-80'
+              }`}
             >
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between gap-2">
@@ -255,7 +259,7 @@ export default function PlayView({
               <CardContent className="space-y-3">
                 <p className="text-xs text-slate-400">{info.players}</p>
                 <Button
-                  className="w-full"
+                  className="w-full transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
                   disabled={!canPlay}
                   onClick={() => void startQueue(mode.id)}
                 >

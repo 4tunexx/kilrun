@@ -246,6 +246,18 @@ export interface EditorViewportApi {
   duplicateSelected: (axis?: 'x' | 'y' | 'z') => void;
   /** Align multi-selection: shared bottom Y, edge-to-edge along X. Returns false if nothing snapped. */
   snapSelectedTogether: (idsOverride?: string[]) => boolean;
+  /**
+   * Snap every non-anchor selected object onto an EXPLICIT face of the anchor
+   * (first-selected item), instead of auto-guessing the closest face. `face`
+   * picks which side of the anchor the rest of the selection is glued to —
+   * e.g. '+x' = to the right, '-y' = underneath / hanging below, '+y' =
+   * stacked on top. Centers the two non-chosen axes so pieces line up
+   * face-to-face cleanly (side-to-side, top-to-top).
+   */
+  snapSelectedToFace: (
+    face: '+x' | '-x' | '+y' | '-y' | '+z' | '-z',
+    idsOverride?: string[]
+  ) => boolean;
   /** Drop selection onto the floor / supporting surface under each pivot. */
   snapSelectedToFloor: (idsOverride?: string[]) => boolean;
   focusSelected: () => void;
@@ -259,6 +271,16 @@ export interface EditorViewportApi {
   deleteSelected: () => void;
   updateSelected: (patch: Partial<EditorEntity>) => void;
   previewAnim: (which: 'default' | 'active') => void;
+  /** Freeze the selected (or given) entity's animation in the editor viewport — does not touch the map document. */
+  stopEntityAnim: (entityId?: string) => void;
+  /** Resume normal trigger-driven animation for one entity after stopEntityAnim(). */
+  resumeEntityAnim: (entityId?: string) => void;
+  /** Freeze every animated entity in the editor viewport at once. */
+  stopAllAnim: () => void;
+  /** Resume every entity frozen by stopAllAnim() / stopEntityAnim(). */
+  resumeAllAnim: () => void;
+  isAllAnimStopped: () => boolean;
+  isEntityAnimStopped: (entityId: string) => boolean;
   captureThumbnail: () => string | null;
   setTouchAxes: (axes: { moveX: number; moveY: number; lookX: number; lookY: number; sprint?: boolean }) => void;
   setViewLayout: (layout: EditorViewLayout) => void;
@@ -802,9 +824,13 @@ export function createEditorViewport(
     obj.position.add(delta);
   };
 
+  /** True while a TransformControls drag is in progress (mouse still down). */
+  let transformDragging = false;
+
   transform.addEventListener('dragging-changed', (e) => {
     orbit.enabled = !(e as { value: boolean }).value && !freeFly;
     const dragging = (e as { value: boolean }).value;
+    transformDragging = dragging;
     if (dragging) {
       if (proxyActive) {
         // Reset proxy pose so local offsets stay valid for this drag.
@@ -832,8 +858,65 @@ export function createEditorViewport(
       groupProxy.scale.set(1, 1, 1);
       captureProxyMembers();
       refreshSelectionOutlines();
+    } else if (!dragging && selectedId) {
+      // Drag just ended on a single selection: do the heavy grid-edge / 90°
+      // re-seat exactly ONCE here, instead of every objectChange tick during
+      // the drag. Doing it every frame fought the user's live rotation/move
+      // and made ramps appear to resize or reshape mid-drag.
+      finalizeSingleDrag();
     }
   });
+
+  /** Runs once when a single-object drag ends: snaps rotation to 90° steps
+   *  and re-seats grid-edge position for the FINAL pose only (Shift held). */
+  function finalizeSingleDrag() {
+    if (!shiftHeld || !selectedId) return;
+    const ent = doc.entities.find((x) => x.id === selectedId);
+    const obj = roots.get(selectedId);
+    if (!ent || !obj) return;
+    const layer = layerMeta(ent.layerId);
+    if (layer?.locked || ent.locked) return;
+
+    const scaleTuple: [number, number, number] = [obj.scale.x, obj.scale.y, obj.scale.z];
+
+    if (transform.mode === 'rotate') {
+      const snapDeg = 90;
+      const sx = Math.round(THREE.MathUtils.radToDeg(obj.rotation.x) / snapDeg) * snapDeg;
+      const sy = Math.round(THREE.MathUtils.radToDeg(obj.rotation.y) / snapDeg) * snapDeg;
+      const sz = Math.round(THREE.MathUtils.radToDeg(obj.rotation.z) / snapDeg) * snapDeg;
+      obj.rotation.set(
+        THREE.MathUtils.degToRad(sx),
+        THREE.MathUtils.degToRad(sy),
+        THREE.MathUtils.degToRad(sz)
+      );
+      const world = yawAlignedSize(entityWorldSize(ent.collisionSize, scaleTuple), sy);
+      obj.position.set(
+        ...snapPoseToGridEdges([obj.position.x, obj.position.y, obj.position.z], world, gridSize)
+      );
+    } else if (transform.mode === 'translate') {
+      const yawDeg = THREE.MathUtils.radToDeg(obj.rotation.y);
+      const world = yawAlignedSize(entityWorldSize(ent.collisionSize, scaleTuple), yawDeg);
+      obj.position.set(
+        ...snapPoseToGridEdges([obj.position.x, obj.position.y, obj.position.z], world, gridSize)
+      );
+    } else {
+      return;
+    }
+
+    lastPrimaryPos.copy(obj.position);
+    const e = doc.entities.find((x) => x.id === selectedId);
+    if (e) {
+      e.position = [obj.position.x, obj.position.y, obj.position.z];
+      e.rotation = [
+        THREE.MathUtils.radToDeg(obj.rotation.x),
+        THREE.MathUtils.radToDeg(obj.rotation.y),
+        THREE.MathUtils.radToDeg(obj.rotation.z),
+      ];
+      e.scale = [obj.scale.x, obj.scale.y, obj.scale.z];
+    }
+    handlers.onDocChange(doc);
+    refreshSelectionOutlines();
+  }
   transform.addEventListener('objectChange', () => {
     // —— Multi-select / group: transform proxy drives every member as one ——
     if (proxyActive && (transform as unknown as { object?: THREE.Object3D }).object === groupProxy) {
@@ -912,17 +995,55 @@ export function createEditorViewport(
       }
 
       if (scaleFromSide && shiftHeld) {
-        // One-sided + Shift: keep min faces fixed (grid-snapped), grow the pulled side.
+        // One-sided + Shift: keep the face OPPOSITE the dragged handle fixed
+        // (grid-snapped), grow only the pulled side. Which face is "fixed"
+        // depends on which handle is being dragged (transform.axis), not
+        // always the min/-X,-Z corner — otherwise dragging the +X handle
+        // and the -X handle both anchored to -X, so -X drags looked like
+        // they grew from the wrong side / grew both ways.
+        const gizmoAxis = (transform as unknown as { axis: string | null }).axis;
         const yawDeg = THREE.MathUtils.radToDeg(obj.rotation.y);
         const world = yawAlignedSize(entityWorldSize(ent.collisionSize, nextScale), yawDeg);
         const oldWorld = yawAlignedSize(entityWorldSize(ent.collisionSize, oldScale), yawDeg);
         const prevPos = lastPrimaryPos;
-        const left = snapToGrid(prevPos.x - oldWorld[0] / 2, gridSize);
-        const back = snapToGrid(prevPos.z - oldWorld[2] / 2, gridSize);
-        const feet = snapToGrid(prevPos.y, gridSize);
-        obj.position.x = left + world[0] / 2;
-        obj.position.z = back + world[2] / 2;
-        obj.position.y = feet;
+
+        // Local-space delta (which face grew) before applying yaw.
+        const deltaX = world[0] - oldWorld[0];
+        const deltaZ = world[2] - oldWorld[2];
+        // Sign of the raw scale change on this axis tells us whether the
+        // dragged handle is on the + or - side for X/Z.
+        const grewPositiveX = nextScale[0] - oldScale[0] >= 0;
+        const grewPositiveZ = nextScale[2] - oldScale[2] >= 0;
+
+        if (gizmoAxis === 'X') {
+          const anchor = grewPositiveX
+            ? snapToGrid(prevPos.x - oldWorld[0] / 2, gridSize) // -X face fixed, grow +X
+            : snapToGrid(prevPos.x + oldWorld[0] / 2, gridSize); // +X face fixed, grow -X
+          obj.position.x = grewPositiveX ? anchor + world[0] / 2 : anchor - world[0] / 2;
+        } else if (deltaX !== 0) {
+          const left = snapToGrid(prevPos.x - oldWorld[0] / 2, gridSize);
+          obj.position.x = left + world[0] / 2;
+        }
+
+        if (gizmoAxis === 'Z') {
+          const anchor = grewPositiveZ
+            ? snapToGrid(prevPos.z - oldWorld[2] / 2, gridSize)
+            : snapToGrid(prevPos.z + oldWorld[2] / 2, gridSize);
+          obj.position.z = grewPositiveZ ? anchor + world[2] / 2 : anchor - world[2] / 2;
+        } else if (deltaZ !== 0) {
+          const back = snapToGrid(prevPos.z - oldWorld[2] / 2, gridSize);
+          obj.position.z = back + world[2] / 2;
+        }
+
+        if (gizmoAxis === 'Y') {
+          const grewPositiveY = nextScale[1] - oldScale[1] >= 0;
+          const feet = grewPositiveY
+            ? snapToGrid(prevPos.y, gridSize)
+            : snapToGrid(prevPos.y + (oldWorld[1] - world[1]), gridSize);
+          obj.position.y = feet;
+        } else {
+          obj.position.y = snapToGrid(prevPos.y, gridSize);
+        }
       } else if (scaleFromSide) {
         // Grow/shrink from the pulled handle; opposite face stays put.
         applyScaleFromSide(obj, ent, oldScale, nextScale);
@@ -940,47 +1061,23 @@ export function createEditorViewport(
       }
 
       lastPrimaryScale.set(...nextScale);
-    } else if (shiftHeld) {
-      const scaleTuple: [number, number, number] = [
-        obj.scale.x,
-        obj.scale.y,
-        obj.scale.z,
-      ];
-      const yawDeg = THREE.MathUtils.radToDeg(obj.rotation.y);
+    } else if (shiftHeld && transformDragging) {
+      // Live drag, Shift held: snap the RAW value only (position to grid cell,
+      // rotation to 15° increments for a smooth feel) — never recompute
+      // world-size edges or hard-lock to 90° here. Re-seating edges every
+      // frame from a live, not-yet-final rotation is what made ramps look
+      // like they were resizing/reshaping mid-drag. The precise 90°/edge
+      // snap happens once in finalizeSingleDrag() when the drag ends.
       if (transform.mode === 'translate') {
-        const world = yawAlignedSize(
-          entityWorldSize(ent.collisionSize, scaleTuple),
-          yawDeg
-        );
-        obj.position.set(
-          ...snapPoseToGridEdges(
-            [obj.position.x, obj.position.y, obj.position.z],
-            world,
-            gridSize
-          )
-        );
+        obj.position.x = snapToGrid(obj.position.x, gridSize);
+        obj.position.z = snapToGrid(obj.position.z, gridSize);
+        if (snapY) obj.position.y = snapToGrid(obj.position.y, gridSize);
       } else if (transform.mode === 'rotate') {
-        const snapDeg = 90;
-        const sx = Math.round(THREE.MathUtils.radToDeg(obj.rotation.x) / snapDeg) * snapDeg;
-        const sy = Math.round(THREE.MathUtils.radToDeg(obj.rotation.y) / snapDeg) * snapDeg;
-        const sz = Math.round(THREE.MathUtils.radToDeg(obj.rotation.z) / snapDeg) * snapDeg;
-        obj.rotation.set(
-          THREE.MathUtils.degToRad(sx),
-          THREE.MathUtils.degToRad(sy),
-          THREE.MathUtils.degToRad(sz)
-        );
-        // After a 90° turn, re-seat edges on the grid with the new yaw footprint.
-        const world = yawAlignedSize(
-          entityWorldSize(ent.collisionSize, scaleTuple),
-          sy
-        );
-        obj.position.set(
-          ...snapPoseToGridEdges(
-            [obj.position.x, obj.position.y, obj.position.z],
-            world,
-            gridSize
-          )
-        );
+        const softSnapDeg = 15;
+        obj.rotation.y =
+          THREE.MathUtils.degToRad(
+            Math.round(THREE.MathUtils.radToDeg(obj.rotation.y) / softSnapDeg) * softSnapDeg
+          );
       }
     } else if (gridSnap && transform.mode === 'translate') {
       obj.position.x = snapToGrid(obj.position.x, gridSize);
@@ -3161,6 +3258,128 @@ export function createEditorViewport(
       handlers.onSelectionChange?.(selectedIds);
       return true;
     },
+    snapSelectedToFace: (face, idsOverride) => {
+      const raw =
+        idsOverride && idsOverride.length >= 2
+          ? idsOverride
+          : selectedIds.length >= 2
+            ? selectedIds
+            : selectedId
+              ? [selectedId]
+              : [];
+      const ids = Array.from(new Set(raw.filter(Boolean)));
+      if (ids.length < 2) return false;
+
+      const ents = ids
+        .map((id) => doc.entities.find((e) => e.id === id))
+        .filter((e): e is EditorEntity => !!e);
+      if (ents.length < 2) return false;
+      if (ents.some((e) => isLockedEnt(e))) {
+        handlers.onPlaceResult?.('locked', 'selection');
+        return false;
+      }
+
+      /** Real world AABB half-extents + center + pivot offset (same shape as snapSelectedTogether). */
+      const measure = (e: EditorEntity) => {
+        const root = roots.get(e.id);
+        if (root) {
+          root.updateMatrixWorld(true);
+          const box = new THREE.Box3().setFromObject(root);
+          if (!box.isEmpty()) {
+            return {
+              hx: Math.max(0.05, (box.max.x - box.min.x) / 2),
+              hy: Math.max(0.05, (box.max.y - box.min.y) / 2),
+              hz: Math.max(0.05, (box.max.z - box.min.z) / 2),
+              cx: (box.min.x + box.max.x) / 2,
+              cy: (box.min.y + box.max.y) / 2,
+              cz: (box.min.z + box.max.z) / 2,
+              ox: (box.min.x + box.max.x) / 2 - root.position.x,
+              oy: (box.min.y + box.max.y) / 2 - root.position.y,
+              oz: (box.min.z + box.max.z) / 2 - root.position.z,
+            };
+          }
+        }
+        const hx = Math.max(0.5, Math.abs(e.scale[0]));
+        const hy = Math.max(0.15, Math.abs(e.scale[1]));
+        const hz = Math.max(0.5, Math.abs(e.scale[2]));
+        return {
+          hx,
+          hy,
+          hz,
+          cx: e.position[0],
+          cy: e.position[1],
+          cz: e.position[2],
+          ox: 0,
+          oy: 0,
+          oz: 0,
+        };
+      };
+
+      const anchorEnt = ents[0];
+      const aM = measure(anchorEnt);
+      const updates = new Map<string, [number, number, number]>();
+
+      // Anchor never moves.
+      {
+        const root = roots.get(anchorEnt.id);
+        updates.set(anchorEnt.id, [
+          root?.position.x ?? anchorEnt.position[0],
+          root?.position.y ?? anchorEnt.position[1],
+          root?.position.z ?? anchorEnt.position[2],
+        ]);
+      }
+
+      // Every other selected piece is placed flush against the CHOSEN face of
+      // the anchor and stacked along that same face for pieces beyond the
+      // first (so picking "+x" lines up a whole row to the right, not just
+      // one piece on top of another). The two axes perpendicular to the
+      // chosen face are centered on the anchor so faces align edge-to-edge
+      // (side-to-side / top-to-top) instead of drifting off-center.
+      let cursor = { cx: aM.cx, cy: aM.cy, cz: aM.cz, hx: aM.hx, hy: aM.hy, hz: aM.hz };
+      for (let i = 1; i < ents.length; i++) {
+        const e = ents[i];
+        const m = measure(e);
+        let cx = aM.cx;
+        let cy = aM.cy;
+        let cz = aM.cz;
+        if (face === '+x' || face === '-x') {
+          cx = face === '+x' ? cursor.cx + cursor.hx + m.hx : cursor.cx - cursor.hx - m.hx;
+          cy = aM.cy - aM.hy + m.hy; // bottom-align on anchor's floor
+          cz = aM.cz; // center on anchor's depth
+        } else if (face === '+y' || face === '-y') {
+          cy = face === '+y' ? cursor.cy + cursor.hy + m.hy : cursor.cy - cursor.hy - m.hy;
+          cx = aM.cx; // center X on anchor
+          cz = aM.cz; // center Z on anchor
+        } else {
+          cz = face === '+z' ? cursor.cz + cursor.hz + m.hz : cursor.cz - cursor.hz - m.hz;
+          cx = aM.cx; // center on anchor's width
+          cy = aM.cy - aM.hy + m.hy; // bottom-align
+        }
+        const pos: [number, number, number] = [cx - m.ox, cy - m.oy, cz - m.oz];
+        updates.set(e.id, pos);
+        cursor = { cx, cy, cz, hx: m.hx, hy: m.hy, hz: m.hz };
+      }
+
+      selectedIds = ids;
+      selectedId = ids[ids.length - 1] ?? null;
+
+      doc = {
+        ...doc,
+        entities: doc.entities.map((e) => {
+          const pos = updates.get(e.id);
+          return pos ? { ...e, position: pos } : e;
+        }),
+      };
+      for (const [id, pos] of updates) {
+        const root = roots.get(id);
+        if (root) root.position.set(pos[0], pos[1], pos[2]);
+      }
+      handlers.onDocChange(doc);
+      attachSelectionGizmo();
+      refreshGizmos();
+      handlers.onSelectionChange?.(selectedIds);
+      return true;
+    },
     snapSelectedToFloor: (idsOverride) => {
       const ids =
         idsOverride && idsOverride.length
@@ -3365,6 +3584,32 @@ export function createEditorViewport(
       if (which === 'active') director.previewActive(ent);
       else director.playDefault(ent);
     },
+    stopEntityAnim: (entityId) => {
+      const id = entityId ?? selectedId;
+      if (!id) return;
+      director.stopEntity(id);
+    },
+    resumeEntityAnim: (entityId) => {
+      const id = entityId ?? selectedId;
+      if (!id) return;
+      director.resumeEntity(id);
+      const ent = doc.entities.find((e) => e.id === id);
+      if (ent) director.playDefault(ent);
+    },
+    stopAllAnim: () => {
+      director.stopAll();
+    },
+    resumeAllAnim: () => {
+      director.resumeAll();
+      // Re-kick every entity's default/always animation now that freeze is lifted.
+      for (const ent of doc.entities) {
+        if (ent.animation?.defaultClip || ent.animation?.trigger === 'always') {
+          director.playDefault(ent);
+        }
+      }
+    },
+    isAllAnimStopped: () => director.isAllStopped,
+    isEntityAnimStopped: (entityId) => director.isFrozen(entityId),
     captureThumbnail: () => {
       try {
         renderer.render(scene, camera);

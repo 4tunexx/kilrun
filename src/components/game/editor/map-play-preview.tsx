@@ -888,9 +888,14 @@ export function MapPlayPreview({
 
         // Authoritative-style AABB hazards (sim space).
         for (const h of hazards) {
-          if (h.buttonControlled) continue;
-          const pulsing = !h.alwaysActive && (hazardActive.get(h.id) ?? false);
-          if (!h.alwaysActive && !pulsing) continue;
+          // Button-controlled traps start disarmed and only deal damage once
+          // a wired Button has activated them (director.activated mirrors the
+          // same latch used for the trap's own activeClip animation). This
+          // was previously skipped unconditionally, so button-armed traps
+          // animated on trigger but never actually hurt the player.
+          if (h.buttonControlled && !director.isActivated(h.id)) continue;
+          const pulsing = !h.alwaysActive && !h.buttonControlled && (hazardActive.get(h.id) ?? false);
+          if (!h.alwaysActive && !h.buttonControlled && !pulsing) continue;
           const halfW = h.width / 2 + 0.35;
           const halfD = h.width / 2 + 0.35;
           const halfH = h.height / 2;

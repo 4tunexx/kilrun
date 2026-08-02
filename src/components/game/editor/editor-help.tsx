@@ -91,6 +91,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
       'Free Fly (Ctrl): WASD move, mouse look, Space up, C down. Placement disabled. Ctrl again to exit.',
       'W / E / R = translate / rotate / scale. Hold Shift = exact grid snap (move by cell, rotate 90°, scale to cell sizes, edges align). Properties: Visible / Lock / Group / Ungroup (works on multi-select). G = grid snap toggle. F = focus selection. Alt+drag = box select. Measure tool = click two ground points.',
       'Ctrl+D duplicate +X, Ctrl+Shift+D +Z. Ctrl+Z / Ctrl+Y undo/redo. Ctrl+S save. Red wire boxes = death zones; yellow lines = button→trap links.',
+      'Texture copy/paste: with the Paint tool active, right-click any textured solid to copy its exact texture, tile density, offset, and rotation, then left-click another solid to paste it — it lines up seam-free, matching the source exactly (no re-tiling or re-aligning by hand). A "Copied" chip appears in the Textures tab confirming what is loaded; Clear reverts to the plain paint brush.',
     ],
   },
   {

@@ -13,6 +13,10 @@ export class AnimationDirector {
   private activated = new Set<string>(); // play-once latched
   private signals = new Set<string>(); // active signal entity ids / channels
   private roots = new Map<string, THREE.Object3D>();
+  /** Editor-only: entities frozen via stopEntity()/stopAll() — ignore trigger evaluation until resumed. */
+  private frozen = new Set<string>();
+  /** Editor-only: global Stop All toggle — freezes every entity, including newly registered ones. */
+  private allStopped = false;
 
   register(entityId: string, root: THREE.Object3D, clips: THREE.AnimationClip[]) {
     this.unregister(entityId);
@@ -28,6 +32,9 @@ export class AnimationDirector {
       map.set(clip.name || '(unnamed)', action);
     }
     this.actions.set(entityId, map);
+    // If a global Stop All is active, newly (re)registered entities join it
+    // frozen too, instead of popping in and immediately looping.
+    if (this.allStopped) this.frozen.add(entityId);
   }
 
   unregister(entityId: string) {
@@ -38,6 +45,7 @@ export class AnimationDirector {
     this.current.delete(entityId);
     this.activated.delete(entityId);
     this.roots.delete(entityId);
+    this.frozen.delete(entityId);
   }
 
   clear() {
@@ -53,8 +61,23 @@ export class AnimationDirector {
     this.signals.delete(entityIdOrChannel);
   }
 
+  /**
+   * Whether a button (or anything wired via activatesEntityIds / signal) has
+   * latched this entity active. Used outside the animation system too — e.g.
+   * button-controlled hazards read this to know whether to actually deal
+   * damage, since arming a trap from a button is the same activation path
+   * as its visual clip.
+   */
+  isActivated(entityId: string): boolean {
+    return this.activated.has(entityId) || this.signals.has(entityId);
+  }
+
   private play(entityId: string, clipName: string | undefined, loop: boolean) {
     if (!clipName) return;
+    // Editor-only freeze: entity is paused via per-object Stop or global Stop All.
+    // Trigger evaluation keeps calling play() every frame, so this must be a
+    // hard no-op — otherwise the mixer would immediately resume advancing.
+    if (this.frozen.has(entityId)) return;
     const actionMap = this.actions.get(entityId);
     const mixer = this.mixers.get(entityId);
     if (!actionMap || !mixer) return;
@@ -76,6 +99,7 @@ export class AnimationDirector {
   playDefault(ent: EditorEntity) {
     const anim = ent.animation;
     if (!anim?.defaultClip) return;
+    this.frozen.delete(ent.id); // explicit Play overrides a prior per-object Stop
     this.play(ent.id, anim.defaultClip, anim.loopDefault !== false);
   }
 
@@ -83,8 +107,49 @@ export class AnimationDirector {
   previewActive(ent: EditorEntity) {
     const anim = ent.animation;
     if (!anim?.activeClip) return;
+    this.frozen.delete(ent.id); // explicit Play overrides a prior per-object Stop
     this.activated.delete(ent.id);
     this.play(ent.id, anim.activeClip, anim.loopActive);
+  }
+
+  /**
+   * Editor-only: freeze one entity's animation on its current pose and stop
+   * the mixer from advancing. Distinct from unregister() — the mixer/actions
+   * stay wired up so a later playDefault()/previewActive() call still works.
+   */
+  stopEntity(entityId: string) {
+    const mixer = this.mixers.get(entityId);
+    const actionMap = this.actions.get(entityId);
+    if (!mixer || !actionMap) return;
+    actionMap.forEach((action) => action.stop());
+    this.current.delete(entityId);
+    this.activated.delete(entityId);
+    this.frozen.add(entityId);
+  }
+
+  /** Resume an entity previously frozen with stopEntity() — replays its default/active state. */
+  resumeEntity(entityId: string) {
+    this.frozen.delete(entityId);
+  }
+
+  isFrozen(entityId: string): boolean {
+    return this.frozen.has(entityId);
+  }
+
+  /** Editor-only: freeze every animated entity on the map at once (global Stop). */
+  stopAll() {
+    this.mixers.forEach((_mixer, id) => this.stopEntity(id));
+    this.allStopped = true;
+  }
+
+  /** Resume normal trigger evaluation for every entity after a global Stop. */
+  resumeAll() {
+    this.frozen.clear();
+    this.allStopped = false;
+  }
+
+  get isAllStopped(): boolean {
+    return this.allStopped;
   }
 
   updatePlayer(

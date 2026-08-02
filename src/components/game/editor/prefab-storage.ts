@@ -327,8 +327,11 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
 
   const model = e.model ?? '';
   const isHammerSolid = isHammerSolidEntity(e);
-  const wantsSolidVolume =
-    mat === 'solid' || e.solid === true || e.kind === 'door';
+  // Door used to always count as a solid volume here regardless of Material
+  // — harmless now that the outer export gate (entityExportsAsPlatform)
+  // correctly excludes walkthrough doors before reaching this function, but
+  // fixed so this stays correct if entityToPad is ever called directly.
+  const wantsSolidVolume = mat === 'solid' || e.solid === true;
   // Hammer++ / box solids are authoring volumes — always full collision when marked
   // solid (even short blocks). Do NOT force top-only for sizeY < 0.6.
   const topOnly =
@@ -691,12 +694,14 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
         !isInvisibleMarkerKind(e.kind) &&
         e.kind !== 'light' &&
         !!e.model &&
+        // Door respects its own Material choice like everywhere else now —
+        // it used to be force-excluded here too, compounding the same bug
+        // fixed in entityExportsAsPlatform (Solid dropdown doing nothing).
         resolveCollideMaterial(e) !== 'walkthrough' &&
         !e.model.startsWith('wall') &&
         !e.model.startsWith('column') &&
         !e.model.startsWith('pipe') &&
         !e.model.startsWith('figurine') &&
-        !e.model.startsWith('door') &&
         !e.model.startsWith('button')
     );
   }

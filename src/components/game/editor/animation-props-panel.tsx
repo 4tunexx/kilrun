@@ -10,6 +10,9 @@ export function AnimationPropsPanel({
   allEntities,
   onChange,
   onPreview,
+  onStop,
+  onResume,
+  isStopped,
   onWireTrap,
   onOpenPlayerStudio,
 }: {
@@ -17,6 +20,12 @@ export function AnimationPropsPanel({
   allEntities: EditorEntity[];
   onChange: (patch: Partial<EditorEntity>) => void;
   onPreview?: (which: 'default' | 'active') => void;
+  /** Freeze this entity's animation in the editor viewport (does not affect Play Test / live match). */
+  onStop?: () => void;
+  /** Resume this entity's animation after Stop. */
+  onResume?: () => void;
+  /** Whether this entity is currently frozen via Stop. */
+  isStopped?: boolean;
   /** When a button picks a trap, wire trap.listenTo → button */
   onWireTrap?: (trapId: string, buttonId: string) => void;
   /** Open dedicated Player Model side panel */
@@ -83,6 +92,29 @@ export function AnimationPropsPanel({
               <option value="signal">Signal from button</option>
             </select>
           </label>
+
+          {anim.trigger === 'always' && (
+            <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-2 py-1.5 space-y-1.5">
+              <p className="text-[10px] text-amber-200/90 leading-snug">
+                "Always loop default" plays in the editor viewport too, non-stop. Use{' '}
+                <b>Stop</b> below to freeze it here while you work — this only affects the
+                editor preview, not Play Test or the live match.
+              </p>
+              {(onStop || onResume) && (
+                <button
+                  type="button"
+                  className={`w-full text-xs py-1.5 rounded font-semibold ${
+                    isStopped
+                      ? 'bg-emerald-600/40 hover:bg-emerald-500/50 text-emerald-100'
+                      : 'bg-rose-600/40 hover:bg-rose-500/50 text-rose-100'
+                  }`}
+                  onClick={() => (isStopped ? onResume?.() : onStop?.())}
+                >
+                  {isStopped ? 'Play (resume in editor)' : 'Stop (freeze in editor)'}
+                </button>
+              )}
+            </div>
+          )}
 
           <label className="block text-xs text-white/60">
             Default clip (idle / closed)
@@ -241,6 +273,20 @@ export function AnimationPropsPanel({
               >
                 Preview open
               </button>
+              {(onStop || onResume) && (
+                <button
+                  type="button"
+                  className={`flex-1 text-xs py-1 rounded font-semibold ${
+                    isStopped
+                      ? 'bg-emerald-600/40 hover:bg-emerald-500/50 text-emerald-100'
+                      : 'bg-rose-600/40 hover:bg-rose-500/50 text-rose-100'
+                  }`}
+                  onClick={() => (isStopped ? onResume?.() : onStop?.())}
+                  title="Freeze / resume this object's animation in the editor only"
+                >
+                  {isStopped ? 'Play' : 'Stop'}
+                </button>
+              )}
             </div>
           )}
 

@@ -124,6 +124,10 @@ export function entityShowsGameplayMaterial(
   if (ent.kind === 'spawn_team_a' || ent.kind === 'spawn_team_b' || ent.kind === 'spawn_monster') {
     return false;
   }
+  // Button is a pure interact trigger — it isn't stood on or collided with,
+  // so Material (Solid/Water/Sand/Ice/Walkthrough) and Jump Pad boost never
+  // apply and only added noise to its Properties panel.
+  if (ent.kind === 'button') return false;
   return true;
 }
 
@@ -1773,7 +1777,6 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
     ent.kind === 'button' ||
     ent.kind === 'hazard' ||
     ent.kind === 'trap' ||
-    ent.kind === 'door' ||
     ent.kind === 'action' ||
     ent.kind === 'red_zone' ||
     ent.kind === 'spinner' ||
@@ -1782,6 +1785,13 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   ) {
     return false;
   }
+  // Door used to be force-excluded here no matter what Material was picked
+  // in Properties, so choosing "Solid" for a door silently did nothing —
+  // the player always walked straight through it. Doors now follow the same
+  // Material rules as every other kind below (Solid = blocks, Walkthrough =
+  // open). This does not yet account for open/close animation state — a
+  // Solid door blocks the path even mid-open-animation; that's a separate,
+  // more involved fix (would need collision to track the Active clip state).
   // Explicit walkthrough never collides.
   if (ent.collideMaterial === 'walkthrough' || ent.solid === false) return false;
   // Finish / revive / health floors / jump pads are standable trigger volumes.

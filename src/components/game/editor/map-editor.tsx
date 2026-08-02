@@ -70,6 +70,12 @@ import {
   Route,
   Package,
   Volume2,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  ArrowUpToLine,
+  ArrowDownToLine,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -283,6 +289,11 @@ export function MapEditor({
   const [editTool, setEditTool] = useState<EditTool>('select');
   const [hammerShape, setHammerShape] = useState<HammerPrimitive>(() => loadStickyHammerShape());
   const [paintTextureUrl, setPaintTextureUrl] = useState<string | null>(null);
+  /** Set after RMB-click on a solid with the Paint tool: exact texture+UV ready to LMB-paste. */
+  const [copiedTextureInfo, setCopiedTextureInfo] = useState<{
+    textureUrl: string | null;
+    sourceName?: string;
+  } | null>(null);
   /** Armed click-to-place kind (spawn flag, light, etc.) — cleared by Select / Escape / place-once. */
   const [pendingPlaceKind, setPendingPlaceKind] = useState<EditorEntity['kind'] | null>(null);
   const [viewLayout, setViewLayout] = useState<EditorViewLayout>('single');
@@ -370,6 +381,12 @@ export function MapEditor({
   });
   const panelResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [panelResizing, setPanelResizing] = useState(false);
+  /** Magnet tool: which face to snap the selection onto (side/top/etc) — user picks, we don't guess. */
+  const [snapFaceMenuOpen, setSnapFaceMenuOpen] = useState(false);
+  /** Entities frozen via per-object Stop in the editor viewport (editor-only, not saved to the map). */
+  const [stoppedAnimIds, setStoppedAnimIds] = useState<Set<string>>(new Set());
+  /** Global Stop All toggle for every animated entity in the editor viewport. */
+  const [allAnimStopped, setAllAnimStopped] = useState(false);
   /** Mobile/desktop properties inspector visibility when something is selected. */
   const [propsOpen, setPropsOpen] = useState(!mobileFirst);
   /** Bottom transform/place toolbar — persisted so Settings can toggle visibility. */
@@ -574,6 +591,20 @@ export function MapEditor({
             description: 'Opens platform-wide avatar settings — not placed on the map.',
           });
         }
+      },
+      onCopiedTexture: (info) => {
+        // RMB-click with Paint tool copies the source solid's exact texture +
+        // UV (tile density, offset, rotation). Surface it so the user knows
+        // the copy worked and what's loaded — previously this fired silently
+        // with zero UI feedback.
+        setCopiedTextureInfo({ textureUrl: info.textureUrl, sourceName: info.sourceName });
+        setPaintTextureUrl(info.textureUrl);
+        toast({
+          title: 'Texture copied',
+          description: info.sourceName
+            ? `Copied from “${info.sourceName}”. Left-click another solid to paste it aligned exactly the same.`
+            : 'Left-click another solid to paste it aligned exactly the same.',
+        });
       },
       onLockedEntityDoubleTap: (id) => {
         // Double-tap/double-click on a locked entity opens its properties panel
@@ -945,17 +976,13 @@ export function MapEditor({
         if (freeFly) apiRef.current?.setFreeFly(false);
       }
       if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey) {
-        const ids =
-          selectedIds.length >= 2
-            ? selectedIds
-            : selectedId
-              ? [selectedId, ...selectedIds.filter((id) => id !== selectedId)]
-              : [];
-        const ok = apiRef.current?.snapSelectedTogether(ids);
-        if (ok) {
+        if (selectedIds.length >= 2) {
+          setSnapFaceMenuOpen((v) => !v);
+        } else {
           toast({
-            title: 'Snapped together',
-            description: 'Edge-to-edge in a line, shared bottom height.',
+            title: 'Select 2 objects first',
+            description: 'Click one, then Shift+click another, then press M.',
+            variant: 'destructive',
           });
         }
       }
@@ -2663,33 +2690,41 @@ export function MapEditor({
               <p className="text-[10px] tracking-widest text-white/50 uppercase">Prefabs / Stamps</p>
               <p className="text-[11px] text-white/55 leading-relaxed">
                 Shift+click to multi-select ({selectedIds.length || (selectedId ? 1 : 0)} selected).
-                With 2+ selected, press the magnet Snap icon — each piece joins the closest face
-                (side or stack on top).
-                at the same bottom height (first click is the anchor).
+                With 2+ selected, press Snap and pick which side to join — the first object you
+                selected is the anchor and stays put.
               </p>
               {selectedIds.length >= 2 && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => {
-                    const ok = apiRef.current?.snapSelectedTogether(selectedIds);
-                    if (ok) {
-                      toast({
-                        title: 'Snapped together',
-                        description: 'Edge-to-edge in a line, shared bottom height.',
-                      });
-                    } else {
-                      toast({
-                        title: 'Select 2 objects first',
-                        description: 'Shift+click two objects, then Snap.',
-                        variant: 'destructive',
-                      });
-                    }
-                  }}
-                >
-                  <Magnet className="w-4 h-4 mr-1" /> Snap together
-                </Button>
+                <div className="relative">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => setSnapFaceMenuOpen((v) => !v)}
+                  >
+                    <Magnet className="w-4 h-4 mr-1" /> Snap…
+                  </Button>
+                  {snapFaceMenuOpen && (
+                    <SnapFacePicker
+                      onPick={(face) => {
+                        const ok = apiRef.current?.snapSelectedToFace(face, selectedIds);
+                        setSnapFaceMenuOpen(false);
+                        if (ok) {
+                          toast({
+                            title: 'Snapped',
+                            description: `Joined ${SNAP_FACE_LABELS[face]} of the first-selected object.`,
+                          });
+                        } else {
+                          toast({
+                            title: 'Snap failed',
+                            description: 'Select 2+ unlocked objects, then try again.',
+                            variant: 'destructive',
+                          });
+                        }
+                      }}
+                      onClose={() => setSnapFaceMenuOpen(false)}
+                    />
+                  )}
+                </div>
               )}
               <input
                 className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
@@ -3338,6 +3373,33 @@ export function MapEditor({
                 Pick a texture, drag a region on the atlas editor (if an object is selected), then
                 paint or apply. Atlas selection sets UV offset + tile for multi-tile sheets.
               </p>
+              <div className="rounded-lg border border-fuchsia-500/25 bg-fuchsia-500/5 px-2.5 py-2 space-y-1">
+                <p className="text-[10px] text-fuchsia-100/90 leading-snug">
+                  <span className="font-semibold text-fuchsia-200">Copy a texture:</span> with the
+                  Paint tool active, <span className="font-semibold">right-click</span> any
+                  textured solid to copy its exact texture, tiling, offset, and rotation. Then{' '}
+                  <span className="font-semibold">left-click</span> another solid to paste it —
+                  aligned exactly like the source, seam-free.
+                </p>
+                {copiedTextureInfo && (
+                  <div className="flex items-center justify-between gap-2 rounded-md bg-black/30 px-2 py-1">
+                    <span className="text-[10px] text-emerald-300 truncate">
+                      Copied{copiedTextureInfo.sourceName ? `: ${copiedTextureInfo.sourceName}` : ''} —
+                      ready to paste
+                    </span>
+                    <button
+                      type="button"
+                      className="text-[10px] text-white/50 hover:text-white/80 shrink-0"
+                      onClick={() => {
+                        apiRef.current?.clearCopiedTexture();
+                        setCopiedTextureInfo(null);
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+              </div>
               {(paintTextureUrl ||
                 selected?.textureUrl ||
                 env.defaultTextureUrl ||
@@ -3425,6 +3487,8 @@ export function MapEditor({
                     onClick={() => {
                       setPaintTextureUrl(t.url);
                       apiRef.current?.setPaintTexture(t.url);
+                      apiRef.current?.clearCopiedTexture();
+                      setCopiedTextureInfo(null);
                       setEditTool('paint');
                     }}
                     onContextMenu={(e) => {
@@ -3449,6 +3513,8 @@ export function MapEditor({
                       onClick={() => {
                         setPaintTextureUrl(t.dataUrl);
                         apiRef.current?.setPaintTexture(t.dataUrl);
+                        apiRef.current?.clearCopiedTexture();
+                        setCopiedTextureInfo(null);
                         setEditTool('paint');
                       }}
                     >
@@ -3804,6 +3870,7 @@ export function MapEditor({
                   <p>· <b className="text-white">Player Model</b> (left nav) = platform avatar (not map spawn)</p>
                   <p>· <b className="text-white">Hammer (H)</b> solids: Material + size in Properties</p>
                   <p>· <b className="text-white">Textures</b> tab: drag atlas region · paint brush</p>
+                  <p>· Paint tool: <b className="text-white">right-click</b> a solid to copy its texture, <b className="text-white">left-click</b> another to paste it aligned exactly the same</p>
                   <p>· <b className="text-white">Ctrl</b> free fly · <b className="text-white">G</b> snap · <b className="text-white">W/E/R</b> gizmo · <b className="text-white">Shift</b> exact grid</p>
                   <p>· Set as <b className="text-white">MAIN map</b> for Deathrun Play</p>
                 </>
@@ -4316,43 +4383,92 @@ export function MapEditor({
             <ToolBtn onClick={() => apiRef.current?.duplicateSelected()} title="Duplicate">
               <Copy className="w-4 h-4" />
             </ToolBtn>
-            <ToolBtn
-              disabled={selectedIds.length < 2}
-              onClick={() => {
-                const ids =
+            <div className="relative">
+              <ToolBtn
+                disabled={selectedIds.length < 2}
+                active={snapFaceMenuOpen}
+                onClick={() => {
+                  if (selectedIds.length < 2) {
+                    toast({
+                      title: 'Select 2 objects first',
+                      description: 'Click one, then Shift+click another, then press magnet.',
+                      variant: 'destructive',
+                    });
+                    return;
+                  }
+                  setSnapFaceMenuOpen((v) => !v);
+                }}
+                title={
                   selectedIds.length >= 2
-                    ? selectedIds
-                    : selectedId
-                      ? [selectedId, ...selectedIds.filter((id) => id !== selectedId)]
-                      : selectedIds;
-                const ok = apiRef.current?.snapSelectedTogether(ids);
-                if (ok) {
-                  toast({
-                    title: 'Snapped together',
-                    description: 'Edge-to-edge in a line, shared bottom height.',
-                  });
+                    ? 'Snap (magnet) — choose which side to join'
+                    : 'Snap (magnet) — Shift+click 2+ objects, then press'
+                }
+              >
+                <Magnet
+                  className={`w-4 h-4 ${
+                    selectedIds.length >= 2 ? 'text-emerald-300' : 'text-white/30'
+                  }`}
+                />
+              </ToolBtn>
+              {snapFaceMenuOpen && (
+                <SnapFacePicker
+                  onPick={(face) => {
+                    const ids =
+                      selectedIds.length >= 2
+                        ? selectedIds
+                        : selectedId
+                          ? [selectedId, ...selectedIds.filter((id) => id !== selectedId)]
+                          : selectedIds;
+                    const ok = apiRef.current?.snapSelectedToFace(face, ids);
+                    setSnapFaceMenuOpen(false);
+                    if (ok) {
+                      toast({
+                        title: 'Snapped',
+                        description: `Joined ${SNAP_FACE_LABELS[face]} of the first-selected object.`,
+                      });
+                    } else {
+                      toast({
+                        title: 'Snap failed',
+                        description: 'Select 2+ unlocked objects, then try again.',
+                        variant: 'destructive',
+                      });
+                    }
+                  }}
+                  onClose={() => setSnapFaceMenuOpen(false)}
+                />
+              )}
+            </div>
+            <ToolBtn onClick={() => apiRef.current?.deleteSelected()} title="Delete">
+              <Trash2 className="w-4 h-4 text-red-300" />
+            </ToolBtn>
+            <ToolBtn
+              active={allAnimStopped}
+              onClick={() => {
+                if (allAnimStopped) {
+                  apiRef.current?.resumeAllAnim();
+                  setAllAnimStopped(false);
+                  setStoppedAnimIds(new Set());
+                  toast({ title: 'Animations resumed', description: 'Every object plays normally again.' });
                 } else {
+                  apiRef.current?.stopAllAnim();
+                  setAllAnimStopped(true);
                   toast({
-                    title: 'Select 2 objects first',
-                    description: 'Click one, then Shift+click another, then press magnet.',
-                    variant: 'destructive',
+                    title: 'Animations stopped',
+                    description: 'Every looping animation is frozen in the editor (Play Test / live match unaffected).',
                   });
                 }
               }}
               title={
-                selectedIds.length >= 2
-                  ? 'Snap (magnet) — join closest faces (side or stack)'
-                  : 'Snap (magnet) — Shift+click 2+ objects, then press'
+                allAnimStopped
+                  ? 'Resume all animations in the editor'
+                  : 'Stop all animations in the editor (freeze looping objects like "Always" triggers)'
               }
             >
-              <Magnet
-                className={`w-4 h-4 ${
-                  selectedIds.length >= 2 ? 'text-emerald-300' : 'text-white/30'
-                }`}
-              />
-            </ToolBtn>
-            <ToolBtn onClick={() => apiRef.current?.deleteSelected()} title="Delete">
-              <Trash2 className="w-4 h-4 text-red-300" />
+              {allAnimStopped ? (
+                <Play className="w-4 h-4 text-emerald-300" />
+              ) : (
+                <Square className="w-4 h-4 text-rose-300" />
+              )}
             </ToolBtn>
           </div>
           )}
@@ -4705,6 +4821,19 @@ export function MapEditor({
                   allEntities={doc.entities}
                   onChange={patchSelected}
                   onPreview={(which) => apiRef.current?.previewAnim(which)}
+                  onStop={() => {
+                    apiRef.current?.stopEntityAnim(selected.id);
+                    setStoppedAnimIds((prev) => new Set(prev).add(selected.id));
+                  }}
+                  onResume={() => {
+                    apiRef.current?.resumeEntityAnim(selected.id);
+                    setStoppedAnimIds((prev) => {
+                      const next = new Set(prev);
+                      next.delete(selected.id);
+                      return next;
+                    });
+                  }}
+                  isStopped={allAnimStopped || stoppedAnimIds.has(selected.id)}
                   onWireTrap={wireTrapToButton}
                   onOpenPlayerStudio={openPlayerStudio}
                 />
@@ -6042,6 +6171,13 @@ export function MapEditor({
                         <option value="button">Button-armed (starts off)</option>
                       </select>
                     </label>
+                    {ensureHazard(selected).mode === 'button' && (
+                      <p className="text-[10px] text-amber-200/80 leading-snug">
+                        Damage stays off until a Button targets this trap: select a Button, set its
+                        "Activates trap / door" to this object. Pressing E on that button arms this
+                        trap for damage (and plays its Active clip if one is set).
+                      </p>
+                    )}
                     <label className="block text-xs text-white/60">
                       Obstacle style
                       <select
@@ -6511,6 +6647,84 @@ function ToolBtn({
     >
       {children}
     </button>
+  );
+}
+
+type SnapFace = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
+
+const SNAP_FACE_LABELS: Record<SnapFace, string> = {
+  '+x': 'right side',
+  '-x': 'left side',
+  '+y': 'top (stack on)',
+  '-y': 'bottom (hang under)',
+  '+z': 'front side',
+  '-z': 'back side',
+};
+
+/**
+ * Magnet tool popover — lets the user explicitly pick WHICH face of the
+ * anchor (first-selected object) the rest of the selection snaps onto,
+ * instead of auto-guessing the nearest face. Auto-guessing was the source
+ * of "it just snaps wherever" — two objects close on multiple axes could
+ * get glued on the wrong side entirely.
+ */
+function SnapFacePicker({
+  onPick,
+  onClose,
+}: {
+  onPick: (face: SnapFace) => void;
+  onClose: () => void;
+}) {
+  const btnCls =
+    'flex flex-col items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2.5 text-white/85 hover:bg-emerald-500/20 hover:border-emerald-400/40 hover:text-emerald-200 active:scale-95 transition-colors';
+  return (
+    <>
+      {/* Click-outside catcher */}
+      <div className="fixed inset-0 z-[9998]" onClick={onClose} />
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-[9999] w-64 rounded-xl border border-white/15 bg-slate-900/95 backdrop-blur p-3 shadow-2xl">
+        <p className="text-[10px] uppercase tracking-widest text-white/50 mb-2 text-center">
+          Snap selection to…
+        </p>
+        <p className="text-[10px] text-white/40 mb-2.5 text-center leading-relaxed">
+          First-selected object stays put. Others join the side you pick, flush and centered.
+        </p>
+        <div className="grid grid-cols-3 gap-1.5">
+          <div />
+          <button type="button" className={btnCls} onClick={() => onPick('+y')} title="Stack on top of anchor">
+            <ArrowUpToLine className="w-4 h-4" />
+            <span className="text-[10px] leading-none">Top</span>
+          </button>
+          <div />
+
+          <button type="button" className={btnCls} onClick={() => onPick('-x')} title="Join left side of anchor">
+            <ArrowLeftToLine className="w-4 h-4" />
+            <span className="text-[10px] leading-none">Left</span>
+          </button>
+          <button type="button" className={btnCls} onClick={() => onPick('+z')} title="Join front side of anchor">
+            <ArrowUp className="w-4 h-4" />
+            <span className="text-[10px] leading-none">Front</span>
+          </button>
+          <button type="button" className={btnCls} onClick={() => onPick('+x')} title="Join right side of anchor">
+            <ArrowRightToLine className="w-4 h-4" />
+            <span className="text-[10px] leading-none">Right</span>
+          </button>
+
+          <div />
+          <button type="button" className={btnCls} onClick={() => onPick('-z')} title="Join back side of anchor">
+            <ArrowDown className="w-4 h-4" />
+            <span className="text-[10px] leading-none">Back</span>
+          </button>
+          <div />
+
+          <div />
+          <button type="button" className={btnCls} onClick={() => onPick('-y')} title="Hang underneath anchor">
+            <ArrowDownToLine className="w-4 h-4" />
+            <span className="text-[10px] leading-none">Bottom</span>
+          </button>
+          <div />
+        </div>
+      </div>
+    </>
   );
 }
 
