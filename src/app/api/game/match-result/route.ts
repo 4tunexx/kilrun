@@ -7,6 +7,7 @@ import {
   type ServerMatchPlayerInput,
 } from '@/lib/match-rewards';
 import { getSiteSecretValue } from '@/lib/site-secrets';
+import { recordClanWarResult } from '@/lib/clan-lobby-actions';
 
 export const runtime = 'nodejs';
 
@@ -45,6 +46,10 @@ type Body = {
     scoreB?: number;
   };
   players?: BodyPlayer[];
+  clanWar?: {
+    lobbyAId?: string;
+    lobbyBId?: string;
+  };
 };
 
 const MODES = new Set<MatchRewardMode>([
@@ -154,6 +159,22 @@ export async function POST(req: NextRequest) {
 
   try {
     const awards = await applyServerMatchBatch({ matchId, mode, players });
+
+    const lobbyAId = body.clanWar?.lobbyAId;
+    const lobbyBId = body.clanWar?.lobbyBId;
+    if (lobbyAId && lobbyBId && (mode === 'competitive' || mode === 'competitive_ranked')) {
+      const winnerTeam =
+        winnerRole === 'team_a' || winnerRole === 'team_b' ? winnerRole : null;
+      await recordClanWarResult({
+        lobbyAId,
+        lobbyBId,
+        roomId: matchId,
+        winnerTeam,
+      }).catch((err) => {
+        console.error('[api/game/match-result] clan war record failed', err);
+      });
+    }
+
     return NextResponse.json({ ok: true, ...awards });
   } catch (err) {
     console.error('[api/game/match-result]', err);

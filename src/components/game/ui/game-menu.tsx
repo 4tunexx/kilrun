@@ -64,9 +64,12 @@ interface GameMenuProps {
    * (`absolute`, sized to a positioned ancestor). Opened from a normal page
    * (profile), there's no such ancestor to size against, so it needs to
    * cover the viewport directly instead. Default 'overlay' keeps existing
-   * in-match behavior byte-identical.
+   * in-match behavior byte-identical. 'inline' renders the same card as a
+   * normal block element in the page flow — no backdrop, no close button,
+   * always visible — for surfaces (like the profile's In-Game tab) that
+   * want the tree shown directly instead of behind a launcher/modal.
    */
-  positioning?: 'overlay' | 'viewport';
+  positioning?: 'overlay' | 'viewport' | 'inline';
 }
 
 /**
@@ -123,6 +126,15 @@ export function GameMenu({
     startDist: number;
     startZoom: number;
   }>({ mode: 'none', lastX: 0, lastY: 0, startDist: 0, startZoom: 1 });
+  // Tracks total movement since pointerdown so a hex "click" can be told
+  // apart from a pan/drag — needed because setPointerCapture below routes
+  // all pointer events (and the eventual click) to the viewport div, which
+  // would otherwise swallow clicks on the hex <button>s. Desktop mice fire
+  // a real click that gets captured by the viewport; touch browsers are
+  // more forgiving about dispatching the synthetic click to the original
+  // target, which is why this only ever showed up with a mouse.
+  const dragDistanceRef = useRef(0);
+  const DRAG_CLICK_THRESHOLD = 6;
 
   const fitToView = useCallback(() => {
     const el = viewportRef.current;
@@ -148,9 +160,22 @@ export function GameMenu({
     }
   }, [selectedKey]);
 
+  // Which hex (if any) the pointer went down on — captured here, before
+  // setPointerCapture below retargets `event.target` on every subsequent
+  // event (including the pointerup this resolves a click from) to the
+  // capturing element itself. Reading target in pointerup was the bug in
+  // the previous attempt at this fix: per the Pointer Events spec, capture
+  // overrides the *target*, not just where the event dispatches from, so
+  // e.target in onTreePointerEnd was always the outer viewport div, never
+  // the hex button under the cursor.
+  const downHexKeyRef = useRef<string | null>(null);
+
   const onTreePointerDown = (e: React.PointerEvent) => {
+    downHexKeyRef.current =
+      (e.target as HTMLElement).closest<HTMLElement>('[data-hex-key]')?.dataset.hexKey ?? null;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    dragDistanceRef.current = 0;
     if (pointersRef.current.size === 1) {
       gestureRef.current.mode = 'pan';
       gestureRef.current.lastX = e.clientX;
@@ -171,16 +196,29 @@ export function GameMenu({
       const dy = e.clientY - gestureRef.current.lastY;
       gestureRef.current.lastX = e.clientX;
       gestureRef.current.lastY = e.clientY;
+      dragDistanceRef.current += Math.hypot(dx, dy);
       setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
     } else if (gestureRef.current.mode === 'pinch' && pointersRef.current.size === 2) {
       const [a, b] = Array.from(pointersRef.current.values());
       const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      dragDistanceRef.current += Math.abs(dist - gestureRef.current.startDist);
       setZoom(clamp(gestureRef.current.startZoom * (dist / gestureRef.current.startDist), MIN_ZOOM, MAX_ZOOM));
     }
   };
 
+  /** setPointerCapture on the viewport (needed for pan/pinch, called in
+   * onTreePointerDown above) makes `event.target` for every subsequent
+   * event — pointerup included — report the capturing div itself, not the
+   * hex button the pointer is actually over. So a hex <button>'s own
+   * onClick/onPointerUp never fires, and re-reading e.target here doesn't
+   * work either; selection has to come from what was under the pointer at
+   * pointerdown time instead (downHexKeyRef, captured before capture takes
+   * effect), gated on movement so a real pan doesn't also select. */
   const onTreePointerEnd = (e: React.PointerEvent) => {
     pointersRef.current.delete(e.pointerId);
+    if (dragDistanceRef.current < DRAG_CLICK_THRESHOLD && downHexKeyRef.current) {
+      setSelectedKey(downHexKeyRef.current);
+    }
     if (pointersRef.current.size === 1) {
       const [[, pt]] = Array.from(pointersRef.current.entries());
       gestureRef.current.mode = 'pan';
@@ -191,12 +229,30 @@ export function GameMenu({
     }
   };
 
-  const onTreeWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    setZoom((z) => clamp(z - e.deltaY * 0.001, MIN_ZOOM, MAX_ZOOM));
-  };
+  const inline = positioning === 'inline';
 
-  if (!open) return null;
+  // React attaches wheel listeners as passive by default, so the synthetic
+  // onWheel's e.preventDefault() below is a no-op and the page scrolls right
+  // through the tree. Zoom still works, but so does page scroll — annoying
+  // when the tree fills the viewport. Bind a real, non-passive listener so
+  // preventDefault actually takes effect and only the tree zooms.
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom((z) => clamp(z - e.deltaY * 0.001, MIN_ZOOM, MAX_ZOOM));
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+    // Re-run once the viewport div actually mounts — for the modal usage
+    // (positioning="overlay"/"viewport") the component stays mounted across
+    // opens/closes but the div (and this ref) only exists while `open` is
+    // true, so this must re-attach whenever that flips.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, inline]);
+
+  if (!open && !inline) return null;
 
   const level = progression?.level ?? 1;
   const percent = progression?.percent ?? 0;
@@ -204,12 +260,21 @@ export function GameMenu({
   const abilityLevels = progression?.abilities ?? {};
   const selectedPower = activePowers.find((p) => p.key === selectedKey) ?? null;
 
-  return (
+  const content = (
     <div
-      className={`${positioning === 'viewport' ? 'fixed' : 'absolute'} inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-md pointer-events-auto p-4`}
+      className={
+        inline
+          ? 'w-full rounded-2xl border border-slate-700/30 bg-slate-800/40 backdrop-blur-sm'
+          : 'w-full max-w-6xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.09] to-white/[0.02] backdrop-blur-2xl shadow-2xl shadow-black/50'
+      }
     >
-      <div className="w-full max-w-6xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.09] to-white/[0.02] backdrop-blur-2xl shadow-2xl shadow-black/50">
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-gradient-to-b from-[#0f1724]/95 to-[#0f1724]/80 backdrop-blur-xl px-6 py-4">
+        <div
+          className={
+            inline
+              ? 'z-10 flex items-center justify-between gap-3 border-b border-slate-700/30 px-6 py-4 rounded-t-2xl'
+              : 'sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-gradient-to-b from-[#0f1724]/95 to-[#0f1724]/80 backdrop-blur-xl px-6 py-4'
+          }
+        >
           <div className="flex items-center gap-3">
             {avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -224,9 +289,11 @@ export function GameMenu({
               </p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close menu">
-            <X className="w-5 h-5 text-white" />
-          </Button>
+          {!inline && (
+            <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close menu">
+              <X className="w-5 h-5 text-white" />
+            </Button>
+          )}
         </div>
 
         <div className="px-6 pt-4">
@@ -262,13 +329,16 @@ export function GameMenu({
             </div>
             <div
               ref={viewportRef}
-              className="relative mx-auto w-full h-[380px] sm:h-[460px] overflow-hidden rounded-xl border border-white/10 bg-black/20 touch-none select-none cursor-grab active:cursor-grabbing"
+              className={`relative mx-auto w-full h-[380px] sm:h-[460px] overflow-hidden rounded-xl touch-none select-none cursor-grab active:cursor-grabbing ${
+                inline
+                  ? 'border border-slate-700/30 bg-slate-900/40 backdrop-blur-sm'
+                  : 'border border-white/10 bg-black/20'
+              }`}
               onPointerDown={onTreePointerDown}
               onPointerMove={onTreePointerMove}
               onPointerUp={onTreePointerEnd}
               onPointerCancel={onTreePointerEnd}
               onPointerLeave={onTreePointerEnd}
-              onWheel={onTreeWheel}
               onDoubleClick={fitToView}
             >
             {treeBackground && (treeBackground.backgroundUrl || treeBackground.backgroundColor) && (
@@ -385,6 +455,7 @@ export function GameMenu({
                   <button
                     key={p.key}
                     type="button"
+                    data-hex-key={p.key}
                     onClick={() => setSelectedKey(p.key)}
                     className={`absolute flex flex-col items-center justify-center gap-0.5 border-2 p-1.5 text-center transition ${stateCls} ${
                       selected ? 'ring-2 ring-white/80 ring-offset-0' : ''
@@ -447,7 +518,14 @@ export function GameMenu({
           </div>
 
           {/* Side panel — selected node detail, WayneTech-style */}
-          <div ref={panelRef} className="w-full lg:w-[260px] shrink-0 rounded-xl border border-white/10 bg-black/30 p-4">
+          <div
+            ref={panelRef}
+            className={`w-full lg:w-[260px] shrink-0 rounded-xl p-4 ${
+              inline
+                ? 'border border-slate-700/30 bg-slate-900/40 backdrop-blur-sm'
+                : 'border border-white/10 bg-black/30'
+            }`}
+          >
             {!selectedPower ? (
               <p className="text-[11px] text-white/40">Click a power hex to see its details here.</p>
             ) : (
@@ -520,12 +598,21 @@ export function GameMenu({
 
         <div className="px-6 pb-6">
           <p className="text-[10px] font-bold text-white/30 text-center">
-            {positioning === 'viewport'
+            {inline || positioning === 'viewport'
               ? 'Kill enemies and win matches to earn XP and Skill Points'
               : 'Press M to close · Kill enemies and win matches to earn XP and Skill Points'}
           </p>
         </div>
       </div>
+  );
+
+  if (inline) return content;
+
+  return (
+    <div
+      className={`${positioning === 'viewport' ? 'fixed' : 'absolute'} inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-md pointer-events-auto p-4`}
+    >
+      {content}
     </div>
   );
 }

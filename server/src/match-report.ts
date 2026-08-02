@@ -37,6 +37,11 @@ export type MatchReportPayload = {
     scoreB?: number;
   };
   players: MatchReportPlayer[];
+  /** Clan Wars — present only when both teams were clan lobbies. */
+  clanWar?: {
+    lobbyAId: string;
+    lobbyBId: string;
+  };
 };
 
 export type PlayerAward = {

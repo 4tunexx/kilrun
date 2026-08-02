@@ -359,6 +359,17 @@ export function MapEditor({
   const [uiCollapsed, setUiCollapsed] = useState(mobileFirst);
   /** Mobile left asset/library drawer (overlay). Desktop keeps the panel in-flow. */
   const [sidebarOpen, setSidebarOpen] = useState(!mobileFirst);
+  /** Icon rail (tool strip) — stays visible even when the wide content panel is collapsed. */
+  const [railOpen, setRailOpen] = useState(!mobileFirst);
+  /** Draggable width (px) of the wide content panel. Persisted across sessions. */
+  const [panelWidth, setPanelWidth] = useState(() => {
+    if (typeof window === 'undefined') return 288;
+    const raw = window.localStorage.getItem('kilrun.editorPanelWidth');
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 288;
+  });
+  const panelResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [panelResizing, setPanelResizing] = useState(false);
   /** Mobile/desktop properties inspector visibility when something is selected. */
   const [propsOpen, setPropsOpen] = useState(!mobileFirst);
   /** Bottom transform/place toolbar — persisted so Settings can toggle visibility. */
@@ -477,12 +488,14 @@ export function MapEditor({
     if (!isMobile) {
       setUiCollapsed(false);
       setSidebarOpen(true);
+      setRailOpen(true);
       setPropsOpen(true);
       setToolsOpen(true);
       return;
     }
     setUiCollapsed(true);
     setSidebarOpen(false);
+    setRailOpen(false);
     setToolsOpen(false);
     setPropsOpen(false);
     setShowHelp(false);
@@ -1769,12 +1782,14 @@ export function MapEditor({
         </div>
       )}
 
-      {/* Desktop: reopen library when collapsed */}
+      {/* Desktop: reopen library when collapsed (offset past the icon rail when it's showing) */}
       {!uiCollapsed && !isMobile && !sidebarOpen && (
         <button
           type="button"
           onClick={() => setSidebarOpen(true)}
-          className="fixed top-16 left-0 z-[140] flex h-12 w-7 items-center justify-center rounded-r-lg border border-l-0 border-white/20 bg-[#121a24] text-white/80 shadow-lg hover:bg-cyan-500/20 hover:text-cyan-200"
+          className={`fixed top-16 z-[140] flex h-12 w-7 items-center justify-center rounded-r-lg border border-l-0 border-white/20 bg-[#121a24] text-white/80 shadow-lg hover:bg-cyan-500/20 hover:text-cyan-200 ${
+            railOpen ? 'left-10' : 'left-0'
+          }`}
           title="Expand model library"
           aria-label="Expand model library"
         >
@@ -2002,7 +2017,7 @@ export function MapEditor({
           />
         )}
 
-        {!uiCollapsed && sidebarOpen && (
+        {!uiCollapsed && railOpen && (
         <div
           className={`border-r border-white/10 bg-[#0f1620] flex flex-col items-center py-2 gap-1 z-[70] ${
             isMobile
@@ -2078,21 +2093,48 @@ export function MapEditor({
           ))}
           <button
             type="button"
-            title="Collapse library"
+            title="Hide tool icons"
             className="mt-auto w-8 h-8 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10"
             onClick={() => {
               closeStudioPanels();
               setSidebarOpen(false);
+              setRailOpen(false);
             }}
-            aria-label="Collapse model panel"
+            aria-label="Hide tool icon rail"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
         </div>
         )}
 
+        {/* Reopen the icon rail once fully hidden */}
+        {!uiCollapsed && !isMobile && !railOpen && (
+          <button
+            type="button"
+            onClick={() => setRailOpen(true)}
+            className="absolute top-1/2 left-0 z-[140] flex h-12 w-6 -translate-y-1/2 items-center justify-center rounded-r-lg border border-l-0 border-white/20 bg-[#121a24] text-white/80 shadow-lg hover:bg-cyan-500/20 hover:text-cyan-200"
+            title="Show tool icons"
+            aria-label="Show tool icon rail"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
+
         {!uiCollapsed && sidebarOpen && (
         <div
+          style={
+            isMobile
+              ? undefined
+              : {
+                  width: Math.max(
+                    220,
+                    Math.min(
+                      panelWidth,
+                      Math.round((typeof window !== 'undefined' ? window.innerWidth : 1280) * 0.7)
+                    )
+                  ),
+                }
+          }
           className={`border-r border-white/10 bg-[#121a24] flex flex-col min-h-0 z-[70] relative ${
             isMobile
               ? `absolute left-10 top-0 bottom-0 shadow-2xl ${
@@ -2100,9 +2142,7 @@ export function MapEditor({
                     ? 'w-[min(22rem,calc(100vw-2.5rem))]'
                     : 'w-[min(18rem,calc(100vw-2.5rem))]'
                 }`
-              : isStudioSidebarTab(tab)
-                ? 'w-[min(26rem,40vw)] relative'
-                : 'w-72 relative'
+              : `relative ${panelResizing ? 'select-none' : ''}`
           }`}
         >
           {/* Edge arrow to collapse the model / library panel */}
@@ -2118,6 +2158,43 @@ export function MapEditor({
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
+
+          {/* Drag handle to resize the panel width (desktop only) */}
+          {!isMobile && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize panel"
+              title="Drag to resize"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                panelResizeRef.current = { startX: e.clientX, startWidth: panelWidth };
+                setPanelResizing(true);
+                const onMove = (ev: MouseEvent) => {
+                  if (!panelResizeRef.current) return;
+                  const delta = ev.clientX - panelResizeRef.current.startX;
+                  const next = Math.max(
+                    220,
+                    Math.min(panelResizeRef.current.startWidth + delta, Math.round(window.innerWidth * 0.7))
+                  );
+                  setPanelWidth(next);
+                };
+                const onUp = () => {
+                  panelResizeRef.current = null;
+                  setPanelResizing(false);
+                  window.removeEventListener('mousemove', onMove);
+                  window.removeEventListener('mouseup', onUp);
+                  setPanelWidth((w) => {
+                    window.localStorage.setItem('kilrun.editorPanelWidth', String(w));
+                    return w;
+                  });
+                };
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+              }}
+              className="absolute top-0 right-0 bottom-0 w-1.5 -mr-0.5 cursor-col-resize z-[75] hover:bg-cyan-400/40 active:bg-cyan-400/60"
+            />
+          )}
 
           {tab === 'tps' && (
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

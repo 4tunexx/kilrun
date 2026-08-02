@@ -18,7 +18,7 @@ import { STATIC_FALLBACK_WEAPONS } from '@/lib/weapon-catalog';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-07-31-sound-board';
+const DB_SCHEMA_SYNC_VERSION = '2026-08-02-clans';
 
 async function requireAdmin() {
   const session = await auth();
@@ -476,6 +476,22 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`defaultTpsViewJson verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — SiteSettings.defaultTpsViewJson not writable. (${msg})`
+    );
+  }
+
+  // Runtime verify: Clan / ClanMember / ClanJoinRequest (Clans feature)
+  try {
+    const clanCount = await prisma.clan.count();
+    const memberCount = await prisma.clanMember.count();
+    const requestCount = await prisma.clanJoinRequest.count();
+    steps.push(
+      `Clan collections verified (clans=${clanCount}, members=${memberCount}, joinRequests=${requestCount})`
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`Clan verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — Clan/ClanMember/ClanJoinRequest not available. Run db push. (${msg})`
     );
   }
 

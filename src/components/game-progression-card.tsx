@@ -2,16 +2,30 @@
 
 import { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
+import { STATIC_FALLBACK_POWERS, type PowerDefinitionRecord } from '@shared/ability-progression';
 import {
-  ABILITY_KEYS,
-  ABILITY_DEFINITIONS,
-} from '@shared/ability-progression';
-import { getGameProgression, type GameProgressionSnapshot } from '@/lib/game-progression-actions';
+  getGameProgression,
+  getPowerDefinitionsForMenu,
+  type GameProgressionSnapshot,
+} from '@/lib/game-progression-actions';
+import { costForLevelFormula, isImageIcon } from '@shared/power-definitions';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+
+/** Renders an ability's `icon` as an uploaded image when it's a URL, else as
+ * the plain emoji glyph — same convention as power-editor.tsx / game-menu.tsx.
+ * Without this check, an admin-uploaded icon URL would render as literal
+ * text instead of an image. */
+function AbilityIcon({ icon, className }: { icon: string; className?: string }) {
+  if (isImageIcon(icon)) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={icon} alt="" className={(className ?? '') + ' object-contain'} />;
+  }
+  return <span className={className}>{icon}</span>;
+}
 
 /**
  * Read-only card for the in-game (match) level + power upgrades.
@@ -21,13 +35,23 @@ import {
 export function GameProgressionCard({ userId }: { userId: string }) {
   const [snap, setSnap] = useState<GameProgressionSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  // Fetched explicitly rather than read off the shared ABILITY_DEFINITIONS
+  // singleton — that object is mutated by applyDynamicPowerDefinitions()
+  // running on the server (inside the getGameProgression server action),
+  // which has zero effect on this client bundle's own separate copy of the
+  // same module. Reading the singleton here meant this grid could never see
+  // admin icon edits, even though the tree (which receives `powers` as an
+  // explicit prop from this same fetch) always has.
+  const [powers, setPowers] = useState<PowerDefinitionRecord[]>(STATIC_FALLBACK_POWERS);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getGameProgression(userId)
-      .then((res) => {
-        if (!cancelled) setSnap(res);
+    Promise.all([getGameProgression(userId), getPowerDefinitionsForMenu()])
+      .then(([res, defs]) => {
+        if (cancelled) return;
+        setSnap(res);
+        if (Array.isArray(defs) && defs.length > 0) setPowers(defs);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -89,8 +113,8 @@ export function GameProgressionCard({ userId }: { userId: string }) {
         </p>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {ABILITY_KEYS.map((key) => {
-            const def = ABILITY_DEFINITIONS[key];
+          {powers.map((def) => {
+            const key = def.key;
             const lvl = snap.abilities[key] ?? 0;
             const locked = snap.level < def.unlockLevel;
 
@@ -104,7 +128,10 @@ export function GameProgressionCard({ userId }: { userId: string }) {
                         : 'border-slate-700/40 bg-slate-900/40 hover:border-orange-400/50 hover:bg-slate-900/60'
                     }`}
                   >
-                    <span className={`text-lg leading-none ${locked ? 'grayscale opacity-70' : ''}`}>{def.icon}</span>
+                    <AbilityIcon
+                      icon={def.icon}
+                      className={`shrink-0 ${isImageIcon(def.icon) ? 'w-6 h-6' : 'text-lg leading-none'} ${locked ? 'grayscale opacity-70' : ''}`}
+                    />
                     <div className="min-w-0">
                       <p className="text-[11px] font-bold text-white truncate">{def.name}</p>
                       <p className="text-[10px] font-bold text-slate-400">
@@ -116,7 +143,7 @@ export function GameProgressionCard({ userId }: { userId: string }) {
                 <PopoverContent className="w-64 bg-slate-900 border-slate-700 p-3">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <span className="text-xl">{def.icon}</span>
+                      <AbilityIcon icon={def.icon} className={isImageIcon(def.icon) ? 'w-8 h-8 shrink-0' : 'text-xl'} />
                       <div>
                         <p className="text-sm font-bold text-orange-300">{def.name}</p>
                         <p className="text-xs text-slate-400">
@@ -130,7 +157,7 @@ export function GameProgressionCard({ userId }: { userId: string }) {
                     {!locked && lvl < def.maxLevel && (
                       <div className="pt-2 border-t border-slate-700">
                         <p className="text-xs text-slate-400">
-                          Cost to upgrade: <span className="text-orange-300 font-bold">{def.costForLevel(lvl)} XP</span>
+                          Cost to upgrade: <span className="text-orange-300 font-bold">{costForLevelFormula(def.cost, lvl)} XP</span>
                         </p>
                       </div>
                     )}

@@ -62,6 +62,14 @@ export const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     title: 'Leaderboard',
     subtitle: 'XP, combat, and Premium Ranked (KP) ladders.',
   },
+  clans: {
+    title: 'Clans',
+    subtitle: 'Team up, combine KP, and climb the Clan Clash leaderboard together.',
+  },
+  cases: {
+    title: 'Cases',
+    subtitle: 'Open daily, weekly, and VP cases for a chance at rare cosmetics.',
+  },
   community: {
     title: 'Community',
     subtitle: 'News, discussions, and hub life.',

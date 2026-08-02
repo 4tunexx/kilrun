@@ -53,6 +53,11 @@ export interface JoinOptions {
     cooldownMs: number;
     coneRadians?: number;
   };
+  /** Clan Wars: explicit team seat request so both clan lobbies land on
+   * opposite sides of a Competitive match. */
+  teamRequest?: 'team_a' | 'team_b';
+  /** Clan Wars: ClanLobby id the joining player belongs to. */
+  clanLobbyId?: string;
 }
 
 export type GameRoomName =

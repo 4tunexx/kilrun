@@ -9,6 +9,8 @@ export type HubPageId =
   | 'play'
   | 'missions'
   | 'leaderboard'
+  | 'clans'
+  | 'cases'
   | 'stats'
   | 'store'
   | 'premium'
@@ -36,6 +38,8 @@ export const HUB_NAV_CATALOG: HubNavItemDef[] = [
   { id: 'play', label: 'Play', defaultRail: 'left' },
   { id: 'missions', label: 'Missions', defaultRail: 'left' },
   { id: 'leaderboard', label: 'Leaderboard', defaultRail: 'left' },
+  { id: 'clans', label: 'Clans', defaultRail: 'left' },
+  { id: 'cases', label: 'Cases', defaultRail: 'left' },
   { id: 'stats', label: 'Statistics', defaultRail: 'left' },
   { id: 'store', label: 'Store', defaultRail: 'left' },
   { id: 'premium', label: 'Premium', defaultRail: 'left' },

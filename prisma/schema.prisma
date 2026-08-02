@@ -123,6 +123,11 @@ model User {
   reputationReceived ReputationVote[] @relation("ReputationVotesReceived")
   profileCommentsReceived ProfileComment[] @relation("ProfileCommentsReceived")
   profileCommentsAuthored ProfileComment[] @relation("ProfileCommentsAuthored")
+  clanMembership     ClanMember?
+  clanJoinRequests   ClanJoinRequest[]
+
+  /// Map of CaseDefinition.id -> ISO timestamp of last free open (daily/weekly cooldowns).
+  lastFreeCaseAt Json?
 }
 
 model MatchStat {
@@ -781,4 +786,171 @@ model Party {
   updatedAt    DateTime @updatedAt
 
   @@index([leaderId])
+}
+
+/// Persistent player guild. Combines member KP/stats into one clan score
+/// for the Clan Clash leaderboard. A player may belong to at most one clan.
+model Clan {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  /// 3-5 char short tag shown next to member names.
+  tag         String   @unique
+  description String   @default("")
+  imageUrl    String   @default("")
+  bannerUrl   String   @default("")
+  /// Short unique invite code, shareable as a /clan/join/<code> link.
+  inviteCode  String   @unique
+  /// true = anyone with the invite link/code joins instantly; false = join requests need approval.
+  isOpen      Boolean  @default(false)
+  ownerId     String   @db.ObjectId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// Clan Wars record — updated when a ClanWarResult is recorded.
+  warWins   Int @default(0)
+  warLosses Int @default(0)
+  warDraws  Int @default(0)
+
+  members      ClanMember[]
+  joinRequests ClanJoinRequest[]
+
+  @@index([ownerId])
+}
+
+model ClanMember {
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  clanId   String   @db.ObjectId
+  userId   String   @unique @db.ObjectId
+  /// "owner" | "officer" | "member"
+  role     String   @default("member")
+  joinedAt DateTime @default(now())
+
+  clan Clan @relation(fields: [clanId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([clanId])
+}
+
+model ClanJoinRequest {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  clanId    String   @db.ObjectId
+  userId    String   @db.ObjectId
+  /// "pending" | "accepted" | "declined"
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
+
+  clan Clan @relation(fields: [clanId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([clanId, userId])
+  @@index([userId])
+}
+
+/// Pre-match squad for Clan Wars — clan members join, then the lobby leader
+/// challenges another clan's lobby. Competitive mode only (real team-vs-team).
+model ClanLobby {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  clanId    String   @db.ObjectId
+  leaderId  String   @db.ObjectId
+  memberIds String[]
+  /// "casual" | "ranked" — competitive queue only.
+  queue     String   @default("casual")
+  /// "open" | "challenging" | "matched" | "closed"
+  status    String   @default("open")
+  opponentLobbyId String? @db.ObjectId
+  activeRoomId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clanId])
+  @@index([status])
+}
+
+model ClanWarChallenge {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  challengerLobbyId String   @db.ObjectId
+  challengerClanId  String   @db.ObjectId
+  targetClanId      String   @db.ObjectId
+  queue             String   @default("casual")
+  /// "pending" | "accepted" | "declined" | "cancelled"
+  status            String   @default("pending")
+  createdAt         DateTime @default(now())
+
+  @@index([targetClanId, status])
+  @@index([challengerClanId])
+}
+
+model ClanWarResult {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  clanAId      String   @db.ObjectId
+  clanBId      String   @db.ObjectId
+  /// null = draw/void
+  winnerClanId String?  @db.ObjectId
+  queue        String
+  roomId       String
+  playedAt     DateTime @default(now())
+
+  @@index([clanAId])
+  @@index([clanBId])
+}
+
+/// Admin-defined loot case. Players open it for a weighted-random cosmetic.
+model CaseDefinition {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  /// Closed crate artwork, shown in listings and at the start of the unboxing animation.
+  imageUrl    String   @default("")
+  /// Opened crate artwork, revealed after the shake + spin, before the won item is shown.
+  openImageUrl String  @default("")
+  description String   @default("")
+  /// "free_daily" | "free_weekly" | "vp_purchase" | "admin_grant"
+  acquireType String   @default("vp_purchase")
+  vpPrice     Int      @default(0)
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items CaseItem[]
+}
+
+model CaseItem {
+  id           String  @id @default(auto()) @map("_id") @db.ObjectId
+  caseId       String  @db.ObjectId
+  /// "cosmetic" (StoreItem/Asset) | "currency" (VP and/or XP payout)
+  rewardType   String  @default("cosmetic")
+  /// Points at an existing StoreItem (cosmetic) OR Asset — exactly one is set
+  /// when rewardType is "cosmetic".
+  storeItemSku String?
+  assetId      String? @db.ObjectId
+  /// VP / XP granted when rewardType is "currency".
+  vpAmount     Int     @default(0)
+  xpAmount     Int     @default(0)
+  /// Denormalized snapshot for display without a join.
+  displayName  String
+  displayImage String  @default("")
+  /// common | rare | epic | legendary — drives unboxing animation color.
+  rarity       String  @default("common")
+  /// Relative weight; chance % = weight / sum(all weights in case) * 100.
+  dropWeight   Int     @default(100)
+
+  case CaseDefinition @relation(fields: [caseId], references: [id])
+
+  @@index([caseId])
+}
+
+/// Audit trail of every case opened — also drives requirement-type metrics
+/// (cases_opened, legendary_cases_opened, etc).
+model CaseOpenLog {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId
+  caseId     String   @db.ObjectId
+  caseItemId String   @db.ObjectId
+  wonName    String
+  wonImage   String   @default("")
+  wonRarity  String   @default("common")
+  openedAt   DateTime @default(now())
+
+  @@index([userId, openedAt])
+  @@index([caseId])
 }

@@ -76,7 +76,10 @@ function buildSnapshot(user: { gameXp: number; gameSkillPoints: number; gameAbil
 
 /** Fetch a player's in-game progression (own profile or public read). */
 export async function getGameProgression(userId: string): Promise<GameProgressionSnapshot | null> {
-  await loadPowerDefinitions().catch(() => null);
+  // force: true — see getPowerDefinitionsForMenu below: this rebuilds the
+  // ABILITY_DEFINITIONS shim (icons included) that GameProgressionCard
+  // reads, and must not serve a stale per-instance cache after an admin edit.
+  await loadPowerDefinitions({ force: true }).catch(() => null);
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return null;
   return buildSnapshot(user);
@@ -86,7 +89,14 @@ export async function getGameProgression(userId: string): Promise<GameProgressio
  * — the client re-derives cost/effect labels with the pure helpers exported
  * from `shared/power-definitions.ts`). Falls back to the static 12 on error. */
 export async function getPowerDefinitionsForMenu(): Promise<PowerDefinitionRecord[]> {
-  return loadPowerDefinitions().catch(() => STATIC_FALLBACK_POWERS);
+  // force: true — this is called once per menu open (not a hot path), and
+  // admin icon/stat edits need to show up immediately. Without `force`,
+  // this can serve up to CACHE_TTL_MS of stale data, and on serverless
+  // (each invocation may land on a different instance with its own
+  // in-memory cache) a request can stay stale well past that TTL since
+  // invalidatePowerDefinitionsCache() only clears the instance that
+  // handled the admin save.
+  return loadPowerDefinitions({ force: true }).catch(() => STATIC_FALLBACK_POWERS);
 }
 
 /**

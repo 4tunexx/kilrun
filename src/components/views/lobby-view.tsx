@@ -16,6 +16,11 @@ import {
   setPartyQueueRoom,
   type PartyDto,
 } from '@/lib/party-actions';
+import {
+  getMyClanLobby,
+  setClanLobbyQueueRoom,
+  type ClanLobbyDto,
+} from '@/lib/clan-lobby-actions';
 
 interface LobbyViewProps {
   mode: KilrunMode;
@@ -36,6 +41,10 @@ interface LobbyViewProps {
   rankedAccess?: boolean;
   /** Casual (no KP) vs Ranked Premium. */
   competitiveQueue?: 'casual' | 'ranked';
+  /** Clan Wars: when set, this match is a clan-vs-clan fight — the lobby
+   * leader creates/relays the room the same way a Party leader does, plus
+   * an explicit team seat request so both clans land on opposite sides. */
+  clanLobbyId?: string;
 }
 
 const LobbyView: React.FC<LobbyViewProps> = ({
@@ -51,6 +60,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   isPremium = false,
   rankedAccess,
   competitiveQueue = 'casual',
+  clanLobbyId,
 }) => {
   const [equippedSkins, setEquippedSkins] = useState<SkinAttachment[]>([]);
   const [skinsReady, setSkinsReady] = useState(false);
@@ -64,6 +74,8 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   const [party, setParty] = useState<PartyDto | null>(null);
   const [joinByRoomId, setJoinByRoomId] = useState<string | undefined>(undefined);
   const [waitingForLeaderRoom, setWaitingForLeaderRoom] = useState(false);
+  const [clanLobby, setClanLobby] = useState<ClanLobbyDto | null>(null);
+  const [clanLobbyReady, setClanLobbyReady] = useState(!clanLobbyId);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,7 +149,13 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   }, [mode, competitiveQueue, kp]);
 
   // Party join: leader joinOrCreate + publish roomId; members wait then joinById.
+  // Skipped entirely for Clan War launches — the clan-lobby effect below owns
+  // joinByRoomId/waitingForLeaderRoom in that case so the two never race.
   useEffect(() => {
+    if (clanLobbyId) {
+      setPartyReady(true);
+      return;
+    }
     let cancelled = false;
     let poll: ReturnType<typeof setInterval> | null = null;
 
@@ -192,7 +210,61 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       cancelled = true;
       if (poll) clearInterval(poll);
     };
-  }, [userId, mode, competitiveQueue]);
+  }, [userId, mode, competitiveQueue, clanLobbyId]);
+
+  // Clan Wars: same leader-relays-roomId pattern as Party, but scoped to the
+  // matched clan lobby and cross-linked opponent lobby.
+  useEffect(() => {
+    if (!clanLobbyId) return;
+    let cancelled = false;
+    let poll: ReturnType<typeof setInterval> | null = null;
+
+    const resolveClanLobby = async () => {
+      try {
+        const lobby = await getMyClanLobby();
+        if (cancelled) return;
+        setClanLobby(lobby);
+        if (!lobby || lobby.status !== 'matched') {
+          setClanLobbyReady(true);
+          return;
+        }
+        if (lobby.isLeader) {
+          setClanLobbyReady(true);
+          return;
+        }
+        if (lobby.activeRoomId) {
+          setJoinByRoomId(lobby.activeRoomId);
+          setClanLobbyReady(true);
+          return;
+        }
+        setWaitingForLeaderRoom(true);
+        setClanLobbyReady(false);
+        poll = setInterval(() => {
+          void getMyClanLobby().then((next) => {
+            if (cancelled || !next) return;
+            setClanLobby(next);
+            if (next.activeRoomId) {
+              setJoinByRoomId(next.activeRoomId);
+              setWaitingForLeaderRoom(false);
+              setClanLobbyReady(true);
+              if (poll) clearInterval(poll);
+            }
+          });
+        }, 1500);
+      } catch {
+        if (!cancelled) {
+          setClanLobby(null);
+          setClanLobbyReady(true);
+        }
+      }
+    };
+
+    void resolveClanLobby();
+    return () => {
+      cancelled = true;
+      if (poll) clearInterval(poll);
+    };
+  }, [clanLobbyId]);
 
   const canRanked = rankedAccess ?? isPremium;
   const loadout = useMemo(() => packMatchLoadout(equippedSkins), [equippedSkins]);
@@ -215,6 +287,15 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       ...(mode === 'competitive' && competitiveQueue === 'ranked'
         ? { rankKey, mmWaitSec, minSameRankPlayers }
         : {}),
+      // Clan Wars: deterministic team split (lower lobby id -> team_a) so
+      // both clans' clients agree on sides without extra coordination.
+      ...(clanLobby && clanLobby.status === 'matched' && clanLobby.opponentLobbyId
+        ? {
+            clanLobbyId: clanLobby.id,
+            teamRequest:
+              clanLobby.id < clanLobby.opponentLobbyId ? 'team_a' : 'team_b',
+          }
+        : {}),
     }),
     [
       userId,
@@ -233,10 +314,15 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       minSameRankPlayers,
       loadout,
       joinByRoomId,
+      clanLobby,
     ]
   );
 
   const handleRoomConnected = (roomId: string) => {
+    if (clanLobby?.isLeader) {
+      void setClanLobbyQueueRoom(clanLobby.id, roomId).catch(() => {});
+      return;
+    }
     void getMyParty()
       .then((p) => {
         if (!p?.isLeader || p.memberIds.length < 2) return;
@@ -253,11 +339,13 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   };
 
   // Wait for equipped skins + join token so privileges are server-minted.
-  if (!skinsReady || !rankReady || !tokenReady || !partyReady) {
+  if (!skinsReady || !rankReady || !tokenReady || !partyReady || !clanLobbyReady) {
     return (
       <div className="fixed inset-0 z-[200] bg-[#0a1220] flex items-center justify-center text-white/60 text-sm">
         {waitingForLeaderRoom
-          ? 'Waiting for party leader…'
+          ? clanLobbyId
+            ? 'Waiting for your clan lobby leader…'
+            : 'Waiting for party leader…'
           : mode === 'competitive' && competitiveQueue === 'ranked'
             ? 'Finding Ranked match…'
             : 'Loading avatar skins…'}

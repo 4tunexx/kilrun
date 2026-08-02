@@ -27,6 +27,8 @@ import {
   Crown,
   ShieldCheck,
   Coins,
+  Flag,
+  Gift,
   type LucideIcon,
 } from 'lucide-react';
 import { RankLabel } from '@/components/ui/rank-badge';
@@ -35,6 +37,8 @@ import StoreView from '@/components/views/store-view';
 import CommunityView from '@/components/views/community-view';
 import GuidesView from '@/components/views/guides-view';
 import LeaderboardView from '@/components/views/leaderboard-view';
+import ClansView from '@/components/views/clans-view';
+import CasesView from '@/components/views/cases-view';
 import SupportView from '@/components/views/support-view';
 import ProfileView from '@/components/views/profile-view';
 import PlayView from '@/components/views/play-view';
@@ -150,6 +154,8 @@ const HUB_PAGE_ICONS: Record<HubPageId, LucideIcon> = {
   play: Play,
   missions: CheckSquare,
   leaderboard: Trophy,
+  clans: Flag,
+  cases: Gift,
   stats: BarChart3,
   store: Store,
   premium: Gem,
@@ -169,6 +175,8 @@ const pageComponents: { [key: string]: React.ComponentType<any> } = {
   community: CommunityView,
   guides: GuidesView,
   leaderboard: LeaderboardView,
+  clans: ClansView,
+  cases: CasesView,
   support: SupportView,
   profile: ProfileView,
   play: PlayView,
@@ -188,6 +196,7 @@ const VIEWS_NEEDING_USER_ID = new Set([
   'profile',
   'stats',
   'leaderboard',
+  'clans',
   'missions',
   'messages',
   'notifications',
@@ -231,6 +240,7 @@ export default function GameHubInterface({
   const [viewingProfileUserId, setViewingProfileUserId] = useState<string | null>(null);
   const [previousPage, setPreviousPage] = useState('home');
   const [lobbyMode, setLobbyMode] = useState<KilrunMode | null>(null);
+  const [clanLobbyQueueId, setClanLobbyQueueId] = useState<string | null>(null);
   const [competitiveQueue, setCompetitiveQueue] = useState<CompetitiveQueue>('casual');
   const [isCompetitiveDialogOpen, setIsCompetitiveDialogOpen] = useState(false);
   const [pendingCompetitiveMode, setPendingCompetitiveMode] = useState<KilrunMode | null>(null);
@@ -628,8 +638,17 @@ export default function GameHubInterface({
 
   const handleCancelLobby = () => {
     setLobbyMode(null);
+    setClanLobbyQueueId(null);
     setCompetitiveQueue('casual');
     navigate('play');
+  };
+
+  /** Clan Wars: matched clan lobby leader/members queue into Competitive Casual. */
+  const handleLaunchClanWar = (lobbyId: string) => {
+    setClanLobbyQueueId(lobbyId);
+    setCompetitiveQueue('casual');
+    setLobbyMode('competitive');
+    navigate('lobby');
   };
 
   const handleLaunchGame = () => {
@@ -753,6 +772,8 @@ export default function GameHubInterface({
         props.headerLogoUrl = headerLogoUrl;
         props.headerLogoStyle = headerLogoStyle;
         props.homeHeroImage = homeHeroImage;
+      } else if (currentPage === 'clans') {
+        props.onLaunchClanWar = handleLaunchClanWar;
       } else if (currentPage === 'lobby' && lobbyMode) {
         props = {
           mode: lobbyMode,
@@ -767,6 +788,7 @@ export default function GameHubInterface({
           isPremium,
           rankedAccess,
           competitiveQueue: lobbyMode === 'competitive' ? competitiveQueue : 'casual',
+          ...(clanLobbyQueueId ? { clanLobbyId: clanLobbyQueueId } : {}),
         };
       } else if (currentPage === 'messages') {
         props.userId = user.id;
@@ -878,6 +900,7 @@ export default function GameHubInterface({
           isPremium={isPremium}
           rankedAccess={rankedAccess}
           competitiveQueue={lobbyMode === 'competitive' ? competitiveQueue : 'casual'}
+          {...(clanLobbyQueueId ? { clanLobbyId: clanLobbyQueueId } : {})}
         />
       </ProfileNavigationProvider>
     );

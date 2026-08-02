@@ -109,6 +109,13 @@ interface JoinOptions {
     cooldownMs?: number;
     coneRadians?: number;
   };
+  /** Clan Wars: explicit team seat request so both clan lobbies land on
+   * opposite sides instead of the default join-order balancing. Ignored
+   * (falls back to balance) if that side is already full. */
+  teamRequest?: 'team_a' | 'team_b';
+  /** Clan Wars: ClanLobby id the joining player belongs to — recorded so the
+   * final match-result report can attribute team_a/team_b to a clan. */
+  clanLobbyId?: string;
 }
 
 interface SpawnPoint {
@@ -243,6 +250,9 @@ export class CompetitiveRoom extends Room<RoomState> {
   private buyTimeMs = 0;
   private overtimeMs = 60_000;
   private maxPlayersPerTeam = 3;
+  /** Clan Wars: lobby ids for team_a / team_b, set from join options when a
+   * clan-war client connects. Undefined for normal matchmaking. */
+  private clanLobbyIdByTeam: { team_a?: string; team_b?: string } = {};
   private friendlyFire = false;
   private respawnInRound = false;
   private combatPhysOpts: MovementPhysicsOpts = {};
@@ -903,7 +913,18 @@ export class CompetitiveRoom extends Room<RoomState> {
     // Balance by current team sizes
     const aCount = Array.from(this.state.players.values()).filter((p) => p.role === 'team_a').length;
     const bCount = Array.from(this.state.players.values()).filter((p) => p.role === 'team_b').length;
-    player.role = aCount <= bCount ? 'team_a' : 'team_b';
+    const requested = options.teamRequest;
+    if (requested === 'team_a' && aCount < this.maxPlayersPerTeam) {
+      player.role = 'team_a';
+    } else if (requested === 'team_b' && bCount < this.maxPlayersPerTeam) {
+      player.role = 'team_b';
+    } else {
+      player.role = aCount <= bCount ? 'team_a' : 'team_b';
+    }
+    if (typeof options.clanLobbyId === 'string' && options.clanLobbyId) {
+      const team = player.role === 'team_b' ? 'team_b' : 'team_a';
+      this.clanLobbyIdByTeam[team] = options.clanLobbyId;
+    }
     player.bodyColorIndex = assignCompetitiveColor(player.role);
 
     this.applyTeamSpawn(player);
@@ -1449,6 +1470,10 @@ export class CompetitiveRoom extends Room<RoomState> {
       };
     });
 
+    const lobbyAId = this.clanLobbyIdByTeam.team_a;
+    const lobbyBId = this.clanLobbyIdByTeam.team_b;
+    const clanWar = lobbyAId && lobbyBId ? { lobbyAId, lobbyBId } : undefined;
+
     const awards = await reportMatchResults({
       matchId,
       mode,
@@ -1456,6 +1481,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       queue,
       room: { scoreA: this.state.scoreA, scoreB: this.state.scoreB },
       players,
+      ...(clanWar ? { clanWar } : {}),
     });
 
     if (awards) {

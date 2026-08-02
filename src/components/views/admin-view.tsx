@@ -30,6 +30,8 @@ import {
   Radio,
   KeyRound,
   Sparkles,
+  Flag,
+  Gift,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -67,6 +69,8 @@ import { AdminWeaponCatalogPanel } from '@/components/views/admin/admin-weapon-c
 import { AdminGameBalancePanel } from '@/components/views/admin/admin-game-balance-panel';
 import { AdminLiveMatchesPanel } from '@/components/views/admin/admin-live-matches-panel';
 import { AdminSecretsVaultPanel } from '@/components/views/admin/admin-secrets-vault-panel';
+import { AdminClansPanel } from '@/components/views/admin/admin-clans-panel';
+import { AdminCasesPanel } from '@/components/views/admin/admin-cases-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -144,9 +148,11 @@ const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   weapons: { label: 'Weapons', icon: <Target className="h-3.5 w-3.5" /> },
   balance: { label: 'Game Balance', icon: <Flame className="h-3.5 w-3.5" /> },
   content: { label: 'Content', icon: <FileText className="h-3.5 w-3.5" /> },
+  clans: { label: 'Clans', icon: <Flag className="h-3.5 w-3.5" /> },
+  cases: { label: 'Cases', icon: <Gift className="h-3.5 w-3.5" /> },
 };
 
-const MODERATOR_TABS = ['dashboard', 'users', 'moderation', 'audit', 'support'] as const;
+const MODERATOR_TABS = ['dashboard', 'users', 'moderation', 'audit', 'support', 'clans'] as const;
 const ADMIN_TABS = [
   'dashboard',
   'live',
@@ -171,6 +177,8 @@ const ADMIN_TABS = [
   'weapons',
   'balance',
   'content',
+  'clans',
+  'cases',
 ] as const;
 
 export default function AdminView({
@@ -2378,6 +2386,16 @@ export default function AdminView({
                 </Button>
               </CardContent>
             </Card>
+          </TabsContent>
+        )}
+
+        <TabsContent value="clans" className="mt-4">
+          <AdminClansPanel isAdmin={isAdmin} />
+        </TabsContent>
+
+        {isAdmin && (
+          <TabsContent value="cases" className="mt-4">
+            <AdminCasesPanel />
           </TabsContent>
         )}
       </Tabs>

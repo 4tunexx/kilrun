@@ -353,6 +353,38 @@ export const REQUIREMENT_TYPES: RequirementType[] = [
     description: 'Open the leaderboard page today.',
     category: 'daily',
   },
+
+  // Clans & Cases
+  {
+    value: 'clan_joined',
+    label: 'Joined a clan',
+    description: 'Player has created or joined a clan.',
+    category: 'social',
+  },
+  {
+    value: 'clan_wars_played',
+    label: 'Clan wars played',
+    description: 'Clan-vs-clan matches the player has taken part in.',
+    category: 'social',
+  },
+  {
+    value: 'clan_wars_won',
+    label: 'Clan wars won',
+    description: "Clan-vs-clan matches the player's clan won.",
+    category: 'social',
+  },
+  {
+    value: 'cases_opened',
+    label: 'Cases opened',
+    description: 'Total loot cases opened, free or purchased.',
+    category: 'game',
+  },
+  {
+    value: 'legendary_cases_opened',
+    label: 'Legendary items won',
+    description: 'Cases opened that dropped a legendary-rarity item.',
+    category: 'game',
+  },
 ];
 
 export function getRequirementType(value: string): RequirementType | undefined {

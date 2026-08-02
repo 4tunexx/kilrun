@@ -12,11 +12,17 @@ import {
   markNotificationRead,
 } from '@/lib/social-actions';
 import { acceptPartyInvite } from '@/lib/party-actions';
+import { requestToJoinClan } from '@/lib/clan-actions';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 
 function extractPartyCode(body: string): string | null {
   const m = body.match(/\bparty\s+([A-Z0-9]{4,8})\b/i);
+  return m?.[1]?.toUpperCase() ?? null;
+}
+
+function extractClanInviteCode(body: string): string | null {
+  const m = body.match(/\binvite code\s+([A-Z0-9]{4,8})\b/i);
   return m?.[1]?.toUpperCase() ?? null;
 }
 
@@ -154,6 +160,64 @@ export default function NotificationsView() {
                       }}
                     >
                       Accept
+                    </Button>
+                  )}
+                  {n.type === 'clan_invite' && extractClanInviteCode(n.body || '') && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy === n.id}
+                      onClick={async () => {
+                        const code = extractClanInviteCode(n.body || '');
+                        if (!code) return;
+                        setBusy(n.id);
+                        try {
+                          const res = await requestToJoinClan(code);
+                          await markNotificationRead(n.id);
+                          setItems((prev) =>
+                            prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x))
+                          );
+                          toast({
+                            title:
+                              res.status === 'joined'
+                                ? `Joined ${res.clan.name}`
+                                : `Join request sent to ${res.clan.name}`,
+                          });
+                        } catch (e: unknown) {
+                          toast({
+                            title: e instanceof Error ? e.message : 'Could not join clan',
+                            variant: 'destructive',
+                          });
+                        } finally {
+                          setBusy(null);
+                        }
+                      }}
+                    >
+                      Join clan
+                    </Button>
+                  )}
+                  {n.type === 'clan_join_request' && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy === n.id}
+                      onClick={async () => {
+                        setBusy(n.id);
+                        try {
+                          await markNotificationRead(n.id);
+                          setItems((prev) =>
+                            prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x))
+                          );
+                          toast({
+                            title: 'Open the Clans page to review',
+                            description: 'Pending requests are listed under your clan’s Overview tab.',
+                          });
+                        } finally {
+                          setBusy(null);
+                        }
+                      }}
+                    >
+                      Review
                     </Button>
                   )}
                   {!n.isRead && (

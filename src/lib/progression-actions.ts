@@ -39,7 +39,12 @@ export type WebsiteActionMetric =
   | 'banner_owned'
   | 'frame_owned'
   | 'nickname_owned'
-  | 'reputation';
+  | 'reputation'
+  | 'cases_opened'
+  | 'legendary_cases_opened'
+  | 'clan_joined'
+  | 'clan_wars_played'
+  | 'clan_wars_won';
 
 async function requireUser() {
   const session = await auth();
@@ -677,6 +682,21 @@ async function metricCount(userId: string, metric: string): Promise<number> {
     case 'daily_leaderboard': {
       const u = await prisma.user.findUnique({ where: { id: userId } });
       return isSameLocalDay(u?.lastLeaderboardAt) ? 1 : 0;
+    }
+    case 'cases_opened':
+      return prisma.caseOpenLog.count({ where: { userId } });
+    case 'legendary_cases_opened':
+      return prisma.caseOpenLog.count({ where: { userId, wonRarity: 'legendary' } });
+    case 'clan_joined': {
+      const membership = await prisma.clanMember.findUnique({ where: { userId } });
+      return membership ? 1 : 0;
+    }
+    case 'clan_wars_played':
+    case 'clan_wars_won': {
+      // Wired ahead of the Clan Wars feature build — returns 0 until
+      // ClanWarResult exists; safe fallback so missions/achievements can
+      // already reference these metrics without erroring.
+      return 0;
     }
     default: {
       // Custom requirement types created in Admin → Requirement types.
