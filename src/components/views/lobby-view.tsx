@@ -292,8 +292,9 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       ...(clanLobby && clanLobby.status === 'matched' && clanLobby.opponentLobbyId
         ? {
             clanLobbyId: clanLobby.id,
-            teamRequest:
-              clanLobby.id < clanLobby.opponentLobbyId ? 'team_a' : 'team_b',
+            teamRequest: (clanLobby.id < clanLobby.opponentLobbyId
+              ? 'team_a'
+              : 'team_b') as 'team_a' | 'team_b',
           }
         : {}),
     }),

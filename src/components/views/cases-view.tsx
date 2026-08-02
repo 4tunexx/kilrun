@@ -80,6 +80,27 @@ function OpenedCrate({ imageUrl }: { imageUrl: string }) {
   );
 }
 
+/** Transitional "lid pops off" beat between the closed-crate shake and the reel spin. */
+function OpeningCrate({ imageUrl }: { imageUrl: string }) {
+  return (
+    <div className="rounded-xl border border-amber-500/30 bg-slate-950/80 py-8">
+      <div className="flex items-center justify-center animate-crate-open">
+        {imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={imageUrl}
+            alt=""
+            className="h-32 w-32 object-contain drop-shadow-[0_0_35px_rgba(251,191,36,0.5)]"
+          />
+        ) : (
+          <Gift className="h-24 w-24 text-amber-300" />
+        )}
+      </div>
+      <p className="text-center text-xs text-amber-400/80 mt-3 animate-pulse">Opening…</p>
+    </div>
+  );
+}
+
 function UnboxingReel({
   items,
   wonIndex,
@@ -156,7 +177,7 @@ export default function CasesView() {
   const [loading, setLoading] = useState(true);
   const [openingCaseId, setOpeningCaseId] = useState<string | null>(null);
   const [result, setResult] = useState<CaseOpenResultDto | null>(null);
-  const [phase, setPhase] = useState<'shaking' | 'spinning' | 'revealed'>('shaking');
+  const [phase, setPhase] = useState<'shaking' | 'opening' | 'spinning' | 'revealed'>('shaking');
   const [busy, setBusy] = useState(false);
 
   const refresh = async () => {
@@ -180,9 +201,11 @@ export default function CasesView() {
       const res = await openCase(c.id);
       setOpeningCaseId(c.id);
       setResult(res);
-      // Let the closed crate shake for a beat before the reel starts spinning —
-      // builds anticipation instead of jumping straight into the spin.
-      setTimeout(() => setPhase('spinning'), 900);
+      // Let the closed crate shake for a beat, then play the lid-popping-open
+      // animation, and only then start the reel spin — builds anticipation
+      // instead of jumping straight into the spin.
+      setTimeout(() => setPhase('opening'), 900);
+      setTimeout(() => setPhase('spinning'), 900 + 650);
     } catch (e: unknown) {
       toast({
         title: e instanceof Error ? e.message : 'Could not open case',
@@ -212,6 +235,9 @@ export default function CasesView() {
           <div className="w-full max-w-xl space-y-4">
             {phase === 'shaking' && (
               <ShakingCrate imageUrl={result.caseImageUrl} active />
+            )}
+            {phase === 'opening' && (
+              <OpeningCrate imageUrl={result.caseOpenImageUrl || result.caseImageUrl} />
             )}
             {phase === 'spinning' && (
               <UnboxingReel
