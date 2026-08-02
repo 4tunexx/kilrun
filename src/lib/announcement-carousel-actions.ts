@@ -79,7 +79,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
               const firesaleItems = await prisma.storeItem.findMany({
                 where: {
                   fireSalePercent: { gt: 0 },
-                  isAvailable: true,
+                  isAvailable: { not: false },
                   OR: [
                     { fireSaleEndsAt: null },
                     { fireSaleEndsAt: { gt: now } },
@@ -317,7 +317,9 @@ export async function getAnnouncementCarouselItems(): Promise<{
     // no items, surface the latest news items so the carousel still has content.
     items.sort(() => Math.random() - 0.5);
 
-    if (items.length === 0) {
+    // Only fall back to news if the admin actually enabled that type — otherwise
+    // an empty result for the selected types should just render nothing.
+    if (items.length === 0 && config.types.includes('news')) {
       try {
         const posts = await prisma.newsPost.findMany({
           where: { published: true },
