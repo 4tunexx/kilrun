@@ -6,6 +6,7 @@ import { Coins, Gift, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import type { CaseOpenResultDto } from '@/lib/case-actions';
+import { CaseItemThumb } from '@/components/case-item-thumb';
 
 export const RARITY_STYLES: Record<string, { ring: string; glow: string; text: string }> = {
   common: { ring: 'ring-slate-500/50', glow: 'shadow-slate-500/20', text: 'text-slate-300' },
@@ -96,21 +97,9 @@ function ReelItemThumb({
   style: { text: string };
   imgClassName: string;
 }) {
-  if (item.rewardType === 'currency') {
-    return <Coins className={`${imgClassName} ${style.text}`} />;
-  }
-  if (item.displayImage) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={item.displayImage}
-        alt=""
-        className={`${imgClassName} object-contain`}
-        draggable={false}
-      />
-    );
-  }
-  return <Gift className={`${imgClassName} ${style.text}`} />;
+  return (
+    <CaseItemThumb item={item} className={imgClassName} iconClassName={`${imgClassName} ${style.text}`} />
+  );
 }
 
 function UnboxingReel({
@@ -268,11 +257,21 @@ export function CrateUnboxModal({
             <CardContent className="p-5 flex items-center gap-4">
               {result.wonRewardType === 'currency' ? (
                 <Coins className={`h-12 w-12 ${rarityStyle(result.wonRarity).text}`} />
-              ) : result.wonImage ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={result.wonImage} alt="" className="h-16 w-16 object-contain" />
               ) : (
-                <Gift className={`h-12 w-12 ${rarityStyle(result.wonRarity).text}`} />
+                <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded">
+                  <CaseItemThumb
+                    item={{
+                      rewardType: result.wonRewardType,
+                      displayName: result.wonName,
+                      displayImage: result.wonImage,
+                      cosmeticSlot: result.wonCosmeticSlot,
+                      bannerConfig: result.wonBannerConfig,
+                      cosmeticConfig: result.wonCosmeticConfig,
+                    }}
+                    className="h-16 w-16"
+                    iconClassName={`h-12 w-12 ${rarityStyle(result.wonRarity).text}`}
+                  />
+                </div>
               )}
               <div className="flex-1">
                 <p className={`text-xs uppercase tracking-wide ${rarityStyle(result.wonRarity).text}`}>

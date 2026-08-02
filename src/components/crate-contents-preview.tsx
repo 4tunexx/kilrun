@@ -3,6 +3,7 @@
 import { Coins, Gift } from 'lucide-react';
 import type { CaseItemPublic } from '@/lib/case-actions';
 import { rarityStyle } from '@/components/crate-unbox-modal';
+import { CaseItemThumb } from '@/components/case-item-thumb';
 
 /** Contents list shown in a hover/tap popover on a crate icon — item name, rarity, and drop odds. */
 export function CrateContentsPreview({
@@ -26,11 +27,10 @@ export function CrateContentsPreview({
             >
               {item.rewardType === 'currency' ? (
                 <Coins className={`h-4 w-4 shrink-0 ${style.text}`} />
-              ) : item.displayImage ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={item.displayImage} alt="" className="h-6 w-6 object-contain shrink-0" />
               ) : (
-                <Gift className={`h-4 w-4 shrink-0 ${style.text}`} />
+                <div className="relative h-6 w-6 shrink-0 overflow-hidden rounded">
+                  <CaseItemThumb item={item} className="h-6 w-6" iconClassName={`h-4 w-4 ${style.text}`} />
+                </div>
               )}
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] font-medium text-slate-200 truncate">
@@ -45,3 +45,4 @@ export function CrateContentsPreview({
     </div>
   );
 }
+

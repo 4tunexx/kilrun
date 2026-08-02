@@ -198,6 +198,9 @@ export type CaseItemPublic = {
   id: string;
   displayName: string;
   displayImage: string;
+  cosmeticSlot: string | null;
+  bannerConfig: unknown;
+  cosmeticConfig: unknown;
   rarity: string;
   dropWeight: number;
   chancePercent: number;
@@ -225,6 +228,9 @@ export type CaseOpenResultDto = {
   wonItemId: string;
   wonName: string;
   wonImage: string;
+  wonCosmeticSlot: string | null;
+  wonBannerConfig: unknown;
+  wonCosmeticConfig: unknown;
   wonRarity: string;
   wonRewardType: 'cosmetic' | 'currency';
   wonVpAmount: number;
@@ -251,6 +257,9 @@ function toItemPublic(item: {
   id: string;
   displayName: string;
   displayImage: string;
+  cosmeticSlot?: string | null;
+  bannerConfig?: unknown;
+  cosmeticConfig?: unknown;
   rarity: string;
   dropWeight: number;
   rewardType: string;
@@ -261,6 +270,9 @@ function toItemPublic(item: {
     id: item.id,
     displayName: item.displayName,
     displayImage: item.displayImage,
+    cosmeticSlot: item.cosmeticSlot ?? null,
+    bannerConfig: item.bannerConfig ?? null,
+    cosmeticConfig: item.cosmeticConfig ?? null,
     rarity: item.rarity,
     dropWeight: item.dropWeight,
     chancePercent: totalWeight > 0 ? Math.round((item.dropWeight / totalWeight) * 1000) / 10 : 0,
@@ -480,6 +492,9 @@ async function resolveCaseWin(
     wonItemId: won.id,
     wonName: won.displayName,
     wonImage: won.displayImage,
+    wonCosmeticSlot: won.cosmeticSlot ?? null,
+    wonBannerConfig: won.bannerConfig ?? null,
+    wonCosmeticConfig: won.cosmeticConfig ?? null,
     wonRarity: won.rarity,
     wonRewardType: won.rewardType === 'currency' ? 'currency' : 'cosmetic',
     wonVpAmount: won.vpAmount,

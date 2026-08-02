@@ -988,6 +988,11 @@ model CaseItem {
   /// Denormalized snapshot for display without a join.
   displayName  String
   displayImage String  @default("")
+  /// Snapshot of the StoreItem's live-preview fields (banner/frame/nickname
+  /// cosmetics render from these instead of a static image).
+  cosmeticSlot    String?
+  bannerConfig    Json?
+  cosmeticConfig  Json?
   /// common | rare | epic | legendary — drives unboxing animation color.
   rarity       String  @default("common")
   /// Relative weight; chance % = weight / sum(all weights in case) * 100.
