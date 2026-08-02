@@ -438,7 +438,14 @@ async function resolveCaseWin(
       wonImage: won.displayImage,
       wonRarity: won.rarity,
     },
-  }).catch(() => {});
+  }).catch((err) => {
+    // Swallowed on purpose (see comment above — must not trigger the
+    // caller's refund/restore path), but silent failure here means the
+    // carousel's "Crate Opened" feed and the player's own open-history both
+    // go quietly empty with zero trace. Log loudly so a real failure is
+    // actually visible in server logs instead of looking like "nothing to show."
+    console.error(`[resolveCaseWin] caseOpenLog.create failed for user ${user.id}, case ${def.id}`, err);
+  });
 
   await prisma.notification.create({
     data: {
