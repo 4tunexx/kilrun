@@ -18,7 +18,7 @@ import { STATIC_FALLBACK_WEAPONS } from '@/lib/weapon-catalog';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-08-02-crates';
+const DB_SCHEMA_SYNC_VERSION = '2026-08-03-dashboard-panels';
 
 async function requireAdmin() {
   const session = await auth();
@@ -131,6 +131,29 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`equippedSkins verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — equippedSkins not writable. Redeploy with latest Prisma schema, then retry. (${msg})`
+    );
+  }
+
+  // Runtime verify: dashboardPanelPrefs (user home-dashboard panel toggles)
+  try {
+    const current = await prisma.user.findUnique({
+      where: { id: staff.id },
+      select: { dashboardPanelPrefs: true },
+    });
+    const map =
+      current?.dashboardPanelPrefs && typeof current.dashboardPanelPrefs === 'object'
+        ? (current.dashboardPanelPrefs as Record<string, unknown>)
+        : {};
+    await prisma.user.update({
+      where: { id: staff.id },
+      data: { dashboardPanelPrefs: map as Prisma.InputJsonValue },
+    });
+    steps.push('dashboardPanelPrefs field verified (read/write OK)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`dashboardPanelPrefs verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — dashboardPanelPrefs not writable. Redeploy with latest Prisma schema, then retry. (${msg})`
     );
   }
 
