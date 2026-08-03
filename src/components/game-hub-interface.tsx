@@ -906,6 +906,33 @@ export default function GameHubInterface({
     );
   }
 
+  const pageBannerEl =
+    currentPage !== 'lobby' && hubChrome.showHeader && PAGE_META[currentPage] ? (
+      <PageBanner
+        title={currentPage === 'home' ? homeTitle : PAGE_META[currentPage].title}
+        subtitle={
+          currentPage === 'home' ? homeSubtitle : PAGE_META[currentPage].subtitle
+        }
+        toolbar={
+          <HubHeaderToolbar
+            unreadCount={unreadCount}
+            unreadMessages={unreadMessages}
+            currentUserId={user.id}
+            onOpenFriends={() => setIsFriendsSheetOpen(true)}
+            onOpenNotifications={() => navigate('notifications')}
+            onOpenMessages={() => navigate('messages')}
+            onLogout={handleLogout}
+            onOpenProfile={handleViewProfile}
+          />
+        }
+      />
+    ) : null;
+
+  const hubFooterEl =
+    currentPage !== 'lobby' && hubChrome.showFooter ? (
+      <HubFooter markLogoUrl={logoUrl} onNavigate={navigate} />
+    ) : null;
+
   return (
     <ProfileNavigationProvider value={{ openProfile: handleViewProfile }}>
     <TooltipProvider>
@@ -1138,38 +1165,13 @@ export default function GameHubInterface({
 
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             {currentPage !== 'lobby' && <HubAnnouncementCarousel />}
-            {currentPage !== 'lobby' && hubChrome.showHeader && PAGE_META[currentPage] && (
-              <PageBanner
-                title={
-                  currentPage === 'home'
-                    ? homeTitle
-                    : PAGE_META[currentPage].title
-                }
-                subtitle={
-                  currentPage === 'home'
-                    ? homeSubtitle
-                    : PAGE_META[currentPage].subtitle
-                }
-                toolbar={
-                  <HubHeaderToolbar
-                    unreadCount={unreadCount}
-                    unreadMessages={unreadMessages}
-                    currentUserId={user.id}
-                    onOpenFriends={() => setIsFriendsSheetOpen(true)}
-                    onOpenNotifications={() => navigate('notifications')}
-                    onOpenMessages={() => navigate('messages')}
-                    onLogout={handleLogout}
-                    onOpenProfile={handleViewProfile}
-                  />
-                }
-              />
-            )}
+            {!isMobile && pageBannerEl}
             <ScrollArea className="relative z-0 flex-1 min-w-0">
+              {isMobile && pageBannerEl}
               {renderContent()}
+              {isMobile && hubFooterEl}
             </ScrollArea>
-            {currentPage !== 'lobby' && hubChrome.showFooter && (
-              <HubFooter markLogoUrl={logoUrl} onNavigate={navigate} />
-            )}
+            {!isMobile && hubFooterEl}
           </div>
 
           <Sheet open={isFriendsSheetOpen} onOpenChange={setIsFriendsSheetOpen}>
