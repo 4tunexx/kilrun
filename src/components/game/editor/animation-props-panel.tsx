@@ -169,7 +169,7 @@ export function AnimationPropsPanel({
 
           {anim.trigger === 'signal' && (
             <label className="block text-xs text-white/60">
-              Listen to button
+              Listen to button / action
               <select
                 className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
                 value={anim.listenToEntityId ?? ''}
@@ -177,7 +177,7 @@ export function AnimationPropsPanel({
               >
                 <option value="">—</option>
                 {allEntities
-                  .filter((e) => e.kind === 'button' && e.id !== entity.id)
+                  .filter((e) => (e.kind === 'button' || e.kind === 'action') && e.id !== entity.id)
                   .map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.name} ({e.kind})

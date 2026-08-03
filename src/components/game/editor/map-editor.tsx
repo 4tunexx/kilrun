@@ -76,6 +76,7 @@ import {
   ArrowRightToLine,
   ArrowUpToLine,
   ArrowDownToLine,
+  Fan,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -601,14 +602,21 @@ export function MapEditor({
           toast({
             title: 'Button placed',
             description:
-              'Select it, then open Properties → Animation → "Activates trap / door" to wire it to a Trap, Hazard, or Door.',
+              'Select it, then open Properties → Animation → "Activates trap / door" to wire it to a Trap, Hazard, Door, Prop, or Checkpoint.',
           });
-        } else if (ent.kind === 'trap' || ent.kind === 'door' || ent.kind === 'hazard') {
+        } else if (ent.kind === 'trap' || ent.kind === 'hazard') {
           wiringHintShown.current.add(ent.kind);
           toast({
             title: `${entityKindLabel(ent.kind)} placed`,
             description:
               'On its own this triggers automatically. To make a Button control it instead, select the Button and set its "Activates trap / door" to this object.',
+          });
+        } else if (ent.kind === 'door') {
+          wiringHintShown.current.add('door');
+          toast({
+            title: 'Door placed',
+            description:
+              'Closed by default and stays that way with no setup — open Properties → Animation and set a Trigger (Interact/Proximity), or wire a Button\'s "Activates trap / door" to this door.',
           });
         }
       },
@@ -1850,8 +1858,8 @@ export function MapEditor({
           type="button"
           onClick={() => apiRef.current?.resetCamera()}
           className="fixed top-1/2 right-2 z-[130] -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-400/40 bg-black/70 text-emerald-200 shadow-lg hover:bg-emerald-500/25 active:scale-95"
-          title="Reset camera to edit location"
-          aria-label="Reset camera to edit location"
+          title="Reset camera to edit home (Start / spawn) — always available, even with toolbars hidden"
+          aria-label="Reset camera to edit home (Start / spawn)"
         >
           <Home className="w-4 h-4" />
         </button>
@@ -4265,6 +4273,12 @@ export function MapEditor({
                   <Skull className="w-4 h-4 text-red-400" />
                 </ToolBtn>
                 <ToolBtn
+                  onClick={() => armPlaceEntity('spinner')}
+                  title="Rotating hazard (saw / blade / crushing bar)"
+                >
+                  <Fan className="w-4 h-4 text-red-300" />
+                </ToolBtn>
+                <ToolBtn
                   onClick={() => armPlaceEntity('door')}
                   title="Door"
                 >
@@ -4329,6 +4343,12 @@ export function MapEditor({
                   <Zap className="w-4 h-4 text-violet-300" />
                 </ToolBtn>
                 <ToolBtn
+                  onClick={() => armPlaceEntity('spinner')}
+                  title="Rotating hazard (saw / blade / crushing bar)"
+                >
+                  <Fan className="w-4 h-4 text-red-300" />
+                </ToolBtn>
+                <ToolBtn
                   onClick={() => armPlaceEntity('door')}
                   title="Door"
                 >
@@ -4355,6 +4375,12 @@ export function MapEditor({
                   title="Death zone / hazard"
                 >
                   <Skull className="w-4 h-4 text-red-400" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => armPlaceEntity('spinner')}
+                  title="Rotating hazard (saw / blade / crushing bar)"
+                >
+                  <Fan className="w-4 h-4 text-red-300" />
                 </ToolBtn>
                 <ToolBtn
                   onClick={() => armPlaceEntity('jump_pad')}
