@@ -188,6 +188,10 @@ export class PlatformState extends Schema {
   @type('number') slopeGradY = 0;
   /** Editor entity id for client mesh sync (custom maps). */
   @type('string') entityId = '';
+  /** When true, only a wired Button can open this door (no collision by default). */
+  @type('boolean') doorControlled = false;
+  /** Door open state — while true, doorControlled platforms are skipped by collision. */
+  @type('boolean') open = false;
 }
 
 /** A hazard that toggles on/off on a fixed interval (or stays on when alwaysActive). */

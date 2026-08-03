@@ -1789,9 +1789,11 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   // in Properties, so choosing "Solid" for a door silently did nothing —
   // the player always walked straight through it. Doors now follow the same
   // Material rules as every other kind below (Solid = blocks, Walkthrough =
-  // open). This does not yet account for open/close animation state — a
-  // Solid door blocks the path even mid-open-animation; that's a separate,
-  // more involved fix (would need collision to track the Active clip state).
+  // open). A Solid door wired to a Button (activatesEntityIds) is tagged
+  // doorControlled in mapDocToSimPlatforms — the server toggles its
+  // PlatformState.open flag while armed and skips collision for it, so it
+  // actually opens for movement, not just visually. An unwired Solid door
+  // has no such toggle and simply blocks, as before.
   // Explicit walkthrough never collides.
   if (ent.collideMaterial === 'walkthrough' || ent.solid === false) return false;
   // Finish / revive / health floors / jump pads are standable trigger volumes.

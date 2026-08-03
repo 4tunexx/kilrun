@@ -408,6 +408,8 @@ export function MapEditor({
     ...DEFAULT_EDITOR_PERF_MODE,
   });
   const lastLockedToastAt = useRef(0);
+  /** One-time-per-session nudge toward the Button/Trap/Door wiring UI (Animation panel). */
+  const wiringHintShown = useRef<Set<EditorEntity['kind']>>(new Set());
   const cameraBeforePlayRef = useRef<EditorCameraState | null>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
@@ -589,6 +591,24 @@ export function MapEditor({
           toast({
             title: 'Player Model',
             description: 'Opens platform-wide avatar settings — not placed on the map.',
+          });
+        }
+      },
+      onEntityPlaced: (ent) => {
+        if (wiringHintShown.current.has(ent.kind)) return;
+        if (ent.kind === 'button') {
+          wiringHintShown.current.add('button');
+          toast({
+            title: 'Button placed',
+            description:
+              'Select it, then open Properties → Animation → "Activates trap / door" to wire it to a Trap, Hazard, or Door.',
+          });
+        } else if (ent.kind === 'trap' || ent.kind === 'door' || ent.kind === 'hazard') {
+          wiringHintShown.current.add(ent.kind);
+          toast({
+            title: `${entityKindLabel(ent.kind)} placed`,
+            description:
+              'On its own this triggers automatically. To make a Button control it instead, select the Button and set its "Activates trap / door" to this object.',
           });
         }
       },

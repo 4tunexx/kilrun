@@ -36,6 +36,8 @@ export interface PlatformBlueprint {
   slopeGradX?: number;
   slopeGradY?: number;
   entityId?: string;
+  /** True for a Solid door wired to a Button — starts closed, opens on activation. */
+  doorControlled?: boolean;
 }
 
 export interface ObstacleBlueprint {
@@ -106,6 +108,8 @@ export function createFromBlueprints(blueprints: PlatformBlueprint[]): PlatformS
     platform.slopeGradX = bp.slopeGradX ?? 0;
     platform.slopeGradY = bp.slopeGradY ?? 0;
     platform.entityId = bp.entityId ?? '';
+    platform.doorControlled = !!bp.doorControlled;
+    platform.open = false;
     return platform;
   });
 }
@@ -181,6 +185,7 @@ export function findSupportPlatform(
   let bestBelow: PlatformHit | null = null;
   let bestClimb: PlatformHit | null = null;
   for (const platform of platforms) {
+    if (platform.doorControlled && platform.open) continue;
     const halfW = platform.width / 2;
     const halfD = platform.depth / 2;
     const { lx, ly } = toPadLocal(x, y, platform.x, platform.y, platform.rotYaw || 0);
@@ -232,6 +237,7 @@ export function resolveSolidCollisions(
   let wallNormalY = 0;
 
   for (const platform of platforms) {
+    if (platform.doorControlled && platform.open) continue;
     const boxH = platform.height > 0 ? platform.height : 0.2;
     // Thin floors: no side collision
     if (boxH <= 0.35) continue;

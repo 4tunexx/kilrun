@@ -320,6 +320,8 @@ export function createEditorViewport(
     onMeasureChange?: (distance: number | null) => void;
     /** Fired when place is blocked (e.g. locked build level). */
     onPlaceResult?: (result: 'locked' | 'ok', layerName?: string) => void;
+    /** Fired right after a new entity is created and added to the doc. */
+    onEntityPlaced?: (entity: EditorEntity) => void;
     /** Fired when click-to-place arming changes (Select / Escape / after place). */
     onPendingPlaceChange?: (kind: EditorEntity['kind'] | null) => void;
     /** Fired when a double-tap/double-click lands on a locked entity (open its props panel). */
@@ -1916,6 +1918,7 @@ export function createEditorViewport(
       select(ent.id);
     });
     handlers.onPlaceResult?.('ok', layer?.name);
+    handlers.onEntityPlaced?.(ent);
     return 'ok';
   }
 

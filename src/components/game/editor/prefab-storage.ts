@@ -202,6 +202,8 @@ export interface SimPlatformBlueprint {
   conveyorDirY?: number;
   /** Optional editor entity id — client can move the mesh with the pad. */
   entityId?: string;
+  /** True for a Solid door wired to a Button — starts closed, opens on activation. */
+  doorControlled?: boolean;
   /** Yaw radians in sim XY — OBB colliders on the server. */
   rotYaw?: number;
   /** True analytic ramp support — dz per unit of LOCAL x/y (post-rotYaw).
@@ -710,7 +712,12 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
     doc.entities.find((e) => e.kind === 'start') ??
     doc.entities.find((e) => e.kind === 'spawn_runner') ??
     doc.entities.find((e) => e.kind === 'player');
-  const pads = source.flatMap(entityToCollisionPads);
+  const doorControlledIds = collectButtonControlledDoorIds(doc);
+  const pads = source.flatMap((e) => {
+    const basePads = entityToCollisionPads(e);
+    if (e.kind !== 'door' || !doorControlledIds.has(e.id)) return basePads;
+    return basePads.map((p) => ({ ...p, doorControlled: true }));
+  });
 
   if (pads.length === 0 && runner) {
     const [tx, ty, tz] = runner.position;
@@ -814,17 +821,36 @@ export function mapDocToSimFinishes(doc: MapDocument): SimFinishBlueprint[] {
     });
 }
 
+/** Ids a button activates: explicit `activatesEntityIds` plus reverse `listenToEntityId` wiring. */
+function resolveButtonTargetIds(doc: MapDocument, button: EditorEntity): string[] {
+  const targets = button.animation?.activatesEntityIds ?? [];
+  const listeners = doc.entities
+    .filter((o) => o.animation?.listenToEntityId === button.id)
+    .map((o) => o.id);
+  return Array.from(new Set([...targets, ...listeners]));
+}
+
+/** Ids of Door entities wired to (at least) one Button — see mapDocToSimPlatforms. */
+function collectButtonControlledDoorIds(doc: MapDocument): Set<string> {
+  const ids = new Set<string>();
+  for (const e of doc.entities) {
+    if (e.kind !== 'button') continue;
+    for (const id of resolveButtonTargetIds(doc, e)) ids.add(id);
+  }
+  const doorIds = new Set(doc.entities.filter((e) => e.kind === 'door').map((e) => e.id));
+  for (const id of Array.from(ids)) {
+    if (!doorIds.has(id)) ids.delete(id);
+  }
+  return ids;
+}
+
 export function mapDocToSimButtons(doc: MapDocument): SimButtonBlueprint[] {
   return doc.entities
     .filter((e) => e.visible !== false && e.kind === 'button')
     .map((e) => {
       const anim = e.animation;
       const [tx, ty, tz] = e.position;
-      const targets = anim?.activatesEntityIds ?? [];
-      const listeners = doc.entities
-        .filter((o) => o.animation?.listenToEntityId === e.id)
-        .map((o) => o.id);
-      const activatesObstacleIds = Array.from(new Set([...targets, ...listeners]));
+      const activatesObstacleIds = resolveButtonTargetIds(doc, e);
       return {
         id: e.id,
         x: tz,
