@@ -1,5 +1,10 @@
 import type { MapDocument } from './map-document';
-import { entityExportsAsPlatform, ensureHordeSettings, getMapGameMode } from './map-document';
+import {
+  entityExportsAsPlatform,
+  ensureHordeSettings,
+  getEntityWarnings,
+  getMapGameMode,
+} from './map-document';
 
 export interface MapValidationIssue {
   level: 'error' | 'warn';
@@ -334,6 +339,20 @@ function pushCreatorEngineChecks(doc: MapDocument, issues: MapValidationIssue[])
     issues.push({
       level: 'warn',
       message: `${danglingWiring.length} button/trap wiring reference(s) point at a deleted entity (e.g. “${danglingWiring[0].name}”). Re-link them.`,
+    });
+  }
+
+  // Same "looks configured, does nothing" checks the Properties panel shows
+  // live while editing (getEntityWarnings) — surfaced again here as a
+  // safety net for anything placed/imported without ever being reselected.
+  const entityWarningCount = ents.reduce(
+    (sum, e) => sum + getEntityWarnings(e, ents).length,
+    0
+  );
+  if (entityWarningCount > 0) {
+    issues.push({
+      level: 'warn',
+      message: `${entityWarningCount} entity(ies) have a setup warning (⚠ icon in the Outliner or Properties panel) — disabled damage, an unwired button/trigger, a moving platform with no offset, or a teleporter with no destination.`,
     });
   }
 }

@@ -117,6 +117,7 @@ import {
   entityKindLabel,
   entityKindsForMode,
   entityShowsGameplayMaterial,
+  getEntityWarnings,
   entityShowsModelPicker,
   findPlayerEntity,
   generateId,
@@ -2699,7 +2700,9 @@ export function MapEditor({
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {doc.entities
                 .filter((e) => !isPlatformPlayerKind(e.kind))
-                .map((e) => (
+                .map((e) => {
+                  const warnings = getEntityWarnings(e, doc.entities);
+                  return (
                 <div
                   key={e.id}
                   className={`flex items-center gap-0.5 rounded ${
@@ -2725,7 +2728,13 @@ export function MapEditor({
                       }
                     }}
                     className="flex-1 text-left px-2 py-1.5 text-sm truncate min-w-0"
+                    title={warnings.length ? warnings.join(' ') : undefined}
                   >
+                    {warnings.length > 0 && (
+                      <span className="text-amber-400 mr-1" title={warnings.join(' ')}>
+                        ⚠
+                      </span>
+                    )}
                     <span className="text-white/40 text-[10px] mr-1">{e.kind}</span>
                     {e.name}
                     {e.groupId ? (
@@ -2763,7 +2772,8 @@ export function MapEditor({
                     )}
                   </button>
                 </div>
-              ))}
+                  );
+                })}
               <button
                 type="button"
                 className="w-full text-left px-2 py-1.5 rounded text-sm border border-sky-500/30 bg-sky-500/10 text-sky-100 mt-2"
@@ -4626,6 +4636,15 @@ export function MapEditor({
                 />
               </label>
 
+              {getEntityWarnings(selected, doc.entities).map((msg, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-100 leading-snug"
+                >
+                  ⚠ {msg}
+                </div>
+              ))}
+
               <div className="rounded-lg border border-white/10 bg-black/30 p-2 space-y-2">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-white/50">
                   Selection
@@ -5226,11 +5245,13 @@ export function MapEditor({
                     <div className="space-y-2 pl-1 border-l border-sky-500/30 ml-1">
                       <p className="text-[10px] text-white/45 leading-snug">
                         Oscillates between rest pose and rest + offset (Y up). Players ride it.
+                        Offset is in world units — same scale as Position/Scale in Properties. All
+                        three at 0 means it won&apos;t move at all.
                       </p>
                       {([0, 1, 2] as const).map((i) => (
                         <label key={i} className="block text-[10px] text-white/55">
                           Offset {['X', 'Y', 'Z'][i]} (
-                          {ensurePlatformMotion(selected).offset[i].toFixed(1)})
+                          {ensurePlatformMotion(selected).offset[i].toFixed(1)}u)
                           <input
                             type="range"
                             min={-12}
@@ -5805,6 +5826,21 @@ export function MapEditor({
                         })
                       }
                     />
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-white/60">
+                    <input
+                      type="checkbox"
+                      checked={!!ensureLight(selected).showFixture}
+                      onChange={(e) =>
+                        patchSelected({
+                          light: {
+                            ...ensureLight(selected),
+                            showFixture: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    Show lamp fixture in game (off = invisible light source, only the editor shows a marker)
                   </label>
                   {(ensureLight(selected).type === 'spot' ||
                     ensureLight(selected).type === 'flashlight' ||
