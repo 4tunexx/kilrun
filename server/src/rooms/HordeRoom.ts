@@ -1247,6 +1247,8 @@ export class HordeRoom extends Room<RoomState> {
         this.buttonArmRemaining.delete(id);
         const obs = this.state.obstacles.find((o) => o.id === id);
         if (obs?.buttonControlled) obs.active = false;
+        const door = this.state.platforms.find((p) => p.entityId === id && p.doorControlled);
+        if (door) door.open = false;
       } else {
         this.buttonArmRemaining.set(id, next);
       }
@@ -1254,6 +1256,11 @@ export class HordeRoom extends Room<RoomState> {
     for (const obstacle of this.state.obstacles) {
       if (obstacle.buttonControlled && this.buttonArmRemaining.has(obstacle.id)) {
         obstacle.active = true;
+      }
+    }
+    for (const platform of this.state.platforms) {
+      if (platform.doorControlled) {
+        platform.open = this.buttonArmRemaining.has(platform.entityId);
       }
     }
   }
@@ -1291,10 +1298,18 @@ export class HordeRoom extends Room<RoomState> {
     this.lastButtonPressAt.set(cooldownKey, now);
     for (const oid of zone.activatesObstacleIds) {
       const obs = this.state.obstacles.find((o) => o.id === oid);
-      if (!obs) continue;
-      obs.active = true;
-      const hold = zone.holdMs > 0 ? zone.holdMs : obs.activeMs || 1500;
-      this.buttonArmRemaining.set(oid, hold);
+      if (obs) {
+        obs.active = true;
+        const hold = zone.holdMs > 0 ? zone.holdMs : obs.activeMs || 1500;
+        this.buttonArmRemaining.set(oid, hold);
+        continue;
+      }
+      const door = this.state.platforms.find((p) => p.entityId === oid && p.doorControlled);
+      if (door) {
+        door.open = true;
+        const hold = zone.holdMs > 0 ? zone.holdMs : 1500;
+        this.buttonArmRemaining.set(oid, hold);
+      }
     }
   }
 

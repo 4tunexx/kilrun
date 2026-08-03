@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scrubDanglingReferences } from './map-document';
+import { getEntityWarnings, scrubDanglingReferences } from './map-document';
 import type { EditorEntity } from './map-document';
 
 function stub(id: string, over: Partial<EditorEntity> = {}): EditorEntity {
@@ -80,5 +80,97 @@ describe('scrubDanglingReferences', () => {
     const entities = [stub('a')];
     const out = scrubDanglingReferences(entities, new Set());
     expect(out).toBe(entities);
+  });
+});
+
+describe('getEntityWarnings', () => {
+  it('flags a trap/hazard with damage disabled', () => {
+    const e = stub('t', { kind: 'trap', hazard: { enabled: false, damage: 20, intervalMs: 500, instantKill: false } });
+    expect(getEntityWarnings(e, [e]).some((w) => w.includes('Damage is disabled'))).toBe(true);
+  });
+
+  it('flags a trap/hazard with no hazard config at all', () => {
+    const e = stub('t', { kind: 'hazard' });
+    expect(getEntityWarnings(e, [e]).some((w) => w.includes('Damage is disabled'))).toBe(true);
+  });
+
+  it('does not flag a trap/hazard with damage enabled', () => {
+    const e = stub('t', { kind: 'trap', hazard: { enabled: true, damage: 20, intervalMs: 500, instantKill: false } });
+    expect(getEntityWarnings(e, [e])).toEqual([]);
+  });
+
+  it('flags a disabled jump pad', () => {
+    const e = stub('j', { kind: 'jump_pad', jumpPad: { enabled: false, boost: 14 } });
+    expect(getEntityWarnings(e, [e]).some((w) => w.includes('Jump pad is disabled'))).toBe(true);
+  });
+
+  it('flags a moving platform with zero offset', () => {
+    const e = stub('p', { motion: { enabled: true, offset: [0, 0, 0], periodMs: 4000, phaseMs: 0 } });
+    expect(getEntityWarnings(e, [e]).some((w) => w.includes('will not actually move'))).toBe(true);
+  });
+
+  it('does not flag a moving platform with a real offset', () => {
+    const e = stub('p', { motion: { enabled: true, offset: [0, 0, 4], periodMs: 4000, phaseMs: 0 } });
+    expect(getEntityWarnings(e, [e])).toEqual([]);
+  });
+
+  it('flags an enabled teleporter with no destination', () => {
+    const e = stub('tp', { teleport: { enabled: true } });
+    expect(getEntityWarnings(e, [e]).some((w) => w.includes('no destination'))).toBe(true);
+  });
+
+  it('flags a signal trigger with nothing wired to listen', () => {
+    const e = stub('d', {
+      kind: 'door',
+      animation: {
+        availableClips: [],
+        trigger: 'signal',
+        radius: 1.5,
+        loopActive: false,
+        loopDefault: false,
+      },
+    });
+    expect(getEntityWarnings(e, [e]).some((w) => w.includes('never activate'))).toBe(true);
+  });
+
+  it('flags a button that activates nothing and has no listeners', () => {
+    const e = stub('b', {
+      kind: 'button',
+      animation: {
+        availableClips: [],
+        trigger: 'interact',
+        radius: 1.5,
+        loopActive: false,
+        loopDefault: false,
+        activatesEntityIds: [],
+      },
+    });
+    expect(getEntityWarnings(e, [e]).some((w) => w.includes("doesn't activate anything"))).toBe(true);
+  });
+
+  it('does not flag a button that a door listens to, even with no activatesEntityIds', () => {
+    const button = stub('b', {
+      kind: 'button',
+      animation: {
+        availableClips: [],
+        trigger: 'interact',
+        radius: 1.5,
+        loopActive: false,
+        loopDefault: false,
+        activatesEntityIds: [],
+      },
+    });
+    const door = stub('d', {
+      kind: 'door',
+      animation: {
+        availableClips: [],
+        trigger: 'signal',
+        radius: 1.5,
+        loopActive: false,
+        loopDefault: false,
+        listenToEntityId: 'b',
+      },
+    });
+    expect(getEntityWarnings(button, [button, door])).toEqual([]);
   });
 });

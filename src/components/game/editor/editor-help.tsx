@@ -24,7 +24,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'place',
     title: 'Place models',
     body: 'Open Assets, click a floor (e.g. floor-square) to arm the Brush, then click the ground to paint. Use the arrow Select tool (V) on the bottom bar to pick objects without placing. In Brush mode, clicking the same model on its cell selects it; Alt+click stacks another on top.',
-    tip: 'Ctrl = Free Fly (WASD + mouse). Placement is off while flying. B toggles Brush.',
+    tip: 'Click the Fly button (top toolbar) for free fly — WASD + mouse look, click Fly again to exit. Placement is off while flying. B toggles Brush.',
     tab: 'assets',
   },
   {
@@ -64,6 +64,13 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     body: 'Place a Trap, then a Button. On the button, choose “Activates trap / door”. Players press E on the button to open/activate that trap. Death zones damage on touch (see Properties).',
   },
   {
+    id: 'weapons-powers',
+    title: 'Weapons, Powers, Sounds & Combat',
+    body: 'Beyond the map itself, the left rail has Weapon Editor, Power Editor, Sound Board, and Combat Editor. Weapon Editor and Combat Editor are per-map (only this map, save to apply). Power Editor and Sound Board are account-wide (every map, every mode, applies immediately) — both are labeled "Account-wide, not per-map" in their header.',
+    tip: 'See the Help tab → "Weapons, Powers, Sounds & Combat" section for the full breakdown.',
+    tab: 'help',
+  },
+  {
     id: 'play',
     title: 'Play Test & publish',
     body: 'Play Test is 3rd-person TPS (like Fortnite): you see your body, crosshair at screen center is aim, left stick moves / WASD, right stick / mouse looks. Needs a Start spawn on a Solid floor.',
@@ -88,7 +95,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     paragraphs: [
       'Orbit: drag with left mouse (short click places in Brush mode; long drag orbits). Scroll to zoom.',
       'Tools: Select (V) picks objects without placing. Brush (B) paints the active model from Assets. In Brush, click the same model on its cell to select it; Alt+click stacks on top. Alt+drag = box select.',
-      'Free Fly (Ctrl): WASD move, mouse look, Space up, C down. Placement disabled. Ctrl again to exit.',
+      'Free Fly: click the Fly button (top toolbar) — WASD move, mouse look, Space up, C down. Placement disabled while flying. Click Fly (now labeled Edit) again to exit.',
       'W / E / R = translate / rotate / scale. Hold Shift = exact grid snap (move by cell, rotate 90°, scale to cell sizes, edges align). Properties: Visible / Lock / Group / Ungroup (works on multi-select). G = grid snap toggle. F = focus selection. Alt+drag = box select. Measure tool = click two ground points.',
       'Ctrl+D duplicate +X, Ctrl+Shift+D +Z. Ctrl+Z / Ctrl+Y undo/redo. Ctrl+S save. Red wire boxes = death zones; yellow lines = button→trap links.',
       'Texture copy/paste: with the Paint tool active, right-click any textured solid to copy its exact texture, tile density, offset, and rotation, then left-click another solid to paste it — it lines up seam-free, matching the source exactly (no re-tiling or re-aligning by hand). A "Copied" chip appears in the Textures tab confirming what is loaded; Clear reverts to the plain paint brush.',
@@ -130,10 +137,20 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     ],
   },
   {
+    id: 'weapons-powers',
+    title: 'Weapons, Powers, Sounds & Combat',
+    paragraphs: [
+      'Four more tabs live in the left rail beyond the map itself — Weapon Editor, Power Editor, Sound Board, and Combat Editor. They are not entity properties, so nothing here shows up by placing an object.',
+      'Weapon Editor and Combat Editor (including weapon sway, under Combat → Sway) are PER-MAP — changes only affect the map currently open, and only take effect for other people once you Save/publish that map.',
+      'Power Editor (skill-tree Powers) and Sound Board are ACCOUNT-WIDE — changes apply to every map, in every mode, immediately, not just the one you have open. Both panels are labeled "Account-wide, not per-map" in their header as a reminder.',
+      'If a weapon or power change "isn\'t showing up" on one map but is on another, that\'s the usual sign you changed something in the wrong scope — check which of the two categories above it falls into.',
+    ],
+  },
+  {
     id: 'match',
     title: 'Playing in Deathrun',
     paragraphs: [
-      'Green wire pads on solids are collision helpers (not multi-select). They only show on the selected object unless you turn on COL in Tools.',
+      'Green wire pads on solids are collision helpers (not multi-select). They only show on the selected object unless you turn on the toolbar toggle titled "Show all solid/collision pads".',
       'Set as Active Match Map stores which JSON Deathrun should use. Floor pieces convert to collision platforms; runner spawn becomes start.',
       'Decorative props, traps, and buttons appear from your map overlay on the client. Restart / rejoin the match after publishing so the server reloads platforms.',
     ],

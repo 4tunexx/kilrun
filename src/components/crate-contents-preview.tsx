@@ -1,6 +1,6 @@
 'use client';
 
-import { Coins, Gift } from 'lucide-react';
+import { Coins } from 'lucide-react';
 import type { CaseItemPublic } from '@/lib/case-actions';
 import { rarityStyle } from '@/components/crate-unbox-modal';
 import { CaseItemThumb } from '@/components/case-item-thumb';

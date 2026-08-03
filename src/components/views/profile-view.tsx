@@ -15,6 +15,7 @@ import {
   MailX,
   Swords,
   Trophy,
+  LayoutDashboard,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -60,6 +61,13 @@ import {
   updateProfileSettings,
 } from '@/lib/social-actions';
 import type { User as UserModel } from '@/generated/prisma';
+import {
+  DASHBOARD_PANEL_KEYS,
+  DASHBOARD_PANEL_LABELS,
+  isDashboardPanelVisible,
+  type DashboardPanelKey,
+  type DashboardPanelPrefs,
+} from '@/lib/dashboard-panels';
 import { BannerFill } from '@/components/banner-fill';
 import { normalizeBannerConfig } from '@/lib/banner';
 import {
@@ -93,8 +101,10 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [notifyEmail, setNotifyEmail] = useState(true);
   const [profilePrivate, setProfilePrivate] = useState(false);
   const [profileCommentsEnabled, setProfileCommentsEnabled] = useState(true);
+  const [dashboardPanelPrefs, setDashboardPanelPrefs] = useState<DashboardPanelPrefs>({});
   const [saving, setSaving] = useState(false);
   const [prefsSaving, setPrefsSaving] = useState(false);
+  const [dashboardPrefsSaving, setDashboardPrefsSaving] = useState(false);
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [cosmeticBusyId, setCosmeticBusyId] = useState<string | null>(null);
   const [deactivatingEmail, setDeactivatingEmail] = useState(false);
@@ -137,6 +147,10 @@ export default function ProfileView({ userId }: { userId: string }) {
       setProfilePrivate(!!(u as { profilePrivate?: boolean } | null)?.profilePrivate);
       setProfileCommentsEnabled(
         (u as { profileCommentsEnabled?: boolean } | null)?.profileCommentsEnabled !== false
+      );
+      setDashboardPanelPrefs(
+        ((u as { dashboardPanelPrefs?: DashboardPanelPrefs } | null)
+          ?.dashboardPanelPrefs ?? {}) as DashboardPanelPrefs
       );
       setSummary(s);
       setInventory(inv);
@@ -228,6 +242,21 @@ export default function ProfileView({ userId }: { userId: string }) {
       toast({ title: 'Could not save preferences', variant: 'destructive' });
     } finally {
       setPrefsSaving(false);
+    }
+  };
+
+  const toggleDashboardPanel = async (key: DashboardPanelKey, visible: boolean) => {
+    const next = { ...dashboardPanelPrefs, [key]: visible };
+    setDashboardPanelPrefs(next);
+    setDashboardPrefsSaving(true);
+    try {
+      const updated = await updateProfileSettings({ dashboardPanelPrefs: next });
+      setUser(updated);
+    } catch {
+      setDashboardPanelPrefs(dashboardPanelPrefs);
+      toast({ title: 'Could not save dashboard layout', variant: 'destructive' });
+    } finally {
+      setDashboardPrefsSaving(false);
     }
   };
 
@@ -1036,6 +1065,33 @@ export default function ProfileView({ userId }: { userId: string }) {
         </TabsContent>
 
         <TabsContent value="settings" className="mt-0 space-y-4">
+          <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <LayoutDashboard className="h-5 w-5 text-primary" /> Dashboard Layout
+              </CardTitle>
+              <CardDescription>
+                Choose which panels show up on your home page. Hidden panels won&apos;t load
+                when you land on the hub.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {DASHBOARD_PANEL_KEYS.map((key) => (
+                <div
+                  key={key}
+                  className="flex items-center justify-between gap-4 rounded-lg border border-slate-700/40 bg-slate-900/30 px-4 py-3"
+                >
+                  <p className="font-semibold">{DASHBOARD_PANEL_LABELS[key]}</p>
+                  <Switch
+                    checked={isDashboardPanelVisible(dashboardPanelPrefs, key)}
+                    disabled={dashboardPrefsSaving}
+                    onCheckedChange={(checked) => toggleDashboardPanel(key, checked)}
+                  />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
           <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

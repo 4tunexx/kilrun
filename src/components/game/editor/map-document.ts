@@ -494,6 +494,13 @@ export interface EntityLight {
   beamLength?: number;
   /** Flashlight / beam aim pitch in degrees (down = negative). */
   pitchDeg?: number;
+  /**
+   * Render a small visible lamp-fixture mesh at this light's position in
+   * Play Test and the live match (in addition to the actual illumination,
+   * which always renders regardless of this flag). Off by default — most
+   * lights are meant to be an invisible light source, not a visible prop.
+   */
+  showFixture?: boolean;
 }
 
 /** Rotating damaging material (spinner entity or prop with spinHazard enabled). */
@@ -1724,6 +1731,62 @@ export function ensureTeleport(ent: EditorEntity): EntityTeleport {
 }
 
 /**
+ * Real-time "this is configured but won't actually do anything" checks for
+ * a single entity — surfaced inline in the Properties panel as it's edited,
+ * not just at publish time (validateMapForPublish covers a different,
+ * broader set of map-wide rules). Every case here is a setup that looks
+ * correct in the editor and produces no visible symptom until someone
+ * plays the map and notices the trap never hurts them / the button does
+ * nothing / the platform never moves.
+ */
+export function getEntityWarnings(ent: EditorEntity, allEntities: EditorEntity[]): string[] {
+  const warnings: string[] = [];
+
+  if (ent.kind === 'trap' || ent.kind === 'hazard') {
+    const hz = ent.hazard;
+    if (!hz || hz.enabled === false) {
+      warnings.push(
+        'Damage is disabled — this will not hurt players. Enable it below, or leave it off if this is meant as a decoration.'
+      );
+    }
+  }
+
+  if (ent.kind === 'jump_pad' && (!ent.jumpPad || ent.jumpPad.enabled === false)) {
+    warnings.push('Jump pad is disabled — players will just stand on it instead of launching.');
+  }
+
+  if (ent.motion?.enabled) {
+    const [ox, oy, oz] = ent.motion.offset;
+    if (Math.abs(ox) < 0.01 && Math.abs(oy) < 0.01 && Math.abs(oz) < 0.01) {
+      warnings.push(
+        'Moving platform is enabled but Offset is (0, 0, 0) — it will not actually move. Set an Offset.'
+      );
+    }
+  }
+
+  if (ent.teleport?.enabled && !ent.teleport.targetEntityId) {
+    warnings.push('Teleporter is enabled but has no destination set — touching it will do nothing.');
+  }
+
+  if (ent.animation?.trigger === 'signal' && !ent.animation.listenToEntityId) {
+    warnings.push(
+      'Trigger is "Signal from button" but nothing is wired to listen — this will never activate. Set "Listen to button / action" below.'
+    );
+  }
+
+  if (ent.kind === 'button') {
+    const anim = ent.animation;
+    const hasTargets = (anim?.activatesEntityIds?.length ?? 0) > 0;
+    const hasListeners = allEntities.some((o) => o.animation?.listenToEntityId === ent.id);
+    if (!hasTargets && !hasListeners) {
+      warnings.push('This button doesn\'t activate anything yet — set "Activates trap / door" below.');
+    }
+  }
+
+  return warnings;
+}
+
+/**
  * Clear teleport targets / button-trap wiring that point at ids no longer in
  * the map. Without this, deleting an entity that's referenced by a
  * teleporter's target or a button's activatesEntityIds/listenToEntityId
@@ -1789,9 +1852,11 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   // in Properties, so choosing "Solid" for a door silently did nothing —
   // the player always walked straight through it. Doors now follow the same
   // Material rules as every other kind below (Solid = blocks, Walkthrough =
-  // open). This does not yet account for open/close animation state — a
-  // Solid door blocks the path even mid-open-animation; that's a separate,
-  // more involved fix (would need collision to track the Active clip state).
+  // open). A Solid door wired to a Button (activatesEntityIds) is tagged
+  // doorControlled in mapDocToSimPlatforms — the server toggles its
+  // PlatformState.open flag while armed and skips collision for it, so it
+  // actually opens for movement, not just visually. An unwired Solid door
+  // has no such toggle and simply blocks, as before.
   // Explicit walkthrough never collides.
   if (ent.collideMaterial === 'walkthrough' || ent.solid === false) return false;
   // Finish / revive / health floors / jump pads are standable trigger volumes.

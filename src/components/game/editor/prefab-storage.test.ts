@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MapDocument } from './map-document';
 import {
   mapDocSpawnPoints,
+  mapDocToSimActions,
   mapDocToSimButtons,
   mapDocToSimFinishes,
   mapDocToSimHazards,
@@ -480,6 +481,107 @@ describe('mapDoc spawn / finish / hazards / bounds', () => {
     const buttons = mapDocToSimButtons(doc);
     expect(buttons).toHaveLength(1);
     expect(buttons[0].activatesObstacleIds).toContain('armed');
+  });
+
+  it('tags a Solid door wired to a Button as doorControlled; an unwired door is not', () => {
+    const doc = baseDoc([
+      {
+        id: 'btn',
+        name: 'Btn',
+        kind: 'button',
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        animation: {
+          availableClips: [],
+          trigger: 'interact',
+          radius: 2,
+          loopActive: false,
+          loopDefault: true,
+          activatesEntityIds: ['door1'],
+        },
+      },
+      {
+        id: 'door1',
+        name: 'Door',
+        kind: 'door',
+        model: 'door-sliding',
+        layerId: 'l1',
+        position: [0, 0, 4],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        solid: true,
+        collideMaterial: 'solid',
+      },
+      {
+        id: 'door2',
+        name: 'Unwired door',
+        kind: 'door',
+        model: 'door-sliding',
+        layerId: 'l1',
+        position: [0, 0, 8],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        solid: true,
+        collideMaterial: 'solid',
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    const wired = pads.find((p) => p.entityId === 'door1');
+    const unwired = pads.find((p) => p.entityId === 'door2');
+    expect(wired?.doorControlled).toBe(true);
+    expect(unwired?.doorControlled).toBeFalsy();
+
+    const buttons = mapDocToSimButtons(doc);
+    expect(buttons[0].activatesObstacleIds).toContain('door1');
+  });
+
+  it('tags a door as doorControlled when it listens to an Action (not just a Button)', () => {
+    const doc = baseDoc([
+      {
+        id: 'act',
+        name: 'Action',
+        kind: 'action',
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        animation: {
+          availableClips: [],
+          trigger: 'proximity',
+          radius: 2,
+          loopActive: false,
+          loopDefault: true,
+        },
+      },
+      {
+        id: 'door1',
+        name: 'Door',
+        kind: 'door',
+        model: 'door-sliding',
+        layerId: 'l1',
+        position: [0, 0, 4],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        solid: true,
+        collideMaterial: 'solid',
+        animation: {
+          availableClips: [],
+          trigger: 'signal',
+          radius: 2,
+          loopActive: false,
+          loopDefault: true,
+          listenToEntityId: 'act',
+        },
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    const wired = pads.find((p) => p.entityId === 'door1');
+    expect(wired?.doorControlled).toBe(true);
+
+    const actions = mapDocToSimActions(doc);
+    expect(actions[0].activatesObstacleIds).toContain('door1');
   });
 
   it('exports ice / conveyor pads and teleports', () => {

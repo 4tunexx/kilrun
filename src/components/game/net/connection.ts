@@ -535,6 +535,7 @@ export class GameConnection {
       conveyorDirY?: number;
       rotYaw?: number;
       entityId?: string;
+      doorControlled?: boolean;
       motionPeriodMs?: number;
       motionPhaseMs?: number;
       motionAmpX?: number;

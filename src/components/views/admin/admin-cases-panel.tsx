@@ -192,8 +192,8 @@ export function AdminCasesPanel() {
                 />
               </div>
               <p className="text-[10px] text-slate-500 sm:col-span-2">
-                Grants this crate automatically, once, the first time a player's metric reaches
-                this amount. Not shown on the Cases page or Shop — it's a hidden milestone reward.
+                Grants this crate automatically, once, the first time a player&apos;s metric reaches
+                this amount. Not shown on the Cases page or Shop — it&apos;s a hidden milestone reward.
               </p>
             </div>
           )}

@@ -76,6 +76,7 @@ import {
   ArrowRightToLine,
   ArrowUpToLine,
   ArrowDownToLine,
+  Fan,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -116,6 +117,7 @@ import {
   entityKindLabel,
   entityKindsForMode,
   entityShowsGameplayMaterial,
+  getEntityWarnings,
   entityShowsModelPicker,
   findPlayerEntity,
   generateId,
@@ -190,6 +192,7 @@ import { AnimationPropsPanel } from './animation-props-panel';
 import {
   EditorTutorial,
   HelpTabPanel,
+  hasCompletedTutorial,
   resetTutorialFlag,
   type TutorialStep,
 } from './editor-help';
@@ -363,6 +366,14 @@ export function MapEditor({
   >([]);
   const [prefabName, setPrefabName] = useState('My Prefab');
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  // First-time admins get dropped into a raw 3D viewport with an icon-only
+  // toolbar and no explanation otherwise — auto-launch the tour once, ever,
+  // per browser. hasCompletedTutorial()/markTutorialDone() already existed
+  // but nothing called the auto-open half of that pair.
+  useEffect(() => {
+    if (!hasCompletedTutorial()) setTutorialOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
   const [measureMode, setMeasureMode] = useState(false);
   const [measureDist, setMeasureDist] = useState<number | null>(null);
@@ -408,6 +419,10 @@ export function MapEditor({
     ...DEFAULT_EDITOR_PERF_MODE,
   });
   const lastLockedToastAt = useRef(0);
+  /** One-time-per-session nudge toward the Button/Trap/Door wiring UI (Animation panel). */
+  const wiringHintShown = useRef<Set<EditorEntity['kind']>>(new Set());
+  /** Confirm once per session before an explicit Save overwrites the live/Active map. */
+  const liveSaveConfirmedRef = useRef(false);
   const cameraBeforePlayRef = useRef<EditorCameraState | null>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
@@ -576,6 +591,18 @@ export function MapEditor({
           });
           return;
         }
+        if (result === 'hidden-layer') {
+          const now = Date.now();
+          if (now - lastLockedToastAt.current < 1600) return;
+          lastLockedToastAt.current = now;
+          toast({
+            title: 'Placed on a hidden layer',
+            description: layerName
+              ? `“${layerName}” is hidden — the object was placed but you won't see it until you toggle that layer visible in the Layers panel.`
+              : "This layer is hidden — the object was placed but you won't see it until you toggle the layer visible in the Layers panel.",
+          });
+          return;
+        }
         // Click-to-place arming hint (layerName reused as message).
         if (layerName?.startsWith('Click once to place') || layerName?.startsWith('Click floor')) {
           toast({
@@ -589,6 +616,31 @@ export function MapEditor({
           toast({
             title: 'Player Model',
             description: 'Opens platform-wide avatar settings — not placed on the map.',
+          });
+        }
+      },
+      onEntityPlaced: (ent) => {
+        if (wiringHintShown.current.has(ent.kind)) return;
+        if (ent.kind === 'button') {
+          wiringHintShown.current.add('button');
+          toast({
+            title: 'Button placed',
+            description:
+              'Select it, then open Properties → Animation → "Activates trap / door" to wire it to a Trap, Hazard, Door, Prop, or Checkpoint.',
+          });
+        } else if (ent.kind === 'trap' || ent.kind === 'hazard') {
+          wiringHintShown.current.add(ent.kind);
+          toast({
+            title: `${entityKindLabel(ent.kind)} placed`,
+            description:
+              'On its own this triggers automatically. To make a Button control it instead, select the Button and set its "Activates trap / door" to this object.',
+          });
+        } else if (ent.kind === 'door') {
+          wiringHintShown.current.add('door');
+          toast({
+            title: 'Door placed',
+            description:
+              'Closed by default and stays that way with no setup — open Properties → Animation and set a Trigger (Interact/Proximity), or wire a Button\'s "Activates trap / door" to this door.',
           });
         }
       },
@@ -770,9 +822,12 @@ export function MapEditor({
         setActive: false,
       }).then(() => {
         if (!opts?.quiet) {
+          const isLive = activePlayId === mapId;
           toast({
-            title: 'Map saved',
-            description: `“${next.name}” saved and synced to cloud — visible on all devices.`,
+            title: isLive ? '🔴 Saved — LIVE for players' : 'Map saved',
+            description: isLive
+              ? `“${next.name}” is the Active map — players in a match right now just got this change.`
+              : `“${next.name}” saved and synced to cloud — visible on all devices.`,
           });
         }
       }).catch((err) => {
@@ -798,6 +853,24 @@ export function MapEditor({
       });
       return false;
     }
+  };
+
+  /**
+   * Explicit user-triggered Save (button click / Ctrl+S). Unlike autosave and
+   * the Play Test snapshot, this warns once per session before the very first
+   * save that would land on the live Active map — plain "Save" looks like it
+   * writes a draft, but persist() always syncs to cloud preserving isActive,
+   * so if this map is already Active it goes live for players immediately.
+   */
+  const handleManualSave = () => {
+    if (activePlayId === mapId && !liveSaveConfirmedRef.current) {
+      const ok = confirm(
+        `“${docRef.current.name}” is the Active ${modeInfo.shortTitle} map — players are on it right now.\n\nSave will publish your changes to them immediately. Continue?`
+      );
+      if (!ok) return;
+      liveSaveConfirmedRef.current = true;
+    }
+    persist();
   };
 
   const requestClose = () => {
@@ -922,7 +995,7 @@ export function MapEditor({
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        persist();
+        handleManualSave();
         return;
       }
 
@@ -1678,7 +1751,7 @@ export function MapEditor({
           </button>
           <button
             type="button"
-            onClick={() => persist()}
+            onClick={() => handleManualSave()}
             className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 ${
               dirty
                 ? 'border-amber-400/70 bg-amber-500/45'
@@ -1689,6 +1762,15 @@ export function MapEditor({
             <Save className="w-4 h-4" />
             {dirty ? 'Save •' : 'Save'}
           </button>
+          {activePlayId === mapId && (
+            <span
+              className="flex items-center gap-1.5 rounded-xl border border-red-400/60 bg-red-500/25 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-red-200 shadow-lg"
+              title="This is the Active map players are in right now."
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+              Live map
+            </span>
+          )}
           {(isMobile || isTouch) && (
             <>
               <button
@@ -1830,8 +1912,8 @@ export function MapEditor({
           type="button"
           onClick={() => apiRef.current?.resetCamera()}
           className="fixed top-1/2 right-2 z-[130] -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-400/40 bg-black/70 text-emerald-200 shadow-lg hover:bg-emerald-500/25 active:scale-95"
-          title="Reset camera to edit location"
-          aria-label="Reset camera to edit location"
+          title="Reset camera to edit home (Start / spawn) — always available, even with toolbars hidden"
+          aria-label="Reset camera to edit home (Start / spawn)"
         >
           <Home className="w-4 h-4" />
         </button>
@@ -1942,7 +2024,7 @@ export function MapEditor({
             variant={freeFly ? 'default' : 'secondary'}
             className={`shrink-0 ${freeFly ? 'bg-amber-600 hover:bg-amber-500' : ''}`}
             onClick={() => apiRef.current?.setFreeFly(!freeFly)}
-            title="Toggle free fly (Ctrl)"
+            title="Toggle free fly — WASD move, mouse look, Space up, C down. Click again to exit."
           >
             <Navigation className="w-4 h-4 mr-1" /> {freeFly ? 'Free Fly ON' : 'Free Fly'}
           </Button>
@@ -1968,11 +2050,20 @@ export function MapEditor({
         </Button>
 
         <div className="flex-1 min-w-2" />
+        {activePlayId === mapId && (
+          <span
+            className="shrink-0 flex items-center gap-1.5 rounded-full border border-red-400/60 bg-red-500/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-red-200"
+            title="This is the Active map players are in right now — Save publishes changes to them immediately."
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+            Live map
+          </span>
+        )}
         <Button
           size="sm"
           variant="secondary"
           className={`shrink-0 ${dirty ? 'border border-amber-400/60 text-amber-100 bg-amber-500/15' : ''}`}
-          onClick={() => persist()}
+          onClick={() => handleManualSave()}
           title={dirty ? 'Unsaved changes — click to save' : 'Saved'}
         >
           <Save className="w-4 h-4 mr-1" /> {dirty ? 'Save •' : 'Save'}
@@ -2609,7 +2700,9 @@ export function MapEditor({
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {doc.entities
                 .filter((e) => !isPlatformPlayerKind(e.kind))
-                .map((e) => (
+                .map((e) => {
+                  const warnings = getEntityWarnings(e, doc.entities);
+                  return (
                 <div
                   key={e.id}
                   className={`flex items-center gap-0.5 rounded ${
@@ -2635,7 +2728,13 @@ export function MapEditor({
                       }
                     }}
                     className="flex-1 text-left px-2 py-1.5 text-sm truncate min-w-0"
+                    title={warnings.length ? warnings.join(' ') : undefined}
                   >
+                    {warnings.length > 0 && (
+                      <span className="text-amber-400 mr-1" title={warnings.join(' ')}>
+                        ⚠
+                      </span>
+                    )}
                     <span className="text-white/40 text-[10px] mr-1">{e.kind}</span>
                     {e.name}
                     {e.groupId ? (
@@ -2673,7 +2772,8 @@ export function MapEditor({
                     )}
                   </button>
                 </div>
-              ))}
+                  );
+                })}
               <button
                 type="button"
                 className="w-full text-left px-2 py-1.5 rounded text-sm border border-sky-500/30 bg-sky-500/10 text-sky-100 mt-2"
@@ -2747,7 +2847,10 @@ export function MapEditor({
                   try {
                     savePrefab(prefabName.trim() || 'Prefab', ents);
                     setPrefabs(listPrefabs());
-                    toast({ title: 'Prefab saved', description: prefabName.trim() || 'Prefab' });
+                    toast({
+                      title: 'Prefab saved (this browser only)',
+                      description: `${prefabName.trim() || 'Prefab'} — use "Publish cloud" below to share it with other staff.`,
+                    });
                   } catch (err) {
                     toast({
                       title: 'Prefab failed',
@@ -2756,8 +2859,9 @@ export function MapEditor({
                     });
                   }
                 }}
+                title="Saves to this browser only — other staff won't see it until you Publish cloud"
               >
-                <Stamp className="w-4 h-4 mr-1" /> Save selection as prefab
+                <Stamp className="w-4 h-4 mr-1" /> Save selection as prefab (local)
               </Button>
               <div className="flex gap-2">
                 <Button
@@ -2831,7 +2935,10 @@ export function MapEditor({
                       } catch (err) {
                         toast({
                           title: 'Could not load cloud prefabs',
-                          description: err instanceof Error ? err.message : 'Staff only?',
+                          description:
+                            err instanceof Error
+                              ? err.message
+                              : 'Unknown error — check your connection and admin/moderator role, then retry.',
                           variant: 'destructive',
                         });
                       }
@@ -4245,6 +4352,12 @@ export function MapEditor({
                   <Skull className="w-4 h-4 text-red-400" />
                 </ToolBtn>
                 <ToolBtn
+                  onClick={() => armPlaceEntity('spinner')}
+                  title="Rotating hazard (saw / blade / crushing bar)"
+                >
+                  <Fan className="w-4 h-4 text-red-300" />
+                </ToolBtn>
+                <ToolBtn
                   onClick={() => armPlaceEntity('door')}
                   title="Door"
                 >
@@ -4309,6 +4422,12 @@ export function MapEditor({
                   <Zap className="w-4 h-4 text-violet-300" />
                 </ToolBtn>
                 <ToolBtn
+                  onClick={() => armPlaceEntity('spinner')}
+                  title="Rotating hazard (saw / blade / crushing bar)"
+                >
+                  <Fan className="w-4 h-4 text-red-300" />
+                </ToolBtn>
+                <ToolBtn
                   onClick={() => armPlaceEntity('door')}
                   title="Door"
                 >
@@ -4335,6 +4454,12 @@ export function MapEditor({
                   title="Death zone / hazard"
                 >
                   <Skull className="w-4 h-4 text-red-400" />
+                </ToolBtn>
+                <ToolBtn
+                  onClick={() => armPlaceEntity('spinner')}
+                  title="Rotating hazard (saw / blade / crushing bar)"
+                >
+                  <Fan className="w-4 h-4 text-red-300" />
                 </ToolBtn>
                 <ToolBtn
                   onClick={() => armPlaceEntity('jump_pad')}
@@ -4510,6 +4635,15 @@ export function MapEditor({
                   onChange={(e) => patchSelected({ name: e.target.value })}
                 />
               </label>
+
+              {getEntityWarnings(selected, doc.entities).map((msg, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-100 leading-snug"
+                >
+                  ⚠ {msg}
+                </div>
+              ))}
 
               <div className="rounded-lg border border-white/10 bg-black/30 p-2 space-y-2">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-white/50">
@@ -5111,11 +5245,13 @@ export function MapEditor({
                     <div className="space-y-2 pl-1 border-l border-sky-500/30 ml-1">
                       <p className="text-[10px] text-white/45 leading-snug">
                         Oscillates between rest pose and rest + offset (Y up). Players ride it.
+                        Offset is in world units — same scale as Position/Scale in Properties. All
+                        three at 0 means it won&apos;t move at all.
                       </p>
                       {([0, 1, 2] as const).map((i) => (
                         <label key={i} className="block text-[10px] text-white/55">
                           Offset {['X', 'Y', 'Z'][i]} (
-                          {ensurePlatformMotion(selected).offset[i].toFixed(1)})
+                          {ensurePlatformMotion(selected).offset[i].toFixed(1)}u)
                           <input
                             type="range"
                             min={-12}
@@ -5691,6 +5827,21 @@ export function MapEditor({
                       }
                     />
                   </label>
+                  <label className="flex items-center gap-2 text-xs text-white/60">
+                    <input
+                      type="checkbox"
+                      checked={!!ensureLight(selected).showFixture}
+                      onChange={(e) =>
+                        patchSelected({
+                          light: {
+                            ...ensureLight(selected),
+                            showFixture: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    Show lamp fixture in game (off = invisible light source, only the editor shows a marker)
+                  </label>
                   {(ensureLight(selected).type === 'spot' ||
                     ensureLight(selected).type === 'flashlight' ||
                     ensureLight(selected).type === 'beam') && (
@@ -6174,7 +6325,7 @@ export function MapEditor({
                     {ensureHazard(selected).mode === 'button' && (
                       <p className="text-[10px] text-amber-200/80 leading-snug">
                         Damage stays off until a Button targets this trap: select a Button, set its
-                        "Activates trap / door" to this object. Pressing E on that button arms this
+                        &ldquo;Activates trap / door&rdquo; to this object. Pressing E on that button arms this
                         trap for damage (and plays its Active clip if one is set).
                       </p>
                     )}

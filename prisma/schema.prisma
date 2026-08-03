@@ -95,6 +95,10 @@ model User {
   /// When false, other players cannot leave comments on the public profile.
   profileCommentsEnabled Boolean @default(true)
 
+  /// Home dashboard panel visibility (Record<DashboardPanelKey, boolean>).
+  /// Missing keys default to visible — see src/lib/dashboard-panels.ts.
+  dashboardPanelPrefs Json?
+
   /// Profile "showcase" slots + layout for the mini hover-card. Stored as
   /// either a legacy JSON array of { slot, itemType, refId }, or
   /// { entries: [...], layout: { position, align } }.

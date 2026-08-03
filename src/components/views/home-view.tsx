@@ -25,9 +25,14 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   getActiveMissions,
+  getSessionUser,
   getStatsSummary,
   type StatsSummary,
 } from '@/lib/actions';
+import {
+  isDashboardPanelVisible,
+  type DashboardPanelPrefs,
+} from '@/lib/dashboard-panels';
 import {
   getGlobalChat,
   sendGlobalChat,
@@ -90,6 +95,7 @@ export default function HomeView({
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [panelPrefs, setPanelPrefs] = useState<DashboardPanelPrefs>({});
   /** Admin SiteSettings win over any prop/default. */
   const [wordmarkSrc, setWordmarkSrc] = useState(
     resolveHeaderLogo(headerLogoUrlProp)
@@ -128,15 +134,20 @@ export default function HomeView({
         // Still load the board; panel may briefly lag until next visit.
       }
       if (!isMounted) return;
-      const [m, s, n, c, settings, forum] = await Promise.all([
+      const [m, s, n, c, settings, forum, sessionUser] = await Promise.all([
         getActiveMissions(userId),
         getStatsSummary(userId),
         getNewsPosts(),
         getGlobalChat(40),
         getSiteSettings(),
         getForumPosts(5),
+        getSessionUser(),
       ]);
       if (!isMounted) return;
+      setPanelPrefs(
+        ((sessionUser as { dashboardPanelPrefs?: DashboardPanelPrefs } | null)
+          ?.dashboardPanelPrefs ?? {}) as DashboardPanelPrefs
+      );
       const daily = m.filter(isDailyMissionRow);
       const main = m.filter((mission) => !isDailyMissionRow(mission));
       // Show the full daily board so completed missions (e.g. Daily Login)
@@ -216,103 +227,110 @@ export default function HomeView({
   return (
     <div className="flex flex-col min-h-full">
       {/* Hero banner — pointer-reactive background + interactive wordmark */}
-      <div
-        ref={heroParallax.ref}
-        className="relative h-48 sm:h-64 overflow-hidden touch-pan-y"
-        onPointerMove={heroParallax.onPointerMove}
-        onPointerLeave={heroParallax.onPointerLeave}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={heroSrc}
-          alt="Kilrun arena"
-          className="absolute inset-[-8%] h-[116%] w-[116%] max-w-none object-cover pointer-events-none select-none"
-          style={heroParallax.mediaStyle}
-          draggable={false}
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-slate-900/90 via-slate-900/55 to-slate-900/70 pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-transparent to-transparent pointer-events-none" />
-        <div className="relative h-full px-4 sm:px-8 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <InteractiveWordmark
-              src={wordmarkSrc}
-              logoStyle={logoStyle}
-              className="h-12 sm:h-16 md:h-20 w-auto max-w-[min(100%,22rem)]"
-            />
+      {isDashboardPanelVisible(panelPrefs, 'hero') && (
+        <div
+          ref={heroParallax.ref}
+          className="relative h-48 sm:h-64 overflow-hidden touch-pan-y"
+          onPointerMove={heroParallax.onPointerMove}
+          onPointerLeave={heroParallax.onPointerLeave}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={heroSrc}
+            alt="Kilrun arena"
+            className="absolute inset-[-8%] h-[116%] w-[116%] max-w-none object-cover pointer-events-none select-none"
+            style={heroParallax.mediaStyle}
+            draggable={false}
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-900/90 via-slate-900/55 to-slate-900/70 pointer-events-none" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-transparent to-transparent pointer-events-none" />
+          <div className="relative h-full px-4 sm:px-8 flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <InteractiveWordmark
+                src={wordmarkSrc}
+                logoStyle={logoStyle}
+                className="h-12 sm:h-16 md:h-20 w-auto max-w-[min(100%,22rem)]"
+              />
+            </div>
+            <Button
+              size="lg"
+              className="shrink-0 h-14 px-8 text-lg font-bold shadow-2xl"
+              onClick={onLaunchGame}
+            >
+              <Play className="mr-2 h-6 w-6 fill-current" /> Launch Game
+            </Button>
           </div>
-          <Button
-            size="lg"
-            className="shrink-0 h-14 px-8 text-lg font-bold shadow-2xl"
-            onClick={onLaunchGame}
-          >
-            <Play className="mr-2 h-6 w-6 fill-current" /> Launch Game
-          </Button>
         </div>
-      </div>
+      )}
 
       {/* Stats — flush under hero, full width matching header */}
-      <div className="w-full border-y border-slate-700/40 bg-slate-900/70 backdrop-blur-md">
-        <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-slate-700/50">
-          <button
-            type="button"
-            className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
-            onClick={() => onNavigate?.('store')}
-          >
-            <Coins className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-yellow-400 transition group-hover:scale-110" />
-            <div className="text-2xl sm:text-3xl font-black tracking-tight">
-              <AnimatedCounter end={vpCurrency} />
-            </div>
-            <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
-              VP Balance
-            </p>
-          </button>
-          <button
-            type="button"
-            className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
-            onClick={() => onNavigate?.('leaderboard')}
-          >
-            <Trophy className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
-            <div className="text-2xl sm:text-3xl font-black tracking-tight">
-              {summary?.bestScore ?? 0}
-            </div>
-            <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
-              Best Score
-            </p>
-          </button>
-          <button
-            type="button"
-            className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
-            onClick={() => onNavigate?.('stats')}
-          >
-            <Gauge className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
-            <div className="text-2xl sm:text-3xl font-black tracking-tight">
-              {summary?.bestDistance ?? 0}m
-            </div>
-            <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
-              Best Distance
-            </p>
-          </button>
-          <button
-            type="button"
-            className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
-            onClick={() => onNavigate?.('stats')}
-          >
-            <Clock className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
-            <div className="text-2xl sm:text-3xl font-black tracking-tight">
-              {summary?.totalRuns ?? 0}
-            </div>
-            <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
-              Total Runs
-            </p>
-          </button>
+      {isDashboardPanelVisible(panelPrefs, 'stats') && (
+        <div className="w-full border-y border-slate-700/40 bg-slate-900/70 backdrop-blur-md">
+          <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-slate-700/50">
+            <button
+              type="button"
+              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+              onClick={() => onNavigate?.('store')}
+            >
+              <Coins className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-yellow-400 transition group-hover:scale-110" />
+              <div className="text-2xl sm:text-3xl font-black tracking-tight">
+                <AnimatedCounter end={vpCurrency} />
+              </div>
+              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+                VP Balance
+              </p>
+            </button>
+            <button
+              type="button"
+              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+              onClick={() => onNavigate?.('leaderboard')}
+            >
+              <Trophy className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
+              <div className="text-2xl sm:text-3xl font-black tracking-tight">
+                {summary?.bestScore ?? 0}
+              </div>
+              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+                Best Score
+              </p>
+            </button>
+            <button
+              type="button"
+              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+              onClick={() => onNavigate?.('stats')}
+            >
+              <Gauge className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
+              <div className="text-2xl sm:text-3xl font-black tracking-tight">
+                {summary?.bestDistance ?? 0}m
+              </div>
+              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+                Best Distance
+              </p>
+            </button>
+            <button
+              type="button"
+              className="group px-3 sm:px-5 py-5 sm:py-6 text-center transition hover:bg-white/[0.03] focus-visible:outline-none focus-visible:bg-white/[0.04]"
+              onClick={() => onNavigate?.('stats')}
+            >
+              <Clock className="w-5 h-5 sm:w-6 sm:h-6 mx-auto mb-2 text-primary transition group-hover:scale-110" />
+              <div className="text-2xl sm:text-3xl font-black tracking-tight">
+                {summary?.totalRuns ?? 0}
+              </div>
+              <p className="mt-1 text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">
+                Total Runs
+              </p>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="px-4 sm:px-8 py-6 space-y-6 flex-1">
         {/* Promoted shop items (event skins etc.) with custom banner + countdown */}
-        <HomePromoBanner onNavigate={onNavigate} />
+        {isDashboardPanelVisible(panelPrefs, 'promo') && (
+          <HomePromoBanner onNavigate={onNavigate} />
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {isDashboardPanelVisible(panelPrefs, 'chat') && (
           <Card className={`${PANEL} h-full flex flex-col`}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 shrink-0">
               <CardTitle className="flex items-center gap-2">
@@ -427,7 +445,9 @@ export default function HomeView({
               )}
             </CardContent>
           </Card>
+          )}
 
+          {isDashboardPanelVisible(panelPrefs, 'dailyMissions') && (
           <Card className={`${PANEL} h-full`}>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2">
@@ -488,9 +508,11 @@ export default function HomeView({
               )}
             </CardContent>
           </Card>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {isDashboardPanelVisible(panelPrefs, 'missions') && (
           <Card className={PANEL}>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2">
@@ -556,7 +578,9 @@ export default function HomeView({
               )}
             </CardContent>
           </Card>
+          )}
 
+          {isDashboardPanelVisible(panelPrefs, 'forum') && (
           <Card className={PANEL}>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2">
@@ -598,9 +622,10 @@ export default function HomeView({
               )}
             </CardContent>
           </Card>
+          )}
         </div>
 
-        {news.length > 0 && (
+        {isDashboardPanelVisible(panelPrefs, 'news') && news.length > 0 && (
           <Card className={PANEL}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

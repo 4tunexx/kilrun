@@ -96,7 +96,7 @@ export function AnimationPropsPanel({
           {anim.trigger === 'always' && (
             <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-2 py-1.5 space-y-1.5">
               <p className="text-[10px] text-amber-200/90 leading-snug">
-                "Always loop default" plays in the editor viewport too, non-stop. Use{' '}
+                &ldquo;Always loop default&rdquo; plays in the editor viewport too, non-stop. Use{' '}
                 <b>Stop</b> below to freeze it here while you work — this only affects the
                 editor preview, not Play Test or the live match.
               </p>
@@ -169,7 +169,7 @@ export function AnimationPropsPanel({
 
           {anim.trigger === 'signal' && (
             <label className="block text-xs text-white/60">
-              Listen to button
+              Listen to button / action
               <select
                 className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
                 value={anim.listenToEntityId ?? ''}
@@ -177,7 +177,7 @@ export function AnimationPropsPanel({
               >
                 <option value="">—</option>
                 {allEntities
-                  .filter((e) => e.kind === 'button' && e.id !== entity.id)
+                  .filter((e) => (e.kind === 'button' || e.kind === 'action') && e.id !== entity.id)
                   .map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.name} ({e.kind})

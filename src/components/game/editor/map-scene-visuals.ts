@@ -288,16 +288,20 @@ export function makeAuthoredLight(ent: EditorEntity): THREE.Group {
   const group = new THREE.Group();
   group.name = 'map-light';
   const type = cfg.type ?? 'point';
-  const bulb = new THREE.Mesh(
-    type === 'beam'
-      ? new THREE.CylinderGeometry(0.07, 0.12, 0.3, 10)
-      : new THREE.SphereGeometry(0.16, 14, 10),
-    new THREE.MeshStandardMaterial({
-      color: new THREE.Color(cfg.color),
-      emissive: new THREE.Color(cfg.color),
-      emissiveIntensity: 1.1,
-    })
-  );
+  // Off by default: a light is meant to illuminate, not appear as a visible
+  // prop. Only add the fixture mesh when the author explicitly opts in.
+  const bulb = cfg.showFixture
+    ? new THREE.Mesh(
+        type === 'beam'
+          ? new THREE.CylinderGeometry(0.07, 0.12, 0.3, 10)
+          : new THREE.SphereGeometry(0.16, 14, 10),
+        new THREE.MeshStandardMaterial({
+          color: new THREE.Color(cfg.color),
+          emissive: new THREE.Color(cfg.color),
+          emissiveIntensity: 1.1,
+        })
+      )
+    : null;
   if (type === 'spot' || type === 'flashlight' || type === 'beam') {
     const angle = THREE.MathUtils.degToRad(cfg.angleDeg ?? (type === 'beam' ? 12 : 40));
     const spot = new THREE.SpotLight(
@@ -314,12 +318,12 @@ export function makeAuthoredLight(ent: EditorEntity): THREE.Group {
     target.position.set(0, Math.sin(pitch) * 4, Math.cos(pitch) * 4);
     group.add(target);
     spot.target = target;
-    group.add(bulb);
+    if (bulb) group.add(bulb);
     group.add(spot);
   } else {
     const point = new THREE.PointLight(new THREE.Color(cfg.color), cfg.intensity, cfg.distance, 2);
     point.castShadow = !!cfg.castShadow;
-    group.add(bulb);
+    if (bulb) group.add(bulb);
     group.add(point);
   }
   group.position.set(...ent.position);

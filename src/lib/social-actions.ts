@@ -24,6 +24,7 @@ import type { SkinAttachment } from '@/lib/player-skins';
 import { persistSiteImage } from '@/lib/site-asset-upload';
 import { getLevelFromXp } from '@/lib/progression';
 import { getInventorySlotCap } from '@/lib/inventory-slots';
+import { sanitizeDashboardPanelPrefs } from '@/lib/dashboard-panels';
 
 async function requireSessionUser() {
   const session = await auth();
@@ -67,6 +68,7 @@ export async function updateProfileSettings(input: {
   notifyEmail?: boolean;
   profilePrivate?: boolean;
   profileCommentsEnabled?: boolean;
+  dashboardPanelPrefs?: Record<string, boolean>;
 }) {
   const user = await requireSessionUser();
   const data: {
@@ -77,6 +79,7 @@ export async function updateProfileSettings(input: {
     notifyEmail?: boolean;
     profilePrivate?: boolean;
     profileCommentsEnabled?: boolean;
+    dashboardPanelPrefs?: Prisma.InputJsonValue;
   } = {};
 
   if (typeof input.bio === 'string') {
@@ -94,6 +97,14 @@ export async function updateProfileSettings(input: {
   if (typeof input.profilePrivate === 'boolean') data.profilePrivate = input.profilePrivate;
   if (typeof input.profileCommentsEnabled === 'boolean') {
     data.profileCommentsEnabled = input.profileCommentsEnabled;
+  }
+  if (input.dashboardPanelPrefs) {
+    const existing =
+      (user.dashboardPanelPrefs as Record<string, boolean> | null) ?? {};
+    data.dashboardPanelPrefs = {
+      ...existing,
+      ...sanitizeDashboardPanelPrefs(input.dashboardPanelPrefs),
+    } as Prisma.InputJsonValue;
   }
 
   return prisma.user.update({

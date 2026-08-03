@@ -10,7 +10,7 @@
  * within seconds across every instance.
  */
 import { prisma } from '@/lib/prisma';
-import { decryptSecret, encryptSecret, siteSecretsEncryptionConfigured } from '@/lib/secrets-crypto';
+import { decryptSecret, siteSecretsEncryptionConfigured } from '@/lib/secrets-crypto';
 
 const CACHE_TTL_MS = 20_000;
 

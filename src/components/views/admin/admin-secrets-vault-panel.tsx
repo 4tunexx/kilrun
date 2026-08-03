@@ -178,7 +178,7 @@ export function AdminSecretsVaultPanel() {
             long random value, e.g. generate one with{' '}
             <code className="text-foreground">openssl rand -base64 32</code>, then redeploy.
           </p>
-          <p>Once that's set, come back here to set a vault password / Face ID passkey and start adding secrets.</p>
+          <p>Once that&apos;s set, come back here to set a vault password / Face ID passkey and start adding secrets.</p>
         </CardContent>
       </Card>
     );
@@ -264,7 +264,7 @@ export function AdminSecretsVaultPanel() {
 }
 
 function UnlockedVault({
-  status,
+  status: _status,
   passkeySupported,
   onRegisterPasskey,
   onRefreshStatus,
