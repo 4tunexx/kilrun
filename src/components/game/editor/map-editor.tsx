@@ -6194,7 +6194,7 @@ export function MapEditor({
                     {ensureHazard(selected).mode === 'button' && (
                       <p className="text-[10px] text-amber-200/80 leading-snug">
                         Damage stays off until a Button targets this trap: select a Button, set its
-                        "Activates trap / door" to this object. Pressing E on that button arms this
+                        &ldquo;Activates trap / door&rdquo; to this object. Pressing E on that button arms this
                         trap for damage (and plays its Active clip if one is set).
                       </p>
                     )}

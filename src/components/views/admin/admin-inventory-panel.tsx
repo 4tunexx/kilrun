@@ -118,8 +118,8 @@ function SlotPacksEditor() {
         <p className="text-xs text-slate-400 font-normal">
           Base cap is {BASE_INVENTORY_SLOTS} slots, +{LEVEL_SLOTS_PER_STEP} every{' '}
           {LEVEL_SLOTS_STEP} levels, capping at {MAX_LEVEL_INVENTORY_SLOTS} from leveling alone.
-          Slot packs sold here stack on top of that as permanent purchases, shown in the shop's
-          "Inventory Slots" section.
+          Slot packs sold here stack on top of that as permanent purchases, shown in the shop&apos;s
+          &ldquo;Inventory Slots&rdquo; section.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">

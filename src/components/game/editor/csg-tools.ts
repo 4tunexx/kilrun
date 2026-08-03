@@ -22,7 +22,7 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Brush, Evaluator, SUBTRACTION, ADDITION } from 'three-bvh-csg';
 import type { EditorEntity, CsgLocalPad } from './map-document';
-import { isHammerSolidEntity, HAMMER_SOLID_MODEL, generateId } from './map-document';
+import { isHammerSolidEntity, HAMMER_SOLID_MODEL } from './map-document';
 import type { HammerPrimitive } from './hammer-shapes';
 import { hammerPrimitiveMeta, makeHammerGeometry } from './hammer-shapes';
 import { loadGltf } from '../renderer/asset-loader';

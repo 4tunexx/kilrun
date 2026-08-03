@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { Coins, Gift, Loader2, Package, ShieldCheck, ShoppingBag, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Gift, Loader2, Package, ShieldCheck, ShoppingBag, Sparkles, Trash2, Upload } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
