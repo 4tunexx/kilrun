@@ -289,12 +289,6 @@ export function AdminMapEditorPanel() {
                 try {
                   const doc = importJson(String(reader.result));
                   const importedMode = getMapGameMode(doc);
-                  if (importedMode !== selectedMode) {
-                    toast({
-                      title: `Imported as ${KILRUN_MODE_INFO[importedMode].title}`,
-                      description: 'Map mode comes from the JSON file.',
-                    });
-                  }
                   const { id } = createNewMap(
                     doc.name || f.name.replace(/\.json$/i, ''),
                     importedMode
@@ -306,8 +300,13 @@ export function AdminMapEditorPanel() {
                   });
                   if (importedMode === selectedMode) {
                     refresh();
+                    toast({ title: `Imported “${doc.name || id}”` });
+                  } else {
+                    toast({
+                      title: `Imported “${doc.name || id}” as ${KILRUN_MODE_INFO[importedMode].title}`,
+                      description: `The JSON file's own mode wins over what you're currently browsing (${modeInfo.title}). Switch to the ${KILRUN_MODE_INFO[importedMode].title} tab to see it.`,
+                    });
                   }
-                  toast({ title: `Imported “${doc.name || id}”` });
                 } catch (err) {
                   toast({
                     title: err instanceof Error ? err.message : 'Import failed',
@@ -393,6 +392,13 @@ export function AdminMapEditorPanel() {
                           variant="secondary"
                           className="h-7 text-xs"
                           onClick={() => {
+                            if (
+                              !confirm(
+                                `Set “${m.name}” as the Active ${modeInfo.shortTitle} map?\n\nPlayers will load into it immediately — this replaces whatever map is currently live.`
+                              )
+                            ) {
+                              return;
+                            }
                             void (async () => {
                               setActivePlayMapIdForMode(selectedMode, m.id);
                               setActiveId(m.id);

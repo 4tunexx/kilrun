@@ -191,6 +191,7 @@ import { AnimationPropsPanel } from './animation-props-panel';
 import {
   EditorTutorial,
   HelpTabPanel,
+  hasCompletedTutorial,
   resetTutorialFlag,
   type TutorialStep,
 } from './editor-help';
@@ -364,6 +365,14 @@ export function MapEditor({
   >([]);
   const [prefabName, setPrefabName] = useState('My Prefab');
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  // First-time admins get dropped into a raw 3D viewport with an icon-only
+  // toolbar and no explanation otherwise — auto-launch the tour once, ever,
+  // per browser. hasCompletedTutorial()/markTutorialDone() already existed
+  // but nothing called the auto-open half of that pair.
+  useEffect(() => {
+    if (!hasCompletedTutorial()) setTutorialOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
   const [measureMode, setMeasureMode] = useState(false);
   const [measureDist, setMeasureDist] = useState<number | null>(null);
@@ -411,6 +420,8 @@ export function MapEditor({
   const lastLockedToastAt = useRef(0);
   /** One-time-per-session nudge toward the Button/Trap/Door wiring UI (Animation panel). */
   const wiringHintShown = useRef<Set<EditorEntity['kind']>>(new Set());
+  /** Confirm once per session before an explicit Save overwrites the live/Active map. */
+  const liveSaveConfirmedRef = useRef(false);
   const cameraBeforePlayRef = useRef<EditorCameraState | null>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
   const touchLayerRef = useRef<HTMLDivElement>(null);
@@ -576,6 +587,18 @@ export function MapEditor({
               ? `“${layerName}” is locked — unlock it in the Layers panel.`
               : 'Object is locked — double-tap it to open properties, or unlock in Layers panel.',
             variant: 'destructive',
+          });
+          return;
+        }
+        if (result === 'hidden-layer') {
+          const now = Date.now();
+          if (now - lastLockedToastAt.current < 1600) return;
+          lastLockedToastAt.current = now;
+          toast({
+            title: 'Placed on a hidden layer',
+            description: layerName
+              ? `“${layerName}” is hidden — the object was placed but you won't see it until you toggle that layer visible in the Layers panel.`
+              : "This layer is hidden — the object was placed but you won't see it until you toggle the layer visible in the Layers panel.",
           });
           return;
         }
@@ -798,9 +821,12 @@ export function MapEditor({
         setActive: false,
       }).then(() => {
         if (!opts?.quiet) {
+          const isLive = activePlayId === mapId;
           toast({
-            title: 'Map saved',
-            description: `“${next.name}” saved and synced to cloud — visible on all devices.`,
+            title: isLive ? '🔴 Saved — LIVE for players' : 'Map saved',
+            description: isLive
+              ? `“${next.name}” is the Active map — players in a match right now just got this change.`
+              : `“${next.name}” saved and synced to cloud — visible on all devices.`,
           });
         }
       }).catch((err) => {
@@ -826,6 +852,24 @@ export function MapEditor({
       });
       return false;
     }
+  };
+
+  /**
+   * Explicit user-triggered Save (button click / Ctrl+S). Unlike autosave and
+   * the Play Test snapshot, this warns once per session before the very first
+   * save that would land on the live Active map — plain "Save" looks like it
+   * writes a draft, but persist() always syncs to cloud preserving isActive,
+   * so if this map is already Active it goes live for players immediately.
+   */
+  const handleManualSave = () => {
+    if (activePlayId === mapId && !liveSaveConfirmedRef.current) {
+      const ok = confirm(
+        `“${docRef.current.name}” is the Active ${modeInfo.shortTitle} map — players are on it right now.\n\nSave will publish your changes to them immediately. Continue?`
+      );
+      if (!ok) return;
+      liveSaveConfirmedRef.current = true;
+    }
+    persist();
   };
 
   const requestClose = () => {
@@ -950,7 +994,7 @@ export function MapEditor({
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        persist();
+        handleManualSave();
         return;
       }
 
@@ -1706,7 +1750,7 @@ export function MapEditor({
           </button>
           <button
             type="button"
-            onClick={() => persist()}
+            onClick={() => handleManualSave()}
             className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95 ${
               dirty
                 ? 'border-amber-400/70 bg-amber-500/45'
@@ -1717,6 +1761,15 @@ export function MapEditor({
             <Save className="w-4 h-4" />
             {dirty ? 'Save •' : 'Save'}
           </button>
+          {activePlayId === mapId && (
+            <span
+              className="flex items-center gap-1.5 rounded-xl border border-red-400/60 bg-red-500/25 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-red-200 shadow-lg"
+              title="This is the Active map players are in right now."
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+              Live map
+            </span>
+          )}
           {(isMobile || isTouch) && (
             <>
               <button
@@ -1970,7 +2023,7 @@ export function MapEditor({
             variant={freeFly ? 'default' : 'secondary'}
             className={`shrink-0 ${freeFly ? 'bg-amber-600 hover:bg-amber-500' : ''}`}
             onClick={() => apiRef.current?.setFreeFly(!freeFly)}
-            title="Toggle free fly (Ctrl)"
+            title="Toggle free fly — WASD move, mouse look, Space up, C down. Click again to exit."
           >
             <Navigation className="w-4 h-4 mr-1" /> {freeFly ? 'Free Fly ON' : 'Free Fly'}
           </Button>
@@ -1996,11 +2049,20 @@ export function MapEditor({
         </Button>
 
         <div className="flex-1 min-w-2" />
+        {activePlayId === mapId && (
+          <span
+            className="shrink-0 flex items-center gap-1.5 rounded-full border border-red-400/60 bg-red-500/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-red-200"
+            title="This is the Active map players are in right now — Save publishes changes to them immediately."
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+            Live map
+          </span>
+        )}
         <Button
           size="sm"
           variant="secondary"
           className={`shrink-0 ${dirty ? 'border border-amber-400/60 text-amber-100 bg-amber-500/15' : ''}`}
-          onClick={() => persist()}
+          onClick={() => handleManualSave()}
           title={dirty ? 'Unsaved changes — click to save' : 'Saved'}
         >
           <Save className="w-4 h-4 mr-1" /> {dirty ? 'Save •' : 'Save'}
@@ -2775,7 +2837,10 @@ export function MapEditor({
                   try {
                     savePrefab(prefabName.trim() || 'Prefab', ents);
                     setPrefabs(listPrefabs());
-                    toast({ title: 'Prefab saved', description: prefabName.trim() || 'Prefab' });
+                    toast({
+                      title: 'Prefab saved (this browser only)',
+                      description: `${prefabName.trim() || 'Prefab'} — use "Publish cloud" below to share it with other staff.`,
+                    });
                   } catch (err) {
                     toast({
                       title: 'Prefab failed',
@@ -2784,8 +2849,9 @@ export function MapEditor({
                     });
                   }
                 }}
+                title="Saves to this browser only — other staff won't see it until you Publish cloud"
               >
-                <Stamp className="w-4 h-4 mr-1" /> Save selection as prefab
+                <Stamp className="w-4 h-4 mr-1" /> Save selection as prefab (local)
               </Button>
               <div className="flex gap-2">
                 <Button
@@ -2859,7 +2925,10 @@ export function MapEditor({
                       } catch (err) {
                         toast({
                           title: 'Could not load cloud prefabs',
-                          description: err instanceof Error ? err.message : 'Staff only?',
+                          description:
+                            err instanceof Error
+                              ? err.message
+                              : 'Unknown error — check your connection and admin/moderator role, then retry.',
                           variant: 'destructive',
                         });
                       }

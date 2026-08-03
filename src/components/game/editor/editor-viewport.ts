@@ -318,8 +318,8 @@ export function createEditorViewport(
     onDocChange: (doc: MapDocument) => void;
     onFreeFlyChange?: (on: boolean) => void;
     onMeasureChange?: (distance: number | null) => void;
-    /** Fired when place is blocked (e.g. locked build level). */
-    onPlaceResult?: (result: 'locked' | 'ok', layerName?: string) => void;
+    /** Fired when place is blocked (locked layer) or placed onto a hidden layer. */
+    onPlaceResult?: (result: 'locked' | 'ok' | 'hidden-layer', layerName?: string) => void;
     /** Fired right after a new entity is created and added to the doc. */
     onEntityPlaced?: (entity: EditorEntity) => void;
     /** Fired when click-to-place arming changes (Select / Escape / after place). */
@@ -1917,7 +1917,7 @@ export function createEditorViewport(
     void syncEntity(ent).then(() => {
       select(ent.id);
     });
-    handlers.onPlaceResult?.('ok', layer?.name);
+    handlers.onPlaceResult?.(layer?.visible === false ? 'hidden-layer' : 'ok', layer?.name);
     handlers.onEntityPlaced?.(ent);
     return 'ok';
   }

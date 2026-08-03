@@ -1055,14 +1055,16 @@ function SwayTab({
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-[10px] text-white/50 leading-snug">
-        Weapon sway is controlled globally in the{' '}
-        <span className="text-amber-300 font-semibold">Combat Editor → Sway</span> section.
+        Weapon sway is one setting shared by every weapon on{' '}
+        <span className="text-amber-300 font-semibold">this map</span> — tune it in{' '}
+        <span className="text-amber-300 font-semibold">Combat Editor → Sway</span> (per-map,
+        not account-wide like Powers/Sounds).
         <br />
         Current: {cs.swayEnabled ? `enabled, ${cs.swayAmplitudeDeg}° @ ${cs.swaySpeedHz}Hz` : 'disabled'}.
       </div>
       <p className="text-[9px] text-white/35">
         Per-weapon sway multipliers will be available in a future update.
-        For now use the Combat Editor to tune idle and movement sway globally.
+        For now use the Combat Editor to tune idle and movement sway for this map.
       </p>
     </div>
   );

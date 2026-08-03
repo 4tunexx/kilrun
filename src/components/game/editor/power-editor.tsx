@@ -375,6 +375,12 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
           <span className="text-[10px] text-white/40 font-bold">
             {powers.length} power{powers.length === 1 ? '' : 's'}
           </span>
+          <span
+            className="text-[10px] font-bold uppercase tracking-wide text-sky-300 border border-sky-400/40 bg-sky-500/10 rounded-full px-2 py-0.5"
+            title="Powers are shared account-wide — changes here apply to every map, in every mode, not just the one currently open."
+          >
+            Account-wide, not per-map
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="ghost" onClick={load} className="text-white/50 hover:text-white/80 gap-1">
