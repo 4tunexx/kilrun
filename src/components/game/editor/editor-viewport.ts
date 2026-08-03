@@ -36,6 +36,7 @@ import {
   scaleFromSideOffset,
   ensureEnvironment,
 } from './map-document';
+import { bakeMeshCollisionForEntity } from './mesh-voxelize';
 import {
   applyTextureToObject,
   makeBoundsWireBox,
@@ -260,6 +261,15 @@ export interface EditorViewportApi {
   ) => boolean;
   /** Drop selection onto the floor / supporting surface under each pivot. */
   snapSelectedToFloor: (idsOverride?: string[]) => boolean;
+  /**
+   * "Bake mesh collision" for a catalog/library prop — voxel-approximates
+   * its real mesh into a compact box list (mesh-voxelize.ts) so a concave
+   * shape (an arch, a curved wall) doesn't collide as one solid bounding
+   * box. Async since it (re)loads the model's geometry.
+   */
+  bakeMeshCollision: (id: string) => Promise<{ ok: true; boxCount: number } | { ok: false; error: string }>;
+  /** Clears a previous mesh-collision bake, reverting to the default box collider. */
+  clearMeshCollision: (id: string) => void;
   focusSelected: () => void;
   /** Restore default edit camera (or Start / edit focus). */
   resetCamera: () => void;
@@ -366,6 +376,16 @@ export function createEditorViewport(
   let gridSize = doc.gridSize || 1;
   /** Scale from pulled side (opposite face fixed) instead of both ways from center. */
   let scaleFromSide = true;
+  /**
+   * Which local-axis side (+1/-1) was actually grabbed when the current scale
+   * drag started. Three.js's scale gizmo reports the same `axis` ('X'/'Y'/'Z')
+   * no matter which end handle you grab, and grows/shrinks symmetrically from
+   * center either way — so the side to keep fixed can't be inferred from the
+   * scale delta's sign (that only says grow vs shrink, not which handle).
+   * Captured once at drag start from the grab point so shrinking the same
+   * handle you grew doesn't flip which face is anchored.
+   */
+  let scaleGrabSign: { x: number; y: number; z: number } = { x: 1, y: 1, z: 1 };
   let shiftHeld = false;
   let freeFly = false;
   /** Pause render loop while Play Test overlays (keeps WebGL context alive). */
@@ -807,9 +827,12 @@ export function createEditorViewport(
     // Bottom-aligned meshes (Hammer / planted) keep feet fixed on Y.
     const offset = scaleFromSideOffset(oldScale, newScale, base, { compensateY: false });
     const axis = (transform as unknown as { axis: string | null }).axis;
-    let ox = offset[0];
-    let oy = offset[1];
-    let oz = offset[2];
+    // scaleFromSideOffset always assumes the +axis side was grabbed (anchors
+    // -axis). Flip the sign when the drag actually started on the -axis
+    // handle so that side stays fixed instead, on both grow and shrink.
+    let ox = offset[0] * scaleGrabSign.x;
+    let oy = offset[1] * scaleGrabSign.y;
+    let oz = offset[2] * scaleGrabSign.z;
     if (axis === 'X') {
       oy = 0;
       oz = 0;
@@ -849,6 +872,21 @@ export function createEditorViewport(
         const root = roots.get(selectedId)!;
         lastPrimaryPos.copy(root.position);
         lastPrimaryScale.copy(root.scale);
+      }
+      if (transform.mode === 'scale') {
+        // Record which side of the object the grabbed handle sits on, in the
+        // object's own unrotated local space, so the anchor face stays put
+        // for this whole drag regardless of grow/shrink.
+        const t = transform as unknown as {
+          pointStart: THREE.Vector3;
+          worldQuaternionStart: THREE.Quaternion;
+        };
+        const grab = t.pointStart.clone().applyQuaternion(t.worldQuaternionStart.clone().invert());
+        scaleGrabSign = {
+          x: grab.x >= 0 ? 1 : -1,
+          y: grab.y >= 0 ? 1 : -1,
+          z: grab.z >= 0 ? 1 : -1,
+        };
       }
     } else if (proxyActive) {
       // Re-seat proxy at the new group center with identity pose for the next drag.
@@ -1012,26 +1050,28 @@ export function createEditorViewport(
         // Local-space delta (which face grew) before applying yaw.
         const deltaX = world[0] - oldWorld[0];
         const deltaZ = world[2] - oldWorld[2];
-        // Sign of the raw scale change on this axis tells us whether the
-        // dragged handle is on the + or - side for X/Z.
-        const grewPositiveX = nextScale[0] - oldScale[0] >= 0;
-        const grewPositiveZ = nextScale[2] - oldScale[2] >= 0;
+        // Which side was actually grabbed at drag start (fixed for the whole
+        // drag) — NOT the sign of the current scale delta, since three.js's
+        // scale gizmo grows/shrinks symmetrically from either end handle and
+        // the delta sign only tells grow-vs-shrink, not which face to anchor.
+        const grabbedPositiveX = scaleGrabSign.x >= 0;
+        const grabbedPositiveZ = scaleGrabSign.z >= 0;
 
         if (gizmoAxis === 'X') {
-          const anchor = grewPositiveX
-            ? snapToGrid(prevPos.x - oldWorld[0] / 2, gridSize) // -X face fixed, grow +X
-            : snapToGrid(prevPos.x + oldWorld[0] / 2, gridSize); // +X face fixed, grow -X
-          obj.position.x = grewPositiveX ? anchor + world[0] / 2 : anchor - world[0] / 2;
+          const anchor = grabbedPositiveX
+            ? snapToGrid(prevPos.x - oldWorld[0] / 2, gridSize) // -X face fixed, grow/shrink +X
+            : snapToGrid(prevPos.x + oldWorld[0] / 2, gridSize); // +X face fixed, grow/shrink -X
+          obj.position.x = grabbedPositiveX ? anchor + world[0] / 2 : anchor - world[0] / 2;
         } else if (deltaX !== 0) {
           const left = snapToGrid(prevPos.x - oldWorld[0] / 2, gridSize);
           obj.position.x = left + world[0] / 2;
         }
 
         if (gizmoAxis === 'Z') {
-          const anchor = grewPositiveZ
+          const anchor = grabbedPositiveZ
             ? snapToGrid(prevPos.z - oldWorld[2] / 2, gridSize)
             : snapToGrid(prevPos.z + oldWorld[2] / 2, gridSize);
-          obj.position.z = grewPositiveZ ? anchor + world[2] / 2 : anchor - world[2] / 2;
+          obj.position.z = grabbedPositiveZ ? anchor + world[2] / 2 : anchor - world[2] / 2;
         } else if (deltaZ !== 0) {
           const back = snapToGrid(prevPos.z - oldWorld[2] / 2, gridSize);
           obj.position.z = back + world[2] / 2;
@@ -3282,85 +3322,160 @@ export function createEditorViewport(
         return false;
       }
 
-      /** Real world AABB half-extents + center + pivot offset (same shape as snapSelectedTogether). */
+      /**
+       * World-space quaternion + LOCAL half-extents + world CENTER + the
+       * local-space pivot→center offset for an entity.
+       *
+       * Two things matter here and both bit us before:
+       *  1. Local (not world-AABB) half-extents so rotated/tilted pieces
+       *     still measure their own true body instead of an inflated
+       *     axis-aligned box (breaks face-to-face placement for tilted ramps).
+       *  2. The entity's PIVOT is not always its geometric center — Hammer
+       *     solids and other "planted" meshes are bottom-aligned (pivot at
+       *     the feet), so treating `root.position` as the box center shifted
+       *     every anchor by half the object's height and made "Top" snap
+       *     sink into (or float above) the other piece instead of touching
+       *     exactly. Measuring the real rendered geometry (temporarily at
+       *     identity position/rotation) gives the true center and pivot
+       *     offset regardless of mesh type, and is also more accurate than
+       *     the authored `collisionSize` metadata, which can drift slightly
+       *     from the actual mesh.
+       */
       const measure = (e: EditorEntity) => {
         const root = roots.get(e.id);
+        const quat = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(
+            THREE.MathUtils.degToRad(e.rotation[0]),
+            THREE.MathUtils.degToRad(e.rotation[1]),
+            THREE.MathUtils.degToRad(e.rotation[2])
+          )
+        );
+        let half: THREE.Vector3;
+        let localPivotOffset: THREE.Vector3;
         if (root) {
+          const savedPos = root.position.clone();
+          const savedQuat = root.quaternion.clone();
+          root.position.set(0, 0, 0);
+          root.quaternion.identity();
           root.updateMatrixWorld(true);
           const box = new THREE.Box3().setFromObject(root);
+          root.position.copy(savedPos);
+          root.quaternion.copy(savedQuat);
+          root.updateMatrixWorld(true);
           if (!box.isEmpty()) {
-            return {
-              hx: Math.max(0.05, (box.max.x - box.min.x) / 2),
-              hy: Math.max(0.05, (box.max.y - box.min.y) / 2),
-              hz: Math.max(0.05, (box.max.z - box.min.z) / 2),
-              cx: (box.min.x + box.max.x) / 2,
-              cy: (box.min.y + box.max.y) / 2,
-              cz: (box.min.z + box.max.z) / 2,
-              ox: (box.min.x + box.max.x) / 2 - root.position.x,
-              oy: (box.min.y + box.max.y) / 2 - root.position.y,
-              oz: (box.min.z + box.max.z) / 2 - root.position.z,
-            };
+            half = box.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+            half.x = Math.max(0.05, half.x);
+            half.y = Math.max(0.05, half.y);
+            half.z = Math.max(0.05, half.z);
+            localPivotOffset = box.getCenter(new THREE.Vector3());
+          } else {
+            half = new THREE.Vector3(0.5, 0.5, 0.5);
+            localPivotOffset = new THREE.Vector3(0, 0, 0);
           }
+        } else {
+          const base = (e.collisionSize ?? [1, 1, 1]) as [number, number, number];
+          half = new THREE.Vector3(
+            Math.max(0.05, (base[0] * Math.abs(e.scale[0])) / 2),
+            Math.max(0.05, (base[1] * Math.abs(e.scale[1])) / 2),
+            Math.max(0.05, (base[2] * Math.abs(e.scale[2])) / 2)
+          );
+          localPivotOffset = new THREE.Vector3(0, 0, 0);
         }
-        const hx = Math.max(0.5, Math.abs(e.scale[0]));
-        const hy = Math.max(0.15, Math.abs(e.scale[1]));
-        const hz = Math.max(0.5, Math.abs(e.scale[2]));
-        return {
-          hx,
-          hy,
-          hz,
-          cx: e.position[0],
-          cy: e.position[1],
-          cz: e.position[2],
-          ox: 0,
-          oy: 0,
-          oz: 0,
-        };
+        const pivot = new THREE.Vector3(
+          root?.position.x ?? e.position[0],
+          root?.position.y ?? e.position[1],
+          root?.position.z ?? e.position[2]
+        );
+        const center = pivot.clone().add(localPivotOffset.clone().applyQuaternion(quat));
+        return { quat, half, center, localPivotOffset };
+      };
+
+      /** OBB support distance: how far this object's own body extends past
+       * its center along world-space direction `dir` (unit vector). */
+      const support = (m: ReturnType<typeof measure>, dir: THREE.Vector3) => {
+        const ex = new THREE.Vector3(1, 0, 0).applyQuaternion(m.quat);
+        const ey = new THREE.Vector3(0, 1, 0).applyQuaternion(m.quat);
+        const ez = new THREE.Vector3(0, 0, 1).applyQuaternion(m.quat);
+        return (
+          Math.abs(ex.dot(dir)) * m.half.x +
+          Math.abs(ey.dot(dir)) * m.half.y +
+          Math.abs(ez.dot(dir)) * m.half.z
+        );
       };
 
       const anchorEnt = ents[0];
       const aM = measure(anchorEnt);
       const updates = new Map<string, [number, number, number]>();
 
-      // Anchor never moves.
+      // Anchor never moves — leave its pivot position exactly as-is (not
+      // its geometric center, which can differ for bottom-aligned meshes).
       {
-        const root = roots.get(anchorEnt.id);
+        const anchorRoot = roots.get(anchorEnt.id);
         updates.set(anchorEnt.id, [
-          root?.position.x ?? anchorEnt.position[0],
-          root?.position.y ?? anchorEnt.position[1],
-          root?.position.z ?? anchorEnt.position[2],
+          anchorRoot?.position.x ?? anchorEnt.position[0],
+          anchorRoot?.position.y ?? anchorEnt.position[1],
+          anchorRoot?.position.z ?? anchorEnt.position[2],
         ]);
       }
 
+      // Chosen face, expressed as the anchor's OWN local axis (not world X/Z)
+      // so this works correctly for rotated/tilted pieces, then rotated into
+      // world space by the anchor's own orientation.
+      const faceLocal =
+        face === '+x'
+          ? new THREE.Vector3(1, 0, 0)
+          : face === '-x'
+            ? new THREE.Vector3(-1, 0, 0)
+            : face === '+y'
+              ? new THREE.Vector3(0, 1, 0)
+              : face === '-y'
+                ? new THREE.Vector3(0, -1, 0)
+                : face === '+z'
+                  ? new THREE.Vector3(0, 0, 1)
+                  : new THREE.Vector3(0, 0, -1);
+      const faceDir = faceLocal.clone().applyQuaternion(aM.quat).normalize();
+
       // Every other selected piece is placed flush against the CHOSEN face of
-      // the anchor and stacked along that same face for pieces beyond the
-      // first (so picking "+x" lines up a whole row to the right, not just
-      // one piece on top of another). The two axes perpendicular to the
-      // chosen face are centered on the anchor so faces align edge-to-edge
-      // (side-to-side / top-to-top) instead of drifting off-center.
-      let cursor = { cx: aM.cx, cy: aM.cy, cz: aM.cz, hx: aM.hx, hy: aM.hy, hz: aM.hz };
+      // the anchor (touching distance computed via each piece's own OBB
+      // support along that world direction, so pieces with different
+      // rotations than the anchor still butt up correctly) and stacked along
+      // that same face for pieces beyond the first. The two axes
+      // perpendicular to the chosen face are centered on the anchor IN THE
+      // ANCHOR'S LOCAL FRAME (not world space) so faces stay aligned even
+      // when the anchor itself is rotated.
+      let cursorCenter = aM.center.clone();
+      let cursorSupport = support(aM, faceDir);
       for (let i = 1; i < ents.length; i++) {
         const e = ents[i];
         const m = measure(e);
-        let cx = aM.cx;
-        let cy = aM.cy;
-        let cz = aM.cz;
+        const eSupport = support(m, faceDir);
+        const newCenter = cursorCenter
+          .clone()
+          .add(faceDir.clone().multiplyScalar(cursorSupport + eSupport));
+        // Re-center the two non-face axes onto the anchor in the anchor's
+        // local frame (keeps side-to-side / top-to-top edges flush).
+        const localOffset = newCenter.clone().sub(aM.center).applyQuaternion(aM.quat.clone().invert());
         if (face === '+x' || face === '-x') {
-          cx = face === '+x' ? cursor.cx + cursor.hx + m.hx : cursor.cx - cursor.hx - m.hx;
-          cy = aM.cy - aM.hy + m.hy; // bottom-align on anchor's floor
-          cz = aM.cz; // center on anchor's depth
+          localOffset.y = 0;
+          localOffset.z = 0;
         } else if (face === '+y' || face === '-y') {
-          cy = face === '+y' ? cursor.cy + cursor.hy + m.hy : cursor.cy - cursor.hy - m.hy;
-          cx = aM.cx; // center X on anchor
-          cz = aM.cz; // center Z on anchor
+          localOffset.x = 0;
+          localOffset.z = 0;
         } else {
-          cz = face === '+z' ? cursor.cz + cursor.hz + m.hz : cursor.cz - cursor.hz - m.hz;
-          cx = aM.cx; // center on anchor's width
-          cy = aM.cy - aM.hy + m.hy; // bottom-align
+          localOffset.x = 0;
+          localOffset.y = 0;
         }
-        const pos: [number, number, number] = [cx - m.ox, cy - m.oy, cz - m.oz];
+        const finalCenter = aM.center.clone().add(localOffset.applyQuaternion(aM.quat));
+        // Convert this piece's own geometric center back to its pivot
+        // (position field) using ITS OWN local pivot offset/rotation, not
+        // the anchor's — each piece keeps its own rotation and pivot type.
+        const pivot = finalCenter
+          .clone()
+          .sub(m.localPivotOffset.clone().applyQuaternion(m.quat));
+        const pos: [number, number, number] = [pivot.x, pivot.y, pivot.z];
         updates.set(e.id, pos);
-        cursor = { cx, cy, cz, hx: m.hx, hy: m.hy, hz: m.hz };
+        cursorCenter = finalCenter;
+        cursorSupport = eSupport;
       }
 
       selectedIds = ids;
@@ -3417,6 +3532,37 @@ export function createEditorViewport(
       attachSelectionGizmo();
       refreshGizmos();
       return true;
+    },
+    bakeMeshCollision: async (id) => {
+      const e = doc.entities.find((x) => x.id === id);
+      if (!e) return { ok: false, error: 'Object not found.' };
+      if (isLockedEnt(e)) return { ok: false, error: 'Object is locked.' };
+      try {
+        const pads = await bakeMeshCollisionForEntity(e);
+        const cur = doc.entities.find((x) => x.id === id);
+        if (!cur) return { ok: false, error: 'Object was removed while baking.' };
+        doc = {
+          ...doc,
+          entities: doc.entities.map((x) =>
+            x.id === id ? { ...x, meshCollisionPads: pads } : x
+          ),
+        };
+        handlers.onDocChange(doc);
+        return { ok: true, boxCount: pads.length };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Bake failed.' };
+      }
+    },
+    clearMeshCollision: (id) => {
+      const e = doc.entities.find((x) => x.id === id);
+      if (!e || !e.meshCollisionPads) return;
+      doc = {
+        ...doc,
+        entities: doc.entities.map((x) =>
+          x.id === id ? { ...x, meshCollisionPads: undefined } : x
+        ),
+      };
+      handlers.onDocChange(doc);
     },
     focusSelected: () => {
       if (!selectedId) return;

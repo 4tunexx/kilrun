@@ -5,6 +5,16 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
+  experimental: {
+    // Server Actions default to a 1MB request body cap. Map publishing and
+    // site-image/skybox uploads pass the payload straight to a server action
+    // (see publishCloudMap in src/lib/game-map-actions.ts, which already has
+    // its own 4.5MB post-strip size cap) — without raising this, those
+    // requests 413 before the action body is even parsed.
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
+  },
   eslint: {
     ignoreDuringBuilds: true,
   },

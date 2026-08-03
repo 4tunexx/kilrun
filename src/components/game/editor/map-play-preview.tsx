@@ -325,6 +325,16 @@ export function MapPlayPreview({
       energy: 100,
     };
     snapBodyToPads(body, pads);
+    // Fixed-timestep interpolation state (see FIXED_DT / accumulator below):
+    // the pose from the tick BEFORE the most recently completed one, so the
+    // render can smoothly blend between two known simulated poses instead of
+    // snapping straight to `body` — which only actually moves once per 30Hz
+    // physics tick and reads as a stutter/slideshow on higher-refresh
+    // displays, worse the faster you move (sprint covers more distance per
+    // stuck-then-jump step).
+    let prevSimX = body.x;
+    let prevSimY = body.y;
+    let prevSimZ = body.z;
 
     {
       const [sx, sy, sz] = simToThree(body.x, body.y, body.z);
@@ -354,6 +364,15 @@ export function MapPlayPreview({
     sun.shadow.camera.right = 45;
     sun.shadow.camera.top = 45;
     sun.shadow.camera.bottom = -45;
+    // Without a bias, a 2048px map spread over a 90-unit shadow frustum is
+    // coarse enough (~0.044 world units/texel) that large flat surfaces
+    // self-shadow into visible banding/striping ("shadow acne") — exactly
+    // what large flat prop faces (walls, archways) showed. normalBias offsets
+    // the shadow sample along the surface normal rather than view depth, so
+    // it doesn't introduce the peter-panning (shadow detaching from its
+    // caster) a plain depth bias this large would.
+    sun.shadow.bias = -0.0009;
+    sun.shadow.normalBias = 0.045;
     scene.add(sun);
     const hemi = new THREE.HemisphereLight(0x88aacc, 0x1a2740, 0.45);
     scene.add(hemi);
@@ -731,6 +750,12 @@ export function MapPlayPreview({
       while (accumulator >= FIXED_DT) {
         accumulator -= FIXED_DT;
         const dt = FIXED_DT;
+        // Snapshot BEFORE stepping — this becomes the "previous" pose to
+        // interpolate from once this loop ends, so even a frame with zero
+        // ticks still has a valid prev→current pair to blend toward.
+        prevSimX = body.x;
+        prevSimY = body.y;
+        prevSimZ = body.z;
 
         if (worldReady && hpLocal > 0 && !finishedLocal) {
           matchElapsedMs += dt * 1000;
@@ -963,7 +988,17 @@ export function MapPlayPreview({
         ghostMesh.visible = false;
       }
 
-      const [tx, ty, tz] = simToThree(body.x, body.y, body.z);
+      // Blend between the previous and current simulated tick using the
+      // leftover accumulator time, instead of snapping straight to `body`
+      // (which only changes once per 30Hz tick) — see prevSimX/Y/Z above.
+      // Skip the blend on a teleport/respawn-sized jump so the character
+      // doesn't visibly slide across the map for one frame.
+      const tickAlpha = FIXED_DT > 0 ? Math.min(1, Math.max(0, accumulator / FIXED_DT)) : 1;
+      const jumpDist = Math.hypot(body.x - prevSimX, body.y - prevSimY, body.z - prevSimZ);
+      const simX = jumpDist > 8 ? body.x : prevSimX + (body.x - prevSimX) * tickAlpha;
+      const simY = jumpDist > 8 ? body.y : prevSimY + (body.y - prevSimY) * tickAlpha;
+      const simZ = jumpDist > 8 ? body.z : prevSimZ + (body.z - prevSimZ) * tickAlpha;
+      const [tx, ty, tz] = simToThree(simX, simY, simZ);
       // Soften visual/camera height on stepped ramps so Play Test matches live feel.
       if (smoothCamY === null || Math.abs(smoothCamY - ty) > 3.5) {
         smoothCamY = ty;

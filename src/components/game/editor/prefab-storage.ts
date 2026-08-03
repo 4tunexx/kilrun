@@ -1,4 +1,4 @@
-import type { EditorEntity, MapDocument } from './map-document';
+import type { CsgLocalPad, EditorEntity, MapDocument } from './map-document';
 import {
   ensureDeathrunSettings,
   entityExportsAsPlatform,
@@ -516,14 +516,99 @@ function rotateLocalXYZ(
  * sloped. That's "can't walk up ramps, have to jump onto the top."
  */
 function isTiltedRampSolid(e: EditorEntity): boolean {
-  const wantsSolid =
-    isHammerSolidEntity(e) || resolveCollideMaterial(e) === 'solid' || e.solid === true;
-  if (!wantsSolid) return false;
+  // Only called from entityToCollisionPads, which is only reached for
+  // entities that already passed the collision-eligibility filters upstream
+  // (entityExportsAsPlatform / the legacy fallback) — this entity WILL
+  // produce a solid pad either way. Gating this further on Material ===
+  // 'solid' (or Hammer-only) meant a tilted prop with the default material,
+  // or a non-Hammer catalog piece someone rotated by hand, silently fell
+  // back to entityToPad's flat yaw-only AABB instead of the accurate sloped
+  // pad below — "some ramps work, some don't" depending on a checkbox that
+  // has nothing to do with whether the mesh is actually tilted.
   const pitch = Math.abs(e.rotation?.[0] ?? 0);
   const roll = Math.abs(e.rotation?.[2] ?? 0);
   // A few degrees of tolerance so slightly-off-axis walls don't get
   // needlessly subdivided; a real ramp is tilted well past that.
   return pitch > 3 || roll > 3;
+}
+
+/**
+ * Hammer "Wedge" / "Ramp" primitives (see hammer-shapes.ts makeHammerGeometry)
+ * have an intrinsically sloped top face — rising from y=0 at the back edge to
+ * y=height at the front edge — baked into the mesh itself, with ZERO entity
+ * rotation required. `isTiltedRampSolid` only looks at e.rotation pitch/roll,
+ * so a flat-placed Wedge/Ramp fell straight through to `entityToPad`'s single
+ * flat AABB: the mesh looks sloped but the collision box was flat, so the
+ * player's feet floated above (or clipped into) the visible slope depending
+ * on where they stood. This fits the SAME slope the mesh actually has instead
+ * of assuming rotation is the only way a solid can be tilted.
+ */
+function isWedgeRampPrimitive(e: EditorEntity): boolean {
+  return isHammerSolidEntity(e) && (e.primitive === 'wedge' || e.primitive === 'ramp');
+}
+
+function wedgePrimitiveToSimPads(e: EditorEntity): SimPlatformBlueprint[] {
+  const [ex, ey, ez] = e.position;
+  const size = (e.collisionSize ?? [2, 1, 2]) as [number, number, number];
+  const halfX = Math.max(0.15, (size[0] * Math.abs(e.scale[0])) / 2);
+  const fullY = Math.max(0.12, size[1] * Math.abs(e.scale[1]));
+  const halfZ = Math.max(0.15, (size[2] * Math.abs(e.scale[2])) / 2);
+  const rotDeg: [number, number, number] = [
+    e.rotation?.[0] ?? 0,
+    e.rotation?.[1] ?? 0,
+    e.rotation?.[2] ?? 0,
+  ];
+  const mat = resolveCollideMaterial(e);
+  let kind: SimPlatformKind = 'solid';
+  if (mat === 'ice') kind = 'ice';
+  else if (mat === 'water') kind = 'water';
+  else if (mat === 'sand') kind = 'sand';
+
+  // Mesh rises from local y=0 at z=-halfZ (back) to y=fullY at z=+halfZ
+  // (front ridge), flat across x — see makeHammerGeometry's wedge/ramp case.
+  // Fit the exact plane through 3 points on that slope, same technique
+  // rampEntityToSimPads uses for hand-rotated blocks, but using this mesh's
+  // OWN known slope as the local top face instead of assuming a flat
+  // y=halfY top that only tilts from rotation.
+  const [dx0, dy0, dz0] = rotateLocalXYZ([0, fullY / 2, 0], rotDeg);
+  const [dx1, dy1, dz1] = rotateLocalXYZ([halfX, fullY / 2, 0], rotDeg);
+  const [dx2, dy2, dz2] = rotateLocalXYZ([0, fullY, halfZ], rotDeg);
+  const ax = dx1 - dx0, ay = dy1 - dy0, az = dz1 - dz0;
+  const bx = dx2 - dx0, by = dy2 - dy0, bz = dz2 - dz0;
+  const det = ax * bz - bx * az;
+  const gThreeX = Math.abs(det) > 1e-6 ? (ay * bz - by * az) / det : 0;
+  const gThreeZ = Math.abs(det) > 1e-6 ? (ax * by - bx * ay) / det : 0;
+  const slopeGradX = gThreeZ;
+  const slopeGradY = gThreeX;
+
+  let minThreeX = Infinity, maxThreeX = -Infinity;
+  let minThreeZ = Infinity, maxThreeZ = -Infinity;
+  for (const sy of [0, fullY]) {
+    for (const sx of [-halfX, halfX]) {
+      for (const sz of [-halfZ, halfZ]) {
+        const [rx, , rz] = rotateLocalXYZ([sx, sy, sz], rotDeg);
+        minThreeX = Math.min(minThreeX, ex + rx);
+        maxThreeX = Math.max(maxThreeX, ex + rx);
+        minThreeZ = Math.min(minThreeZ, ez + rz);
+        maxThreeZ = Math.max(maxThreeZ, ez + rz);
+      }
+    }
+  }
+  const centerThreeY = ey + dy0;
+
+  return [
+    {
+      x: (minThreeZ + maxThreeZ) / 2,
+      y: (minThreeX + maxThreeX) / 2,
+      z: centerThreeY,
+      width: Math.max(0.4, maxThreeZ - minThreeZ),
+      depth: Math.max(0.4, maxThreeX - minThreeX),
+      kind,
+      height: 0.3,
+      slopeGradX,
+      slopeGradY,
+    },
+  ];
 }
 
 /**
@@ -556,6 +641,20 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
   else if (mat === 'water') kind = 'water';
   else if (mat === 'sand') kind = 'sand';
 
+  // Hammer solids are bottom-aligned — the entity's position/pivot IS the
+  // box's bottom face (local y runs 0..fullY), not its center — see
+  // makeHammerSolidObject in hammer-shapes.ts (mesh.position.y = size[1]*0.5
+  // inside a group planted at ent.position) and the same convention already
+  // used by entityToPad (`topZ = ty + sizeY` for Hammer). Using the
+  // center-pivot assumption (top face at local y=+halfY) here for a
+  // bottom-aligned mesh silently offset the fitted plane by halfY — a 45°
+  // Hammer box built as a ramp got a collision surface floating/sunk by
+  // roughly half its own thickness relative to what it visually looks like.
+  const bottomAligned = isHammerSolidEntity(e);
+  const yMin = bottomAligned ? 0 : -halfY;
+  const yMax = bottomAligned ? 2 * halfY : halfY;
+  const topLocalY = yMax;
+
   // A rigid box's top face stays perfectly flat no matter how it's rotated —
   // approximating it with N discrete flat shelves (the old approach) always
   // reads as walking up/down stairs no matter how thin the shelves get,
@@ -563,9 +662,9 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
   // Instead: fit the EXACT plane equation for the top face (3 points fully
   // determine a plane) and hand the server one continuous sloped surface —
   // mathematically zero stepping, not just less of it.
-  const [dx0, dy0, dz0] = rotateLocalXYZ([0, halfY, 0], rotDeg);
-  const [dx1, dy1, dz1] = rotateLocalXYZ([halfX, halfY, 0], rotDeg);
-  const [dx2, dy2, dz2] = rotateLocalXYZ([0, halfY, halfZ], rotDeg);
+  const [dx0, dy0, dz0] = rotateLocalXYZ([0, topLocalY, 0], rotDeg);
+  const [dx1, dy1, dz1] = rotateLocalXYZ([halfX, topLocalY, 0], rotDeg);
+  const [dx2, dy2, dz2] = rotateLocalXYZ([0, topLocalY, halfZ], rotDeg);
   // Deltas from center, in world/three space.
   const ax = dx1 - dx0, ay = dy1 - dy0, az = dz1 - dz0;
   const bx = dx2 - dx0, by = dy2 - dy0, bz = dz2 - dz0;
@@ -586,7 +685,7 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
   // needs to be exact (handled above), not the footprint shape.
   let minThreeX = Infinity, maxThreeX = -Infinity;
   let minThreeZ = Infinity, maxThreeZ = -Infinity;
-  for (const sy of [-halfY, halfY]) {
+  for (const sy of [yMin, yMax]) {
     for (const sx of [-halfX, halfX]) {
       for (const sz of [-halfZ, halfZ]) {
         const [rx, , rz] = rotateLocalXYZ([sx, sy, sz], rotDeg);
@@ -623,8 +722,7 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
  * `EditorEntity.csgPads`), not re-derived from the mesh at runtime (this
  * project has no general triangle-mesh collision solver).
  */
-function csgEntityToSimPads(e: EditorEntity): SimPlatformBlueprint[] {
-  const pads = e.csgPads ?? [];
+function localPadsToSimPads(e: EditorEntity, pads: CsgLocalPad[]): SimPlatformBlueprint[] {
   if (!pads.length) return [];
   const [ex, ey, ez] = e.position;
   const baseYaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
@@ -669,10 +767,17 @@ function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
   // no-explicit-platforms fallback) let this entity through to here.
   if (isInvisibleMarkerKind(e.kind)) return [];
   if (resolveCollideMaterial(e) === 'walkthrough') return [];
-  if (e.csgOp && e.csgPads) return csgEntityToSimPads(e);
+  if (e.csgOp && e.csgPads) return localPadsToSimPads(e, e.csgPads);
+  // "Bake mesh collision" result on a catalog prop (see mesh-voxelize.ts) —
+  // a voxel-approximated multi-box fit to the real mesh, so a concave/hollow
+  // shape (an arch, a curved wall) doesn't collide as its full bounding box.
+  if (e.meshCollisionPads?.length) return localPadsToSimPads(e, e.meshCollisionPads);
   const model = e.model ?? '';
   if (model.includes('stair') || model.includes('ramp')) {
     return stairEntityToSimPads(e, 14);
+  }
+  if (isWedgeRampPrimitive(e)) {
+    return wedgePrimitiveToSimPads(e);
   }
   if (isTiltedRampSolid(e)) {
     return rampEntityToSimPads(e, 24);

@@ -394,6 +394,10 @@ export function MapEditor({
   const [panelResizing, setPanelResizing] = useState(false);
   /** Magnet tool: which face to snap the selection onto (side/top/etc) — user picks, we don't guess. */
   const [snapFaceMenuOpen, setSnapFaceMenuOpen] = useState(false);
+  const [snapFaceAnchorRect, setSnapFaceAnchorRect] = useState<DOMRect | null>(null);
+  const [bakingMeshId, setBakingMeshId] = useState<string | null>(null);
+  const snapMagnetBtnRef = useRef<HTMLButtonElement>(null);
+  const prefabSnapBtnRef = useRef<HTMLButtonElement>(null);
   /** Entities frozen via per-object Stop in the editor viewport (editor-only, not saved to the map). */
   const [stoppedAnimIds, setStoppedAnimIds] = useState<Set<string>>(new Set());
   /** Global Stop All toggle for every animated entity in the editor viewport. */
@@ -2796,15 +2800,20 @@ export function MapEditor({
               {selectedIds.length >= 2 && (
                 <div className="relative">
                   <Button
+                    ref={prefabSnapBtnRef}
                     size="sm"
                     variant="secondary"
                     className="w-full"
-                    onClick={() => setSnapFaceMenuOpen((v) => !v)}
+                    onClick={() => {
+                      setSnapFaceAnchorRect(prefabSnapBtnRef.current?.getBoundingClientRect() ?? null);
+                      setSnapFaceMenuOpen((v) => !v);
+                    }}
                   >
                     <Magnet className="w-4 h-4 mr-1" /> Snap…
                   </Button>
                   {snapFaceMenuOpen && (
                     <SnapFacePicker
+                      anchorRect={snapFaceAnchorRect}
                       onPick={(face) => {
                         const ok = apiRef.current?.snapSelectedToFace(face, selectedIds);
                         setSnapFaceMenuOpen(false);
@@ -3108,16 +3117,40 @@ export function MapEditor({
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (!f) return;
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      patchEnv({
-                        sky: 'custom',
-                        skyTextureUrl: String(reader.result),
-                      });
-                    };
-                    reader.readAsDataURL(f);
                     e.target.value = '';
+                    if (!f) return;
+                    // Upload to a persistent /uploads/site/... URL instead of
+                    // embedding a base64 data URL in the map document — inline
+                    // data URLs get silently stripped by publishCloudMap's
+                    // size-cap pass (anything over ~8KB), so the sky would
+                    // "work" until the next Save + reload, then vanish.
+                    void (async () => {
+                      try {
+                        const form = new FormData();
+                        form.append('file', f);
+                        form.append('kind', 'bg');
+                        const res = await fetch('/api/admin/upload-site-image', {
+                          method: 'POST',
+                          body: form,
+                        });
+                        const data = (await res.json()) as { url?: string; error?: string };
+                        if (!res.ok || !data.url) {
+                          toast({
+                            title: 'Sky upload failed',
+                            description: data.error || 'Try a smaller image.',
+                            variant: 'destructive',
+                          });
+                          return;
+                        }
+                        patchEnv({ sky: 'custom', skyTextureUrl: data.url });
+                      } catch {
+                        toast({
+                          title: 'Sky upload failed',
+                          description: 'Network error, try again.',
+                          variant: 'destructive',
+                        });
+                      }
+                    })();
                   }}
                 />
                 {env.skyTextureUrl && (
@@ -4240,22 +4273,59 @@ export function MapEditor({
             <ToolBtn active={snapY} onClick={() => setSnapY((v) => !v)} title="Also snap Y height">
               <span className="text-[10px] font-bold">Y</span>
             </ToolBtn>
-            <ToolBtn
-              onClick={() => {
-                const ok = apiRef.current?.snapSelectedToFloor(
-                  selectedIds.length ? selectedIds : selectedId ? [selectedId] : undefined
-                );
-                toast({
-                  title: ok ? 'Snapped to floor' : 'Select an object first',
-                  description: ok
-                    ? 'Object sits on the floor / surface under it (not below 0).'
-                    : undefined,
-                });
-              }}
-              title="Snap selection to floor top"
-            >
-              <Magnet className="w-4 h-4 text-emerald-300" />
-            </ToolBtn>
+            <div className="relative">
+              <ToolBtn
+                btnRef={snapMagnetBtnRef}
+                active={snapFaceMenuOpen}
+                onClick={() => {
+                  // 2+ selected: join them face-to-face (pick which side).
+                  // 0/1 selected: drop the selection onto the floor/surface below it.
+                  if (selectedIds.length >= 2) {
+                    setSnapFaceAnchorRect(snapMagnetBtnRef.current?.getBoundingClientRect() ?? null);
+                    setSnapFaceMenuOpen((v) => !v);
+                    return;
+                  }
+                  const ok = apiRef.current?.snapSelectedToFloor(
+                    selectedIds.length ? selectedIds : selectedId ? [selectedId] : undefined
+                  );
+                  toast({
+                    title: ok ? 'Snapped to floor' : 'Select an object first',
+                    description: ok
+                      ? 'Object sits on the floor / surface under it (not below 0).'
+                      : undefined,
+                  });
+                }}
+                title={
+                  selectedIds.length >= 2
+                    ? 'Snap (magnet) — choose which side to join'
+                    : 'Snap selection to floor top — select 2+ objects to join them side-to-side instead'
+                }
+              >
+                <Magnet className="w-4 h-4 text-emerald-300" />
+              </ToolBtn>
+              {snapFaceMenuOpen && (
+                <SnapFacePicker
+                  anchorRect={snapFaceAnchorRect}
+                  onPick={(face) => {
+                    const ok = apiRef.current?.snapSelectedToFace(face, selectedIds);
+                    setSnapFaceMenuOpen(false);
+                    if (ok) {
+                      toast({
+                        title: 'Snapped',
+                        description: `Joined ${SNAP_FACE_LABELS[face]} of the first-selected object.`,
+                      });
+                    } else {
+                      toast({
+                        title: 'Snap failed',
+                        description: 'Select 2+ unlocked objects, then try again.',
+                        variant: 'destructive',
+                      });
+                    }
+                  }}
+                  onClose={() => setSnapFaceMenuOpen(false)}
+                />
+              )}
+            </div>
             <ToolBtn
               active={measureMode}
               onClick={() => {
@@ -4508,61 +4578,6 @@ export function MapEditor({
             <ToolBtn onClick={() => apiRef.current?.duplicateSelected()} title="Duplicate">
               <Copy className="w-4 h-4" />
             </ToolBtn>
-            <div className="relative">
-              <ToolBtn
-                disabled={selectedIds.length < 2}
-                active={snapFaceMenuOpen}
-                onClick={() => {
-                  if (selectedIds.length < 2) {
-                    toast({
-                      title: 'Select 2 objects first',
-                      description: 'Click one, then Shift+click another, then press magnet.',
-                      variant: 'destructive',
-                    });
-                    return;
-                  }
-                  setSnapFaceMenuOpen((v) => !v);
-                }}
-                title={
-                  selectedIds.length >= 2
-                    ? 'Snap (magnet) — choose which side to join'
-                    : 'Snap (magnet) — Shift+click 2+ objects, then press'
-                }
-              >
-                <Magnet
-                  className={`w-4 h-4 ${
-                    selectedIds.length >= 2 ? 'text-emerald-300' : 'text-white/30'
-                  }`}
-                />
-              </ToolBtn>
-              {snapFaceMenuOpen && (
-                <SnapFacePicker
-                  onPick={(face) => {
-                    const ids =
-                      selectedIds.length >= 2
-                        ? selectedIds
-                        : selectedId
-                          ? [selectedId, ...selectedIds.filter((id) => id !== selectedId)]
-                          : selectedIds;
-                    const ok = apiRef.current?.snapSelectedToFace(face, ids);
-                    setSnapFaceMenuOpen(false);
-                    if (ok) {
-                      toast({
-                        title: 'Snapped',
-                        description: `Joined ${SNAP_FACE_LABELS[face]} of the first-selected object.`,
-                      });
-                    } else {
-                      toast({
-                        title: 'Snap failed',
-                        description: 'Select 2+ unlocked objects, then try again.',
-                        variant: 'destructive',
-                      });
-                    }
-                  }}
-                  onClose={() => setSnapFaceMenuOpen(false)}
-                />
-              )}
-            </div>
             <ToolBtn onClick={() => apiRef.current?.deleteSelected()} title="Delete">
               <Trash2 className="w-4 h-4 text-red-300" />
             </ToolBtn>
@@ -5108,6 +5123,70 @@ export function MapEditor({
                     Solid scans the model size (stairs become climbable steps). Water / sand /
                     ice change how you move on top. Walkthrough disables collision.
                   </p>
+
+                  {!isHammerSolidEntity(selected) &&
+                    resolveCollideMaterial(selected) === 'solid' &&
+                    (selected.model || selected.customModelUrl) && (
+                      <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-2 space-y-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-sky-200">
+                          Mesh collision
+                        </p>
+                        <p className="text-[10px] text-white/50 leading-relaxed">
+                          Solid props default to one box matching the model&apos;s bounding
+                          box — wrong for anything with an opening or hollow (an arch, a
+                          curved wall segment). Bake fits collision to the real mesh shape
+                          instead, so openings stay walkable.
+                          {selected.meshCollisionPads?.length
+                            ? ` Currently baked: ${selected.meshCollisionPads.length} box${
+                                selected.meshCollisionPads.length === 1 ? '' : 'es'
+                              }.`
+                            : ''}
+                        </p>
+                        <div className="flex gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="flex-1"
+                            disabled={bakingMeshId === selected.id}
+                            onClick={async () => {
+                              setBakingMeshId(selected.id);
+                              const result = await apiRef.current?.bakeMeshCollision(selected.id);
+                              setBakingMeshId(null);
+                              if (!result) return;
+                              if (result.ok) {
+                                toast({
+                                  title: 'Mesh collision baked',
+                                  description: `Fit to ${result.boxCount} box${
+                                    result.boxCount === 1 ? '' : 'es'
+                                  } from the real mesh shape.`,
+                                });
+                              } else {
+                                toast({
+                                  title: 'Bake failed',
+                                  description: result.error,
+                                  variant: 'destructive',
+                                });
+                              }
+                            }}
+                          >
+                            {bakingMeshId === selected.id
+                              ? 'Baking…'
+                              : selected.meshCollisionPads?.length
+                                ? 'Re-bake mesh collision'
+                                : 'Bake mesh collision'}
+                          </Button>
+                          {!!selected.meshCollisionPads?.length && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => apiRef.current?.clearMeshCollision(selected.id)}
+                            >
+                              Clear
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                   {isHammerSolidEntity(selected) && (
                     <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 space-y-1">
@@ -6775,15 +6854,18 @@ function ToolBtn({
   onClick,
   title,
   disabled,
+  btnRef,
 }: {
   children: React.ReactNode;
   active?: boolean;
   onClick?: () => void;
   title?: string;
   disabled?: boolean;
+  btnRef?: React.Ref<HTMLButtonElement>;
 }) {
   return (
     <button
+      ref={btnRef}
       type="button"
       title={title}
       disabled={disabled}
@@ -6820,19 +6902,33 @@ const SNAP_FACE_LABELS: Record<SnapFace, string> = {
  * get glued on the wrong side entirely.
  */
 function SnapFacePicker({
+  anchorRect,
   onPick,
   onClose,
 }: {
+  anchorRect: DOMRect | null;
   onPick: (face: SnapFace) => void;
   onClose: () => void;
 }) {
   const btnCls =
     'flex flex-col items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2.5 text-white/85 hover:bg-emerald-500/20 hover:border-emerald-400/40 hover:text-emerald-200 active:scale-95 transition-colors';
-  return (
+  // Rendered via portal to document.body and positioned `fixed` from the
+  // trigger button's screen rect — the toolbar this opens from scrolls
+  // horizontally (overflow-x-auto), and per the CSS overflow spec setting
+  // overflow-x to anything but visible silently forces overflow-y to `auto`
+  // too, clipping any `absolute`-positioned popup inside it. Escaping to a
+  // body-level portal sidesteps that entirely instead of fighting it.
+  const width = 256; // w-64
+  const left = anchorRect ? Math.min(Math.max(8, anchorRect.left + anchorRect.width / 2 - width / 2), window.innerWidth - width - 8) : 8;
+  const bottom = anchorRect ? Math.max(8, window.innerHeight - anchorRect.top + 8) : 8;
+  return createPortal(
     <>
       {/* Click-outside catcher */}
       <div className="fixed inset-0 z-[9998]" onClick={onClose} />
-      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-[9999] w-64 rounded-xl border border-white/15 bg-slate-900/95 backdrop-blur p-3 shadow-2xl">
+      <div
+        className="fixed z-[9999] w-64 rounded-xl border border-white/15 bg-slate-900/95 backdrop-blur p-3 shadow-2xl"
+        style={{ left, bottom }}
+      >
         <p className="text-[10px] uppercase tracking-widest text-white/50 mb-2 text-center">
           Snap selection to…
         </p>
@@ -6875,7 +6971,8 @@ function SnapFacePicker({
           <div />
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 

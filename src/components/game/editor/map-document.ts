@@ -684,6 +684,19 @@ export interface EditorEntity {
   csgPads?: CsgLocalPad[];
   /** Set when collision could only be approximated (e.g. non-aligned Subtract). */
   csgWarning?: string;
+  /**
+   * "Bake mesh collision" result for a catalog/library prop (Model Editor →
+   * Properties → Material = Solid → Bake mesh collision). The engine has no
+   * general triangle-mesh physics solver, so a Solid prop otherwise collides
+   * as a single box matching its visual bounding box — fine for a crate, but
+   * wrong for anything concave (an arch, a curved wall segment): the box
+   * covers the hollow/open part too and reads as an invisible wall. This is
+   * a voxel-approximated multi-box collision fit to the ACTUAL mesh geometry
+   * (see mesh-voxelize.ts) so hollow/open regions stay open. Same local-space
+   * convention as `csgPads` (world units at entity.scale === 1, relative to
+   * this entity's position) so it reuses the exact same runtime pad export.
+   */
+  meshCollisionPads?: CsgLocalPad[];
   animation?: EntityAnimation;
   /** Only for kind === 'player' */
   playerAnims?: PlayerAnimBindings;
