@@ -305,11 +305,16 @@ function resolveSolids(body: SimBody, pads: SimPad[]) {
     if (boxH <= 0.35) continue;
     const topZ = pad.z;
     const bottomZ = topZ - boxH;
-    // Step-up allowance: mirrors server/src/sim/platforms.ts's fix for the
-    // same duplicated logic — a ledge within LAND_STEP_CLIMB of the
-    // player's feet is a walkable step, not a wall (fixes Play Test
-    // matching the live "stuck at ramp-to-platform seam" bug).
-    if (playerBottom >= topZ - LAND_STEP_CLIMB) continue;
+    // Step-up allowance: a ledge within LAND_STEP_CLIMB of the player's feet
+    // is a walkable step, not a wall (fixes Play Test matching the live
+    // "stuck at ramp-to-platform seam" bug). This only makes sense for a
+    // genuinely short pad (boxH <= LAND_STEP_CLIMB) — without that guard, a
+    // full-height solid whose top merely happens to land within climbing
+    // range of the player's current feet (e.g. a ~1-unit doorway post while
+    // standing on a raised floor) got waved through as if it were a curb,
+    // even though its base runs all the way to the ground. Mirrors the same
+    // duplicated logic in server/src/sim/platforms.ts.
+    if (boxH <= LAND_STEP_CLIMB && playerBottom >= topZ - LAND_STEP_CLIMB) continue;
     if (playerTop <= bottomZ + SKIN || playerBottom >= topZ - SKIN) continue;
     const halfW = pad.width / 2 + PLAYER_RADIUS;
     const halfD = pad.depth / 2 + PLAYER_RADIUS;

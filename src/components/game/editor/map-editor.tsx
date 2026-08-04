@@ -396,6 +396,7 @@ export function MapEditor({
   const [snapFaceMenuOpen, setSnapFaceMenuOpen] = useState(false);
   const [snapFaceAnchorRect, setSnapFaceAnchorRect] = useState<DOMRect | null>(null);
   const [bakingMeshId, setBakingMeshId] = useState<string | null>(null);
+  const [bakingAllMesh, setBakingAllMesh] = useState(false);
   const snapMagnetBtnRef = useRef<HTMLButtonElement>(null);
   const prefabSnapBtnRef = useRef<HTMLButtonElement>(null);
   /** Entities frozen via per-object Stop in the editor viewport (editor-only, not saved to the map). */
@@ -1641,11 +1642,19 @@ export function MapEditor({
     });
   };
 
-  const startPlay = (tpsOverride?: TpsViewSettings | null) => {
+  const startPlay = async (tpsOverride?: TpsViewSettings | null) => {
     if (freeFly) apiRef.current?.setFreeFly(false);
     // Snapshot camera so Exit restores the exact map view you left
     cameraBeforePlayRef.current = apiRef.current?.getCameraState() ?? null;
     apiRef.current?.setPaused(true);
+    // Every Solid prop must have mesh-fit collision before Play Test builds
+    // its pad list — a wall/prop marked Solid without a bake still falls
+    // back to one bounding-box collider (blocks doorway openings/arches
+    // solid). Users were relying on manually clicking "Bake"/"Fix Solid
+    // Collision" first, which is easy to forget and left stale maps broken;
+    // do it here automatically so entering Play Test always reflects the
+    // real mesh shape with no extra step.
+    await bakeAllSolidMeshCollision({ silent: true });
     // Do NOT auto-insert Player Avatar into the map — Play Test uses default
     // mannequin / existing avatar, and invents Start on a floor if needed.
     persist();
@@ -1668,13 +1677,57 @@ export function MapEditor({
     });
   };
 
+  /** Batch-fits mesh collision for every Solid prop that's still using the
+   * default full-bounding-box collider (i.e. placed/marked Solid before
+   * per-prop auto-bake existed, or baked entities from an older save).
+   * Brings existing maps in line with newly-placed props without making
+   * the user re-toggle the Material dropdown on each one by hand. */
+  const bakeAllSolidMeshCollision = async (opts?: { silent?: boolean }) => {
+    const targets = doc.entities.filter(
+      (e) =>
+        resolveCollideMaterial(e) === 'solid' &&
+        !isHammerSolidEntity(e) &&
+        (e.model || e.customModelUrl) &&
+        !e.meshCollisionPads?.length
+    );
+    if (!targets.length) {
+      if (!opts?.silent) {
+        toast({
+          title: 'Nothing to fix',
+          description: 'Every Solid prop already has mesh-fit collision.',
+        });
+      }
+      return;
+    }
+    setBakingAllMesh(true);
+    let ok = 0;
+    let fail = 0;
+    for (const e of targets) {
+      const result = await apiRef.current?.bakeMeshCollision(e.id);
+      if (result?.ok) ok++;
+      else fail++;
+    }
+    setBakingAllMesh(false);
+    if (!opts?.silent) {
+      toast({
+        title: 'Mesh collision fitted',
+        description: `${ok} prop${ok === 1 ? '' : 's'} updated to match their real shape${
+          fail ? ` (${fail} failed)` : ''
+        }.`,
+      });
+    }
+  };
+
   /** "Play Test (Live)" — same pre-play snapshot/pause/persist as startPlay,
    * but launches the real KilrunEngine against a private practice room
    * instead of the local MapPlayPreview renderer. Deathrun only. */
-  const startPlayLive = () => {
+  const startPlayLive = async () => {
     if (freeFly) apiRef.current?.setFreeFly(false);
     cameraBeforePlayRef.current = apiRef.current?.getCameraState() ?? null;
     apiRef.current?.setPaused(true);
+    // Same auto-bake as startPlay — the live server reads whatever collision
+    // is persisted, so it must be up to date before persist() runs.
+    await bakeAllSolidMeshCollision({ silent: true });
     persist();
     setPlayTestLive(true);
   };
@@ -2020,6 +2073,17 @@ export function MapEditor({
           title="Use this map in Deathrun matches"
         >
           {activePlayId === mapId ? 'MAIN map ✓' : 'Set as MAIN map'}
+        </Button>
+
+        <Button
+          size="sm"
+          variant="secondary"
+          className="shrink-0"
+          disabled={bakingAllMesh}
+          onClick={() => bakeAllSolidMeshCollision()}
+          title="Fit collision to the real mesh shape for every Solid prop still using a full-bounding-box collider (fixes doorways/arches placed before mesh-fit collision was automatic)."
+        >
+          {bakingAllMesh ? 'Fitting collision…' : 'Fix Solid Collision'}
         </Button>
 
         {!isMobile && (
@@ -5104,12 +5168,29 @@ export function MapEditor({
                       value={resolveCollideMaterial(selected)}
                       onChange={(e) => {
                         const material = e.target.value as EntityCollideMaterial;
+                        const target = selected;
                         patchSelected({
-                          ...patchCollideMaterial(selected, material),
+                          ...patchCollideMaterial(target, material),
                           ...(material === 'walkthrough'
-                            ? { jumpPad: { ...ensureJumpPad(selected), enabled: false } }
+                            ? { jumpPad: { ...ensureJumpPad(target), enabled: false } }
                             : {}),
                         });
+                        // Picking Solid on a catalog prop used to leave collision as one
+                        // box spanning the model's full bounding box — including any
+                        // opening/hollow (a doorway's hole, an arch) — so the "Solid"
+                        // dropdown alone couldn't make a doorway actually match its
+                        // visible shape; that required a separate manual "Bake mesh
+                        // collision" click most users never found. Auto-bake right away
+                        // so every prefab's Solid collision matches its real mesh shape
+                        // by default, with no extra step.
+                        if (
+                          material === 'solid' &&
+                          !isHammerSolidEntity(target) &&
+                          (target.model || target.customModelUrl) &&
+                          !target.meshCollisionPads?.length
+                        ) {
+                          void apiRef.current?.bakeMeshCollision(target.id);
+                        }
                       }}
                     >
                       <option value="solid">Solid — collide / stand on mesh</option>
@@ -5150,9 +5231,26 @@ export function MapEditor({
                             disabled={bakingMeshId === selected.id}
                             onClick={async () => {
                               setBakingMeshId(selected.id);
-                              const result = await apiRef.current?.bakeMeshCollision(selected.id);
+                              let result;
+                              try {
+                                result = await apiRef.current?.bakeMeshCollision(selected.id);
+                              } catch (err) {
+                                result = {
+                                  ok: false as const,
+                                  error: err instanceof Error ? err.message : String(err),
+                                };
+                              }
                               setBakingMeshId(null);
-                              if (!result) return;
+                              if (!result) {
+                                toast({
+                                  title: 'Bake failed',
+                                  description: 'Editor viewport is not ready yet — try again in a moment.',
+                                  variant: 'destructive',
+                                });
+                                return;
+                              }
+                              // eslint-disable-next-line no-console
+                              console.log('[bake-mesh-collision] result:', result);
                               if (result.ok) {
                                 toast({
                                   title: 'Mesh collision baked',

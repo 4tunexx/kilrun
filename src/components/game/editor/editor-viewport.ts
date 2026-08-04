@@ -468,6 +468,11 @@ export function createEditorViewport(
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  // Match Play Test's color pipeline (map-play-preview.tsx) so prefabs don't
+  // look flatter/duller in the editor than they do in-game.
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.95;
   host.appendChild(renderer.domElement);
   Object.assign(renderer.domElement.style, {
     width: '100%',

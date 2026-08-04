@@ -34,14 +34,51 @@ manager.setURLModifier((url) => {
 const loader = new GLTFLoader(manager);
 const cache = new Map<string, Promise<GLTF>>();
 
+// Kenney's "Prototype textures" kit shares one colormap.png swatch atlas
+// across every catalog model — different faces of the same object sample
+// different colored squares from that grid, which reads as a "patchwork of
+// colored peaches" rather than a clean, unified prop. Every material that
+// uses it is named "colormap" in the source GLBs, so strip that texture and
+// give the model one flat, neutral color instead — done once here so both
+// the editor viewport and Play Test (which both load through loadGltf) get
+// the same clean look automatically.
+const FLAT_PROTOTYPE_COLOR = 0xaab4c2;
+function flattenPrototypeMaterials(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const next = mats.map((m) => {
+      if (!m || m.name !== 'colormap') return m;
+      const flat = new THREE.MeshStandardMaterial({
+        color: FLAT_PROTOTYPE_COLOR,
+        roughness: 0.85,
+        metalness: 0.05,
+        side: (m as THREE.MeshStandardMaterial).side,
+      });
+      flat.name = m.name;
+      return flat;
+    });
+    mesh.material = Array.isArray(mesh.material) ? next : next[0];
+  });
+}
+
 export function loadGltf(url: string): Promise<GLTF> {
   let pending = cache.get(url);
   if (!pending) {
     pending = new Promise((resolve, reject) => {
-      loader.load(url, resolve, undefined, (err) => {
-        console.error('[gltf] load failed', url, err);
-        reject(err);
-      });
+      loader.load(
+        url,
+        (gltf) => {
+          flattenPrototypeMaterials(gltf.scene);
+          resolve(gltf);
+        },
+        undefined,
+        (err) => {
+          console.error('[gltf] load failed', url, err);
+          reject(err);
+        }
+      );
     });
     cache.set(url, pending);
   }

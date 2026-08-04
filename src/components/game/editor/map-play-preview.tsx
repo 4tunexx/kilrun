@@ -285,6 +285,8 @@ export function MapPlayPreview({
       homeY: p.y,
       homeZ: p.z,
     }));
+    // eslint-disable-next-line no-console
+    console.log('[collision-debug] pads at Play Test start:', pads);
     const finishes = mapDocToSimFinishes(playDoc);
     const hazards = mapDocToSimHazards(playDoc);
     const teleports = mapDocToSimTeleports(playDoc);

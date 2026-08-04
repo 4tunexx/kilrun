@@ -380,12 +380,19 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
             : wantsSolidVolume
               ? Math.max(0.8, sizeY)
               : Math.max(0.35, sizeY * 0.5);
-  // Hammer meshes are bottom-aligned at position.y — pad top = feet + sizeY.
+  // All catalog models are bottom-aligned at position.y (plantLocalFeet in
+  // editor-mesh.ts shifts every loaded mesh so its AABB base sits at y=0
+  // relative to the entity) — pad top must be feet + height, not feet +
+  // height/2. Using height/2 here silently shifted every wall/solid
+  // collision box down by half its height, so the top half of the visible
+  // mesh had no collision and the step-up-ledge allowance in resolveSolids
+  // (platformer-sim.ts) misread the whole wall as a climbable curb near the
+  // player's feet — the wall was skipped entirely instead of blocking.
   const topZ = isHammerSolid
     ? ty + sizeY
     : topOnly && mat !== 'water'
       ? ty + sizeY * 0.5
-      : ty + height * 0.5;
+      : ty + height;
 
   const dirSimX = Math.cos(yaw);
   const dirSimY = Math.sin(yaw);
@@ -744,7 +751,12 @@ function localPadsToSimPads(e: EditorEntity, pads: CsgLocalPad[]): SimPlatformBl
     const wz = ez + (-lcx * sin + lcz * cos);
     const wy = ey + lcy;
     const hx = Math.max(0.05, p.hx * sx);
-    const hy = Math.max(0.06, p.hy * sy);
+    // Side-collision (resolveSolids, platformer-sim.ts) ignores any pad
+    // whose height is <= 0.35 (thin floor slabs are top-only by design).
+    // A baked mesh-collision box for a Solid prop must never end up under
+    // that cutoff, or the player walks straight through it — only floors
+    // (water/ice/sand kinds are always top-only) are allowed to stay thin.
+    const hy = Math.max(kind === 'solid' ? 0.2 : 0.06, p.hy * sy);
     const hz = Math.max(0.05, p.hz * sz);
     return {
       x: wz,

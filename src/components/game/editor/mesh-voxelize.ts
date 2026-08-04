@@ -31,10 +31,23 @@ export interface VoxelizeOptions {
  * (grazing exactly along a box face/edge) that break the parity count. */
 const PROBE_DIR = new THREE.Vector3(0.998, 0.0537, 0.0261).normalize();
 
+/** Some catalog GLBs export duplicate coincident triangles per face (seen on
+ * wall-doorway-garage: every real surface crossing produces two raycast hits
+ * at the exact same distance) — that doubles every crossing and makes the
+ * ray-parity count always even, so containment could never register as
+ * "inside" no matter the point. Collapse hits within EPS of each other (the
+ * same physical surface) into one crossing before taking parity. */
+const DUPLICATE_HIT_EPS = 1e-4;
 function isPointInside(bvh: MeshBVH, point: THREE.Vector3): boolean {
   const ray = new THREE.Ray(point, PROBE_DIR);
   const hits = bvh.raycast(ray, THREE.DoubleSide);
-  return hits.length % 2 === 1;
+  if (hits.length === 0) return false;
+  hits.sort((a, b) => a.distance - b.distance);
+  let crossings = 1;
+  for (let i = 1; i < hits.length; i++) {
+    if (hits[i].distance - hits[i - 1].distance > DUPLICATE_HIT_EPS) crossings++;
+  }
+  return crossings % 2 === 1;
 }
 
 interface Cell {

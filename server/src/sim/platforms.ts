@@ -251,7 +251,11 @@ export function resolveSolidCollisions(
     // player's current feet — e.g. a ramp leading into an adjacent flat
     // platform that isn't pixel-perfect flush — reads as an impassable
     // barrier that only a jump clears, instead of a smooth step up.
-    if (playerBottom >= topZ - LAND_STEP_CLIMB) continue;
+    // Gated on boxH <= LAND_STEP_CLIMB too — otherwise a full-height solid
+    // (e.g. a ~1-unit doorway post) whose top merely happens to land within
+    // climbing range of the player's current feet gets waved through
+    // entirely, even though its base runs all the way to the ground.
+    if (boxH <= LAND_STEP_CLIMB && playerBottom >= topZ - LAND_STEP_CLIMB) continue;
     // Vertical overlap with skin
     if (playerTop <= bottomZ + COLLISION_SKIN || playerBottom >= topZ - COLLISION_SKIN) {
       continue;
