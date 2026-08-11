@@ -18,7 +18,7 @@ import { STATIC_FALLBACK_WEAPONS } from '@/lib/weapon-catalog';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-08-03-dashboard-panels';
+const DB_SCHEMA_SYNC_VERSION = '2026-08-11-ghost-runs-clanwars-crate-cosmetics';
 
 async function requireAdmin() {
   const session = await auth();
@@ -55,8 +55,12 @@ export type AdminDbSyncResult = {
  * Push Prisma schema to Mongo and verify all gameplay fields are writable.
  * Call from Admin → Dashboard → Sync database schema (once after this deploy).
  *
- * Verifies: equippedSkins, kp, peakKp/peakRank, premiumExpiresAt,
- * MatchResult.kpDelta/stats, SiteSettings.premiumConfigJson, rankConfigJson.
+ * Each `steps.push(...)` block below is its own smoke test for one feature
+ * area — see the `steps` array for the full current list. When a schema
+ * change adds a genuinely new field/collection, add a matching verify block
+ * here and bump DB_SCHEMA_SYNC_VERSION so admins know a re-sync covers it;
+ * `prisma db push` above already applies every model's fields/indexes
+ * regardless, these checks just surface which ones were confirmed reachable.
  */
 export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
   const staff = await requireAdmin();
@@ -535,6 +539,70 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`Crate fields verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — crate fields not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify: MapGhostRun (map editor ghost / world-record replays)
+  try {
+    const ghostRunCount = await prisma.mapGhostRun.count();
+    steps.push(`MapGhostRun collection verified (count=${ghostRunCount})`);
+    await prisma.mapGhostRun.findFirst({
+      select: { id: true, mapId: true, finishMs: true, samplesJson: true },
+    });
+    steps.push('MapGhostRun.samplesJson/finishMs fields readable');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`MapGhostRun verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — MapGhostRun not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify: Clan Wars (ClanLobby queue + challenge/result history)
+  try {
+    const lobbyCount = await prisma.clanLobby.count();
+    const challengeCount = await prisma.clanWarChallenge.count();
+    const resultCount = await prisma.clanWarResult.count();
+    steps.push(
+      `Clan Wars collections verified (lobbies=${lobbyCount}, challenges=${challengeCount}, results=${resultCount})`
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`Clan Wars verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — ClanLobby/ClanWarChallenge/ClanWarResult not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify: Asset registry (3D cosmetic models used by crates + admin editor)
+  try {
+    const assetCount = await prisma.asset.count();
+    steps.push(`Asset collection verified (count=${assetCount})`);
+    await prisma.asset.findFirst({ select: { id: true, assetId: true, equipSlot: true } });
+    steps.push('Asset.equipSlot field readable');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`Asset verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — Asset registry not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify: StoreItem.caseOnly (crate-exclusive shop items) +
+  // CaseItem's cosmetic snapshot fields (live banner/frame/nickname preview
+  // in crate contents and the unbox reveal).
+  try {
+    await prisma.storeItem.findFirst({ select: { id: true, caseOnly: true } });
+    steps.push('StoreItem.caseOnly field readable');
+    await prisma.caseItem.findFirst({
+      select: { id: true, cosmeticSlot: true, bannerConfig: true, cosmeticConfig: true },
+    });
+    steps.push('CaseItem.cosmeticSlot/bannerConfig/cosmeticConfig fields readable');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`StoreItem/CaseItem cosmetic fields verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — StoreItem.caseOnly / CaseItem cosmetic fields not available. Run db push. (${msg})`
     );
   }
 

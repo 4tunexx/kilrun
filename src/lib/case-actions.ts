@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@/generated/prisma';
 import { processWebsiteAction, grantXp, metricCountPublic } from '@/lib/progression-actions';
 import { getLevelFromXp } from '@/lib/progression';
-import { getInventorySlotCap } from '@/lib/inventory-slots';
+import { getInventorySlotCap, MAX_STACK_QUANTITY } from '@/lib/inventory-slots';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -77,6 +77,49 @@ async function assertSlotAvailable(userId: string) {
   }
 }
 
+/**
+ * Adds one unit of an item to a user's inventory, stacking onto an existing
+ * row with room (quantity below MAX_STACK_QUANTITY) instead of always creating a
+ * new row. Once every row of that item is full, a new row is created if a
+ * slot is free; if the inventory is completely full, `payoutVpOnFull` (when
+ * given) is credited instead so the duplicate is never silently discarded.
+ * Returns the row that was updated or created.
+ */
+async function grantStackableItem(
+  userId: string,
+  itemSku: string,
+  rowData: Omit<Prisma.InventoryItemUncheckedCreateInput, 'userId' | 'itemSku' | 'quantity'>,
+  payoutVpOnFull?: number
+) {
+  const rows = await prisma.inventoryItem.findMany({
+    where: { userId, itemSku },
+    orderBy: { acquiredAt: 'asc' },
+  });
+  const target = rows.find((r) => r.quantity < MAX_STACK_QUANTITY);
+  if (target) {
+    return prisma.inventoryItem.update({
+      where: { id: target.id },
+      data: { quantity: { increment: 1 } },
+    });
+  }
+
+  try {
+    await assertSlotAvailable(userId);
+  } catch (err) {
+    if (payoutVpOnFull && payoutVpOnFull > 0) {
+      return prisma.user.update({
+        where: { id: userId },
+        data: { vpCurrency: { increment: payoutVpOnFull } },
+      });
+    }
+    throw err;
+  }
+
+  return prisma.inventoryItem.create({
+    data: { userId, itemSku, quantity: 1, ...rowData },
+  });
+}
+
 /** Grants an unopened crate into a player's inventory (admin award, shop purchase, or mission/achievement reward). */
 export async function grantCrateToInventory(
   userId: string,
@@ -89,21 +132,18 @@ export async function grantCrateToInventory(
   });
   if (!def) throw new Error('Case not found');
 
-  await assertSlotAvailable(userId);
-
   const vpValue = await computeCaseExpectedValue(def.items);
 
-  const created = await prisma.inventoryItem.create({
-    data: {
-      userId,
-      itemSku: `crate:${def.id}`,
-      itemName: def.name,
-      itemCategory: 'crate',
-      imageUrl: def.imageUrl || null,
-      vpValue,
-      caseDefId: def.id,
-      crateSource: source,
-    },
+  // Unopened crates of the same case stack into one row (up to
+  // MAX_STACK_QUANTITY) rather than costing a fresh slot each time — no VP
+  // fallback here since a crate has no standalone sell price to pay out.
+  const created = await grantStackableItem(userId, `crate:${def.id}`, {
+    itemName: def.name,
+    itemCategory: 'crate',
+    imageUrl: def.imageUrl || null,
+    vpValue,
+    caseDefId: def.id,
+    crateSource: source,
   });
 
   await prisma.notification.create({
@@ -373,75 +413,42 @@ async function resolveCaseWin(
     // Grant into inventory if it references a StoreItem cosmetic — same
     // snapshot pattern as a normal purchase, so later catalog edits don't
     // retroactively change what the player already won. Re-winning an
-    // already-owned *stackable* item (no unique equip slot/config) adds a
-    // quantity instead of creating a duplicate row; re-winning an already-owned
-    // *unique* cosmetic (skin/banner/frame/nickname) can't stack, so it's
-    // paid out as VP equal to the item's shop price instead of vanishing.
+    // already-owned item stacks a quantity onto it (up to MAX_STACK_QUANTITY
+    // per row, then a fresh row) rather than vanishing; VP is only paid out
+    // as a last resort if the inventory is completely full.
   else if (won.storeItemSku) {
     const storeItem = await prisma.storeItem.findUnique({ where: { itemSku: won.storeItemSku } });
     if (storeItem) {
-      const owned = await prisma.inventoryItem.findFirst({
-        where: { userId: user.id, itemSku: storeItem.itemSku },
-      });
-      const stackable = !storeItem.cosmeticSlot && !storeItem.bannerConfig && !storeItem.cosmeticConfig;
-      if (owned && stackable) {
-        await prisma.inventoryItem.update({
-          where: { id: owned.id },
-          data: { quantity: { increment: 1 } },
-        });
-      } else if (owned) {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { vpCurrency: { increment: storeItem.vpPrice } },
-        });
-      } else {
-        await assertSlotAvailable(user.id);
-        await prisma.inventoryItem.create({
-          data: {
-            userId: user.id,
-            itemSku: storeItem.itemSku,
-            itemName: storeItem.itemName,
-            itemCategory: storeItem.itemCategory,
-            cosmeticSlot: storeItem.cosmeticSlot ?? null,
-            bannerConfig: storeItem.bannerConfig ?? undefined,
-            cosmeticConfig: storeItem.cosmeticConfig ?? undefined,
-            imageUrl: storeItem.imageUrl ?? null,
-            vpValue: storeItem.vpPrice,
-          },
-        });
-      }
+      await grantStackableItem(
+        user.id,
+        storeItem.itemSku,
+        {
+          itemName: storeItem.itemName,
+          itemCategory: storeItem.itemCategory,
+          cosmeticSlot: storeItem.cosmeticSlot ?? null,
+          bannerConfig: storeItem.bannerConfig ?? undefined,
+          cosmeticConfig: storeItem.cosmeticConfig ?? undefined,
+          imageUrl: storeItem.imageUrl ?? null,
+          vpValue: storeItem.vpPrice,
+        },
+        storeItem.vpPrice
+      );
     }
   } else if (won.assetId) {
     const asset = await prisma.asset.findUnique({ where: { id: won.assetId } });
     if (asset) {
-      const owned = await prisma.inventoryItem.findFirst({
-        where: { userId: user.id, itemSku: asset.assetId },
-      });
-      const stackable = !asset.equipSlot;
-      if (owned && stackable) {
-        await prisma.inventoryItem.update({
-          where: { id: owned.id },
-          data: { quantity: { increment: 1 } },
-        });
-      } else if (owned) {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { vpCurrency: { increment: asset.price } },
-        });
-      } else {
-        await assertSlotAvailable(user.id);
-        await prisma.inventoryItem.create({
-          data: {
-            userId: user.id,
-            itemSku: asset.assetId,
-            itemName: asset.displayName,
-            itemCategory: asset.category,
-            cosmeticSlot: asset.equipSlot,
-            imageUrl: asset.thumbnailUrl ?? asset.previewUrl ?? null,
-            vpValue: asset.price,
-          },
-        });
-      }
+      await grantStackableItem(
+        user.id,
+        asset.assetId,
+        {
+          itemName: asset.displayName,
+          itemCategory: asset.category,
+          cosmeticSlot: asset.equipSlot,
+          imageUrl: asset.thumbnailUrl ?? asset.previewUrl ?? null,
+          vpValue: asset.price,
+        },
+        asset.price
+      );
     }
   }
 

@@ -14,6 +14,10 @@ export const LEVEL_SLOTS_STEP = 5;
 export const LEVEL_SLOTS_PER_STEP = 5;
 /** Highest slot count leveling alone can reach (before purchased packs). */
 export const MAX_LEVEL_INVENTORY_SLOTS = 30;
+/** Max copies of the same item a single inventory row can stack (shown as
+ *  an "xN" badge). The next duplicate past this spills into a new row/slot
+ *  instead of incrementing further. */
+export const MAX_STACK_QUANTITY = 5;
 
 /** Slots granted purely from account level, before any purchased packs. */
 export function getLevelInventorySlots(level: number): number {
