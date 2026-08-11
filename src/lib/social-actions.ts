@@ -1136,7 +1136,7 @@ export async function getGuides() {
   return prisma.guide.findMany({
     where: { published: true },
     orderBy: { createdAt: 'desc' },
-    take: 40,
+    take: 200,
   });
 }
 
@@ -2611,6 +2611,7 @@ export async function adminCreateGuide(input: {
   summary: string;
   body: string;
   category?: string;
+  published?: boolean;
 }) {
   const staff = await requireStaff();
   const guide = await prisma.guide.create({
@@ -2619,6 +2620,7 @@ export async function adminCreateGuide(input: {
       summary: input.summary,
       body: input.body,
       category: input.category || 'general',
+      published: input.published ?? true,
     },
   });
   const { writeAuditLog } = await import('@/lib/audit');
@@ -2629,6 +2631,51 @@ export async function adminCreateGuide(input: {
     detail: guide.title,
   });
   return guide;
+}
+
+export async function adminListGuides() {
+  await requireStaff();
+  return prisma.guide.findMany({ orderBy: { createdAt: 'desc' } });
+}
+
+export async function adminUpdateGuide(
+  id: string,
+  input: { title: string; summary: string; body: string; category: string; published: boolean }
+) {
+  const staff = await requireStaff();
+  const guide = await prisma.guide.update({
+    where: { id },
+    data: {
+      title: input.title,
+      summary: input.summary,
+      body: input.body,
+      category: input.category || 'general',
+      published: input.published,
+    },
+  });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'update_guide',
+    detail: guide.title,
+  });
+  return guide;
+}
+
+export async function adminDeleteGuide(id: string) {
+  const staff = await requireStaff();
+  const existing = await prisma.guide.findUnique({ where: { id } });
+  if (!existing) throw new Error('Guide not found');
+  await prisma.guide.delete({ where: { id } });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    actorId: staff.id,
+    actorUsername: staff.username,
+    action: 'delete_guide',
+    detail: existing.title,
+  });
+  return { ok: true as const };
 }
 
 export async function adminDashboardStats() {

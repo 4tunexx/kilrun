@@ -58,6 +58,7 @@ import { AdminMapEditorPanel } from '@/components/views/admin/admin-map-editor-p
 import { AdminPowersPanel } from '@/components/views/admin/admin-powers-panel';
 import { AdminSiteLayoutPanel } from '@/components/views/admin/admin-site-layout-panel';
 import { AdminNewsPanel } from '@/components/views/admin/admin-news-panel';
+import { AdminGuidesPanel } from '@/components/views/admin/admin-guides-panel';
 import { AdminPremiumPanel } from '@/components/views/admin/admin-premium-panel';
 import { AdminRanksPanel } from '@/components/views/admin/admin-ranks-panel';
 import { AdminAnnouncementCarouselPanel } from '@/components/views/admin/admin-announcement-carousel-panel';
@@ -81,7 +82,6 @@ import {
   adminAdjustVp,
   adminBroadcastAnnouncement,
   adminClearFireSale,
-  adminCreateGuide,
   adminGetAllStoreItems,
   adminListTickets,
   adminListUsers,
@@ -241,12 +241,6 @@ export default function AdminView({
     body: '',
   });
   const [detailUserId, setDetailUserId] = useState<string | null>(null);
-  const [guideForm, setGuideForm] = useState({
-    title: '',
-    summary: '',
-    body: '',
-    category: 'general',
-  });
   const [siteForm, setSiteForm] = useState({
     logoUrl: '',
     headerLogoUrl: '',
@@ -2392,61 +2386,7 @@ export default function AdminView({
 
             <AdminNewsPanel />
 
-            <Card className="bg-slate-800/40 border-slate-700/30 max-w-xl">
-              <CardHeader>
-                <CardTitle>Publish guide</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Input
-                  placeholder="Title"
-                  value={guideForm.title}
-                  onChange={(e) =>
-                    setGuideForm((f) => ({ ...f, title: e.target.value }))
-                  }
-                  className="bg-slate-900/50 border-slate-700"
-                />
-                <Input
-                  placeholder="Summary"
-                  value={guideForm.summary}
-                  onChange={(e) =>
-                    setGuideForm((f) => ({ ...f, summary: e.target.value }))
-                  }
-                  className="bg-slate-900/50 border-slate-700"
-                />
-                <Input
-                  placeholder="Category"
-                  value={guideForm.category}
-                  onChange={(e) =>
-                    setGuideForm((f) => ({ ...f, category: e.target.value }))
-                  }
-                  className="bg-slate-900/50 border-slate-700"
-                />
-                <Textarea
-                  placeholder="Body"
-                  value={guideForm.body}
-                  onChange={(e) => setGuideForm((f) => ({ ...f, body: e.target.value }))}
-                  className="bg-slate-900/50 border-slate-700"
-                />
-                <Button
-                  disabled={busyKey === 'publish-guide'}
-                  onClick={() =>
-                    runAction('publish-guide', async () => {
-                      await adminCreateGuide(guideForm);
-                      setGuideForm({
-                        title: '',
-                        summary: '',
-                        body: '',
-                        category: 'general',
-                      });
-                      toast({ title: 'Guide published' });
-                    })
-                  }
-                >
-                  {busyKey === 'publish-guide' && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                  Publish guide
-                </Button>
-              </CardContent>
-            </Card>
+            <AdminGuidesPanel />
           </TabsContent>
         )}
 

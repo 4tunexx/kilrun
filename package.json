@@ -12,6 +12,7 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed-assets": "tsx scripts/seed-asset-registry.ts",
+    "db:seed-guides": "tsx scripts/seed-guides.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
