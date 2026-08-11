@@ -15,6 +15,7 @@ import {
 } from '../editor/skin-attachments';
 import { resolveModelSrc } from '../editor/model-scan';
 import type { SkinAttachment } from '@/lib/player-skins';
+import { PLAYER_RADIUS } from '@shared/sim-constants';
 import { BODY_COLOR_NONE } from '@/lib/body-colors';
 import { applyTeamTint } from '@/lib/premium-skin-config';
 
@@ -238,7 +239,7 @@ export class ThreeCharacter {
       console.warn('[ThreeCharacter] load failed — using simple mesh', err);
       while (this.root.children.length) this.root.remove(this.root.children[0]);
       const mesh = new THREE.Mesh(
-        new THREE.CapsuleGeometry(0.35, 0.95, 4, 10),
+        new THREE.CapsuleGeometry(PLAYER_RADIUS, 0.95, 4, 10),
         new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.5 })
       );
       mesh.castShadow = true;

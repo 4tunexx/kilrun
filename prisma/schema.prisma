@@ -708,6 +708,22 @@ model GamePrefab {
   @@index([mode])
 }
 
+/// Staff-uploaded single models for the map editor's prefab catalog —
+/// distinct from GamePrefab (multi-entity layout stamps). Shows up in the
+/// catalog panel next to the built-in library, grouped by `category`.
+model MapPrefabModel {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  category    String
+  modelUrl    String
+  previewUrl  String?
+  createdById String?  @db.ObjectId
+  createdAt   DateTime @default(now())
+
+  @@index([category])
+  @@index([createdAt])
+}
+
 /// Personal-best / WR ghost samples for a cloud map (Deathrun race feel).
 model MapGhostRun {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId

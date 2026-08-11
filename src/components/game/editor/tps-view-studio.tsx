@@ -498,9 +498,15 @@ export function TpsViewStudio({
         <p className="absolute bottom-2 left-2 text-[9px] text-white/40 pointer-events-none">
           {mapDoc ? 'WASD / arrows in real map preview' : 'Drag to look · boom cyan'}
         </p>
-        <p className="absolute bottom-2 right-2 text-[9px] text-cyan-200/50 tabular-nums pointer-events-none">
-          yaw {(yaw * 180) / Math.PI | 0}° · pitch {((pitch * 180) / Math.PI).toFixed(0)}°
-        </p>
+        {/* When mapDoc is set, camera movement happens inside MapPlayPreview's
+            own internal yaw/pitch state, which is never reported back up —
+            `yaw`/`pitch` here stay frozen at their initial values no matter
+            how the user orbits, so showing them would be misleading. */}
+        {!mapDoc && (
+          <p className="absolute bottom-2 right-2 text-[9px] text-cyan-200/50 tabular-nums pointer-events-none">
+            yaw {(yaw * 180) / Math.PI | 0}° · pitch {((pitch * 180) / Math.PI).toFixed(0)}°
+          </p>
+        )}
       </div>
 
       <div className={mapDoc && !isMobile && !embedded ? 'w-[320px] shrink-0 flex flex-col min-h-0' : 'contents'}>

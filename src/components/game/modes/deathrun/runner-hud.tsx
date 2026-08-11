@@ -12,7 +12,10 @@ export const RunnerHud: React.FC<{
 }> = ({ player, room }) => {
   const startX = room?.courseStartX ?? SPAWN_X;
   const finishX = room?.courseFinishX ?? FINISH_X;
-  const span = Math.max(1, finishX - startX);
+  // Math.max(1, ...) only guarded division-by-zero — a reversed/misconfigured
+  // course (finishX < startX) still collapsed span to 1, making progress
+  // swing wildly and clamp near 100% almost immediately. Guard the sign too.
+  const span = Math.max(1, Math.abs(finishX - startX));
   const progress = Math.max(0, Math.min(1, (player.x - startX) / span));
 
   return (

@@ -39,6 +39,7 @@ import {
 } from './player-avatar';
 import { DEFAULT_PACK_PLAYER_URL } from '../renderer/pack-player';
 import { normalizeCharacter } from '../renderer/asset-loader';
+import { disposeClonedMaterials } from './editor-mesh';
 import {
   applyExtraBones,
   applyPlayerMeshEdits,
@@ -81,6 +82,13 @@ export function PlayerModelStudio({
 }) {
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<StudioPreview | null>(null);
+  // Guards the "Reload preview" button below: unlike the model-source effect
+  // above (which has a `cancelled` flag), this handler had no way to detect
+  // a second click landing before the first async load finished — both
+  // would construct their own StudioPreview and append its canvas, and
+  // whichever resolved last silently overwrote previewRef.current, leaking
+  // the other instance's renderer/canvas and its render-loop RAF forever.
+  const reloadTokenRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clipCount, setClipCount] = useState(0);
@@ -530,11 +538,17 @@ export function PlayerModelStudio({
                     previewRef.current = null;
                     const host = canvasHostRef.current;
                     if (host) {
+                      const token = ++reloadTokenRef.current;
                       void loadPlayerAvatar({
                         ...entity,
                         customModelUrl: entity.customModelUrl || DEFAULT_PACK_PLAYER_URL,
                         model: undefined,
                       }).then((loaded) => {
+                        // A second click landed before this load resolved —
+                        // that click already disposed/rebuilt its own
+                        // preview, so let this stale one drop instead of
+                        // overwriting it with a since-superseded instance.
+                        if (token !== reloadTokenRef.current) return;
                         previewRef.current = new StudioPreview(host);
                         previewRef.current.setAvatar(loaded.scene, loaded.animations);
                         setClipCount(loaded.clipNames.length);
@@ -1220,6 +1234,7 @@ class StudioPreview {
   setAvatar(scene: THREE.Object3D, animations: THREE.AnimationClip[]) {
     if (this.avatarRoot) {
       this.pivot.remove(this.avatarRoot);
+      disposeClonedMaterials(this.avatarRoot);
       this.avatarRoot = null;
     }
     if (this.boneHelper) {
@@ -1380,6 +1395,7 @@ class StudioPreview {
     cancelAnimationFrame(this.raf);
     this.mixer?.stopAllAction();
     this.transform?.dispose();
+    if (this.avatarRoot) disposeClonedMaterials(this.avatarRoot);
     const ro = (this as unknown as { _ro?: ResizeObserver })._ro;
     ro?.disconnect();
     this.renderer.dispose();

@@ -21,6 +21,7 @@ import {
   skinSlotMeta,
 } from '@/lib/player-skins';
 import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
+import { disposeClonedMaterials } from './editor-mesh';
 import { applySculptDataToGeometry } from './skin-sculpt';
 import { isPackPreviewIconUrl } from '@/lib/asset-registry';
 
@@ -238,8 +239,18 @@ export function sanitizePackSkinMaterials(root: THREE.Object3D) {
 
 export function clearSkinAttachments(avatarRoot: THREE.Object3D) {
   attachmentGeneration.set(avatarRoot, (attachmentGeneration.get(avatarRoot) ?? 0) + 1);
+  // buildSkinPartMesh mixes uniquely-created primitive geometry (makeGeometry
+  // — safe to fully dispose) with cache-derived GLB parts whose geometry is
+  // shared with loadAnimatedPrefab's module-level cache (NOT safe to dispose,
+  // see disposeClonedMaterials's doc comment). Dispose only the per-instance
+  // material clones here, which is safe for both cases — this was previously
+  // skipped entirely, leaking a full material+texture set on every rebuild
+  // (color/rotation edits call applySkinAttachments on essentially every tick).
   const existing = avatarRoot.getObjectByName(ATTACH_ROOT_NAME);
-  if (existing) existing.removeFromParent();
+  if (existing) {
+    disposeClonedMaterials(existing);
+    existing.removeFromParent();
+  }
   // Bone-mode holders parent onto bones (not under __skin_attachments) — remove those too
   const orphaned: THREE.Object3D[] = [];
   avatarRoot.traverse((o) => {
@@ -247,7 +258,10 @@ export function clearSkinAttachments(avatarRoot: THREE.Object3D) {
       orphaned.push(o);
     }
   });
-  for (const o of orphaned) o.removeFromParent();
+  for (const o of orphaned) {
+    disposeClonedMaterials(o);
+    o.removeFromParent();
+  }
   // A full-body preview hides the base skinned body. Restore it when the
   // attachment set changes or is cleared.
   avatarRoot.traverse((o) => {
@@ -884,6 +898,10 @@ export async function captureSkinPartThumbnail(
     renderer.setPixelRatio(1);
     renderer.render(scene, camera);
     const url = renderer.domElement.toDataURL('image/jpeg', 0.82);
+    // part's material is always this call's own clone (buildSkinPartMesh);
+    // its geometry may be cache-shared for GLB-backed parts, so only the
+    // material is safe to dispose here (see disposeClonedMaterials).
+    disposeClonedMaterials(part);
     renderer.dispose();
     return url;
   } catch (err) {

@@ -204,16 +204,48 @@ export class ThreeMap {
     }
   }
 
+  // getPrefab/getPrefabFromUrl cache a per-model-kind clone (`proto`) whose
+  // geometry+material are shared by every instance of that same model within
+  // this ThreeMap (see getPrefabFromUrl — Object3D.clone(true) does not deep
+  // clone geometry/material), and the geometry itself is shared further with
+  // the global loadGltf() cache in asset-loader.ts. Disposing those on a
+  // single instance's removal would corrupt every other live/future instance
+  // of that model. Only resources created fresh per-call (never shared) are
+  // safe to dispose here — the raw fallback mesh built in the catch branch
+  // of upsertPlatform/upsertObstacle (own geometry+material) and the
+  // nameplate sprite (own CanvasTexture per obstacle) — both are marked with
+  // `userData.__ownsGpuResources` at creation.
+  private disposeOwnResources(node: THREE.Object3D) {
+    node.traverse((obj) => {
+      if (!obj.userData?.__ownsGpuResources) return;
+      if (obj instanceof THREE.Sprite) {
+        const mat = obj.material as THREE.SpriteMaterial;
+        mat.map?.dispose();
+        mat.dispose();
+        return;
+      }
+      const mesh = obj as THREE.Mesh;
+      mesh.geometry?.dispose();
+      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) m.dispose();
+    });
+  }
+
   public removePlatform(index: number) {
     const node = this.platformRoots.get(index);
     if (node) {
       node.removeFromParent();
+      this.disposeOwnResources(node);
       this.platformRoots.delete(index);
     }
   }
 
   public clearPlatforms() {
-    this.platformRoots.forEach((node) => node.removeFromParent());
+    this.platformRoots.forEach((node) => {
+      node.removeFromParent();
+      this.disposeOwnResources(node);
+    });
     this.platformRoots.clear();
   }
 
@@ -228,12 +260,16 @@ export class ThreeMap {
     const node = this.obstacleRoots.get(index);
     if (node) {
       node.removeFromParent();
+      this.disposeOwnResources(node);
       this.obstacleRoots.delete(index);
     }
   }
 
   public clearObstacles() {
-    this.obstacleRoots.forEach((node) => node.removeFromParent());
+    this.obstacleRoots.forEach((node) => {
+      node.removeFromParent();
+      this.disposeOwnResources(node);
+    });
     this.obstacleRoots.clear();
   }
 
@@ -265,6 +301,7 @@ export class ThreeMap {
           new THREE.CylinderGeometry(1, 1.05, 0.35, 20),
           new THREE.MeshStandardMaterial({ color: 0x5b6574, flatShading: true })
         );
+        node.userData.__ownsGpuResources = true;
       }
       this.platformRoots.set(index, node);
       this.root.add(node);
@@ -294,9 +331,11 @@ export class ThreeMap {
           new THREE.CylinderGeometry(0.4, 0.4, 1.1, 12),
           new THREE.MeshStandardMaterial({ color: 0xef4444 })
         );
+        node.userData.__ownsGpuResources = true;
       }
       if (obstacle.displayName) {
         const label = makeNameplateSprite(obstacle.displayName);
+        label.userData.__ownsGpuResources = true;
         label.position.y = 1.6;
         node.add(label);
       }
@@ -322,6 +361,8 @@ export class ThreeMap {
   }
 
   public destroy() {
+    this.clearPlatforms();
+    this.clearObstacles();
     this.root.removeFromParent();
     this.glowMats.forEach((m) => m.dispose());
     this.atlas?.dispose();

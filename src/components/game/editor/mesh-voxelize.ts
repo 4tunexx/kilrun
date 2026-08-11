@@ -20,6 +20,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { CsgLocalPad, EditorEntity } from './map-document';
 import { resolveModelSrc } from './model-scan';
 import { loadGltf } from '../renderer/asset-loader';
+import { isFbxUrl, loadFbxModel } from '../renderer/asset-loader-fbx';
 
 export interface VoxelizeOptions {
   /** Voxel count along the mesh's longest bounding-box axis. Higher = more
@@ -176,10 +177,10 @@ export function voxelizeGeometryToPads(
 async function entityLocalRenderGeometry(e: EditorEntity): Promise<THREE.BufferGeometry> {
   const src = resolveModelSrc(e.model, e.customModelUrl);
   if (!src) throw new Error('This model type isn\'t supported for mesh collision baking yet.');
-  const gltf = await loadGltf(src);
-  gltf.scene.updateMatrixWorld(true);
+  const scene = isFbxUrl(src) ? (await loadFbxModel(src)).scene : (await loadGltf(src)).scene;
+  scene.updateMatrixWorld(true);
   const geometries: THREE.BufferGeometry[] = [];
-  gltf.scene.traverse((obj) => {
+  scene.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh || !mesh.geometry) return;
     const g = mesh.geometry.clone();

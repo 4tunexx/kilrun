@@ -141,6 +141,12 @@ import { TextureAtlasPicker } from './texture-atlas-picker';
 import { worldScaleToUvRepeat } from './editor-mesh';
 import { KILRUN_MODE_INFO } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
+import {
+  getPrefabLibrary,
+  getPrefabLibraryCategories,
+  adminUploadPrefabModel,
+  adminDeletePrefabModel,
+} from '@/lib/prefab-library-actions';
 import { CharacterAssetPicker } from './character-asset-picker';
 import {
   ensureStarterMap,
@@ -206,6 +212,7 @@ import {
   stripLegacyBakedStairPads,
   type PrefabStamp,
 } from './prefab-storage';
+import { setLastPrefabScale } from './prefab-defaults';
 import { formatValidationSummary, validateMapForPublish } from './map-validate';
 import { isCsgDeleteResult, isCsgEligible, subtractEntities, unionEntities } from './csg-tools';
 import { DualJoystick } from '../input/dual-joystick';
@@ -316,6 +323,26 @@ export function MapEditor({
   const [mode, setMode] = useState<TransformMode>('translate');
   const [gridSnap, setGridSnap] = useState(true);
   const [query, setQuery] = useState('');
+  const [libraryCategory, setLibraryCategory] = useState('all');
+  const [libraryPrefabs, setLibraryPrefabs] = useState<
+    Awaited<ReturnType<typeof getPrefabLibrary>>
+  >([]);
+  const [libraryCategories, setLibraryCategories] = useState<string[]>([]);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadForm, setUploadForm] = useState({ name: '', category: '', file: null as File | null });
+
+  const reloadPrefabLibrary = () => {
+    getPrefabLibrary()
+      .then(setLibraryPrefabs)
+      .catch(() => {});
+    getPrefabLibraryCategories()
+      .then(setLibraryCategories)
+      .catch(() => {});
+  };
+  useEffect(() => {
+    reloadPrefabLibrary();
+  }, []);
   const [activeLayerId, setActiveLayerId] = useState(starter.doc.layers[0]?.id ?? '');
   const [freeFly, setFreeFly] = useState(false);
   const [playTest, setPlayTest] = useState(false);
@@ -375,6 +402,15 @@ export function MapEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
+  // handleManualSave is called from the keydown effect below, whose
+  // dependency array intentionally omits activePlayId (it changes without
+  // touching any listed dep, so the effect wouldn't rebind) — read the
+  // latest value via ref instead of letting the Ctrl+S handler close over a
+  // stale activePlayId and skip the "this map is live" warning.
+  const activePlayIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activePlayIdRef.current = activePlayId;
+  }, [activePlayId]);
   const [measureMode, setMeasureMode] = useState(false);
   const [measureDist, setMeasureDist] = useState<number | null>(null);
   /** Master hide: collapses top bar, side menus, tools, and properties for a clear canvas. */
@@ -868,7 +904,7 @@ export function MapEditor({
    * so if this map is already Active it goes live for players immediately.
    */
   const handleManualSave = () => {
-    if (activePlayId === mapId && !liveSaveConfirmedRef.current) {
+    if (activePlayIdRef.current === mapId && !liveSaveConfirmedRef.current) {
       const ok = confirm(
         `“${docRef.current.name}” is the Active ${modeInfo.shortTitle} map — players are on it right now.\n\nSave will publish your changes to them immediately. Continue?`
       );
@@ -1054,7 +1090,9 @@ export function MapEditor({
         if (freeFly) apiRef.current?.setFreeFly(false);
       }
       if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey) {
-        if (selectedIds.length >= 2) {
+        if (e.repeat) {
+          // OS key auto-repeat would otherwise flap this toggle rapidly while held.
+        } else if (selectedIds.length >= 2) {
           setSnapFaceMenuOpen((v) => !v);
         } else {
           toast({
@@ -1067,16 +1105,22 @@ export function MapEditor({
       if (e.key === 'g' || e.key === 'G') {
         if (e.ctrlKey || e.metaKey) {
           e.preventDefault();
-          if (e.shiftKey) ungroupSelection();
-          else groupSelection();
+          if (!e.repeat) {
+            if (e.shiftKey) ungroupSelection();
+            else groupSelection();
+          }
           return;
         }
-        setGridSnap((v) => !v);
+        // OS key auto-repeat would otherwise flap this toggle rapidly while held.
+        if (!e.repeat) setGridSnap((v) => !v);
       }
       if (e.key === 'f' || e.key === 'F') apiRef.current?.focusSelected();
       if (e.key === 'Delete' || e.key === 'Backspace') apiRef.current?.deleteSelected();
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
         e.preventDefault();
+        // OS key auto-repeat would otherwise spam-duplicate the selection
+        // while the combo is held.
+        if (e.repeat) return;
         const axis = e.shiftKey ? 'z' : 'x';
         apiRef.current?.duplicateSelected(axis);
       }
@@ -1087,9 +1131,20 @@ export function MapEditor({
   }, [onClose, selectedId, selectedIds, freeFly, playTest, mapId, brush]);
 
   const filtered = useMemo(() => {
+    if (libraryCategory !== 'all' && libraryCategory !== 'built-in') return [];
     const q = query.trim().toLowerCase();
     return PROTOTYPE_MODELS.filter((n) => !q || n.includes(q));
-  }, [query]);
+  }, [query, libraryCategory]);
+
+  const filteredLibraryPrefabs = useMemo(() => {
+    if (libraryCategory === 'built-in') return [];
+    const q = query.trim().toLowerCase();
+    return libraryPrefabs.filter(
+      (p) =>
+        (libraryCategory === 'all' || p.category === libraryCategory) &&
+        (!q || p.name.toLowerCase().includes(q))
+    );
+  }, [libraryPrefabs, query, libraryCategory]);
 
   const doExport = () => {
     const blob = new Blob([exportJson(apiRef.current?.getDoc() ?? doc)], { type: 'application/json' });
@@ -1112,6 +1167,9 @@ export function MapEditor({
       ...d,
       entities: d.entities.map((e) => (e.id === selectedId ? { ...e, ...patch } : e)),
     }));
+    if (patch.scale && selected?.model) {
+      setLastPrefabScale(selected.model, patch.scale as [number, number, number]);
+    }
   };
 
   /** Apply a patch to the current selection (multi + group members). */
@@ -2519,12 +2577,38 @@ export function MapEditor({
           {tab === 'assets' && (
             <>
               <div className="p-2 border-b border-white/10 space-y-1">
-                <input
-                  className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
-                  placeholder="Search models…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
+                <div className="flex gap-1">
+                  <input
+                    className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
+                    placeholder="Search models…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="shrink-0 flex items-center gap-1 px-2 py-1.5 rounded border border-emerald-500/40 text-emerald-300 text-xs hover:bg-emerald-500/10"
+                    title="Upload a new prefab model into the library"
+                    onClick={() => setUploadOpen(true)}
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {['all', 'built-in', ...libraryCategories].map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setLibraryCategory(cat)}
+                      className={`text-[10px] px-2 py-0.5 rounded-full border capitalize ${
+                        libraryCategory === cat
+                          ? 'border-cyan-400 text-cyan-200 bg-cyan-500/10'
+                          : 'border-white/15 text-white/50 hover:border-white/30'
+                      }`}
+                    >
+                      {cat === 'all' ? 'All' : cat === 'built-in' ? 'Built-in' : cat}
+                    </button>
+                  ))}
+                </div>
                 <div className="grid grid-cols-3 gap-1">
                   <button
                     type="button"
@@ -2612,6 +2696,62 @@ export function MapEditor({
                       className="w-full aspect-square object-contain bg-black/30 rounded"
                     />
                     <p className="text-[10px] mt-1 truncate text-white/80">{name}</p>
+                  </button>
+                ))}
+                {filteredLibraryPrefabs.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      setBrush(p.modelUrl);
+                      setEditTool((t) => (t === 'bucket' ? 'bucket' : 'brush'));
+                      if (isMobile) {
+                        setSidebarOpen(false);
+                        setUiCollapsed(true);
+                      }
+                    }}
+                    className={`relative rounded border p-1 text-left ${
+                      brush === p.modelUrl && (editTool === 'brush' || editTool === 'bucket')
+                        ? 'border-cyan-400 bg-cyan-500/10'
+                        : brush === p.modelUrl
+                          ? 'border-white/30 bg-white/5'
+                          : 'border-white/10 hover:border-white/30'
+                    }`}
+                  >
+                    {p.previewUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.previewUrl}
+                        alt={p.name}
+                        className="w-full aspect-square object-contain bg-black/30 rounded"
+                      />
+                    ) : (
+                      <div className="w-full aspect-square flex items-center justify-center bg-black/30 rounded">
+                        <Package className="w-6 h-6 text-white/30" />
+                      </div>
+                    )}
+                    <p className="text-[10px] mt-1 truncate text-white/80">{p.name}</p>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!confirm(`Delete "${p.name}" from the library?`)) return;
+                        try {
+                          await adminDeletePrefabModel(p.id);
+                          reloadPrefabLibrary();
+                        } catch (err) {
+                          toast({
+                            title: err instanceof Error ? err.message : 'Delete failed',
+                            variant: 'destructive',
+                          });
+                        }
+                      }}
+                      className="absolute top-0.5 right-0.5 bg-black/60 rounded p-0.5 text-white/50 hover:text-red-400"
+                      title="Remove from library"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </span>
                   </button>
                 ))}
               </div>
@@ -6918,6 +7058,88 @@ export function MapEditor({
             >
               Cancel
             </Button>
+          </div>
+        </div>
+      )}
+      {uploadOpen && (
+        <div className="fixed inset-0 z-[10060] bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-full max-w-sm space-y-3">
+            <p className="text-sm font-semibold text-slate-100">Upload prefab model</p>
+            <p className="text-xs text-slate-400">
+              .glb, .gltf, or .fbx — appears in the catalog for every mapper immediately.
+            </p>
+            <input
+              type="file"
+              accept=".glb,.gltf,.fbx,.obj"
+              className="w-full text-xs text-white/70 file:mr-2 file:rounded file:border-0 file:bg-white/10 file:px-2 file:py-1 file:text-xs file:text-white"
+              onChange={(e) =>
+                setUploadForm((f) => ({ ...f, file: e.target.files?.[0] ?? null }))
+              }
+            />
+            <input
+              className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
+              placeholder="Name (e.g. Wooden Crate)"
+              value={uploadForm.name}
+              onChange={(e) => setUploadForm((f) => ({ ...f, name: e.target.value }))}
+            />
+            <input
+              className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
+              placeholder="Category (existing or new)"
+              list="prefab-category-options"
+              value={uploadForm.category}
+              onChange={(e) => setUploadForm((f) => ({ ...f, category: e.target.value }))}
+            />
+            <datalist id="prefab-category-options">
+              {libraryCategories.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
+            <div className="flex gap-2 pt-1">
+              <Button
+                size="sm"
+                disabled={uploadBusy || !uploadForm.file || !uploadForm.name.trim() || !uploadForm.category.trim()}
+                onClick={async () => {
+                  if (!uploadForm.file) return;
+                  setUploadBusy(true);
+                  try {
+                    const dataUrl = await new Promise<string>((resolve, reject) => {
+                      const reader = new FileReader();
+                      reader.onload = () => resolve(reader.result as string);
+                      reader.onerror = reject;
+                      reader.readAsDataURL(uploadForm.file!);
+                    });
+                    await adminUploadPrefabModel({
+                      name: uploadForm.name,
+                      category: uploadForm.category,
+                      modelDataUrl: dataUrl,
+                      originalFilename: uploadForm.file.name,
+                    });
+                    toast({ title: 'Prefab uploaded' });
+                    setUploadForm({ name: '', category: '', file: null });
+                    setUploadOpen(false);
+                    reloadPrefabLibrary();
+                  } catch (err) {
+                    toast({
+                      title: err instanceof Error ? err.message : 'Upload failed',
+                      variant: 'destructive',
+                    });
+                  } finally {
+                    setUploadBusy(false);
+                  }
+                }}
+              >
+                {uploadBusy ? 'Uploading…' : 'Upload'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-slate-400"
+                onClick={() => setUploadOpen(false)}
+                disabled={uploadBusy}
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
         </div>
       )}

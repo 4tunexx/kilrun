@@ -584,30 +584,49 @@ export async function openCaseFromInventory(inventoryItemId: string): Promise<Ca
   if (!def) throw new Error('Case not found');
   if (def.items.length === 0) throw new Error('This case has no items configured');
 
-  // Consume the crate up front — if resolveCaseWin fails partway, we don't
-  // want the player able to open the same inventory row twice.
-  const claimed = await prisma.inventoryItem.deleteMany({
-    where: { id: invItem.id, userId: user.id },
-  });
-  if (claimed.count === 0) throw new Error('That crate was already opened');
+  // Consume exactly one crate up front — if resolveCaseWin fails partway, we
+  // don't want the player able to open the same inventory row twice. A
+  // stacked row (quantity > 1, shown as an "xN" badge) only loses one unit;
+  // deleting the whole row here would silently destroy the rest of the stack
+  // for a single open.
+  const ownedQty = Math.max(1, invItem.quantity ?? 1);
+  if (ownedQty > 1) {
+    const claimed = await prisma.inventoryItem.updateMany({
+      where: { id: invItem.id, userId: user.id, quantity: invItem.quantity },
+      data: { quantity: { decrement: 1 } },
+    });
+    if (claimed.count === 0) throw new Error('That crate was already opened');
+  } else {
+    const claimed = await prisma.inventoryItem.deleteMany({
+      where: { id: invItem.id, userId: user.id },
+    });
+    if (claimed.count === 0) throw new Error('That crate was already opened');
+  }
 
   try {
     return await resolveCaseWin(user, def);
   } catch (err) {
-    // Restore the crate to inventory if opening failed after it was consumed.
+    // Restore the consumed crate (or its quantity) if opening failed after it was consumed.
     try {
-      await prisma.inventoryItem.create({
-        data: {
-          userId: user.id,
-          itemSku: invItem.itemSku,
-          itemName: invItem.itemName,
-          itemCategory: 'crate',
-          imageUrl: invItem.imageUrl,
-          vpValue: invItem.vpValue,
-          caseDefId: invItem.caseDefId,
-          crateSource: invItem.crateSource,
-        },
-      });
+      if (ownedQty > 1) {
+        await prisma.inventoryItem.update({
+          where: { id: invItem.id },
+          data: { quantity: { increment: 1 } },
+        });
+      } else {
+        await prisma.inventoryItem.create({
+          data: {
+            userId: user.id,
+            itemSku: invItem.itemSku,
+            itemName: invItem.itemName,
+            itemCategory: 'crate',
+            imageUrl: invItem.imageUrl,
+            vpValue: invItem.vpValue,
+            caseDefId: invItem.caseDefId,
+            crateSource: invItem.crateSource,
+          },
+        });
+      }
     } catch {
       /* ignore rollback failure */
     }

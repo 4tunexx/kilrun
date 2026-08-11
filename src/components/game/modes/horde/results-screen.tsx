@@ -25,6 +25,15 @@ export const HordeResultsScreen: React.FC<Props> = ({ room, player, onContinue }
       ? 'loss'
       : 'eliminated';
 
+  // Keeps the latest live values available to the one-shot fallback timer
+  // below without making it a dependency — the room keeps pushing periodic
+  // full-state resyncs after the match ends, and a naive dependency array
+  // covering all of these kept re-triggering the effect, clearing and
+  // restarting the 2500ms timer on every tick so a player under network
+  // jitter could sit on "…" well past the intended fallback window.
+  const latestRef = useRef({ player, room, outcome, survived });
+  latestRef.current = { player, room, outcome, survived };
+
   useEffect(() => {
     if (!player.userId) return;
     // Admin-cancelled: rewardsReady never becomes true, so without this
@@ -40,51 +49,44 @@ export const HordeResultsScreen: React.FC<Props> = ({ room, player, onContinue }
         xpEarned: player.xpEarned ?? 0,
         vpEarned: player.vpEarned ?? 0,
       });
-      if (room.rewardsReady) {
-        hasRecordedRef.current = true;
-        return;
-      }
+      if (room.rewardsReady) hasRecordedRef.current = true;
     }
+  }, [player.userId, player.xpEarned, player.vpEarned, room.rewardsReady, room.wasCancelled]);
 
-    if (hasRecordedRef.current) return;
+  // One-shot fallback: give the server 2500ms to deliver rewardsReady, then
+  // record client-side. Scheduled exactly once per mount — NOT re-armed by
+  // subsequent room state pushes.
+  const timerScheduledRef = useRef(false);
+  useEffect(() => {
+    if (!player.userId || room.wasCancelled || timerScheduledRef.current) return;
+    timerScheduledRef.current = true;
 
-    const matchId = room.matchId || undefined;
-    const wavesCleared = Math.max(0, (room.wave ?? 1) - (survived ? 0 : 1));
     const timer = window.setTimeout(() => {
       if (hasRecordedRef.current) return;
-      if (room.rewardsReady) {
+      const { player: p, room: r, outcome: o, survived: s } = latestRef.current;
+      if (r.rewardsReady) {
         hasRecordedRef.current = true;
         setRewards({
-          xpEarned: player.xpEarned ?? 0,
-          vpEarned: player.vpEarned ?? 0,
+          xpEarned: p.xpEarned ?? 0,
+          vpEarned: p.vpEarned ?? 0,
         });
         return;
       }
       hasRecordedRef.current = true;
+      const wavesCleared = Math.max(0, (r.wave ?? 1) - (s ? 0 : 1));
       recordHordeResult({
-        userId: player.userId,
-        outcome,
+        userId: p.userId,
+        outcome: o,
         wavesCleared,
-        kills: player.kills ?? 0,
-        matchId,
+        kills: p.kills ?? 0,
+        matchId: r.matchId || undefined,
       })
         .then(setRewards)
         .catch(() => {});
     }, 2500);
 
     return () => window.clearTimeout(timer);
-  }, [
-    player.userId,
-    player.xpEarned,
-    player.vpEarned,
-    player.kills,
-    outcome,
-    room.wave,
-    room.rewardsReady,
-    room.matchId,
-    survived,
-    room.wasCancelled,
-  ]);
+  }, [player.userId, room.wasCancelled]);
 
   if (room.wasCancelled) {
     return (

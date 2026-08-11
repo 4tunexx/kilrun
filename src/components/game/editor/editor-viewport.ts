@@ -37,6 +37,8 @@ import {
   ensureEnvironment,
 } from './map-document';
 import { bakeMeshCollisionForEntity } from './mesh-voxelize';
+import { PLAYER_RADIUS } from '@shared/sim-constants';
+import { getLastPrefabScale, setLastPrefabScale } from './prefab-defaults';
 import {
   applyTextureToObject,
   makeBoundsWireBox,
@@ -349,6 +351,14 @@ export function createEditorViewport(
 ): EditorViewportApi {
   let doc: MapDocument = structuredClone(initial);
   if (!doc.environment) doc.environment = { ...DEFAULT_ENVIRONMENT };
+  // Bumped on every setDoc() (undo/redo, reopening a map, etc). syncEntity
+  // captures this before its `await loadModel(...)` and re-checks after —
+  // without it, a slow GLB load from a superseded setDoc() could still land:
+  // its root gets added to the scene and orphaned (never disposed, since a
+  // newer rebuildAll's dispose pass already ran before this call started),
+  // and its collisionSize/animation patch gets spliced into whatever `doc`
+  // is CURRENT by the time it resolves — not the doc this call started with.
+  let docGeneration = 0;
   let selectedId: string | null = null;
   let selectedIds: string[] = [];
   let brush: string | null = 'floor-square';
@@ -909,6 +919,10 @@ export function createEditorViewport(
       // the drag. Doing it every frame fought the user's live rotation/move
       // and made ramps appear to resize or reshape mid-drag.
       finalizeSingleDrag();
+      if (transform.mode === 'scale') {
+        const ent = doc.entities.find((x) => x.id === selectedId);
+        if (ent?.model) setLastPrefabScale(ent.model, ent.scale);
+      }
     }
   });
 
@@ -1361,6 +1375,7 @@ export function createEditorViewport(
   }
 
   async function syncEntity(ent: EditorEntity) {
+    const gen = docGeneration;
     let root = roots.get(ent.id);
 
     // Platform player avatar is settings-only — never show / pick it on the map.
@@ -1411,13 +1426,27 @@ export function createEditorViewport(
       } else if (!wantsMarker && (ent.model || ent.customModelUrl)) {
         try {
           const loaded = await loadModel(ent.model, ent.customModelUrl);
+          // A newer setDoc() (rapid undo/redo, reopening a map) may have
+          // already superseded this call while the load above was pending —
+          // bail before touching roots/scene/doc. loaded.root's geometry is
+          // shared with loadAnimatedPrefab's module-level cache (never
+          // added to the scene here), so simply dropping the reference is
+          // enough — no dispose needed.
+          if (gen !== docGeneration) return;
           // Wrap + plant feet so entity.position.y is the stand surface (no gap/clip)
           root = new THREE.Group();
           plantLocalFeet(loaded.root);
           root.add(loaded.root);
           // Measure real mesh size (local, unscaled) for collision export.
+          // Only visible meshes count — hidden LODs / helper / collision-proxy
+          // nodes some GLBs ship with must not inflate the collision box.
           loaded.root.updateMatrixWorld(true);
-          const meshBox = new THREE.Box3().setFromObject(loaded.root);
+          const meshBox = new THREE.Box3();
+          loaded.root.traverse((child) => {
+            if (!(child as THREE.Mesh).isMesh) return;
+            if (!child.visible) return;
+            meshBox.expandByObject(child);
+          });
           if (!meshBox.isEmpty()) {
             const size = new THREE.Vector3();
             meshBox.getSize(size);
@@ -1540,7 +1569,7 @@ export function createEditorViewport(
         root.userData.isEditorMarker = true;
       } else if (ent.kind === 'player') {
         root = new THREE.Mesh(
-          new THREE.CapsuleGeometry(0.35, 0.9, 4, 8),
+          new THREE.CapsuleGeometry(PLAYER_RADIUS, 0.9, 4, 8),
           new THREE.MeshStandardMaterial({ color: 0x38bdf8 })
         );
         root.position.y = 0.9;
@@ -1919,7 +1948,11 @@ export function createEditorViewport(
       layerId: activeLayerId,
       position: [x, Math.max(0, y), z],
       rotation: [0, 0, 0],
-      scale: isHammer ? [1, 1, 1] : padKinds ? [2, 1, 2] : [1, 1, 1],
+      scale: isHammer
+        ? [1, 1, 1]
+        : padKinds
+          ? [2, 1, 2]
+          : (defaultModel ? getLastPrefabScale(defaultModel) : null) ?? [1, 1, 1],
       color: isHammer ? '#64748b' : defaultColor,
       opacity: 1,
       visible: true,
@@ -2867,6 +2900,7 @@ export function createEditorViewport(
 
   return {
     setDoc: (next) => {
+      docGeneration++;
       doc = structuredClone(next);
       if (!doc.environment) doc.environment = { ...DEFAULT_ENVIRONMENT };
       gridSize = doc.gridSize || 1;

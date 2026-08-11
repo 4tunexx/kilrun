@@ -1688,17 +1688,27 @@ export function ensurePlatformMotion(ent: EditorEntity): EntityPlatformMotion {
   };
 }
 
-/** Resolve material for UI + collision export. */
+/**
+ * Resolve material for UI + collision export.
+ * Default is SOLID: any prop/door/trap placed from the model library blocks
+ * movement unless a mapper explicitly sets it to Walkthrough (or `solid:
+ * false`). Only actual gameplay markers (finish pads, checkpoints, lights,
+ * spawns, buttons, etc.) skip collision entirely — but those never reach
+ * this function's fallback because they're filtered out earlier by
+ * `isInvisibleMarkerKind` / `entityShowsGameplayMaterial` before pad export.
+ */
 export function resolveCollideMaterial(ent: EditorEntity): EntityCollideMaterial {
   if (ent.collideMaterial) return ent.collideMaterial;
   if (ent.solid === false) return 'walkthrough';
+  // Player avatar entity is platform-wide config, not a physical map prop —
+  // it must never be swept into Solid-prop tooling (mesh-collision baking,
+  // pad export). The player's own capsule collision is handled separately.
+  if (isPlatformPlayerKind(ent.kind)) return 'walkthrough';
   if (ent.surface?.ice) return 'ice';
   if (ent.surface?.conveyor) return 'solid';
   if (ent.solid === true) return 'solid';
   if (ent.kind === 'finish' || ent.kind === 'checkpoint' || ent.kind === 'jump_pad') return 'solid';
-  if (ent.model?.includes('floor') || ent.model?.startsWith('platform')) return 'solid';
-  if (ent.model?.includes('stair') || ent.model?.includes('ramp')) return 'solid';
-  return 'walkthrough';
+  return 'solid';
 }
 
 /** Patch entity fields when the Material dropdown changes. */
@@ -2542,6 +2552,20 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
     revive: ent.revive ? { ...ent.revive } : undefined,
     healthFloor: ent.healthFloor ? { ...ent.healthFloor } : undefined,
     waveAnchor: ent.waveAnchor ? { ...ent.waveAnchor } : undefined,
+    // These were previously left as shallow spread (via `...ent` above),
+    // aliasing the same nested array/object references between the original
+    // and the clone — editing one in place (a common three.js/pad-editing
+    // pattern) would silently corrupt the other.
+    spinHazard: ent.spinHazard ? { ...ent.spinHazard, size: [...ent.spinHazard.size] as [number, number, number] } : undefined,
+    pushRail: ent.pushRail ? { ...ent.pushRail } : undefined,
+    pushBlock: ent.pushBlock ? { ...ent.pushBlock } : undefined,
+    interact: ent.interact ? { ...ent.interact } : undefined,
+    motion: ent.motion ? { ...ent.motion, offset: [...ent.motion.offset] as [number, number, number] } : undefined,
+    csgPads: ent.csgPads ? ent.csgPads.map((p) => ({ ...p })) : undefined,
+    meshCollisionPads: ent.meshCollisionPads ? ent.meshCollisionPads.map((p) => ({ ...p })) : undefined,
+    collisionSize: ent.collisionSize ? ([...ent.collisionSize] as [number, number, number]) : undefined,
+    textureRepeat: ent.textureRepeat ? ([...ent.textureRepeat] as [number, number]) : undefined,
+    textureOffset: ent.textureOffset ? ([...ent.textureOffset] as [number, number]) : undefined,
   };
 }
 

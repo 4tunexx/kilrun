@@ -19,6 +19,15 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ room, player, onCo
   const isVictory = room.winnerRole === player.role;
   const outcome: 'win' | 'loss' | 'eliminated' = isVictory ? 'win' : !player.isAlive ? 'eliminated' : 'loss';
 
+  // Keeps the latest live values available to the one-shot fallback timer
+  // below without making it a dependency — the room keeps pushing periodic
+  // full-state resyncs after the match ends, and a naive dependency array
+  // covering all of these kept re-triggering the effect, clearing and
+  // restarting the 2500ms timer on every tick so a player under network
+  // jitter could sit on "…" well past the intended fallback window.
+  const latestRef = useRef({ player, room, outcome });
+  latestRef.current = { player, room, outcome };
+
   useEffect(() => {
     if (!player.userId) return;
     // Admin-cancelled: the room intentionally never called reportRewards(),
@@ -36,58 +45,51 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ room, player, onCo
         xpEarned: player.xpEarned ?? 0,
         vpEarned: player.vpEarned ?? 0,
       });
-      if (room.rewardsReady) {
-        hasRecordedRef.current = true;
-        return;
-      }
+      if (room.rewardsReady) hasRecordedRef.current = true;
       // Display-only preview from room — still fall through to timed persist.
     }
+  }, [player.userId, player.xpEarned, player.vpEarned, room.rewardsReady, room.wasCancelled]);
 
-    if (hasRecordedRef.current) return;
+  // One-shot fallback: give the server 2500ms to deliver rewardsReady, then
+  // record client-side. Scheduled exactly once per mount — NOT re-armed by
+  // subsequent room state pushes.
+  const timerScheduledRef = useRef(false);
+  useEffect(() => {
+    if (!player.userId || room.wasCancelled || timerScheduledRef.current) return;
+    timerScheduledRef.current = true;
 
-    const matchId = room.matchId || undefined;
     const timer = window.setTimeout(() => {
       if (hasRecordedRef.current) return;
-      if (room.rewardsReady) {
+      const { player: p, room: r, outcome: o } = latestRef.current;
+      if (r.rewardsReady) {
         hasRecordedRef.current = true;
         setRewards({
-          xpEarned: player.xpEarned ?? 0,
-          vpEarned: player.vpEarned ?? 0,
+          xpEarned: p.xpEarned ?? 0,
+          vpEarned: p.vpEarned ?? 0,
         });
         return;
       }
       hasRecordedRef.current = true;
       const score =
-        typeof player.score === 'number'
-          ? player.score
-          : outcome === 'win'
+        typeof p.score === 'number'
+          ? p.score
+          : o === 'win'
             ? 100
             : 25;
       recordDeathrunResult({
-        userId: player.userId,
-        role: player.role === 'trapper' ? 'trapper' : 'runner',
-        outcome,
+        userId: p.userId,
+        role: p.role === 'trapper' ? 'trapper' : 'runner',
+        outcome: o,
         score,
-        distance: player.distance ?? 0,
-        matchId,
+        distance: p.distance ?? 0,
+        matchId: r.matchId || undefined,
       })
         .then((result) => setRewards(result))
         .catch(() => {});
     }, 2500);
 
     return () => window.clearTimeout(timer);
-  }, [
-    player.userId,
-    player.role,
-    player.xpEarned,
-    player.vpEarned,
-    player.score,
-    player.distance,
-    outcome,
-    room.rewardsReady,
-    room.matchId,
-    room.wasCancelled,
-  ]);
+  }, [player.userId, room.wasCancelled]);
 
   if (room.wasCancelled) {
     return (

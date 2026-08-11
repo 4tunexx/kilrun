@@ -32,7 +32,10 @@ async function requireStaff() {
  * instead of embedding the raw data URL, which prevents maps from exceeding
  * the 4.5 MB cloud-sync cap and allows cross-device access.
  */
-export async function uploadModelGlb(dataUrl: string): Promise<string> {
+export async function uploadModelGlb(
+  dataUrl: string,
+  originalFilename?: string
+): Promise<string> {
   await requireStaff();
 
   if (!dataUrl.startsWith('data:')) {
@@ -52,9 +55,22 @@ export async function uploadModelGlb(dataUrl: string): Promise<string> {
     );
   }
 
+  // Extension: prefer the original filename (so .fbx/.obj survive upload),
+  // fall back to sniffing the data URL mime, default to .glb.
+  const nameExt = originalFilename?.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  const ALLOWED_EXT = new Set(['glb', 'gltf', 'fbx', 'obj']);
+  const ext =
+    (nameExt && ALLOWED_EXT.has(nameExt) ? nameExt : null) ??
+    (dataUrl.startsWith('data:model/gltf+json') ? 'gltf' : 'glb');
+  const CONTENT_TYPES: Record<string, string> = {
+    glb: 'model/gltf-binary',
+    gltf: 'model/gltf+json',
+    fbx: 'application/octet-stream',
+    obj: 'text/plain',
+  };
+
   // Stable filename from content hash so re-uploads of the same file are deduplicated.
   const hash = createHash('sha256').update(buffer).digest('hex').slice(0, 16);
-  const ext = dataUrl.startsWith('data:model/gltf+json') ? 'gltf' : 'glb';
   const filename = `model-${hash}.${ext}`;
 
   // 1. Try Vercel Blob first (durable across deployments).
@@ -63,7 +79,7 @@ export async function uploadModelGlb(dataUrl: string): Promise<string> {
       const { put } = await import('@vercel/blob');
       const blob = await put(`models/${filename}`, buffer, {
         access: 'public',
-        contentType: ext === 'gltf' ? 'model/gltf+json' : 'model/gltf-binary',
+        contentType: CONTENT_TYPES[ext] ?? 'application/octet-stream',
         addRandomSuffix: false,
       });
       return blob.url;

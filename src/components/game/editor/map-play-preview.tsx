@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
 import type { MapDocument } from './map-document';
 import { ensureCombatSettings, ensurePlatformMotion } from './map-document';
+import { PLAYER_RADIUS } from '@shared/sim-constants';
 import {
   HAMMER_SOLID_MODEL,
   ensureEnvironment,
@@ -17,6 +18,7 @@ import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
 import { AnimationDirector } from './animation-director';
 import {
   applyTextureToObject,
+  disposeClonedMaterials,
   plantLocalFeet,
   resolveEntityTextureRepeat,
   shouldHideEntityInPlay,
@@ -513,7 +515,7 @@ export function MapPlayPreview({
         console.warn('[PlayPreview] avatar load failed', err);
         // Guaranteed visible body so Play Test never feels empty / first-person
         const fallback = new THREE.Mesh(
-          new THREE.CapsuleGeometry(0.35, 0.95, 4, 10),
+          new THREE.CapsuleGeometry(PLAYER_RADIUS, 0.95, 4, 10),
           new THREE.MeshStandardMaterial({ color: 0x38bdf8 })
         );
         fallback.position.y = 0.85;
@@ -1166,6 +1168,16 @@ export function MapPlayPreview({
       if (document.pointerLockElement) document.exitPointerLock?.();
       envHandle.dispose();
       director.clear();
+      // Every entity mesh here mixes uniquely-created geometry (hammer
+      // solids, placeholders, the fallback capsule) with cache-derived GLB
+      // parts (loadAnimatedPrefab / loadPlayerAvatar — geometry shared with
+      // a module-level cache, see disposeClonedMaterials's doc comment).
+      // renderer.dispose() alone only frees renderer-owned GPU state, not
+      // per-object geometry/material/texture buffers — without this, every
+      // Play Test open/close leaked the whole loaded scene's materials.
+      if (playerRoot) disposeClonedMaterials(playerRoot);
+      disposeClonedMaterials(ghostMesh);
+      roots.forEach((root) => disposeClonedMaterials(root));
       renderer.dispose();
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
     };

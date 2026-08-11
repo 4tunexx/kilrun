@@ -70,9 +70,25 @@ export function savePrefab(name: string, entities: EditorEntity[]): PrefabStamp 
     revive: e.revive ? { ...e.revive } : undefined,
     healthFloor: e.healthFloor ? { ...e.healthFloor } : undefined,
     waveAnchor: e.waveAnchor ? { ...e.waveAnchor } : undefined,
+    // Same aliasing risk as map-document.ts's cloneEntity — these were
+    // previously left as shallow spread, sharing array/object references
+    // between the source entity and the saved stamp.
+    scale: [...e.scale] as [number, number, number],
+    rotation: [...e.rotation] as [number, number, number],
+    spinHazard: e.spinHazard ? { ...e.spinHazard, size: [...e.spinHazard.size] as [number, number, number] } : undefined,
+    pushRail: e.pushRail ? { ...e.pushRail } : undefined,
+    pushBlock: e.pushBlock ? { ...e.pushBlock } : undefined,
+    interact: e.interact ? { ...e.interact } : undefined,
+    csgPads: e.csgPads ? e.csgPads.map((p) => ({ ...p })) : undefined,
+    meshCollisionPads: e.meshCollisionPads ? e.meshCollisionPads.map((p) => ({ ...p })) : undefined,
+    collisionSize: e.collisionSize ? ([...e.collisionSize] as [number, number, number]) : undefined,
   }));
   const stamp: PrefabStamp = {
-    id: `prefab_${Date.now().toString(36)}`,
+    // Millisecond-timestamp-only IDs could collide on rapid double-fires of
+    // the save action (same ms → same id), corrupting deletePrefab (which
+    // matches by id) and React list keys. generateId() adds a random
+    // component so this can't happen.
+    id: generateId('prefab'),
     name,
     createdAt: new Date().toISOString(),
     entities: relative,
@@ -120,6 +136,15 @@ export function instantiatePrefab(
     revive: e.revive ? { ...e.revive } : undefined,
     healthFloor: e.healthFloor ? { ...e.healthFloor } : undefined,
     waveAnchor: e.waveAnchor ? { ...e.waveAnchor } : undefined,
+    scale: [...e.scale] as [number, number, number],
+    rotation: [...e.rotation] as [number, number, number],
+    spinHazard: e.spinHazard ? { ...e.spinHazard, size: [...e.spinHazard.size] as [number, number, number] } : undefined,
+    pushRail: e.pushRail ? { ...e.pushRail } : undefined,
+    pushBlock: e.pushBlock ? { ...e.pushBlock } : undefined,
+    interact: e.interact ? { ...e.interact } : undefined,
+    csgPads: e.csgPads ? e.csgPads.map((p) => ({ ...p })) : undefined,
+    meshCollisionPads: e.meshCollisionPads ? e.meshCollisionPads.map((p) => ({ ...p })) : undefined,
+    collisionSize: e.collisionSize ? ([...e.collisionSize] as [number, number, number]) : undefined,
   }));
 }
 

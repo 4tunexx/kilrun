@@ -35,6 +35,7 @@ import { PROTOTYPE_MODELS } from './prototype-catalog';
 import { CharacterAssetPicker } from './character-asset-picker';
 import { loadPlayerAvatar } from './player-avatar';
 import { normalizeCharacter } from '../renderer/asset-loader';
+import { disposeClonedMaterials } from './editor-mesh';
 import {
   applySkinAttachments,
   buildSkinPartMesh,
@@ -2664,7 +2665,10 @@ class SkinPreview {
   }
 
   setAvatar(scene: THREE.Object3D) {
-    if (this.avatar) this.avatar.removeFromParent();
+    if (this.avatar) {
+      this.avatar.removeFromParent();
+      disposeClonedMaterials(this.avatar);
+    }
     normalizeCharacter(scene, 1.75);
     this.avatar = scene;
     this.scene.add(scene);
@@ -2743,6 +2747,8 @@ class SkinPreview {
     if (this.commitTimer) window.clearTimeout(this.commitTimer);
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    if (this.avatar) disposeClonedMaterials(this.avatar);
+    disposeClonedMaterials(this.soloRoot);
     const el = this.renderer.domElement;
     el.removeEventListener('pointerdown', this.onPointerDown);
     el.removeEventListener('pointermove', this.onPointerMove);

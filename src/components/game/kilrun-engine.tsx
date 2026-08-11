@@ -1260,7 +1260,7 @@ export default function KilrunEngine({
       }
       world.destroy();
       joystickRef.current = null;
-      inputManager.joystick.destroy();
+      inputManager.destroy();
     };
     // Wait for Active cloud map so live play uses the same document as editor Play Test.
     // eslint-disable-next-line react-hooks/exhaustive-deps

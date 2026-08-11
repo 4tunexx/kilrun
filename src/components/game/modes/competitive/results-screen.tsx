@@ -31,7 +31,19 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
     rank: string;
   } | null>(null);
 
-  const team = player.role === 'team_b' ? 'team_b' : 'team_a';
+  // player.role is a shared enum across modes ('trapper' | 'runner' | 'survivor'
+  // | 'team_a' | 'team_b') — a reconnect mid-match can momentarily deliver a
+  // stale/unset value before the server's competitive role sync lands. Lock
+  // onto the first valid team_a/team_b we see instead of silently defaulting
+  // to team_a, which would flip a real win into a shown loss (and vice versa)
+  // for anyone actually on team_b whose role hasn't synced yet.
+  const lockedTeamRef = useRef<'team_a' | 'team_b' | null>(null);
+  if (player.role === 'team_a' || player.role === 'team_b') {
+    lockedTeamRef.current = player.role;
+  } else if (!lockedTeamRef.current) {
+    console.error(`[CompetitiveResultsScreen] unexpected player.role "${player.role}" — awaiting valid team assignment`);
+  }
+  const team = lockedTeamRef.current ?? 'team_a';
   const won = room.winnerRole === team;
   const outcome: 'win' | 'loss' = won ? 'win' : 'loss';
   const ranked = queue === 'ranked' || room.modeTag === 'competitive_ranked';
@@ -46,6 +58,17 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
     return enemies.reduce((a, b) => a + b, 0) / enemies.length;
   }, [players, team]);
 
+  // Keeps the latest live values available to the one-shot fallback timer
+  // below without making it a dependency — the room keeps pushing periodic
+  // full-state resyncs after the match ends, and a naive dependency array
+  // covering all of these kept re-triggering the effect, clearing and
+  // restarting the 2500ms timer on every tick so a player under network
+  // jitter could sit on "…" well past the intended fallback window.
+  const latestRef = useRef({ player, room, team, outcome, opponentAvgKp, ranked });
+  latestRef.current = { player, room, team, outcome, opponentAvgKp, ranked };
+
+  // Reacts immediately whenever the server (or the wasCancelled short-circuit)
+  // delivers a real result — independent of the fallback timer's schedule.
   useEffect(() => {
     if (!player.userId) return;
     // Admin-cancelled: rewardsReady never becomes true, so without this
@@ -56,7 +79,6 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
       hasRecordedRef.current = true;
       return;
     }
-
     if (room.rewardsReady || (player.xpEarned ?? 0) > 0 || (player.vpEarned ?? 0) > 0) {
       setRewards({
         xpEarned: player.xpEarned ?? 0,
@@ -65,62 +87,59 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
         kp: typeof player.kp === 'number' ? player.kp : KP_DEFAULT,
         rank: '',
       });
-      if (room.rewardsReady) {
-        hasRecordedRef.current = true;
-        return;
-      }
+      if (room.rewardsReady) hasRecordedRef.current = true;
     }
-
-    if (hasRecordedRef.current) return;
-
-    const matchId = room.matchId || undefined;
-    const timer = window.setTimeout(() => {
-      if (hasRecordedRef.current) return;
-      if (room.rewardsReady) {
-        hasRecordedRef.current = true;
-        setRewards({
-          xpEarned: player.xpEarned ?? 0,
-          vpEarned: player.vpEarned ?? 0,
-          kpDelta: player.kpDelta ?? 0,
-          kp: typeof player.kp === 'number' ? player.kp : KP_DEFAULT,
-          rank: '',
-        });
-        return;
-      }
-      hasRecordedRef.current = true;
-      recordCompetitiveResult({
-        userId: player.userId,
-        team,
-        outcome,
-        opponentAvgKp,
-        roundsWon: team === 'team_a' ? room.scoreA ?? 0 : room.scoreB ?? 0,
-        roundsLost: team === 'team_a' ? room.scoreB ?? 0 : room.scoreA ?? 0,
-        kills: player.kills ?? 0,
-        queue: ranked ? 'ranked' : 'casual',
-        matchId,
-      })
-        .then(setRewards)
-        .catch(() => {});
-    }, 2500);
-
-    return () => window.clearTimeout(timer);
   }, [
     player.userId,
     player.xpEarned,
     player.vpEarned,
     player.kpDelta,
     player.kp,
-    player.kills,
-    team,
-    outcome,
-    opponentAvgKp,
-    room.scoreA,
-    room.scoreB,
     room.rewardsReady,
-    room.matchId,
-    ranked,
     room.wasCancelled,
   ]);
+
+  // One-shot fallback: give the server 2500ms to deliver rewardsReady, then
+  // record client-side. Scheduled exactly once per mount (guarded by
+  // timerScheduledRef) — NOT re-armed by subsequent room state pushes.
+  const timerScheduledRef = useRef(false);
+  useEffect(() => {
+    if (!player.userId || room.wasCancelled || timerScheduledRef.current) return;
+    timerScheduledRef.current = true;
+
+    const timer = window.setTimeout(() => {
+      if (hasRecordedRef.current) return;
+      const { player: p, room: r, team: t, outcome: o, opponentAvgKp: avgKp, ranked: rk } =
+        latestRef.current;
+      if (r.rewardsReady) {
+        hasRecordedRef.current = true;
+        setRewards({
+          xpEarned: p.xpEarned ?? 0,
+          vpEarned: p.vpEarned ?? 0,
+          kpDelta: p.kpDelta ?? 0,
+          kp: typeof p.kp === 'number' ? p.kp : KP_DEFAULT,
+          rank: '',
+        });
+        return;
+      }
+      hasRecordedRef.current = true;
+      recordCompetitiveResult({
+        userId: p.userId,
+        team: t,
+        outcome: o,
+        opponentAvgKp: avgKp,
+        roundsWon: t === 'team_a' ? r.scoreA ?? 0 : r.scoreB ?? 0,
+        roundsLost: t === 'team_a' ? r.scoreB ?? 0 : r.scoreA ?? 0,
+        kills: p.kills ?? 0,
+        queue: rk ? 'ranked' : 'casual',
+        matchId: r.matchId || undefined,
+      })
+        .then(setRewards)
+        .catch(() => {});
+    }, 2500);
+
+    return () => window.clearTimeout(timer);
+  }, [player.userId, room.wasCancelled]);
 
   if (room.wasCancelled) {
     return (

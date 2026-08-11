@@ -228,21 +228,27 @@ export class GameConnection {
       // when we have a token for it; otherwise fall back to a fresh join.
       const token = this.room?.reconnectionToken;
       const { joinByRoomId: _joinByRoomId, ...joinPayload } = options;
+      // The reconnect/join promise below can resolve after disconnect() has
+      // already run (e.g. the user left mid-reconnect-attempt) — without a
+      // post-await disposed check, it would silently rejoin server-side and
+      // rebind callbacks onto a torn-down UI, leaking a live room.
+      const bindIfStillLive = (room: Room) => {
+        if (this.disposed) {
+          room.leave();
+          return;
+        }
+        this.room = room;
+        this.bindRoom(callbacks);
+      };
       const attempt = token
-        ? this.client.reconnect(token).then((room) => {
-            this.room = room;
-            this.bindRoom(callbacks);
-          })
+        ? this.client.reconnect(token).then(bindIfStillLive)
         : this.client
             .joinOrCreate(roomName, {
               ...joinPayload,
               rankKey:
                 options.rankKey && options.rankKey !== 'open' ? options.rankKey : 'open',
             })
-            .then((room) => {
-              this.room = room;
-              this.bindRoom(callbacks);
-            });
+            .then(bindIfStillLive);
 
       attempt
         .then(() => {
@@ -280,12 +286,17 @@ export class GameConnection {
     // Never tear down a room that already started countdown / match.
     if (state.phase !== 'lobby') return;
 
-    let count = 0;
+    // A read failure here (unexpected schema shape, room mid-teardown, etc)
+    // must NOT be treated as "lobby is empty" — that would silently evict
+    // everyone to an open lobby even when same-rank players are already
+    // present. Bail out of the fallback entirely instead of guessing.
+    let count: number;
     try {
       const players = (this.room.state as { players?: { size?: number } }).players;
-      count = typeof players?.size === 'number' ? players.size : 0;
+      if (typeof players?.size !== 'number') return;
+      count = players.size;
     } catch {
-      count = 0;
+      return;
     }
     if (count >= minSame) return;
 
@@ -297,10 +308,15 @@ export class GameConnection {
     this.room = null;
     if (this.disposed) return;
 
-    this.room = await this.client.joinOrCreate(roomName, {
+    const room = await this.client.joinOrCreate(roomName, {
       ...options,
       rankKey: 'open',
     });
+    if (this.disposed) {
+      room.leave();
+      return;
+    }
+    this.room = room;
     this.bindRoom(callbacks);
   }
 

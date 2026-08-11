@@ -26,6 +26,17 @@ export class InputManager {
     this.joystick = new DualJoystick(element);
   }
 
+  /** Tears down every input subsystem's listeners — call once when the game
+   *  session ends. Previously only joystick.destroy() was called at match
+   *  teardown, so every match start/leave (or React remount) that
+   *  constructed a new InputManager permanently leaked a fresh set of
+   *  keydown/keyup/mousemove/mousedown/mouseup/blur/contextmenu listeners. */
+  public destroy() {
+    this.keyboard.destroy();
+    this.mouse.destroy();
+    this.joystick.destroy();
+  }
+
   public getMoveVector(): Vector2 {
     if (this.isMobile) return this.joystick.getMoveVector();
     return this.keyboard.getAxis();

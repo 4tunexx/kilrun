@@ -18,6 +18,10 @@ export function resolveModelSrc(model?: string, customModelUrl?: string): string
   if (!model || model === HAMMER_SOLID_MODEL) return null;
   if (model.startsWith('/game/')) return model;
   if (model.startsWith('charasset:')) return null;
+  // Staff-uploaded prefab-library models (MapPrefabModel) store their full
+  // Blob/local URL directly as `model`, same as any built-in catalog name —
+  // pass it straight through instead of treating it as a catalog lookup key.
+  if (/^(https?:)?\/\//i.test(model) || model.startsWith('/uploads/')) return model;
   return modelUrl(model);
 }
 

@@ -1173,11 +1173,33 @@ async function loadWeaponModel(
   def: MapWeaponDef,
   group: THREE.Group
 ): Promise<THREE.AnimationClip[]> {
-  // Clear existing weapon mesh
+  // Clear existing weapon mesh. Each load builds its own fresh GLTFLoader
+  // with no shared cache (unlike three-map.ts's cached prefab clones), so
+  // every geometry/material/texture here is owned solely by this preview and
+  // safe to fully dispose — previously only the top-level child's geometry
+  // was checked, but a real GLB is added as `group.add(gltf.scene)` (a
+  // THREE.Group with no direct .geometry), so every model swap leaked the
+  // previous model's meshes/geometries/materials/textures entirely.
   while (group.children.length) {
     const child = group.children[0];
     group.remove(child);
-    if ('geometry' in child && child.geometry) (child as THREE.Mesh).geometry.dispose();
+    child.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      if (!mat) return;
+      for (const m of Array.isArray(mat) ? mat : [mat]) {
+        const std = m as THREE.MeshStandardMaterial;
+        std.map?.dispose();
+        std.normalMap?.dispose();
+        std.roughnessMap?.dispose();
+        std.metalnessMap?.dispose();
+        std.emissiveMap?.dispose();
+        std.aoMap?.dispose();
+        std.alphaMap?.dispose();
+        m.dispose();
+      }
+    });
   }
 
   const src = def.customModelUrl ?? (def.model ? weaponModelSrc(def.model) : null);

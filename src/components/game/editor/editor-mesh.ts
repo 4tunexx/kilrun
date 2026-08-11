@@ -1,6 +1,59 @@
 import * as THREE from 'three';
 import { entityWorldSize, isInvisibleMarkerKind, type EditorEntity } from './map-document';
 
+/**
+ * Recursively release GPU resources (geometry, material, and the standard
+ * material texture slots) for a detached Object3D tree. Only safe to call on
+ * trees that are fully owned by the caller (e.g. a preview's own loaded
+ * avatar/attachment meshes) — never on nodes that share geometry/materials
+ * with a cache other code still reads from. See `disposeClonedMaterials`
+ * below for trees loaded via loadAnimatedPrefab/loadPlayerAvatar, which DO
+ * share geometry/textures with a module-level cache.
+ */
+export function disposeObject3D(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry.dispose();
+    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) {
+      const std = m as THREE.MeshStandardMaterial;
+      for (const key of [
+        'map',
+        'normalMap',
+        'roughnessMap',
+        'metalnessMap',
+        'emissiveMap',
+        'aoMap',
+        'alphaMap',
+      ] as const) {
+        const tex = std[key];
+        if (tex) tex.dispose();
+      }
+      m.dispose();
+    }
+  });
+}
+
+/**
+ * Release only the per-instance-cloned Material objects (GPU program/uniform
+ * state) of a tree loaded via loadAnimatedPrefab / loadPlayerAvatar /
+ * loadPackPlayerPrefab. Those loaders cache the source GLTF/FBX scene at
+ * module scope and hand back `scene.clone(true)` with only materials cloned
+ * per call (see cloneGltfScene/cloneFbxScene) — geometry and material.map
+ * textures still point at the shared cached original. Disposing geometry or
+ * textures here would corrupt every other live/future avatar built from the
+ * same cached model, so this deliberately disposes materials only.
+ */
+export function disposeClonedMaterials(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) m.dispose();
+  });
+}
+
 /** Shift mesh so local AABB feet sit on y=0 and XZ is centered on the pivot. */
 export function plantLocalFeet(obj: THREE.Object3D) {
   obj.updateMatrixWorld(true);

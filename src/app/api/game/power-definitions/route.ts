@@ -70,13 +70,50 @@ function validateRecord(body: unknown): { ok: true; record: PowerDefinitionRecor
       : [],
     cost,
     effectType: effectType as PowerDefinitionRecord['effectType'],
-    effectParams: (b.effectParams ?? {}) as PowerDefinitionRecord['effectParams'],
+    effectParams: sanitizeEffectParams(
+      effectType as PowerDefinitionRecord['effectType'],
+      (b.effectParams ?? {}) as PowerDefinitionRecord['effectParams']
+    ),
     isCore: false,
     sortOrder: Number(b.sortOrder) || 0,
     posX: typeof b.posX === 'number' && Number.isFinite(b.posX) ? b.posX : null,
     posY: typeof b.posY === 'number' && Number.isFinite(b.posY) ? b.posY : null,
   };
   return { ok: true, record };
+}
+
+/** Non-negative fields that must never go negative regardless of what the
+ *  editor UI sent — this API is the authoritative write path the sim reads
+ *  from, so client-side clamping alone isn't enough (a direct POST/PATCH
+ *  could still smuggle a negative value through). */
+const NON_NEGATIVE_EFFECT_FIELDS = [
+  'durationBaseSec',
+  'durationPerLevelSec',
+  'energyCost',
+  'cooldownMs',
+  'radiusBaseMeters',
+  'radiusPerLevelMeters',
+  'damageBase',
+  'damagePerLevel',
+  'rangeBaseMeters',
+  'rangePerLevelMeters',
+  'pullDurationBaseSec',
+  'pullDurationPerLevelSec',
+] as const;
+
+function sanitizeEffectParams(
+  effectType: PowerDefinitionRecord['effectType'],
+  params: PowerDefinitionRecord['effectParams']
+): PowerDefinitionRecord['effectParams'] {
+  if (effectType === 'stat_bonus') return params;
+  const p = { ...(params as unknown as Record<string, unknown>) };
+  for (const field of NON_NEGATIVE_EFFECT_FIELDS) {
+    if (field in p) {
+      const n = Number(p[field]);
+      p[field] = Math.max(0, Number.isFinite(n) ? n : 0);
+    }
+  }
+  return p as unknown as PowerDefinitionRecord['effectParams'];
 }
 
 /** Uploaded icons arrive as data: URLs — persist to durable storage (Blob

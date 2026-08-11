@@ -86,6 +86,12 @@ export class CustomMapOverlay {
     { offset: [number, number, number]; periodMs: number; phaseMs: number }
   >();
   private disposed = false;
+  // Bumped on every load() call so a still-in-flight `await loadAnimatedPrefab`
+  // from a superseded call (rapid map switch / re-invoked load) can detect
+  // it's stale and bail instead of adding entities into a scene that a newer
+  // load() already cleared — without this, the older call's leftover geometry
+  // bleeds into the new map and its GPU resources are never disposed.
+  private loadToken = 0;
 
   constructor(private scene: THREE.Scene) {
     this.root.name = 'custom-map-overlay';
@@ -94,6 +100,7 @@ export class CustomMapOverlay {
 
   async load(doc: MapDocument) {
     this.clear();
+    const token = ++this.loadToken;
     const skipKinds = new Set<EditorEntity['kind']>([
       'player',
       'spawn_runner',
@@ -108,7 +115,7 @@ export class CustomMapOverlay {
     ]);
 
     for (const ent of doc.entities) {
-      if (this.disposed) return;
+      if (this.disposed || token !== this.loadToken) return;
       if (ent.visible === false) continue;
       if (isInvisibleMarkerKind(ent.kind) || skipKinds.has(ent.kind)) continue;
 
@@ -124,6 +131,9 @@ export class CustomMapOverlay {
           applyEntTexture(obj, ent, doc);
         } else if (src) {
           const loaded = await loadAnimatedPrefab(src);
+          // A newer load() call (rapid map switch) may have already cleared
+          // and superseded this one while the fetch above was in flight.
+          if (token !== this.loadToken) return;
           plantLocalFeet(loaded.root);
           const wrap = new THREE.Group();
           wrap.add(loaded.root);
@@ -201,7 +211,7 @@ export class CustomMapOverlay {
 
     // Invisible Action markers: register empty roots so AnimationDirector can fire signals.
     for (const ent of doc.entities) {
-      if (this.disposed) return;
+      if (this.disposed || token !== this.loadToken) return;
       if (ent.visible === false) continue;
       if (ent.kind !== 'action') continue;
       const ghost = new THREE.Group();
@@ -252,6 +262,7 @@ export class CustomMapOverlay {
   }
 
   clear() {
+    this.loadToken++;
     this.director.clear();
     for (const obj of this.entityRoots.values()) {
       obj.removeFromParent();

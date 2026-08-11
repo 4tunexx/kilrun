@@ -667,7 +667,7 @@ function PowerForm({
             value={draft.maxLevel}
             min={1}
             max={50}
-            onChange={(e) => onChange({ maxLevel: Number(e.target.value) || 1 })}
+            onChange={(e) => onChange({ maxLevel: Math.min(50, Math.max(1, Math.floor(Number(e.target.value) || 1))) })}
           />
         </Field>
         <Field label="Unlock Level (account)">
@@ -676,7 +676,7 @@ function PowerForm({
             className={inputCls}
             value={draft.unlockLevel}
             min={0}
-            onChange={(e) => onChange({ unlockLevel: Number(e.target.value) || 0 })}
+            onChange={(e) => onChange({ unlockLevel: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
           />
         </Field>
       </div>
@@ -963,19 +963,21 @@ function TimedBuffEditor({ params, onChange }: { params: TimedBuffParams; onChan
         <Field label="Base duration (s)">
           <input
             type="number"
+            min={0}
             step={0.1}
             className={inputCls}
             value={params.durationBaseSec}
-            onChange={(e) => onChange({ ...params, durationBaseSec: Number(e.target.value) || 0 })}
+            onChange={(e) => onChange({ ...params, durationBaseSec: Math.max(0, Number(e.target.value) || 0) })}
           />
         </Field>
         <Field label="Per level (s)">
           <input
             type="number"
+            min={0}
             step={0.1}
             className={inputCls}
             value={params.durationPerLevelSec}
-            onChange={(e) => onChange({ ...params, durationPerLevelSec: Number(e.target.value) || 0 })}
+            onChange={(e) => onChange({ ...params, durationPerLevelSec: Math.max(0, Number(e.target.value) || 0) })}
           />
         </Field>
       </div>
@@ -1031,35 +1033,39 @@ function BurstEffectEditor({
           <Field label="Base radius (m)">
             <input
               type="number"
+              min={0}
               step={0.1}
               className={inputCls}
               value={params.radiusBaseMeters ?? 0}
-              onChange={(e) => onChange({ ...params, radiusBaseMeters: Number(e.target.value) || 0 })}
+              onChange={(e) => onChange({ ...params, radiusBaseMeters: Math.max(0, Number(e.target.value) || 0) })}
             />
           </Field>
           <Field label="Radius / level">
             <input
               type="number"
+              min={0}
               step={0.1}
               className={inputCls}
               value={params.radiusPerLevelMeters ?? 0}
-              onChange={(e) => onChange({ ...params, radiusPerLevelMeters: Number(e.target.value) || 0 })}
+              onChange={(e) => onChange({ ...params, radiusPerLevelMeters: Math.max(0, Number(e.target.value) || 0) })}
             />
           </Field>
           <Field label="Base damage">
             <input
               type="number"
+              min={0}
               className={inputCls}
               value={params.damageBase ?? 0}
-              onChange={(e) => onChange({ ...params, damageBase: Number(e.target.value) || 0 })}
+              onChange={(e) => onChange({ ...params, damageBase: Math.max(0, Number(e.target.value) || 0) })}
             />
           </Field>
           <Field label="Damage / level">
             <input
               type="number"
+              min={0}
               className={inputCls}
               value={params.damagePerLevel ?? 0}
-              onChange={(e) => onChange({ ...params, damagePerLevel: Number(e.target.value) || 0 })}
+              onChange={(e) => onChange({ ...params, damagePerLevel: Math.max(0, Number(e.target.value) || 0) })}
             />
           </Field>
         </div>
@@ -1068,37 +1074,41 @@ function BurstEffectEditor({
           <Field label="Base range (m)">
             <input
               type="number"
+              min={0}
               step={0.1}
               className={inputCls}
               value={params.rangeBaseMeters ?? 0}
-              onChange={(e) => onChange({ ...params, rangeBaseMeters: Number(e.target.value) || 0 })}
+              onChange={(e) => onChange({ ...params, rangeBaseMeters: Math.max(0, Number(e.target.value) || 0) })}
             />
           </Field>
           <Field label="Range / level">
             <input
               type="number"
+              min={0}
               step={0.1}
               className={inputCls}
               value={params.rangePerLevelMeters ?? 0}
-              onChange={(e) => onChange({ ...params, rangePerLevelMeters: Number(e.target.value) || 0 })}
+              onChange={(e) => onChange({ ...params, rangePerLevelMeters: Math.max(0, Number(e.target.value) || 0) })}
             />
           </Field>
           <Field label="Base pull (s)">
             <input
               type="number"
+              min={0}
               step={0.01}
               className={inputCls}
               value={params.pullDurationBaseSec ?? 0}
-              onChange={(e) => onChange({ ...params, pullDurationBaseSec: Number(e.target.value) || 0 })}
+              onChange={(e) => onChange({ ...params, pullDurationBaseSec: Math.max(0, Number(e.target.value) || 0) })}
             />
           </Field>
           <Field label="Pull / level (s)">
             <input
               type="number"
+              min={0}
               step={0.01}
               className={inputCls}
               value={params.pullDurationPerLevelSec ?? 0}
-              onChange={(e) => onChange({ ...params, pullDurationPerLevelSec: Number(e.target.value) || 0 })}
+              onChange={(e) => onChange({ ...params, pullDurationPerLevelSec: Math.max(0, Number(e.target.value) || 0) })}
             />
           </Field>
         </div>
