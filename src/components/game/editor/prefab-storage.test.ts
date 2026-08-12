@@ -290,9 +290,13 @@ describe('mapDocToSimPlatforms', () => {
     ]);
     const pads = mapDocToSimPlatforms(doc);
     expect(pads).toHaveLength(1);
-    // Must stay 0.2 — old Math.max(0.35) made Play Test stop short of the mesh.
-    expect(pads[0].width).toBeCloseTo(0.2, 5);
-    expect(pads[0].depth).toBeCloseTo(2, 5);
+    // Old Math.max(0.35) made Play Test stop short of the mesh — authored
+    // thickness (0.2) is preserved, not inflated to a minimum. It does grow
+    // by the small SEAM_SKIN margin (0.03 per side) so abutting hand-placed
+    // walls always overlap slightly instead of leaving a slip-through seam.
+    const SEAM_SKIN = 0.03;
+    expect(pads[0].width).toBeCloseTo(0.2 + SEAM_SKIN * 2, 5);
+    expect(pads[0].depth).toBeCloseTo(2 + SEAM_SKIN * 2, 5);
     expect(pads[0].height ?? 0).toBeGreaterThan(0.35);
   });
 

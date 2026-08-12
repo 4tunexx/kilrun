@@ -1711,8 +1711,11 @@ export function MapEditor({
     // solid). Users were relying on manually clicking "Bake"/"Fix Solid
     // Collision" first, which is easy to forget and left stale maps broken;
     // do it here automatically so entering Play Test always reflects the
-    // real mesh shape with no extra step.
-    await bakeAllSolidMeshCollision({ silent: true });
+    // real mesh shape with no extra step. force: true so a prop baked
+    // before a voxelizer accuracy fix (see mesh-voxelize.ts) always gets
+    // re-fit at the current resolution instead of keeping its old, possibly
+    // gappy, cached boxes forever.
+    await bakeAllSolidMeshCollision({ silent: true, force: true });
     // Do NOT auto-insert Player Avatar into the map — Play Test uses default
     // mannequin / existing avatar, and invents Start on a floor if needed.
     persist();
@@ -1740,13 +1743,13 @@ export function MapEditor({
    * per-prop auto-bake existed, or baked entities from an older save).
    * Brings existing maps in line with newly-placed props without making
    * the user re-toggle the Material dropdown on each one by hand. */
-  const bakeAllSolidMeshCollision = async (opts?: { silent?: boolean }) => {
+  const bakeAllSolidMeshCollision = async (opts?: { silent?: boolean; force?: boolean }) => {
     const targets = doc.entities.filter(
       (e) =>
         resolveCollideMaterial(e) === 'solid' &&
         !isHammerSolidEntity(e) &&
         (e.model || e.customModelUrl) &&
-        !e.meshCollisionPads?.length
+        (opts?.force || !e.meshCollisionPads?.length)
     );
     if (!targets.length) {
       if (!opts?.silent) {
@@ -2138,8 +2141,8 @@ export function MapEditor({
           variant="secondary"
           className="shrink-0"
           disabled={bakingAllMesh}
-          onClick={() => bakeAllSolidMeshCollision()}
-          title="Fit collision to the real mesh shape for every Solid prop still using a full-bounding-box collider (fixes doorways/arches placed before mesh-fit collision was automatic)."
+          onClick={() => bakeAllSolidMeshCollision({ force: true })}
+          title="Re-fit collision to the real mesh shape for every Solid prop, including ones with an existing bake — use this to pick up a fixed voxelizer/collision algorithm on props baked before the fix."
         >
           {bakingAllMesh ? 'Fitting collision…' : 'Fix Solid Collision'}
         </Button>

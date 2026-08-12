@@ -1904,7 +1904,11 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   if (ent.model?.startsWith('platform')) return true;
   // Stairs / walls marked solid by name heuristic when model suggests walkable geometry.
   if (ent.model?.includes('stair') || ent.model?.includes('ramp')) return true;
-  return false;
+  // Default: every visible mesh is solid until Properties says otherwise.
+  // All non-solid kinds (light/button/hazard/trap/action/red_zone/spinner/
+  // push_rail/push_block) and the explicit walkthrough case are already
+  // filtered out above, so anything still here is an ordinary placed prop.
+  return true;
 }
 
 /** Human-readable label for an entity kind (editor UI). */

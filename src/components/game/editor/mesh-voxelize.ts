@@ -118,7 +118,15 @@ export function voxelizeGeometryToPads(
   geometry: THREE.BufferGeometry,
   opts?: VoxelizeOptions
 ): CsgLocalPad[] {
-  const resolution = Math.max(2, Math.min(24, opts?.resolution ?? 8));
+  // 8 samples along the longest axis was too coarse for anything beyond a
+  // plain box — a door frame's pillar/lintel junction, for instance, could
+  // land a whole cell short of the real silhouette and leave a real hole a
+  // player falls/walks through. That gets worse the more a placed instance
+  // is non-uniformly scaled, since any local-space imprecision is amplified
+  // by the scale factor in world space. Doubling the default resolution
+  // trades bake time (still sub-second) for an approximation close enough
+  // that it doesn't matter.
+  const resolution = Math.max(2, Math.min(32, opts?.resolution ?? 16));
   geometry.computeBoundingBox();
   const box = geometry.boundingBox;
   if (!box || box.isEmpty()) return [];
@@ -152,16 +160,23 @@ export function voxelizeGeometryToPads(
   }
 
   const boxes = mergeOccupancyToBoxes(occ, nx, ny, nz);
+  // Adjacent merged boxes meet at an exact shared face (zero overlap) — at
+  // that seam, floating-point rounding in the player-vs-box overlap test
+  // can land a hair outside both boxes and the player slips through. Grow
+  // every box by a small skin on all sides so neighbors overlap instead of
+  // just touching. Also floor each half-extent instead of dropping thin
+  // slivers outright — a thin sliver dropped from bookkeeping is a real
+  // hole in the collision shape, not a harmless rounding artifact.
+  const SKIN = 0.03;
   const pads: CsgLocalPad[] = [];
   for (const b of boxes) {
-    const hx = ((b.x1 - b.x0) * cellX) / 2;
-    const hy = ((b.y1 - b.y0) * cellY) / 2;
-    const hz = ((b.z1 - b.z0) * cellZ) / 2;
-    if (hx < 0.02 || hy < 0.02 || hz < 0.02) continue;
+    const hx = Math.max(0.02, ((b.x1 - b.x0) * cellX) / 2) + SKIN;
+    const hy = Math.max(0.02, ((b.y1 - b.y0) * cellY) / 2) + SKIN;
+    const hz = Math.max(0.02, ((b.z1 - b.z0) * cellZ) / 2) + SKIN;
     pads.push({
-      cx: box.min.x + b.x0 * cellX + hx,
-      cy: box.min.y + b.y0 * cellY + hy,
-      cz: box.min.z + b.z0 * cellZ + hz,
+      cx: box.min.x + b.x0 * cellX + ((b.x1 - b.x0) * cellX) / 2,
+      cy: box.min.y + b.y0 * cellY + ((b.y1 - b.y0) * cellY) / 2,
+      cz: box.min.z + b.z0 * cellZ + ((b.z1 - b.z0) * cellZ) / 2,
       hx,
       hy,
       hz,

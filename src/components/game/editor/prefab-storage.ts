@@ -387,9 +387,17 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   // must keep authored thickness — inflating thin walls (e.g. 0.25 → 0.35) is
   // what made Play Test stop a full tile short of the visible mesh.
   const minXZ = topOnly ? 0.35 : 0.05;
-  const sizeX = Math.max(minXZ, rawX);
+  // Hand-placed Hammer solids / wall props are rarely aligned to sub-mm
+  // precision — two abutting boxes that just barely touch can leave a
+  // floating-point seam the player slips through at the join. Pad every
+  // full-collision (non-top-only) box by a small skin on each side so
+  // neighboring pieces always overlap slightly instead of only touching.
+  // Top-only floors/pads keep their exact footprint (standability, not a
+  // seam concern).
+  const SEAM_SKIN = 0.03;
+  const sizeX = Math.max(minXZ, rawX) + (topOnly ? 0 : SEAM_SKIN * 2);
   const sizeY = Math.max(0.12, rawY);
-  const sizeZ = Math.max(minXZ, rawZ);
+  const sizeZ = Math.max(minXZ, rawZ) + (topOnly ? 0 : SEAM_SKIN * 2);
   // True OBB yaw on the server — keep local extents (do not expand AABB).
   const yaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
   const height =
@@ -416,7 +424,7 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const topZ = isHammerSolid
     ? ty + sizeY
     : topOnly && mat !== 'water'
-      ? ty + sizeY * 0.5
+      ? ty + sizeY
       : ty + height;
 
   const dirSimX = Math.cos(yaw);
@@ -775,14 +783,21 @@ function localPadsToSimPads(e: EditorEntity, pads: CsgLocalPad[]): SimPlatformBl
     const wx = ex + (lcx * cos + lcz * sin);
     const wz = ez + (-lcx * sin + lcz * cos);
     const wy = ey + lcy;
-    const hx = Math.max(0.05, p.hx * sx);
+    // Baked boxes (mesh-voxelize / CSG) built before the seam-skin fix have
+    // their old exact-touching half-extents cached on the entity forever —
+    // re-baking is the only way to change the stored pads, but every map
+    // must work without that manual step. Pad here, at the final sim-pad
+    // conversion every baked pad (fresh or years-old) always passes
+    // through, so old saved maps get the fix for free.
+    const SEAM_SKIN = kind === 'solid' ? 0.03 : 0;
+    const hx = Math.max(0.05, p.hx * sx) + SEAM_SKIN;
     // Side-collision (resolveSolids, platformer-sim.ts) ignores any pad
     // whose height is <= 0.35 (thin floor slabs are top-only by design).
     // A baked mesh-collision box for a Solid prop must never end up under
     // that cutoff, or the player walks straight through it — only floors
     // (water/ice/sand kinds are always top-only) are allowed to stay thin.
     const hy = Math.max(kind === 'solid' ? 0.2 : 0.06, p.hy * sy);
-    const hz = Math.max(0.05, p.hz * sz);
+    const hz = Math.max(0.05, p.hz * sz) + SEAM_SKIN;
     return {
       x: wz,
       y: wx,
@@ -807,7 +822,12 @@ function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
   if (e.csgOp && e.csgPads) return localPadsToSimPads(e, e.csgPads);
   // "Bake mesh collision" result on a catalog prop (see mesh-voxelize.ts) —
   // a voxel-approximated multi-box fit to the real mesh, so a concave/hollow
-  // shape (an arch, a curved wall) doesn't collide as its full bounding box.
+  // shape (an arch, a doorway opening) doesn't collide as its full bounding
+  // box. Low sample resolution combined with a heavily non-uniform-scaled
+  // instance can leave real gaps in the approximation (see VOXEL_RESOLUTION
+  // in mesh-voxelize.ts) — that's fixed at the source (higher resolution +
+  // forced re-bake on every Play Test entry, see bakeAllSolidMeshCollision
+  // in map-editor.tsx), not by discarding the approximation here.
   if (e.meshCollisionPads?.length) return localPadsToSimPads(e, e.meshCollisionPads);
   const model = e.model ?? '';
   if (model.includes('stair') || model.includes('ramp')) {

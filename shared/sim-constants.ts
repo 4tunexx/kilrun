@@ -37,7 +37,11 @@ export const LAND_SNAP_FAST = 0.7;
 export const GROUND_FOLLOW_SPEED = 7;
 export const LAND_STEP_CLIMB = 0.75;
 export const LAND_STEP_DESCEND = 0.9;
-export const LEDGE_ASSIST = 0.55;
+// Forgives a tiny accidental overshoot off a platform edge without
+// blocking deliberate walking/jumping off. 0.55 (half a meter) made edges
+// nearly impossible to step off intentionally — you had to push way past
+// the visible mesh before the game admitted you were falling.
+export const LEDGE_ASSIST = 0.12;
 export const COLLISION_SKIN = 0.02;
 export const VOID_Z = -4;
 

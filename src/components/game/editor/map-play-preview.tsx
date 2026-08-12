@@ -34,6 +34,7 @@ import { makeHammerSolidObject, type HammerPrimitive } from './hammer-shapes';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
+import { playSound, preloadSoundboard } from '../effects/soundboard';
 import {
   createSimScratch,
   simToThree,
@@ -235,6 +236,11 @@ export function MapPlayPreview({
   const tpsRef = useRef<TpsViewSettings>(resolvedTps);
   const onCloseRef = useRef(onClose);
   const [hp, setHp] = useState(100);
+  // Live text readout of player Z vs. the nearest collision pad's top —
+  // lets you SEE the exact sink/float amount on screen (e.g. "legs inside
+  // the mesh") without needing DevTools open. Remove once collision
+  // accuracy issues are resolved.
+  const [debugHud, setDebugHud] = useState('');
   const [finished, setFinished] = useState(false);
   const [loading, setLoading] = useState(true);
   const [autoStartNote, setAutoStartNote] = useState(false);
@@ -260,6 +266,7 @@ export function MapPlayPreview({
     const host = hostRef.current;
     if (!host) return;
 
+    preloadSoundboard();
     setHp(100);
     setFinished(false);
     setLoading(true);
@@ -287,8 +294,21 @@ export function MapPlayPreview({
       homeY: p.y,
       homeZ: p.z,
     }));
+    // console.table renders as a visible grid immediately — no clicking to
+    // expand a collapsed array reference before the numbers are readable.
     // eslint-disable-next-line no-console
-    console.log('[collision-debug] pads at Play Test start:', pads);
+    console.table(
+      pads.map((p) => ({
+        id: p.id,
+        kind: p.kind,
+        x: +p.x.toFixed(2),
+        y: +p.y.toFixed(2),
+        z: +p.z.toFixed(2),
+        width: +p.width.toFixed(2),
+        depth: +p.depth.toFixed(2),
+        height: +(p.height ?? 0).toFixed(2),
+      }))
+    );
     const finishes = mapDocToSimFinishes(playDoc);
     const hazards = mapDocToSimHazards(playDoc);
     const teleports = mapDocToSimTeleports(playDoc);
@@ -336,6 +356,7 @@ export function MapPlayPreview({
     // physics tick and reads as a stutter/slideshow on higher-refresh
     // displays, worse the faster you move (sprint covers more distance per
     // stuck-then-jump step).
+    let lastDebugAt = 0;
     let prevSimX = body.x;
     let prevSimY = body.y;
     let prevSimZ = body.z;
@@ -349,7 +370,11 @@ export function MapPlayPreview({
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCFSoftShadowMap is deprecated in this three.js version — the renderer
+    // already silently substitutes PCFShadowMap for it (with a console
+    // warning every frame setup). Request PCFShadowMap directly: identical
+    // rendered result, no warning.
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.95;
@@ -443,6 +468,7 @@ export function MapPlayPreview({
     let finishedLocal = false;
     let checkpoint: { x: number; y: number; z: number } | null = null;
     let wasGrounded = true;
+    let wasSprintingForSound = false;
     let landUntil = 0;
     let meleeUntil = 0;
     const avatarEntity = getMapPlayerAvatar(playDoc) ?? null;
@@ -678,7 +704,10 @@ export function MapPlayPreview({
       joystickRef.current = joy;
     }
 
-    const clock = new THREE.Clock();
+    // THREE.Clock is deprecated in this three.js version in favor of Timer —
+    // same getDelta()-in-seconds contract, but Timer requires an explicit
+    // update() call per frame before reading it (see tick() below).
+    const clock = new THREE.Timer();
     const playerPos = new THREE.Vector3();
     let smoothCamY: number | null = null;
     // Separate from smoothCamY: that softening was written for the old
@@ -704,6 +733,7 @@ export function MapPlayPreview({
     const tick = () => {
       if (disposed) return;
       raf = requestAnimationFrame(tick);
+      clock.update();
       const frameDt = Math.min(clock.getDelta(), 0.05);
       const now = performance.now();
 
@@ -736,6 +766,9 @@ export function MapPlayPreview({
         wishFwd += -moveStick.y;
         wishStrafe += moveStick.x;
       }
+      const sprintingNow = sprint && wasGrounded && (wishFwd !== 0 || wishStrafe !== 0);
+      if (sprintingNow && !wasSprintingForSound) playSound('sprint_start');
+      wasSprintingForSound = sprintingNow;
       // Camera-relative: W into look, A = screen-left, D = screen-right.
       // Look flat = (sinYaw, cosYaw) in Three XZ; screen-right = (−cosYaw, sinYaw).
       const c = Math.cos(yaw);
@@ -836,7 +869,10 @@ export function MapPlayPreview({
             body.z >= pad.z - 0.35 &&
             body.z <= pad.z + 0.6
           ) {
+            const isNewCheckpoint =
+              !checkpoint || checkpoint.x !== pad.x || checkpoint.y !== pad.y || checkpoint.z !== pad.z;
             checkpoint = { x: pad.x, y: pad.y, z: pad.z };
+            if (isNewCheckpoint) playSound('checkpoint');
           }
         }
         for (const f of finishes) {
@@ -850,6 +886,7 @@ export function MapPlayPreview({
           ) {
             if (!finishedLocal) {
               finishedLocal = true;
+              playSound('finish_line');
               setFinished(true);
               if (mapId && !ghostSubmitted && recordedSamples.length > 2) {
                 ghostSubmitted = true;
@@ -874,6 +911,7 @@ export function MapPlayPreview({
           }
         }
         if (body.z < -4) {
+          playSound('void_fall');
           if (checkpoint) {
             body.x = checkpoint.x;
             body.y = checkpoint.y;
@@ -936,6 +974,7 @@ export function MapPlayPreview({
             continue;
           }
           if (h.instantKill) {
+            if (hpLocal > 0) playSound('trap_trigger');
             hpLocal = 0;
             setHp(0);
             continue;
@@ -945,6 +984,7 @@ export function MapPlayPreview({
             lastDamageAt.set(h.id, now);
             hpLocal = Math.max(0, hpLocal - h.damage);
             setHp(hpLocal);
+            playSound('trap_trigger');
           }
         }
 
@@ -966,8 +1006,24 @@ export function MapPlayPreview({
             body.vz = 0;
             snapBodyToPads(body, pads);
             teleportCooldownUntil.set(t.id, now + t.cooldownMs);
+            playSound('teleport');
           }
         }
+      }
+
+      if (now - lastDebugAt > 150) {
+        lastDebugAt = now;
+        // Show the pad actually holding the player up (scratch.supportPadId),
+        // not just whatever's nearest by XY distance — a nearby-but-unrelated
+        // pad reads as a false "sunk" warning even when you're standing
+        // correctly on a different one right next to it.
+        const support = scratch.supportPadId ? pads.find((p) => p.id === scratch.supportPadId) : undefined;
+        const delta = support ? body.z - support.z : NaN;
+        setDebugHud(
+          support
+            ? `z=${body.z.toFixed(2)}  grounded=${body.isGrounded}  support=${support.id}  supportTopZ=${support.z.toFixed(2)}  Δ(z-top)=${delta.toFixed(2)}${Math.abs(delta) > 0.02 ? '  ⚠ MISALIGNED' : '  ✓ flush'}`
+            : `z=${body.z.toFixed(2)}  grounded=${body.isGrounded}  support=none (airborne)`
+        );
       }
 
       // --- Variable-rate rendering: camera, mesh smoothing, animation —
@@ -1073,6 +1129,8 @@ export function MapPlayPreview({
         playerRoot.rotation.y =
           bodyYaw + (liveTps.player.yawOffsetDeg * Math.PI) / 180;
         const justLanded = !wasGrounded && body.isGrounded;
+        if (justLanded) playSound('land');
+        else if (wasGrounded && !body.isGrounded && body.vz > 0.5) playSound('jump');
         wasGrounded = body.isGrounded;
         if (justLanded) landUntil = performance.now() + 280;
 
@@ -1231,6 +1289,11 @@ export function MapPlayPreview({
       <div className="flex-1 relative min-h-0">
         <div ref={hostRef} className="absolute inset-0 touch-none" />
         <Crosshair visible={aimingHud} style={tpsHud.crosshair} />
+        {debugHud && (
+          <div className="absolute top-2 left-2 z-[80] pointer-events-none rounded bg-black/70 px-2 py-1 font-mono text-[11px] text-lime-300">
+            {debugHud}
+          </div>
+        )}
         {loading && (
           <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 pointer-events-none">
             <p className="text-sm font-semibold text-white/80 tracking-wide">Loading play test…</p>

@@ -31,7 +31,11 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // PCFSoftShadowMap is deprecated in this three.js version — the renderer
+  // already silently substitutes PCFShadowMap for it (with a console
+  // warning every frame setup). Request PCFShadowMap directly: identical
+  // rendered result, no warning.
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.95;
