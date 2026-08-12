@@ -111,9 +111,61 @@ function warnMissingGameServerUrlOnce() {
 
 /** Colyseus close code used when the client leaves on purpose (tab close, unmount, etc). */
 const CONSENTED_CLOSE_CODE = 4000;
+/** Close code CompetitiveRoom sends for a deliberate @abandonMatch — never
+ * worth auto-reconnecting or offering a manual rejoin for. */
+const ABANDONED_CLOSE_CODE = 4002;
 /** How many automatic reconnect attempts before giving up and reporting 'lost'. */
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 800;
+
+/** localStorage key for the "rejoin after crash" reconnection token. */
+const REJOIN_STORAGE_KEY = 'kilrun_rejoin_v1';
+/** Matches CompetitiveRoom's RECONNECT_WINDOW_SEC — a stored token past this
+ * age is certainly stale, so don't bother offering it. */
+const REJOIN_WINDOW_MS = 120_000;
+
+interface StoredRejoin {
+  roomName: GameRoomName;
+  reconnectionToken: string;
+  savedAt: number;
+}
+
+function saveRejoinToken(roomName: GameRoomName, reconnectionToken: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const data: StoredRejoin = { roomName, reconnectionToken, savedAt: Date.now() };
+    window.localStorage.setItem(REJOIN_STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // Storage unavailable (private mode, quota) — rejoin just won't be offered.
+  }
+}
+
+function clearRejoinToken() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(REJOIN_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/** Returns a still-fresh stored rejoin token, or null if none/expired. Call
+ * this on app load to decide whether to show a "Rejoin Match" button. */
+export function getStoredRejoin(): { roomName: GameRoomName } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(REJOIN_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as StoredRejoin;
+    if (!data?.reconnectionToken || Date.now() - data.savedAt > REJOIN_WINDOW_MS) {
+      clearRejoinToken();
+      return null;
+    }
+    return { roomName: data.roomName };
+  } catch {
+    return null;
+  }
+}
 
 export class GameConnection {
   private client: Client;
@@ -322,10 +374,16 @@ export class GameConnection {
 
   private bindRoom(callbacks: RoomCallbacks) {
     if (!this.room) return;
+    if (this.room.reconnectionToken) {
+      saveRejoinToken(this.lastJoin?.roomName ?? 'competitive', this.room.reconnectionToken);
+    }
     // A dropped/killed WebSocket surfaces here as onLeave (with a non-consented
     // close code) — reconnect automatically instead of leaving `sendInput`
     // hammering a closed socket every frame.
     this.room.onLeave((code: number) => {
+      if (code === CONSENTED_CLOSE_CODE || code === ABANDONED_CLOSE_CODE) {
+        clearRejoinToken();
+      }
       if (this.disposed) return;
       this.scheduleReconnect(code);
     });
@@ -529,6 +587,49 @@ export class GameConnection {
 
   public sendAdminBan(targetSessionId: string, reason?: string): void {
     this.safeSend('adminBan', { targetSessionId, reason });
+  }
+
+  /** Deliberate mid-match leave (Competitive only) — triggers the escalating
+   * abandon-cooldown server-side. See ABANDONED_CLOSE_CODE. */
+  public sendAbandonMatch(): void {
+    this.safeSend('abandonMatch', {});
+  }
+
+  /**
+   * Attempts to resume a match using a rejoin token saved from a previous
+   * session (crash/tab close). Returns false if there's no usable token or
+   * the reconnect fails (e.g. the 2-minute window already expired).
+   */
+  public async rejoin(callbacks: RoomCallbacks): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    let stored: StoredRejoin;
+    try {
+      const raw = window.localStorage.getItem(REJOIN_STORAGE_KEY);
+      if (!raw) return false;
+      stored = JSON.parse(raw) as StoredRejoin;
+    } catch {
+      return false;
+    }
+    if (!stored?.reconnectionToken || Date.now() - stored.savedAt > REJOIN_WINDOW_MS) {
+      clearRejoinToken();
+      return false;
+    }
+    this.disposed = false;
+    this.lastJoin = { roomName: stored.roomName, options: {} as JoinOptions, callbacks };
+    try {
+      const room = await this.client.reconnect(stored.reconnectionToken);
+      if (this.disposed) {
+        room.leave();
+        return false;
+      }
+      this.room = room;
+      this.bindRoom(callbacks);
+      callbacks.onConnectionState?.('connected');
+      return true;
+    } catch {
+      clearRejoinToken();
+      return false;
+    }
   }
 
   /** Colyseus room id after a successful connect (for party queue sync). */

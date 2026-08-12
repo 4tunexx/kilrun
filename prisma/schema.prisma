@@ -177,6 +177,19 @@ model MatchResult {
   @@index([userId, mode])
 }
 
+/// Escalating cooldown for players who deliberately abandon a Competitive
+/// match (@abandonMatch). Tracks 10m → 30m → 2h → 5h → 1d tiers; resets to
+/// tier 0 once 24h has passed since the last abandon (see COOLDOWN_TIERS_MS
+/// in src/app/api/game/abandon-match/route.ts).
+model MatchAbandonPenalty {
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId        String    @unique @db.ObjectId
+  /// Index into COOLDOWN_TIERS_MS for the *next* abandon.
+  level         Int       @default(0)
+  cooldownUntil DateTime?
+  lastAbandonAt DateTime?
+}
+
 model StoreItem {
   id           String  @id @default(auto()) @map("_id") @db.ObjectId
   itemName     String

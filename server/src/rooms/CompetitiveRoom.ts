@@ -80,6 +80,11 @@ import {
   sanitizeChatText,
 } from '../lib/chat.js';
 import { reportAdminBan } from '../lib/admin-actions.js';
+import { reportMatchAbandon } from '../lib/match-abandon.js';
+
+/** Reconnection window for an unexpected disconnect mid-match — long enough
+ * to restart a crashed client, short enough the team isn't stuck shorthanded. */
+const RECONNECT_WINDOW_SEC = 120;
 
 const KP_DEFAULT = 1000;
 
@@ -519,6 +524,23 @@ export class CompetitiveRoom extends Room<RoomState> {
       }
     );
 
+    this.onMessage('abandonMatch', async (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      // Only a genuine mid-match abandon is penalized — leaving from the
+      // lobby or after results costs nothing.
+      const midMatch = this.state.phase === 'countdown' || this.state.phase === 'playing';
+      if (midMatch) {
+        const result = await reportMatchAbandon(player.userId);
+        if (!result.ok) {
+          console.error('[CompetitiveRoom] reportMatchAbandon failed:', result.error);
+        }
+      }
+      // Close code 4002 tells GameConnection this was deliberate — no
+      // reconnection window, and it clears any stored rejoin token.
+      client.leave(4002, 'abandoned');
+    });
+
     this.onMessage('activateAbility', (client, payload: { ability?: string } | undefined) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
@@ -934,7 +956,22 @@ export class CompetitiveRoom extends Room<RoomState> {
     this.simScratch.set(client.sessionId, createSimScratch());
   }
 
-  onLeave(client: Client) {
+  async onLeave(client: Client, consented: boolean) {
+    const player = this.state.players.get(client.sessionId);
+    const midMatch = this.state.phase === 'countdown' || this.state.phase === 'playing';
+    // Unexpected drop (crash, network blip, tab kill) mid-match — hold the
+    // seat open so the player can rejoin instead of losing it immediately.
+    // A deliberate leave (consented — includes the abandonMatch 4002 close)
+    // skips straight to cleanup below.
+    if (!consented && player && midMatch) {
+      try {
+        await this.allowReconnection(client, RECONNECT_WINDOW_SEC);
+        console.log(`[CompetitiveRoom] ${player.username} reconnected`);
+        return;
+      } catch {
+        // Window expired without a reconnect — fall through to full cleanup.
+      }
+    }
     this.state.players.delete(client.sessionId);
     this.latestInputs.delete(client.sessionId);
     this.simScratch.delete(client.sessionId);

@@ -1592,6 +1592,13 @@ export default function KilrunEngine({
           }}
           onToggleFullscreen={toggleFullscreen}
           onExit={onExit}
+          showAbandon={
+            mode === 'competitive' && (room.phase === 'countdown' || room.phase === 'playing')
+          }
+          onAbandon={() => {
+            connectionRef.current?.sendAbandonMatch();
+            onExit();
+          }}
         />
 
         {editorOpen && isAdmin && (

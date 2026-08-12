@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Map, Maximize, Play, LogOut } from 'lucide-react';
+import { Map, Maximize, Play, LogOut, AlertTriangle } from 'lucide-react';
 
 interface PauseMenuProps {
   open: boolean;
@@ -11,6 +11,11 @@ interface PauseMenuProps {
   onOpenEditor: () => void;
   onToggleFullscreen: () => void;
   onExit: () => void;
+  /** Competitive match currently in countdown/playing — enables Abandon Match. */
+  showAbandon?: boolean;
+  /** Escalating cooldown tier (in minutes) the player would incur next. */
+  nextAbandonPenaltyMin?: number;
+  onAbandon?: () => void;
 }
 
 export function PauseMenu({
@@ -20,8 +25,60 @@ export function PauseMenu({
   onOpenEditor,
   onToggleFullscreen,
   onExit,
+  showAbandon,
+  nextAbandonPenaltyMin,
+  onAbandon,
 }: PauseMenuProps) {
+  const [confirmingAbandon, setConfirmingAbandon] = useState(false);
+
+  useEffect(() => {
+    if (!open) setConfirmingAbandon(false);
+  }, [open]);
+
   if (!open) return null;
+
+  if (confirmingAbandon) {
+    return (
+      <div className="absolute inset-0 z-[250] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
+        <div className="w-full max-w-sm mx-4 rounded-2xl border border-red-500/30 bg-[#0f1724]/95 p-6 shadow-2xl">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="w-5 h-5 text-red-400" />
+            <h2 className="text-xl font-black tracking-wide text-white">Abandon Match?</h2>
+          </div>
+          <p className="text-sm text-white/60 mb-4">
+            Leaving a Competitive match in progress locks you out of Competitive
+            queueing for{' '}
+            <span className="text-white font-semibold">
+              {nextAbandonPenaltyMin ? `${nextAbandonPenaltyMin} min` : 'a while'}
+            </span>
+            . Repeated abandons escalate the cooldown: 10 min → 30 min → 2 hr →
+            5 hr → 1 day. Your team will also play shorthanded.
+          </p>
+          <div className="space-y-2">
+            <Button
+              className="w-full justify-start"
+              size="lg"
+              variant="destructive"
+              onClick={() => {
+                setConfirmingAbandon(false);
+                onAbandon?.();
+              }}
+            >
+              <LogOut className="w-4 h-4 mr-2" /> Confirm Abandon
+            </Button>
+            <Button
+              className="w-full justify-start"
+              size="lg"
+              variant="secondary"
+              onClick={() => setConfirmingAbandon(false)}
+            >
+              Never mind — keep playing
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute inset-0 z-[250] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
@@ -43,6 +100,16 @@ export function PauseMenu({
           <Button className="w-full justify-start" size="lg" variant="destructive" onClick={onExit}>
             <LogOut className="w-4 h-4 mr-2" /> Exit Match
           </Button>
+          {showAbandon && (
+            <Button
+              className="w-full justify-start border border-red-500/40"
+              size="lg"
+              variant="ghost"
+              onClick={() => setConfirmingAbandon(true)}
+            >
+              <AlertTriangle className="w-4 h-4 mr-2 text-red-400" /> Abandon Match…
+            </Button>
+          )}
         </div>
       </div>
     </div>

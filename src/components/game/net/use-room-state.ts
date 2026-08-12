@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   GameConnection,
+  getStoredRejoin,
   type GameRoomName,
   type JoinOptions,
   type RoomCallbacks,
@@ -103,10 +104,23 @@ export function useRoomState(
       },
     };
 
-    connection.connect(roomName, joinOptions, callbacks).catch((err) => {
-      if (!disposed)
-        setConnectionError(err instanceof Error ? err.message : 'Failed to connect to game server');
-    });
+    // If a rejoin token is still fresh for this exact room (crash/tab close
+    // during the previous session), resume that match instead of starting a
+    // brand-new join/queue — mirrors the "rejoin" button's underlying flow,
+    // but happens automatically whenever this mode is opened again in time.
+    const storedRejoin = getStoredRejoin();
+    const rejoinAttempt =
+      storedRejoin?.roomName === roomName ? connection.rejoin(callbacks) : Promise.resolve(false);
+
+    rejoinAttempt
+      .then((rejoined) => {
+        if (disposed || rejoined) return;
+        return connection.connect(roomName, joinOptions, callbacks);
+      })
+      .catch((err) => {
+        if (!disposed)
+          setConnectionError(err instanceof Error ? err.message : 'Failed to connect to game server');
+      });
 
     return () => {
       disposed = true;

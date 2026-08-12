@@ -29,6 +29,9 @@ import {
   getMyParty,
   setPartyMode,
 } from '@/lib/party-actions';
+import { getMyAbandonCooldown } from '@/lib/match-abandon-actions';
+import { getStoredRejoin } from '@/components/game/net/connection';
+import { RotateCcw } from 'lucide-react';
 
 export type { KilrunMode };
 export type CompetitiveQueue = 'casual' | 'ranked';
@@ -37,6 +40,16 @@ interface ModeDefinition {
   id: KilrunMode;
   icon: typeof Skull;
   isLive: boolean;
+}
+
+function formatCooldownRemaining(until: Date): string {
+  const ms = until.getTime() - Date.now();
+  if (ms <= 0) return '';
+  const mins = Math.ceil(ms / 60_000);
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.ceil(mins / 60);
+  if (hours < 24) return `${hours} hr`;
+  return `${Math.ceil(hours / 24)} day`;
 }
 
 const modes: ModeDefinition[] = [
@@ -77,6 +90,8 @@ export default function PlayView({
   const canRanked = rankedAccess ?? isPremium;
   const [gameDisabled, setGameDisabled] = useState(false);
   const [disabledMsg, setDisabledMsg] = useState('');
+  const [abandonCooldownUntil, setAbandonCooldownUntil] = useState<Date | null>(null);
+  const [rejoinRoom, setRejoinRoom] = useState<KilrunMode | null>(null);
 
   useEffect(() => {
     getSiteSettings().then((s) => {
@@ -88,7 +103,23 @@ export default function PlayView({
       );
       setDisabledMsg(s.gameDisabledMsg);
     });
+    getMyAbandonCooldown().then((c) => {
+      setAbandonCooldownUntil(c.active && c.cooldownUntil ? new Date(c.cooldownUntil) : null);
+    });
+    const stored = getStoredRejoin();
+    if (stored) {
+      if (stored.roomName === 'competitive_ranked' || stored.roomName === 'competitive') {
+        setRejoinRoom('competitive');
+      } else if (stored.roomName === 'deathrun' || stored.roomName === 'horde') {
+        setRejoinRoom(stored.roomName);
+      }
+    }
   }, []);
+
+  const cooldownActive = !!abandonCooldownUntil && abandonCooldownUntil.getTime() > Date.now();
+  const cooldownLabel = abandonCooldownUntil
+    ? formatCooldownRemaining(abandonCooldownUntil)
+    : '';
 
   const startQueue = async (
     mode: KilrunMode,
@@ -131,6 +162,33 @@ export default function PlayView({
         </div>
       )}
 
+      {rejoinRoom && (
+        <button
+          type="button"
+          onClick={() => {
+            setRejoinRoom(null);
+            void startQueue(rejoinRoom);
+          }}
+          className="w-full rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-3.5 text-sm text-sky-100 flex gap-2.5 items-start text-left transition-all duration-200 hover:bg-sky-500/15 hover:border-sky-400/60 active:scale-[0.99]"
+        >
+          <RotateCcw className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            <span className="font-semibold">Match in progress</span> — you disconnected recently.
+            Click to rejoin before your seat is given up.
+          </span>
+        </button>
+      )}
+
+      {cooldownActive && (
+        <div className="w-full rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3.5 text-sm text-red-100 flex gap-2.5 items-start">
+          <Ban className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            Competitive queueing is locked for <span className="font-semibold">{cooldownLabel}</span>{' '}
+            after abandoning a match.
+          </span>
+        </div>
+      )}
+
       {!pulsarOn && (
         <button
           type="button"
@@ -156,7 +214,7 @@ export default function PlayView({
           const canPlay = mode.isLive && !gameDisabled;
 
           if (mode.id === 'competitive') {
-            const canComp = canPlay && pulsarOn;
+            const canComp = canPlay && pulsarOn && !cooldownActive;
             return (
               <Card
                 key={mode.id}
@@ -194,7 +252,7 @@ export default function PlayView({
                   </Button>
                   <Button
                     className="w-full bg-amber-600 hover:bg-amber-500 text-black font-bold transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
-                    disabled={!canPlay}
+                    disabled={!canPlay || cooldownActive}
                     onClick={() => {
                       if (!pulsarOn) {
                         onOpenPulsar?.();
