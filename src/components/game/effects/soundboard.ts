@@ -1,14 +1,18 @@
 /**
  * Client playback engine for the admin-uploaded Sound Board. Fetches the
  * event->file map once (cached in-memory for the session) from
- * /api/admin/sound-definitions, then plays a pooled HTMLAudioElement per
- * event key on demand. Silently no-ops for any event with nothing uploaded
- * yet — that's the expected state for most events until an admin populates
- * the board, so callers can fire playSound() unconditionally at every
- * trigger point without checking "is this wired up yet".
+ * /api/admin/sound-definitions, then plays each event through the shared
+ * Web Audio pipeline (src/lib/audio-fx.ts) — crop/EQ/noise-gate applied,
+ * decoded+processed buffer cached per event so repeat fires (footsteps,
+ * multi-pellet hits) are cheap. Silently no-ops for any event with nothing
+ * uploaded yet — that's the expected state for most events until an admin
+ * populates the board, so callers can fire playSound() unconditionally at
+ * every trigger point without checking "is this wired up yet".
  */
 
-interface SoundEntry {
+import { getAudioContext, getProcessedBuffer, type SoundFxParams } from '@/lib/audio-fx';
+
+interface SoundEntry extends SoundFxParams {
   fileUrl: string;
   volume: number;
 }
@@ -16,8 +20,10 @@ interface SoundEntry {
 let cache: Record<string, SoundEntry> = {};
 let loaded = false;
 let loadingPromise: Promise<void> | null = null;
-const audioPool = new Map<string, HTMLAudioElement[]>();
-const POOL_SIZE_PER_EVENT = 6;
+// Caps rapid repeats (multi-pellet hits, fast footsteps) from stacking
+// unboundedly loud/overlapping voices for the same event.
+const activeVoices = new Map<string, number>();
+const MAX_CONCURRENT_PER_EVENT = 6;
 
 function ensureLoaded(): Promise<void> {
   if (loaded) return Promise.resolve();
@@ -44,29 +50,26 @@ export function preloadSoundboard(): void {
 /** Fire-and-forget playback for a game-engine event (see
  * shared/sound-events.ts for valid keys). No-ops if nothing is bound. */
 export function playSound(eventKey: string, opts?: { volume?: number }): void {
-  if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
-  void ensureLoaded().then(() => {
+  if (typeof window === 'undefined' || typeof AudioContext === 'undefined') return;
+  void ensureLoaded().then(async () => {
     const entry = cache[eventKey];
     if (!entry?.fileUrl) return;
+    const active = activeVoices.get(eventKey) ?? 0;
+    if (active >= MAX_CONCURRENT_PER_EVENT) return;
     try {
-      let pool = audioPool.get(eventKey);
-      if (!pool) {
-        pool = [];
-        audioPool.set(eventKey, pool);
-      }
-      // Reuse a free element so rapid repeats (multi-pellet hits, fast
-      // footsteps) don't spawn unbounded Audio() instances.
-      let audio = pool.find((a) => a.paused || a.ended);
-      if (!audio) {
-        audio = new Audio();
-        if (pool.length < POOL_SIZE_PER_EVENT) pool.push(audio);
-      }
-      if (audio.src !== entry.fileUrl) audio.src = entry.fileUrl;
-      audio.volume = Math.max(0, Math.min(1, (opts?.volume ?? 1) * entry.volume));
-      audio.currentTime = 0;
-      void audio.play().catch(() => {
-        // Autoplay policy before first user gesture — expected, ignore.
-      });
+      const ctx = getAudioContext();
+      if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+      const buffer = await getProcessedBuffer(entry.fileUrl, entry);
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      const gain = ctx.createGain();
+      gain.gain.value = Math.max(0, Math.min(1, (opts?.volume ?? 1) * entry.volume));
+      src.connect(gain).connect(ctx.destination);
+      activeVoices.set(eventKey, active + 1);
+      src.onended = () => {
+        activeVoices.set(eventKey, Math.max(0, (activeVoices.get(eventKey) ?? 1) - 1));
+      };
+      src.start();
     } catch {
       // Never let audio playback break gameplay.
     }

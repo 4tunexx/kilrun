@@ -19,6 +19,9 @@ export interface PlatformBlueprint {
   width: number;
   depth: number;
   kind?: PlatformState['kind'];
+  /** True for pads meant to be walked over, never blocked against sideways
+   * — see the matching field/comment on PlatformState. */
+  topOnly?: boolean;
   boost?: number;
   /** Vertical thickness below top. */
   height?: number;
@@ -57,22 +60,22 @@ export interface ObstacleBlueprint {
 }
 
 export const DEATHRUN_PLATFORMS: PlatformBlueprint[] = [
-  { x: 2.2, y: WORLD_HEIGHT / 2, z: 0, width: 4.2, depth: 4.2, height: 0.25 },
-  { x: 6.0, y: WORLD_HEIGHT / 2, z: 0, width: 2.6, depth: 2.6, height: 0.25 },
-  { x: 9.2, y: WORLD_HEIGHT / 2 - 1.6, z: 0.35, width: 2.4, depth: 2.4, height: 0.25 },
-  { x: 9.2, y: WORLD_HEIGHT / 2 + 1.6, z: 0.35, width: 2.4, depth: 2.4, height: 0.25 },
-  { x: 12.6, y: WORLD_HEIGHT / 2, z: 0.1, width: 2.8, depth: 3.0, height: 0.25 },
-  { x: 15.8, y: WORLD_HEIGHT / 2, z: 0.55, width: 2.5, depth: 2.5, height: 0.25 },
-  { x: 18.6, y: WORLD_HEIGHT / 2 + 0.4, z: 1.05, width: 2.3, depth: 2.3, height: 0.25 },
-  { x: 21.4, y: WORLD_HEIGHT / 2 - 0.3, z: 1.55, width: 2.3, depth: 2.3, height: 0.25 },
-  { x: 24.8, y: WORLD_HEIGHT / 2, z: 1.35, width: 3.6, depth: 1.35, height: 0.25 },
-  { x: 28.4, y: 2.6, z: 0.9, width: 2.6, depth: 2.6, height: 0.25 },
-  { x: 28.4, y: 7.4, z: 0.9, width: 2.6, depth: 2.6, height: 0.25 },
-  { x: 32.0, y: WORLD_HEIGHT / 2, z: 0.15, width: 3.2, depth: 3.4, height: 0.25 },
-  { x: 35.6, y: WORLD_HEIGHT / 2, z: 0.4, width: 3.4, depth: 2.8, height: 0.25 },
-  { x: 39.0, y: WORLD_HEIGHT / 2, z: 0.25, width: 3.0, depth: 3.0, height: 0.25 },
-  { x: 42.4, y: WORLD_HEIGHT / 2, z: 0, width: 3.2, depth: 3.6, height: 0.25 },
-  { x: WORLD_WIDTH - 1.6, y: WORLD_HEIGHT / 2, z: 0, width: 3.4, depth: 4.0, height: 0.25 },
+  { x: 2.2, y: WORLD_HEIGHT / 2, z: 0, width: 4.2, depth: 4.2, height: 0.25, topOnly: true },
+  { x: 6.0, y: WORLD_HEIGHT / 2, z: 0, width: 2.6, depth: 2.6, height: 0.25, topOnly: true },
+  { x: 9.2, y: WORLD_HEIGHT / 2 - 1.6, z: 0.35, width: 2.4, depth: 2.4, height: 0.25, topOnly: true },
+  { x: 9.2, y: WORLD_HEIGHT / 2 + 1.6, z: 0.35, width: 2.4, depth: 2.4, height: 0.25, topOnly: true },
+  { x: 12.6, y: WORLD_HEIGHT / 2, z: 0.1, width: 2.8, depth: 3.0, height: 0.25, topOnly: true },
+  { x: 15.8, y: WORLD_HEIGHT / 2, z: 0.55, width: 2.5, depth: 2.5, height: 0.25, topOnly: true },
+  { x: 18.6, y: WORLD_HEIGHT / 2 + 0.4, z: 1.05, width: 2.3, depth: 2.3, height: 0.25, topOnly: true },
+  { x: 21.4, y: WORLD_HEIGHT / 2 - 0.3, z: 1.55, width: 2.3, depth: 2.3, height: 0.25, topOnly: true },
+  { x: 24.8, y: WORLD_HEIGHT / 2, z: 1.35, width: 3.6, depth: 1.35, height: 0.25, topOnly: true },
+  { x: 28.4, y: 2.6, z: 0.9, width: 2.6, depth: 2.6, height: 0.25, topOnly: true },
+  { x: 28.4, y: 7.4, z: 0.9, width: 2.6, depth: 2.6, height: 0.25, topOnly: true },
+  { x: 32.0, y: WORLD_HEIGHT / 2, z: 0.15, width: 3.2, depth: 3.4, height: 0.25, topOnly: true },
+  { x: 35.6, y: WORLD_HEIGHT / 2, z: 0.4, width: 3.4, depth: 2.8, height: 0.25, topOnly: true },
+  { x: 39.0, y: WORLD_HEIGHT / 2, z: 0.25, width: 3.0, depth: 3.0, height: 0.25, topOnly: true },
+  { x: 42.4, y: WORLD_HEIGHT / 2, z: 0, width: 3.2, depth: 3.6, height: 0.25, topOnly: true },
+  { x: WORLD_WIDTH - 1.6, y: WORLD_HEIGHT / 2, z: 0, width: 3.4, depth: 4.0, height: 0.25, topOnly: true },
 ];
 
 export function createFromBlueprints(blueprints: PlatformBlueprint[]): PlatformState[] {
@@ -110,6 +113,7 @@ export function createFromBlueprints(blueprints: PlatformBlueprint[]): PlatformS
     platform.entityId = bp.entityId ?? '';
     platform.doorControlled = !!bp.doorControlled;
     platform.open = false;
+    platform.topOnly = !!bp.topOnly;
     return platform;
   });
 }
@@ -218,6 +222,7 @@ export function findSupportPlatform(
 export interface SolidCollisionResult {
   x: number;
   y: number;
+  z: number;
   touchingWall: boolean;
   wallNormalX: number;
   wallNormalY: number;
@@ -227,45 +232,58 @@ export function resolveSolidCollisions(
   pos: { x: number; y: number; z: number },
   platforms: Iterable<PlatformState>,
   radius = PLAYER_RADIUS,
-  height = PLAYER_HEIGHT
+  height = PLAYER_HEIGHT,
+  isGrounded = false
 ): SolidCollisionResult {
   let { x, y } = pos;
-  const playerBottom = pos.z;
-  const playerTop = pos.z + height;
+  let z = pos.z;
   let touchingWall = false;
   let wallNormalX = 0;
   let wallNormalY = 0;
 
   for (const platform of platforms) {
     if (platform.doorControlled && platform.open) continue;
+    // Walk-over pads (floors, stair/ramp treads, jump pads, ice/conveyor/
+    // sand) never block sideways — that's what makes them walkable at all.
+    if (platform.topOnly) continue;
     const boxH = platform.height > 0 ? platform.height : 0.2;
-    // Thin floors: no side collision
-    if (boxH <= 0.35) continue;
-
     const topZ = platform.z;
     const bottomZ = topZ - boxH;
-    // Step-up allowance: a ledge within normal walkable step height (the
-    // same LAND_STEP_CLIMB tolerance movement.ts already uses to re-stick
-    // feet onto a slightly-higher pad) should be walkable, not a wall.
-    // Without this, any tall solid whose top sits even a few cm above the
-    // player's current feet — e.g. a ramp leading into an adjacent flat
-    // platform that isn't pixel-perfect flush — reads as an impassable
-    // barrier that only a jump clears, instead of a smooth step up.
-    // Gated on boxH <= LAND_STEP_CLIMB too — otherwise a full-height solid
-    // (e.g. a ~1-unit doorway post) whose top merely happens to land within
-    // climbing range of the player's current feet gets waved through
-    // entirely, even though its base runs all the way to the ground.
-    if (boxH <= LAND_STEP_CLIMB && playerBottom >= topZ - LAND_STEP_CLIMB) continue;
-    // Vertical overlap with skin
-    if (playerTop <= bottomZ + COLLISION_SKIN || playerBottom >= topZ - COLLISION_SKIN) {
-      continue;
-    }
 
+    // Horizontal footprint test up front — used by both the auto-step and
+    // the wall-block branches below.
     const halfW = platform.width / 2 + radius;
     const halfD = platform.depth / 2 + radius;
     const yaw = platform.rotYaw || 0;
     const { lx, ly } = toPadLocal(x, y, platform.x, platform.y, yaw);
     if (Math.abs(lx) >= halfW || Math.abs(ly) >= halfD) continue;
+
+    // Auto-step: a solid short enough to count as a curb/step (<=
+    // LAND_STEP_CLIMB, the same threshold the sim already uses for
+    // climbing/landing) AND whose top the player's feet are already within
+    // climbing range of gets walked straight up onto instead of forcing a
+    // jump — ordinary step-up behavior for a slab, a low crate, a knee-high
+    // block. Lifting z directly here (not just skipping the block and
+    // waiting for findSupportPlatform to notice) matters because that
+    // function prefers whatever's already "at/under feet" — when a floor
+    // platform extends underneath the step (a block sitting ON a floor,
+    // the normal case), it would keep tracking that lower floor forever and
+    // the player would slide straight through the step's body at floor
+    // height instead of climbing it. Gated on isGrounded so this only ever
+    // fires for grounded, walking-into-it contact — airborne jump arcs /
+    // landings are untouched. Mirrors the same duplicated logic in
+    // src/lib/platformer-sim.ts (Map Play Test).
+    if (isGrounded && boxH <= LAND_STEP_CLIMB && z >= topZ - LAND_STEP_CLIMB) {
+      if (z < topZ) z = topZ;
+      continue;
+    }
+
+    const playerBottom = z;
+    const playerTop = z + height;
+    // Vertical overlap with skin
+    if (playerTop <= bottomZ + COLLISION_SKIN || playerBottom >= topZ - COLLISION_SKIN) {
+      continue;
+    }
 
     // Push out along the shallowest local axis, then rotate back to world.
     const pushX = halfW - Math.abs(lx);
@@ -292,5 +310,5 @@ export function resolveSolidCollisions(
     wallNormalY = nWorld.y;
   }
 
-  return { x, y, touchingWall, wallNormalX, wallNormalY };
+  return { x, y, z, touchingWall, wallNormalX, wallNormalY };
 }

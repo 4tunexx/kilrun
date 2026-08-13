@@ -807,6 +807,25 @@ model SoundDefinition {
   /// Original uploaded filename, for display in the admin panel.
   fileName  String   @default("")
   volume    Float    @default(1)
+  /// Crop: offset in ms into the source clip where playback starts/ends.
+  /// null trimEndMs = play to the natural end of the clip.
+  trimStartMs Float?
+  trimEndMs   Float?
+  /// High-pass cutoff (Hz) — attenuates everything BELOW this frequency
+  /// (rumble/hum). null/0 = no low-cut filtering.
+  lowCutHz    Float?
+  /// Low-pass cutoff (Hz) — attenuates everything ABOVE this frequency
+  /// (hiss/harshness). null/0 = no high-cut filtering.
+  highCutHz   Float?
+  /// Low-shelf gain in dB applied under ~200Hz. Positive boosts bass,
+  /// negative cuts it. null/0 = no change.
+  bassGain    Float?
+  /// High-shelf gain in dB applied above ~4kHz. Positive boosts treble,
+  /// negative cuts it. null/0 = no change.
+  trebleGain  Float?
+  /// Static noise gate threshold in dBFS — samples quieter than this (after
+  /// the filters above) are silenced to clean up upload hiss/hum. null = off.
+  noiseGateDb Float?
   updatedAt DateTime @updatedAt
 }
 

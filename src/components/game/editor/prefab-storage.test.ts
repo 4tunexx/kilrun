@@ -300,6 +300,109 @@ describe('mapDocToSimPlatforms', () => {
     expect(pads[0].height ?? 0).toBeGreaterThan(0.35);
   });
 
+  it('a short custom-model solid prop stands flush and blocks sideways (no floating, no walk-through)', () => {
+    // Regression: a "slab" dragged in from the model/prefab library — real
+    // content, not a Kenney catalog name, so `model` never matches the
+    // 'floor'/'wall'/'platform' substring heuristics. Material defaults to
+    // 'solid'. Its measured mesh is genuinely short (0.22m), which used to
+    // force height up to a 1.0m/0.8m floor (topZ way above the visible
+    // mesh — "floating") and also made it walk-through in resolveSolids
+    // (any pad with height <= LAND_STEP_CLIMB was always skipped there).
+    const doc = baseDoc([
+      {
+        id: 'slab1',
+        name: 'Custom Slab',
+        kind: 'prop',
+        model: 'https://blob.example/models/model-abc123def456.glb',
+        collisionSize: [1.5, 0.22, 1.5],
+        solid: true,
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads).toHaveLength(1);
+    const pad = pads[0];
+    // topZ must match the real measured mesh top (ty + sizeY), not an
+    // inflated wall/solid-volume floor.
+    expect(pad.z).toBeCloseTo(0.22, 5);
+    // Must NOT be flagged as a walk-over-only pad — a plain solid prop
+    // blocks sideways at any height.
+    expect(pad.topOnly).toBeFalsy();
+  });
+
+  it('a short BAKED mesh-collision prop (the actual Play Test path for model-library props) stands flush', () => {
+    // Regression: map-editor.tsx force-rebakes mesh collision for every
+    // non-Hammer Solid prop with a model before every Play Test entry
+    // (bakeAllSolidMeshCollision), so a dragged-in "slab" almost always
+    // collides via its meshCollisionPads (mesh-voxelize.ts output), NOT the
+    // plain entityToPad AABB path covered by the test above. That baked
+    // path had its OWN independent height-floor bug: localPadsToSimPads
+    // used to floor a solid pad's half-height to a minimum of 0.2 (full
+    // 0.4m) specifically so resolveSolids' old height<=0.35 walk-through
+    // check wouldn't skip it — inflating a real 0.22m-tall slab's standing
+    // surface by ~9cm. Now that resolveSolids keys off an explicit topOnly
+    // flag instead of height, that floor is gone.
+    const doc = baseDoc([
+      {
+        id: 'baked1',
+        name: 'Baked Slab',
+        kind: 'prop',
+        model: 'https://blob.example/models/model-def456abc123.glb',
+        solid: true,
+        collideMaterial: 'solid',
+        // A single voxel box spanning the full 0.22m-tall mesh, bottom-
+        // aligned per plantLocalFeet (cy = half the true height).
+        meshCollisionPads: [{ cx: 0, cy: 0.11, cz: 0, hx: 0.75, hy: 0.11, hz: 0.75 }],
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads).toHaveLength(1);
+    // Old floor put this at 0.31 (0.2 half-height, doubled). Real top is
+    // 0.22 — allow a couple cm for the (now much smaller) seam skin only.
+    expect(pads[0].z).toBeLessThan(0.24);
+    expect(pads[0].z).toBeGreaterThan(0.2);
+    expect(pads[0].topOnly).toBeFalsy();
+  });
+
+  it('keeps floor/stair/ramp pads explicitly topOnly so they stay walkable', () => {
+    const doc = baseDoc([
+      {
+        id: 'floor1',
+        name: 'Floor',
+        kind: 'prop',
+        model: 'floor-square',
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [2, 1, 2],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    const floor = pads.find((p) => p.height !== undefined && p.height <= 0.35);
+    expect(floor?.topOnly).toBe(true);
+
+    const stairPads = stairEntityToSimPads({
+      id: 'stairs1',
+      name: 'Stairs',
+      kind: 'prop',
+      model: 'stairs',
+      collisionSize: [2, 3, 4],
+      layerId: 'l1',
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+    } as MapDocument['entities'][number]);
+    expect(stairPads.length).toBeGreaterThan(0);
+    for (const p of stairPads) expect(p.topOnly).toBe(true);
+  });
+
   it('exports jump pads with boost', () => {
     const doc = baseDoc([
       {

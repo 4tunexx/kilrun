@@ -19,8 +19,8 @@ export const runtime = 'nodejs';
 export async function GET() {
   try {
     const rows = await loadSoundDefinitions();
-    const sounds: Record<string, { fileUrl: string; volume: number; fileName: string }> = {};
-    for (const r of rows) sounds[r.eventKey] = { fileUrl: r.fileUrl, volume: r.volume, fileName: r.fileName };
+    const sounds: Record<string, (typeof rows)[number]> = {};
+    for (const r of rows) sounds[r.eventKey] = r;
     return NextResponse.json({ ok: true, sounds });
   } catch (err) {
     console.error('[api/admin/sound-definitions GET]', err);
@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Sound file too large (max ~5MB)' }, { status: 400 });
   }
   const volume = Math.max(0, Math.min(1, Number(form.get('volume')) || 1));
+  const fx = fxFromFormData(form);
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const contentType = isWav ? 'audio/wav' : 'audio/mpeg';
@@ -75,28 +76,66 @@ export async function POST(req: NextRequest) {
 
   await prisma.soundDefinition.upsert({
     where: { eventKey },
-    create: { eventKey, fileUrl, fileName: file.name, volume },
-    update: { fileUrl, fileName: file.name, volume },
+    create: { eventKey, fileUrl, fileName: file.name, volume, ...fx },
+    // A replace upload swaps the source clip out from under any previously
+    // tuned crop/EQ — those offsets/filters were fit to the OLD audio, so
+    // reset them rather than silently re-applying stale settings to new
+    // (likely differently-timed) content.
+    update: { fileUrl, fileName: file.name, volume, ...resetFx() },
   });
   invalidateSoundDefinitionsCache();
   return NextResponse.json({ ok: true, eventKey, fileUrl });
 }
 
-/** Update just the volume for an already-bound event. */
+const FX_KEYS = ['trimStartMs', 'trimEndMs', 'lowCutHz', 'highCutHz', 'bassGain', 'trebleGain', 'noiseGateDb'] as const;
+type FxKey = (typeof FX_KEYS)[number];
+type FxUpdate = Partial<Record<FxKey, number | null>>;
+
+function resetFx(): FxUpdate {
+  const out: FxUpdate = {};
+  for (const k of FX_KEYS) out[k] = null;
+  return out;
+}
+
+function fxFromFormData(form: FormData): FxUpdate {
+  const out: FxUpdate = {};
+  for (const k of FX_KEYS) {
+    const raw = form.get(k);
+    if (raw == null || raw === '') continue;
+    const n = Number(raw);
+    if (Number.isFinite(n)) out[k] = n;
+  }
+  return out;
+}
+
+/** Update volume and/or crop/EQ/noise-gate fields for an already-bound event.
+ * Only keys present in the JSON body are touched — `null` clears a filter,
+ * an absent key leaves it unchanged. */
 export async function PATCH(req: NextRequest) {
   const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
 
-  const body = await req.json().catch(() => null);
-  const eventKey = String((body as Record<string, unknown> | null)?.eventKey ?? '').trim();
+  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const eventKey = String(body?.eventKey ?? '').trim();
   if (!getSoundEventDef(eventKey)) {
     return NextResponse.json({ ok: false, error: 'Unknown event key' }, { status: 400 });
   }
   const existing = await prisma.soundDefinition.findUnique({ where: { eventKey } });
   if (!existing) return NextResponse.json({ ok: false, error: 'No sound bound to this event yet' }, { status: 404 });
 
-  const volume = Math.max(0, Math.min(1, Number((body as Record<string, unknown>).volume) || 0));
-  await prisma.soundDefinition.update({ where: { eventKey }, data: { volume } });
+  const data: FxUpdate & { volume?: number } = {};
+  if (body && Object.prototype.hasOwnProperty.call(body, 'volume')) {
+    data.volume = Math.max(0, Math.min(1, Number(body.volume) || 0));
+  }
+  for (const k of FX_KEYS) {
+    if (!body || !Object.prototype.hasOwnProperty.call(body, k)) continue;
+    const raw = body[k];
+    data[k] = raw == null ? null : Number(raw);
+  }
+  if (Object.keys(data).length === 0) {
+    return NextResponse.json({ ok: false, error: 'No fields to update' }, { status: 400 });
+  }
+  await prisma.soundDefinition.update({ where: { eventKey }, data });
   invalidateSoundDefinitionsCache();
   return NextResponse.json({ ok: true });
 }

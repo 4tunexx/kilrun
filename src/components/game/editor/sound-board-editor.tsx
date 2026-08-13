@@ -6,6 +6,11 @@
  * the full catalog). Lives in the map editor tab bar alongside Power Editor
  * / Weapon Editor, same "own REST API, not the map document" pattern as
  * Power Editor (sounds are account-wide, not per-map).
+ *
+ * Volume plus a full filter rack (low-cut, high-cut, bass, treble, noise
+ * gate) and crop (trim start/end) — all applied client-side via the Web
+ * Audio pipeline in src/lib/audio-fx.ts, the same one gameplay playback
+ * (soundboard.ts) uses, so Preview here always matches what plays in-game.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -13,11 +18,44 @@ import { X, Volume2, Upload, Play, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { SOUND_EVENTS, getSoundEventCategories } from '@shared/sound-events';
+import { getAudioContext, getProcessedBuffer, playProcessedBuffer, clearProcessedAudioCache, type SoundFxParams } from '@/lib/audio-fx';
 
-interface SoundEntry {
+interface SoundEntry extends SoundFxParams {
   fileUrl: string;
   volume: number;
   fileName: string;
+}
+
+interface FxDraft {
+  lowCutHz: number;
+  highCutHz: number;
+  bassGain: number;
+  trebleGain: number;
+  noiseGateDb: number;
+  trimStartMs: number;
+  trimEndMs: number | null;
+}
+
+const FX_DEFAULT: FxDraft = {
+  lowCutHz: 0,
+  highCutHz: 0,
+  bassGain: 0,
+  trebleGain: 0,
+  noiseGateDb: 0,
+  trimStartMs: 0,
+  trimEndMs: null,
+};
+
+function fxFromBound(bound: SoundEntry | undefined): FxDraft {
+  return {
+    lowCutHz: bound?.lowCutHz ?? 0,
+    highCutHz: bound?.highCutHz ?? 0,
+    bassGain: bound?.bassGain ?? 0,
+    trebleGain: bound?.trebleGain ?? 0,
+    noiseGateDb: bound?.noiseGateDb ?? 0,
+    trimStartMs: bound?.trimStartMs ?? 0,
+    trimEndMs: bound?.trimEndMs ?? null,
+  };
 }
 
 export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; embedded?: boolean }) {
@@ -27,8 +65,9 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
   const [selectedKey, setSelectedKey] = useState<string>(SOUND_EVENTS[0].key);
   const [uploading, setUploading] = useState(false);
   const [volumeDraft, setVolumeDraft] = useState(1);
+  const [fxDraft, setFxDraft] = useState<FxDraft>(FX_DEFAULT);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const previewRef = useRef<HTMLAudioElement | null>(null);
+  const previewSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,7 +92,11 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
 
   useEffect(() => {
     setVolumeDraft(bound?.volume ?? 1);
-  }, [selectedKey, bound?.volume]);
+    setFxDraft(fxFromBound(bound));
+    // Selecting a different event (or a fresh upload replacing this one's
+    // clip) invalidates any cached processed buffer for the OLD file at
+    // this key — cheap to just drop it, decoding is lazy on next play.
+  }, [selectedKey, bound]);
 
   const handleUpload = async (file: File) => {
     setUploading(true);
@@ -68,6 +111,7 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
         toast({ title: data.error ?? 'Upload failed', variant: 'destructive' });
         return;
       }
+      if (bound?.fileUrl) clearProcessedAudioCache(bound.fileUrl);
       toast({ title: 'Sound uploaded', description: selectedDef.label });
       await load();
     } catch {
@@ -77,35 +121,48 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
     }
   };
 
-  // Dragging the slider fires onChange on every tick — without a debounce
+  // Dragging a slider fires onChange on every tick — without a debounce
   // this sent one PATCH per pixel of drag, and since each request was
   // fire-and-forget with no sequencing, an earlier request that happened to
   // resolve last could overwrite a later value (last *response* wins instead
   // of last *drag position*). Debounce the network write and use a sequence
   // number so a stale response is ignored once a newer request has gone out.
-  const volumeCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const volumeCommitSeq = useRef(0);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commitSeq = useRef(0);
+
+  const commitPatch = useCallback(
+    (patch: Record<string, number | null>, localMerge: Partial<SoundEntry>) => {
+      if (!bound) return;
+      if (commitTimer.current) clearTimeout(commitTimer.current);
+      const seq = ++commitSeq.current;
+      commitTimer.current = setTimeout(async () => {
+        try {
+          const res = await fetch('/api/admin/sound-definitions', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ eventKey: selectedKey, ...patch }),
+          });
+          const data = await res.json();
+          if (data.ok && seq === commitSeq.current) {
+            clearProcessedAudioCache(bound.fileUrl);
+            setSounds((s) => ({ ...s, [selectedKey]: { ...s[selectedKey], ...localMerge } }));
+          }
+        } catch {
+          // Best-effort — a failed tweak isn't worth a toast.
+        }
+      }, 250);
+    },
+    [bound, selectedKey]
+  );
 
   const handleVolumeCommit = (v: number) => {
     setVolumeDraft(v);
-    if (!bound) return;
-    if (volumeCommitTimer.current) clearTimeout(volumeCommitTimer.current);
-    const seq = ++volumeCommitSeq.current;
-    volumeCommitTimer.current = setTimeout(async () => {
-      try {
-        const res = await fetch('/api/admin/sound-definitions', {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ eventKey: selectedKey, volume: v }),
-        });
-        const data = await res.json();
-        if (data.ok && seq === volumeCommitSeq.current) {
-          setSounds((s) => ({ ...s, [selectedKey]: { ...s[selectedKey], volume: v } }));
-        }
-      } catch {
-        // Best-effort — a failed volume tweak isn't worth a toast.
-      }
-    }, 250);
+    commitPatch({ volume: v }, { volume: v });
+  };
+
+  const handleFxCommit = <K extends keyof FxDraft>(key: K, value: FxDraft[K]) => {
+    setFxDraft((d) => ({ ...d, [key]: value }));
+    commitPatch({ [key]: value } as Record<string, number | null>, { [key]: value } as Partial<SoundEntry>);
   };
 
   const handleRemove = async () => {
@@ -120,6 +177,7 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
         toast({ title: data.error ?? 'Remove failed', variant: 'destructive' });
         return;
       }
+      clearProcessedAudioCache(bound.fileUrl);
       toast({ title: 'Sound removed', description: selectedDef.label });
       await load();
     } catch {
@@ -127,15 +185,23 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
     }
   };
 
-  const handlePreview = () => {
+  const handlePreview = async () => {
     if (!bound?.fileUrl) return;
-    if (!previewRef.current) previewRef.current = new Audio();
-    previewRef.current.src = bound.fileUrl;
-    previewRef.current.volume = bound.volume;
-    void previewRef.current.play().catch(() => {});
+    try {
+      const ctx = getAudioContext();
+      if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
+      previewSourceRef.current?.stop();
+      const buffer = await getProcessedBuffer(bound.fileUrl, bound);
+      previewSourceRef.current = playProcessedBuffer(ctx, buffer, bound.volume);
+    } catch {
+      // Autoplay policy before first user gesture, or decode failure — ignore.
+    }
   };
 
   const boundCount = Object.keys(sounds).filter((k) => sounds[k]?.fileUrl).length;
+
+  const trimStartSec = fxDraft.trimStartMs / 1000;
+  const trimEndSec = fxDraft.trimEndMs != null ? fxDraft.trimEndMs / 1000 : null;
 
   return (
     <div
@@ -248,6 +314,103 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
               </div>
             </div>
 
+            {/* --- Filter rack: crop + EQ + noise gate, only meaningful once a clip is bound --- */}
+            <div className={`space-y-3 pt-1 ${bound?.fileUrl ? '' : 'opacity-40 pointer-events-none'}`}>
+              <p className="text-[10px] font-black text-white/40 uppercase tracking-wide border-t border-white/10 pt-3">
+                Crop &amp; EQ
+              </p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-white/50 uppercase tracking-wide">Trim start (s)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.05}
+                    value={trimStartSec.toFixed(2)}
+                    onChange={(e) => {
+                      const sec = Math.max(0, Number(e.target.value) || 0);
+                      handleFxCommit('trimStartMs', Math.round(sec * 1000));
+                    }}
+                    className="w-full mt-1 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-white/50 uppercase tracking-wide">Trim end (s)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.05}
+                    placeholder="end of clip"
+                    value={trimEndSec != null ? trimEndSec.toFixed(2) : ''}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const ms = raw === '' ? null : Math.max(0, Math.round((Number(raw) || 0) * 1000));
+                      handleFxCommit('trimEndMs', ms);
+                    }}
+                    className="w-full mt-1 rounded bg-black/30 border border-white/10 px-2 py-1 text-xs text-white placeholder:text-white/25"
+                  />
+                </div>
+              </div>
+
+              <FxSlider
+                label="Low cut"
+                hint="removes rumble/hum below this frequency"
+                value={fxDraft.lowCutHz}
+                min={0}
+                max={1000}
+                step={10}
+                unit="Hz"
+                offValue={0}
+                onCommit={(v) => handleFxCommit('lowCutHz', v)}
+              />
+              <FxSlider
+                label="High cut"
+                hint="removes hiss/harshness above this frequency"
+                value={fxDraft.highCutHz}
+                min={0}
+                max={20000}
+                step={100}
+                unit="Hz"
+                offValue={0}
+                onCommit={(v) => handleFxCommit('highCutHz', v)}
+              />
+              <FxSlider
+                label="Bass"
+                hint="low-shelf gain (~200Hz)"
+                value={fxDraft.bassGain}
+                min={-24}
+                max={24}
+                step={1}
+                unit="dB"
+                offValue={0}
+                onCommit={(v) => handleFxCommit('bassGain', v)}
+              />
+              <FxSlider
+                label="Treble"
+                hint="high-shelf gain (~4kHz)"
+                value={fxDraft.trebleGain}
+                min={-24}
+                max={24}
+                step={1}
+                unit="dB"
+                offValue={0}
+                onCommit={(v) => handleFxCommit('trebleGain', v)}
+              />
+              <FxSlider
+                label="Noise gate"
+                hint="silences anything quieter than this threshold"
+                value={fxDraft.noiseGateDb}
+                min={-60}
+                max={0}
+                step={1}
+                unit="dB"
+                offValue={0}
+                offLabel="Off"
+                onCommit={(v) => handleFxCommit('noiseGateDb', v === 0 ? 0 : v)}
+              />
+            </div>
+
             <div>
               <input
                 ref={fileInputRef}
@@ -269,10 +432,61 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
                 <Upload className="w-3.5 h-3.5" />
                 {uploading ? 'Uploading…' : bound?.fileUrl ? 'Replace .wav / .mp3' : 'Upload .wav / .mp3'}
               </Button>
-              <p className="text-[9px] text-white/30 mt-1.5">Max ~5MB. .wav or .mp3 only.</p>
+              <p className="text-[9px] text-white/30 mt-1.5">
+                Max ~5MB. .wav or .mp3 only. Replacing a clip resets crop/EQ below.
+              </p>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** One filter-rack row: a slider that reads as "Off" at `offValue` (skipped
+ * entirely by the audio pipeline — see hasAnyFx in src/lib/audio-fx.ts). */
+function FxSlider({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  step,
+  unit,
+  offValue,
+  offLabel = 'Off',
+  onCommit,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+  offValue: number;
+  offLabel?: string;
+  onCommit: (v: number) => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <label className="text-[10px] font-bold text-white/50 uppercase tracking-wide">{label}</label>
+        <span className="text-[9px] text-white/30">{hint}</span>
+      </div>
+      <div className="flex items-center gap-2 mt-1">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onCommit(Number(e.target.value))}
+          className="flex-1"
+        />
+        <span className="text-xs text-white/60 tabular-nums w-14 text-right">
+          {value === offValue ? offLabel : `${value > 0 && unit === 'dB' ? '+' : ''}${value}${unit}`}
+        </span>
       </div>
     </div>
   );

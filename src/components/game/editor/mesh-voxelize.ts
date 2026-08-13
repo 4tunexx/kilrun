@@ -167,11 +167,21 @@ export function voxelizeGeometryToPads(
   // just touching. Also floor each half-extent instead of dropping thin
   // slivers outright — a thin sliver dropped from bookkeeping is a real
   // hole in the collision shape, not a harmless rounding artifact.
+  //
+  // Y gets a much smaller skin than X/Z: the topmost voxel layer's +Y face
+  // IS the surface the player stands on, so padding it the same 0.03 as the
+  // horizontal seam margin directly floats every baked prop's standing
+  // height by 3cm (visible, and it stacked with a since-removed height
+  // floor in localPadsToSimPads to make short baked props float noticeably
+  // more). Y-skin only actually needs to close seams BETWEEN vertically
+  // stacked voxel layers, which tolerate a much smaller margin than the
+  // horizontal seam case.
   const SKIN = 0.03;
+  const Y_SKIN = 0.01;
   const pads: CsgLocalPad[] = [];
   for (const b of boxes) {
     const hx = Math.max(0.02, ((b.x1 - b.x0) * cellX) / 2) + SKIN;
-    const hy = Math.max(0.02, ((b.y1 - b.y0) * cellY) / 2) + SKIN;
+    const hy = Math.max(0.02, ((b.y1 - b.y0) * cellY) / 2) + Y_SKIN;
     const hz = Math.max(0.02, ((b.z1 - b.z0) * cellZ) / 2) + SKIN;
     pads.push({
       cx: box.min.x + b.x0 * cellX + ((b.x1 - b.x0) * cellX) / 2,

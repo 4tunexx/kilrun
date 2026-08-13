@@ -24,6 +24,7 @@ import {
   MAX_FALL_SPEED,
   MAX_GROUND_SPEED,
   MELEE_MOVE_MULT,
+  PLAYER_HEIGHT,
   PLAYER_RADIUS,
   SPRINT_MULTIPLIER,
   TRAPPER_MOVE_SPEED,
@@ -493,10 +494,14 @@ export function applyMovement(
   const beforePushY = player.y;
   const pushed = resolveSolidCollisions(
     { x: player.x, y: player.y, z: player.z },
-    platforms
+    platforms,
+    PLAYER_RADIUS,
+    PLAYER_HEIGHT,
+    player.isGrounded
   );
   player.x = clamp(pushed.x, bounds.minX + PLAYER_RADIUS, bounds.maxX - PLAYER_RADIUS);
   player.y = clamp(pushed.y, bounds.minY + PLAYER_RADIUS, bounds.maxY - PLAYER_RADIUS);
+  player.z = pushed.z;
   if (Math.abs(player.x - beforePushX) > 1e-5) scratch.velX = 0;
   if (Math.abs(player.y - beforePushY) > 1e-5) scratch.velY = 0;
   scratch.touchingWallX = pushed.touchingWall ? pushed.wallNormalX : 0;

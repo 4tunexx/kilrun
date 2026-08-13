@@ -330,7 +330,7 @@ export class CompetitiveRoom extends Room<RoomState> {
 
     this.state.platforms.push(
       ...createFromBlueprints([
-        { x: 0, y: 0, z: 0, width: 18, depth: 22, kind: 'solid', height: 0.25 },
+        { x: 0, y: 0, z: 0, width: 18, depth: 22, kind: 'solid', height: 0.25, topOnly: true },
       ])
     );
     // Default arena is centered at origin — Deathrun's [0,W]×[0,H] clamp would

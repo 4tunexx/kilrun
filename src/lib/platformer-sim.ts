@@ -56,6 +56,12 @@ export interface SimPad {
   /** Yaw in radians (sim XY) — mirrors server/src/sim/platforms.ts OBB support. */
   rotYaw?: number;
   kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor' | 'water' | 'sand';
+  /** True for pads meant to be walked over, never blocked against sideways —
+   * floors, stair/ramp treads, jump pads, ice/conveyor/sand. A pad WITHOUT
+   * this flag (any regular solid prop: wall, crate, slab, whatever) always
+   * blocks horizontal movement in resolveSolids, no matter how short it is —
+   * see the comment there for why height alone used to decide this. */
+  topOnly?: boolean;
   boost?: number;
   conveyorSpeed?: number;
   conveyorDirX?: number;
@@ -295,32 +301,52 @@ function tryLedgeAssist(
 
 function resolveSolids(body: SimBody, pads: SimPad[]) {
   let { x, y } = body;
-  const playerBottom = body.z;
-  const playerTop = body.z + PLAYER_HEIGHT;
+  let z = body.z;
   let touchingWall = false;
   let wallNormalX = 0;
   let wallNormalY = 0;
   for (const pad of pads) {
+    // Walk-over pads (floors, stair/ramp treads, jump pads, ice/conveyor/
+    // sand) never block sideways — that's what makes them walkable at all.
+    if (pad.topOnly) continue;
     const boxH = pad.height ?? 0.2;
-    if (boxH <= 0.35) continue;
     const topZ = pad.z;
     const bottomZ = topZ - boxH;
-    // Step-up allowance: a ledge within LAND_STEP_CLIMB of the player's feet
-    // is a walkable step, not a wall (fixes Play Test matching the live
-    // "stuck at ramp-to-platform seam" bug). This only makes sense for a
-    // genuinely short pad (boxH <= LAND_STEP_CLIMB) — without that guard, a
-    // full-height solid whose top merely happens to land within climbing
-    // range of the player's current feet (e.g. a ~1-unit doorway post while
-    // standing on a raised floor) got waved through as if it were a curb,
-    // even though its base runs all the way to the ground. Mirrors the same
-    // duplicated logic in server/src/sim/platforms.ts.
-    if (boxH <= LAND_STEP_CLIMB && playerBottom >= topZ - LAND_STEP_CLIMB) continue;
-    if (playerTop <= bottomZ + SKIN || playerBottom >= topZ - SKIN) continue;
+    // Horizontal footprint test up front (used by both the auto-step and
+    // the wall-block branches below) — a pad the player isn't even near has
+    // no business touching their Z either way.
     const halfW = pad.width / 2 + PLAYER_RADIUS;
     const halfD = pad.depth / 2 + PLAYER_RADIUS;
     const yaw = pad.rotYaw || 0;
     const { lx, ly } = toPadLocal(x, y, pad.x, pad.y, yaw);
     if (Math.abs(lx) >= halfW || Math.abs(ly) >= halfD) continue;
+    // Auto-step: a solid short enough to count as a curb/step (<=
+    // LAND_STEP_CLIMB, the same threshold the rest of the sim already uses
+    // for climbing/landing) AND whose top the player's feet are already
+    // within climbing range of gets walked straight up onto instead of
+    // forcing a jump — ordinary step-up behavior for a slab, a low crate, a
+    // knee-high block. Lifting z directly here (not just skipping the block
+    // and waiting for findSupport to notice) matters because findSupport
+    // prefers whatever's already "at/under feet" — when a floor pad extends
+    // underneath the step (the normal case: a block sitting ON a floor),
+    // findSupport would keep tracking that lower floor forever and the
+    // player would slide straight through the step's body at floor height
+    // instead of climbing it. The z-proximity check keeps this from
+    // firing on a short-but-elevated ledge (e.g. a windowsill) the player
+    // isn't actually standing near yet — that still blocks like a wall
+    // until they're within climbing range. A genuinely tall wall (boxH >
+    // LAND_STEP_CLIMB) always blocks and must be jumped. Gated on
+    // body.isGrounded so this only ever fires for grounded, walking-into-it
+    // contact — airborne jump arcs / landings are untouched, handled
+    // entirely by the existing findSupport-based landing logic below.
+    // Mirrors the same duplicated logic in server/src/sim/platforms.ts.
+    if (body.isGrounded && boxH <= LAND_STEP_CLIMB && z >= topZ - LAND_STEP_CLIMB) {
+      if (z < topZ) z = topZ;
+      continue;
+    }
+    const playerBottom = z;
+    const playerTop = z + PLAYER_HEIGHT;
+    if (playerTop <= bottomZ + SKIN || playerBottom >= topZ - SKIN) continue;
     const pushX = halfW - Math.abs(lx);
     const pushY = halfD - Math.abs(ly);
     touchingWall = true;
@@ -344,6 +370,7 @@ function resolveSolids(body: SimBody, pads: SimPad[]) {
     wallNormalX = nWorld.x;
     wallNormalY = nWorld.y;
   }
+  body.z = z;
   return { x, y, touchingWall, wallNormalX, wallNormalY };
 }
 

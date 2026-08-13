@@ -326,7 +326,7 @@ export class HordeRoom extends Room<RoomState> {
     // Small default arena until MAIN map loads
     this.state.platforms.push(
       ...createFromBlueprints([
-        { x: 0, y: 0, z: 0, width: 14, depth: 14, kind: 'solid', height: 0.25 },
+        { x: 0, y: 0, z: 0, width: 14, depth: 14, kind: 'solid', height: 0.25, topOnly: true },
       ])
     );
     this.playerSpawns = [{ x: 0, y: 0, z: 0.5 }];

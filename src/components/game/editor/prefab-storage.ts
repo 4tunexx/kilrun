@@ -220,6 +220,10 @@ export interface SimPlatformBlueprint {
   width: number;
   depth: number;
   kind?: SimPlatformKind;
+  /** True for pads meant to be walked over, never blocked against sideways
+   * (floors, stair/ramp treads, jump pads, ice/conveyor/sand) — see the
+   * matching field/comment on SimPad in src/lib/platformer-sim.ts. */
+  topOnly?: boolean;
   boost?: number;
   height?: number;
   conveyorSpeed?: number;
@@ -327,15 +331,15 @@ export interface SimWorldBounds {
 
 function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const [tx, ty, tz] = e.position;
-  // Prefer measured GLB size, then catalog footprint, then legacy scale*2 heuristic.
-  const foot =
-    e.collisionSize ??
-    modelFootprint(e.model) ??
-    ([
-      Math.max(1, Math.abs(e.scale[0]) * 2),
-      Math.max(0.2, Math.abs(e.scale[1]) * 2),
-      Math.max(1, Math.abs(e.scale[2]) * 2),
-    ] as [number, number, number]);
+  // Prefer measured GLB size, then catalog footprint, then a flat 2-unit
+  // (Kenney prototype grid unit) legacy guess. `foot` is always an UNSCALED
+  // local size — it gets multiplied by e.scale exactly once below. The old
+  // fallback baked `* Math.abs(e.scale)` into the guess itself and then this
+  // same multiplication happened again on the next line, squaring the
+  // effective scale (e.g. a prop scaled 3x got a collision box 9x too big —
+  // "massive gap walking into any solid" for any custom/model-library prefab
+  // that hadn't finished its async GLB measurement yet).
+  const foot = e.collisionSize ?? modelFootprint(e.model) ?? ([2, 2, 2] as [number, number, number]);
   const rawX = Math.abs(foot[0] * Math.abs(e.scale[0]));
   const rawY = Math.abs(foot[1] * Math.abs(e.scale[1]));
   const rawZ = Math.abs(foot[2] * Math.abs(e.scale[2]));
@@ -354,11 +358,6 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
 
   const model = e.model ?? '';
   const isHammerSolid = isHammerSolidEntity(e);
-  // Door used to always count as a solid volume here regardless of Material
-  // — harmless now that the outer export gate (entityExportsAsPlatform)
-  // correctly excludes walkthrough doors before reaching this function, but
-  // fixed so this stays correct if entityToPad is ever called directly.
-  const wantsSolidVolume = mat === 'solid' || e.solid === true;
   // Hammer++ / box solids are authoring volumes — always full collision when marked
   // solid (even short blocks). Do NOT force top-only for sizeY < 0.6.
   const topOnly =
@@ -374,6 +373,12 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
       model.includes('floor') ||
       model.startsWith('platform'));
   // Water keeps full volume so deep pools can swim; floors stay thin tops.
+  // NOTE: this intentionally does NOT include wantsSolidVolume — every
+  // placed prop defaults to Material 'solid' (resolveCollideMaterial), so
+  // that used to make wallLike true for virtually everything (crates, slabs,
+  // decor), forcing a 1.0m-tall collision box on objects with no "wall"
+  // shape at all. wallLike now only fires for things that are actually
+  // wall-shaped by name/kind or genuinely tall by measurement.
   const wallLike =
     !topOnly &&
     (isHammerSolid ||
@@ -381,8 +386,7 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
       model.startsWith('column') ||
       model.includes('door') ||
       e.kind === 'door' ||
-      rawY >= 1.0 ||
-      wantsSolidVolume);
+      rawY >= 1.0);
   // Floors keep a wider min footprint so tiny pads stay standable. Walls/solids
   // must keep authored thickness — inflating thin walls (e.g. 0.25 → 0.35) is
   // what made Play Test stop a full tile short of the visible mesh.
@@ -400,6 +404,17 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const sizeZ = Math.max(minXZ, rawZ) + (topOnly ? 0 : SEAM_SKIN * 2);
   // True OBB yaw on the server — keep local extents (do not expand AABB).
   const yaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
+  // `height` is ONLY the blocking volume's downward extent (topZ - height =
+  // bottomZ) — it decides whether a short prop counts as a climbable curb
+  // (<=LAND_STEP_CLIMB) or a full wall in resolveSolids' step-up check. It
+  // must NEVER move topZ (the surface the player actually stands/glues to):
+  // this used to feed straight into topZ below, so any prop that fell into
+  // the wallLike/wantsSolidVolume buckets got its *visible standing surface*
+  // shoved up to floor+1.0m / floor+0.8m regardless of its real measured
+  // height — e.g. a 0.2m-tall slab reported flush at z=floor+1.0, a full
+  // meter above the mesh you can see. That's the "floating on top of
+  // prefabs" + "massive gap walking into solids" bug: the physics thought it
+  // was flush (Δz-top=0.00) against a phantom box the eye can't see.
   const height =
     mat === 'water'
       ? Math.max(0.5, sizeY)
@@ -410,22 +425,15 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
             Math.max(0.4, sizeY)
           : wallLike
             ? Math.max(1.0, sizeY)
-            : wantsSolidVolume
-              ? Math.max(0.8, sizeY)
-              : Math.max(0.35, sizeY * 0.5);
-  // All catalog models are bottom-aligned at position.y (plantLocalFeet in
-  // editor-mesh.ts shifts every loaded mesh so its AABB base sits at y=0
-  // relative to the entity) — pad top must be feet + height, not feet +
-  // height/2. Using height/2 here silently shifted every wall/solid
-  // collision box down by half its height, so the top half of the visible
-  // mesh had no collision and the step-up-ledge allowance in resolveSolids
-  // (platformer-sim.ts) misread the whole wall as a climbable curb near the
-  // player's feet — the wall was skipped entirely instead of blocking.
-  const topZ = isHammerSolid
-    ? ty + sizeY
-    : topOnly && mat !== 'water'
-      ? ty + sizeY
-      : ty + height;
+            : Math.max(0.12, sizeY);
+  // topZ is always the real, measured top of the mesh (ty + sizeY) — matching
+  // exactly what the player sees rendered — except for water, whose surface
+  // is deliberately allowed to sit above a thin pool floor so the space is
+  // actually swimmable. All catalog models are bottom-aligned at position.y
+  // (plantLocalFeet in editor-mesh.ts shifts every loaded mesh so its AABB
+  // base sits at y=0 relative to the entity), so ty + sizeY is exactly the
+  // visible top face for every kind — solid, wall, hammer, or top-only.
+  const topZ = mat === 'water' ? ty + height : ty + sizeY;
 
   const dirSimX = Math.cos(yaw);
   const dirSimY = Math.sin(yaw);
@@ -444,6 +452,7 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
     width: sizeZ,
     depth: sizeX,
     kind,
+    topOnly: topOnly || undefined,
     boost: jump ? Math.max(4, e.jumpPad?.boost ?? 14) : undefined,
     height,
     conveyorSpeed: conveyor ? Math.max(0.5, e.surface?.conveyorSpeed ?? 4) : undefined,
@@ -470,14 +479,10 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
 export function stairEntityToSimPads(stairs: EditorEntity, steps = 18): SimPlatformBlueprint[] {
   const [sx, sy, sz] = stairs.position;
   const yaw = ((stairs.rotation?.[1] ?? 0) * Math.PI) / 180;
+  // `foot` is an unscaled local size, multiplied by stairs.scale exactly
+  // once below — see the matching fix/comment in entityToPad above.
   const foot =
-    stairs.collisionSize ??
-    modelFootprint(stairs.model) ??
-    ([
-      Math.max(1, Math.abs(stairs.scale[0]) * 2),
-      Math.max(0.8, Math.abs(stairs.scale[1]) * 2),
-      Math.max(1, Math.abs(stairs.scale[2]) * 2),
-    ] as [number, number, number]);
+    stairs.collisionSize ?? modelFootprint(stairs.model) ?? ([2, 2, 2] as [number, number, number]);
   const run = Math.max(1.2, foot[2] * Math.abs(stairs.scale[2]));
   const rise = Math.max(0.6, foot[1] * Math.abs(stairs.scale[1]));
   const width = Math.max(0.8, foot[0] * Math.abs(stairs.scale[0]));
@@ -519,6 +524,10 @@ export function stairEntityToSimPads(stairs: EditorEntity, steps = 18): SimPlatf
       width: worldSizeZ,
       depth: worldSizeX,
       kind,
+      // Each individual step must not block sideways or climbing the
+      // staircase would mean bumping into every riser instead of walking
+      // up — see the topOnly comment on resolveSolids in platformer-sim.ts.
+      topOnly: true,
       height: Math.min(0.35, Math.max(0.18, stepRise * 0.85)),
       // Steps are already yaw-baked into AABB; leave rotYaw 0.
       rotYaw: 0,
@@ -644,6 +653,9 @@ function wedgePrimitiveToSimPads(e: EditorEntity): SimPlatformBlueprint[] {
       width: Math.max(0.4, maxThreeZ - minThreeZ),
       depth: Math.max(0.4, maxThreeX - minThreeX),
       kind,
+      // Sloped surface, not a wall — see the topOnly comment on
+      // resolveSolids in platformer-sim.ts.
+      topOnly: true,
       height: 0.3,
       slopeGradX,
       slopeGradY,
@@ -659,14 +671,9 @@ function wedgePrimitiveToSimPads(e: EditorEntity): SimPlatformBlueprint[] {
  */
 export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBlueprint[] {
   const [ex, ey, ez] = e.position;
-  const foot =
-    e.collisionSize ??
-    modelFootprint(e.model) ??
-    ([
-      Math.max(1, Math.abs(e.scale[0]) * 2),
-      Math.max(0.2, Math.abs(e.scale[1]) * 2),
-      Math.max(1, Math.abs(e.scale[2]) * 2),
-    ] as [number, number, number]);
+  // `foot` is an unscaled local size, multiplied by e.scale exactly once
+  // below — see the matching fix/comment in entityToPad above.
+  const foot = e.collisionSize ?? modelFootprint(e.model) ?? ([2, 2, 2] as [number, number, number]);
   const halfX = Math.max(0.15, (foot[0] * Math.abs(e.scale[0])) / 2);
   const halfY = Math.max(0.06, (foot[1] * Math.abs(e.scale[1])) / 2);
   const halfZ = Math.max(0.15, (foot[2] * Math.abs(e.scale[2])) / 2);
@@ -746,10 +753,10 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
       width: Math.max(0.4, maxThreeZ - minThreeZ),
       depth: Math.max(0.4, maxThreeX - minThreeX),
       kind,
-      // Thin/top-only: a walkable ramp shouldn't also act as a side wall
-      // (that check uses a flat vertical range, which would be wrong for
-      // a sloped surface) — same "thin pad" exemption already used for
-      // ordinary floor pads.
+      // A walkable ramp shouldn't also act as a flat-vertical-range side
+      // wall (resolveSolids' box check would be wrong for a sloped surface)
+      // — see the topOnly comment there.
+      topOnly: true,
       height: 0.3,
       slopeGradX,
       slopeGradY,
@@ -791,12 +798,18 @@ function localPadsToSimPads(e: EditorEntity, pads: CsgLocalPad[]): SimPlatformBl
     // through, so old saved maps get the fix for free.
     const SEAM_SKIN = kind === 'solid' ? 0.03 : 0;
     const hx = Math.max(0.05, p.hx * sx) + SEAM_SKIN;
-    // Side-collision (resolveSolids, platformer-sim.ts) ignores any pad
-    // whose height is <= 0.35 (thin floor slabs are top-only by design).
-    // A baked mesh-collision box for a Solid prop must never end up under
-    // that cutoff, or the player walks straight through it — only floors
-    // (water/ice/sand kinds are always top-only) are allowed to stay thin.
-    const hy = Math.max(kind === 'solid' ? 0.2 : 0.06, p.hy * sy);
+    // Side-collision (resolveSolids, platformer-sim.ts) used to ignore any
+    // pad whose height was <= 0.35 (inferred "thin floor slab, top-only by
+    // design"), so a baked mesh-collision box for a genuinely short Solid
+    // prop (a slab, a low crate) got floored to a minimum 0.4m tall here to
+    // avoid falling under that cutoff — which pushed its top surface up to
+    // half that (0.2m) above the real mesh, "floating" the player standing
+    // on it. resolveSolids now keys off an explicit topOnly flag instead of
+    // height (these baked pads never set it — a baked box is always a real
+    // full-volume solid), so that workaround is gone: just the real
+    // measured half-height, with a tiny floor for degenerate zero-thickness
+    // voxels.
+    const hy = Math.max(0.02, p.hy * sy);
     const hz = Math.max(0.05, p.hz * sz) + SEAM_SKIN;
     return {
       x: wz,

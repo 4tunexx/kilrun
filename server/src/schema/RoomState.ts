@@ -192,6 +192,15 @@ export class PlatformState extends Schema {
   @type('boolean') doorControlled = false;
   /** Door open state — while true, doorControlled platforms are skipped by collision. */
   @type('boolean') open = false;
+  /**
+   * True for pads meant to be walked over, never blocked against sideways —
+   * floors, stair/ramp treads, jump pads, ice/conveyor/sand. false (default)
+   * means a regular solid prop: it always blocks horizontal movement in
+   * resolveSolidCollisions, no matter how short it is — see the comment
+   * there for why inferring this from `height` alone let any short solid
+   * prop become a walk-through auto-step.
+   */
+  @type('boolean') topOnly = false;
 }
 
 /** A hazard that toggles on/off on a fixed interval (or stays on when alwaysActive). */

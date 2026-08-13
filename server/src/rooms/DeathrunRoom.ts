@@ -245,6 +245,7 @@ export class DeathrunRoom extends Room<RoomState> {
           depth: 10,
           kind: 'solid',
           height: 0.25,
+          topOnly: true,
         },
       ])
     );

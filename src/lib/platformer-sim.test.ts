@@ -20,7 +20,7 @@ function groundedBody(over: Partial<SimBody> = {}): SimBody {
   };
 }
 
-const floor: SimPad = { x: 0, y: 0, z: 0, width: 6, depth: 6, kind: 'solid', height: 0.25 };
+const floor: SimPad = { x: 0, y: 0, z: 0, width: 6, depth: 6, kind: 'solid', height: 0.25, topOnly: true };
 
 describe('stepPlatformer (Foundry feel)', () => {
   it('jumps with coyote after walking off a ledge', () => {
@@ -136,8 +136,54 @@ describe('stepPlatformer (Foundry feel)', () => {
     expect(body.x).toBeLessThan(2.5);
   });
 
+  it('auto-steps onto a short solid slab without jumping (curb-height, <= LAND_STEP_CLIMB)', () => {
+    // Regression: a plain Solid prop short enough to count as a step (a
+    // slab, a low crate) must be walkable straight onto, not blocked like a
+    // wall requiring a jump. Only pads explicitly flagged topOnly used to
+    // get this treatment — any other solid, no matter how short, blocked
+    // sideways at every height and forced a jump.
+    const slab: SimPad = { x: 2, y: 0, z: 0.4, width: 2, depth: 2, height: 0.4, kind: 'solid' };
+    const body = groundedBody({ x: 0, y: 0, z: 0 });
+    const scratch = createSimScratch();
+    // Stop once atop the slab (x~2), well before walking off its far edge
+    // (~3.35) — this test is about the step-up, not edge-of-map falling.
+    for (let i = 0; i < 15; i++) {
+      stepPlatformer(
+        body,
+        { moveX: 1, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+        1 / 30,
+        [floor, slab],
+        scratch,
+        bounds
+      );
+    }
+    // Walked up onto the slab's top, not stopped at its side face.
+    expect(body.x).toBeGreaterThan(1.2);
+    expect(body.isGrounded).toBe(true);
+    expect(body.z).toBeCloseTo(0.4, 1);
+  });
+
+  it('still blocks a solid taller than LAND_STEP_CLIMB — must be jumped, not walked up', () => {
+    const tallBlock: SimPad = { x: 2, y: 0, z: 1.2, width: 2, depth: 2, height: 1.2, kind: 'solid' };
+    const body = groundedBody({ x: 0, y: 0, z: 0 });
+    const scratch = createSimScratch();
+    for (let i = 0; i < 40; i++) {
+      stepPlatformer(
+        body,
+        { moveX: 1, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+        1 / 30,
+        [floor, tallBlock],
+        scratch,
+        bounds
+      );
+    }
+    // Stopped at the block's side face (x=1, plus capsule radius), still on the ground floor.
+    expect(body.x).toBeLessThan(1.4);
+    expect(body.z).toBeCloseTo(0, 1);
+  });
+
   it('respects rotYaw for OBB wall collision (parity with server platforms.ts)', () => {
-    const bigFloor: SimPad = { x: 0, y: 0, z: 0, width: 20, depth: 20, kind: 'solid', height: 0.25 };
+    const bigFloor: SimPad = { x: 0, y: 0, z: 0, width: 20, depth: 20, kind: 'solid', height: 0.25, topOnly: true };
     // Same thin/wide wall as the unrotated test above, but rotated 90° — the
     // 4-unit depth now spans world X instead of the 0.2-unit width. Before
     // this fix, Play Test ignored rotYaw entirely and would have let the
