@@ -19,6 +19,7 @@ import {
   FLIP_COOLDOWN_MS,
   FLIP_DURATION_MS,
   FLIP_ENERGY_COST,
+  FLIP_PUSH_SPEED,
   FLIP_VELOCITY,
   GRAVITY,
   GROUND_FOLLOW_SPEED,
@@ -129,6 +130,9 @@ export interface SimScratch {
   flipCooldownMs: number;
   /** Edge-detects the flip button so holding it doesn't retrigger every tick. */
   wasFlipHeld: boolean;
+  /** Counts down while a flip's backward kick is active; wish input doesn't
+   * override velX/velY until this expires (same pattern as wall jump). */
+  flipLockoutMs: number;
   /** Local (non-networked) custom-move state — Play Test has no server, so
    * this scratch object IS the source of truth, unlike movement.ts where
    * the equivalent lives on the synced PlayerState.customMoves schema. */
@@ -147,6 +151,8 @@ export interface SimInput {
   meleeActive?: boolean;
   flipPressed?: boolean;
   customMoveKeysHeld?: string[];
+  /** Camera yaw (radians) — only needed for flip's backward kick direction. */
+  cameraYaw?: number;
 }
 
 /** === Tunables from shared/sim-constants.ts === */
@@ -214,6 +220,7 @@ export function createSimScratch(): SimScratch {
     flipMs: 0,
     flipCooldownMs: 0,
     wasFlipHeld: false,
+    flipLockoutMs: 0,
     customMoveWasHeld: new Map(),
     customMoveActiveId: '',
     customMoveActiveUntil: 0,
@@ -537,6 +544,10 @@ export function stepPlatformer(
     body.vz = FLIP_VELOCITY;
     body.isGrounded = false;
     grounded = false;
+    const camYaw = input.cameraYaw ?? 0;
+    scratch.velX = -Math.cos(camYaw) * FLIP_PUSH_SPEED;
+    scratch.velY = -Math.sin(camYaw) * FLIP_PUSH_SPEED;
+    scratch.flipLockoutMs = FLIP_DURATION_MS;
   }
   if (scratch.flipMs > 0) {
     scratch.flipMs = Math.max(0, scratch.flipMs - dt * 1000);
@@ -692,10 +703,11 @@ export function stepPlatformer(
       scratch.velX *= (speed - drop) / speed;
       scratch.velY *= (speed - drop) / speed;
     }
-  } else if (scratch.wallJumpLockoutMs <= 0) {
+  } else if (scratch.wallJumpLockoutMs <= 0 && scratch.flipLockoutMs <= 0) {
     scratch.velX = wishX * maxSpeed;
     scratch.velY = wishY * maxSpeed;
   }
+  scratch.flipLockoutMs = Math.max(0, scratch.flipLockoutMs - dt * 1000);
 
   // Deep water: soften gravity while submerged in a tall water volume
   if (onWater && (support?.pad.height ?? 0) > 0.8 && body.vz < 0) {

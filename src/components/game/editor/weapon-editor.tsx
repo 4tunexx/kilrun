@@ -432,8 +432,8 @@ export function WeaponEditor({
     <div
       className={
         embedded
-          ? 'flex flex-col h-full min-h-0 w-full bg-slate-950/95'
-          : `fixed inset-0 z-[3000] ${isMobile ? 'flex flex-col' : 'flex'} bg-slate-950/95 backdrop-blur-md`
+          ? 'flex flex-col h-full min-h-0 w-full bg-[#0e1520]'
+          : `fixed inset-0 z-[3000] ${isMobile ? 'flex flex-col' : 'flex'} bg-[#0e1520] backdrop-blur-md`
       }
     >
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
@@ -442,12 +442,12 @@ export function WeaponEditor({
           embedded
             ? 'flex flex-col flex-1 min-h-0 overflow-hidden'
             : isMobile
-              ? 'w-full flex-1 min-h-0 flex flex-col bg-slate-900/60 border-b border-white/10 overflow-hidden'
-              : 'w-72 shrink-0 flex flex-col bg-slate-900/60 border-r border-white/10 overflow-hidden'
+              ? 'w-full flex-1 min-h-0 flex flex-col bg-[#0e1520] border-b border-white/10 overflow-hidden'
+              : 'w-72 shrink-0 flex flex-col bg-[#0e1520] border-r border-white/10 overflow-hidden'
         }
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-[#121a24]">
           <div className="flex items-center gap-2">
             <Sword className="w-4 h-4 text-amber-300" />
             <span className="text-sm font-black text-white tracking-tight">Weapon Editor</span>

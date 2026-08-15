@@ -12,6 +12,7 @@ import {
   FLIP_COOLDOWN_MS,
   FLIP_DURATION_MS,
   FLIP_ENERGY_COST,
+  FLIP_PUSH_SPEED,
   FLIP_VELOCITY,
   GRAVITY,
   JUMP_BUFFER_MS,
@@ -126,6 +127,9 @@ export interface PlayerSimScratch {
   flipCooldownMs: number;
   /** Edge-detects the flip button so holding it doesn't retrigger every tick. */
   wasFlipHeld: boolean;
+  /** Counts down while a flip's backward kick is active; wish input doesn't
+   * override velX/velY until this expires (same pattern as wall jump). */
+  flipLockoutMs: number;
   /** Edge-detects each custom move's key (CustomMoveDef.id -> was held last tick). */
   customMoveWasHeld: Map<string, boolean>;
 }
@@ -152,6 +156,7 @@ export function createSimScratch(): PlayerSimScratch {
     flipMs: 0,
     flipCooldownMs: 0,
     wasFlipHeld: false,
+    flipLockoutMs: 0,
     customMoveWasHeld: new Map(),
   };
 }
@@ -370,6 +375,11 @@ export function applyMovement(
     player.vz = FLIP_VELOCITY;
     player.isGrounded = false;
     grounded = false;
+    // Kick backward (opposite of camera-forward) — same forward-vector
+    // convention as the client's wish-vector rotation, negated.
+    scratch.velX = -Math.cos(player.cameraYaw) * FLIP_PUSH_SPEED;
+    scratch.velY = -Math.sin(player.cameraYaw) * FLIP_PUSH_SPEED;
+    scratch.flipLockoutMs = FLIP_DURATION_MS;
   }
   player.isFlipping = scratch.flipMs > 0;
   if (scratch.flipMs > 0) {
@@ -572,10 +582,11 @@ export function applyMovement(
       scratch.velX *= (speed - drop) / speed;
       scratch.velY *= (speed - drop) / speed;
     }
-  } else if (scratch.wallJumpLockoutMs <= 0) {
+  } else if (scratch.wallJumpLockoutMs <= 0 && scratch.flipLockoutMs <= 0) {
     scratch.velX = wishX * maxSpeed;
     scratch.velY = wishY * maxSpeed;
   }
+  scratch.flipLockoutMs = Math.max(0, scratch.flipLockoutMs - dtSeconds * 1000);
 
   if (onWater && support && support.platform.height > 0.8 && player.vz < 0) {
     player.vz *= 0.85;

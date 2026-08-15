@@ -131,7 +131,8 @@ export interface PowerDefinitionRecord {
 /** `icon` doubles as either an emoji glyph (default) or an admin-uploaded
  * image (persisted via persistSiteImage, so a `/uploads/...` or blob URL —
  * data: URLs are also accepted transiently before the server round-trip). */
-export function isImageIcon(icon: string): boolean {
+export function isImageIcon(icon: string | null | undefined): boolean {
+  if (typeof icon !== 'string') return false;
   return (
     icon.startsWith('http://') ||
     icon.startsWith('https://') ||

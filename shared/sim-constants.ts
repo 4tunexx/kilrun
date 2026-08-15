@@ -67,6 +67,12 @@ export const FLIP_COOLDOWN_MS = 1500;
 /** Small vertical hop so a grounded flip reads as an actual jump-flip, not a
  * feet-planted animation. ~55% of a normal jump. */
 export const FLIP_VELOCITY = JUMP_VELOCITY * 0.55;
+/** Horizontal kick-back distance (meters) — "jump back ~3x body length". */
+export const FLIP_PUSH_DISTANCE = PLAYER_HEIGHT * 3;
+/** Horizontal speed (m/s) that covers FLIP_PUSH_DISTANCE over the flip's
+ * airborne duration — held via a short lockout so wish-input doesn't
+ * immediately cancel it (same pattern as wall jump). */
+export const FLIP_PUSH_SPEED = FLIP_PUSH_DISTANCE / (FLIP_DURATION_MS / 1000);
 
 export const JUMP_PAD_BOOST = 14;
 

@@ -870,6 +870,7 @@ export default function KilrunEngine({
                   crouch: inputManager.isCrouchPressed(),
                   meleeActive: performance.now() < meleeUntil,
                   flipPressed: inputManager.isFlipPressed(),
+                  cameraYaw,
                 },
                 dt,
                 predictedPads,

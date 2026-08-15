@@ -953,6 +953,7 @@ export function MapPlayPreview({
               meleeActive: performance.now() < meleeUntil,
               flipPressed,
               customMoveKeysHeld,
+              cameraYaw: yaw,
             },
             dt,
             pads,
