@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { SOUND_EVENTS, getSoundEventCategories } from '@shared/sound-events';
 import { getAudioContext, getProcessedBuffer, playProcessedBuffer, clearProcessedAudioCache, type SoundFxParams } from '@/lib/audio-fx';
+import { refreshSoundboard } from '@/components/game/effects/soundboard';
 
 interface SoundEntry extends SoundFxParams {
   fileUrl: string;
@@ -112,6 +113,7 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
         return;
       }
       if (bound?.fileUrl) clearProcessedAudioCache(bound.fileUrl);
+      refreshSoundboard();
       toast({ title: 'Sound uploaded', description: selectedDef.label });
       await load();
     } catch {
@@ -145,6 +147,7 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
           const data = await res.json();
           if (data.ok && seq === commitSeq.current) {
             clearProcessedAudioCache(bound.fileUrl);
+            refreshSoundboard();
             setSounds((s) => ({ ...s, [selectedKey]: { ...s[selectedKey], ...localMerge } }));
           }
         } catch {
@@ -178,6 +181,7 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
         return;
       }
       clearProcessedAudioCache(bound.fileUrl);
+      refreshSoundboard();
       toast({ title: 'Sound removed', description: selectedDef.label });
       await load();
     } catch {

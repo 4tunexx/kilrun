@@ -12,7 +12,7 @@ import type { DualJoystick } from './input/dual-joystick';
 import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
 import { SprintParticles } from './effects/sprint-particles';
 import { DamageNumberFx } from './effects/damage-numbers';
-import { playSound, preloadSoundboard } from './effects/soundboard';
+import { playSound, playLoopedSound, stopLoopedSound, preloadSoundboard } from './effects/soundboard';
 import { ThreeCharacter } from './entities/three-character';
 import { ThreeMap } from './entities/three-map';
 import { CustomMapOverlay } from './entities/custom-map-overlay';
@@ -913,7 +913,11 @@ export default function KilrunEngine({
           (predictedBody?.isGrounded ?? true) &&
           horizSpeed > 4.5;
         const sliding = predictedScratch.slideMs > 0;
-        if (sprinting && !wasSprintingForSound) playSound('sprint_start');
+        // Loop the sprint sound for as long as sprinting stays true (instead
+        // of firing once on the rising edge) so it keeps playing while the
+        // player holds sprint, and stop it the moment sprinting ends.
+        if (sprinting && !wasSprintingForSound) playLoopedSound('sprint_start');
+        else if (!sprinting && wasSprintingForSound) stopLoopedSound('sprint_start');
         wasSprintingForSound = sprinting;
         if (sliding && !wasSlidingForSound) playSound('slide');
         wasSlidingForSound = sliding;
@@ -1246,6 +1250,7 @@ export default function KilrunEngine({
       disposed = true;
       cancelAnimationFrame(raf);
       window.clearInterval(syncTimer);
+      stopLoopedSound('sprint_start');
       if (document.pointerLockElement) document.exitPointerLock?.();
       characters.forEach((c) => c.destroy());
       sprintParticles.dispose();

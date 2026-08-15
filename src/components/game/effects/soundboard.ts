@@ -19,24 +19,34 @@ interface SoundEntry extends SoundFxParams {
 
 let cache: Record<string, SoundEntry> = {};
 let loaded = false;
+let loadedAt = 0;
 let loadingPromise: Promise<void> | null = null;
 // Caps rapid repeats (multi-pellet hits, fast footsteps) from stacking
 // unboundedly loud/overlapping voices for the same event.
 const activeVoices = new Map<string, number>();
 const MAX_CONCURRENT_PER_EVENT = 6;
+// Safety-net TTL mirroring the 15s server-side cache in
+// src/lib/sound-definitions.ts, in case an admin-edit call site forgets to
+// invalidate explicitly.
+const CACHE_TTL_MS = 15_000;
 
 function ensureLoaded(): Promise<void> {
-  if (loaded) return Promise.resolve();
+  if (loaded && Date.now() - loadedAt < CACHE_TTL_MS) return Promise.resolve();
   if (loadingPromise) return loadingPromise;
   loadingPromise = fetch('/api/admin/sound-definitions')
     .then((r) => (r.ok ? r.json() : null))
     .then((data: { ok?: boolean; sounds?: Record<string, SoundEntry> } | null) => {
       if (data?.ok && data.sounds) cache = data.sounds;
       loaded = true;
+      loadedAt = Date.now();
     })
     .catch(() => {
       // Never retry-storm on failure — just stay silent for the session.
       loaded = true;
+      loadedAt = Date.now();
+    })
+    .finally(() => {
+      loadingPromise = null;
     });
   return loadingPromise;
 }
@@ -45,6 +55,69 @@ function ensureLoaded(): Promise<void> {
  * gameplay event fires (avoids a missed sound on the very first trigger). */
 export function preloadSoundboard(): void {
   void ensureLoaded();
+}
+
+/** Invalidate the in-memory sound-definitions cache so the next playSound
+ * (or preloadSoundboard) call re-fetches fresh data. Call this after an
+ * admin edits/saves a sound definition (see sound-board-editor.tsx) so
+ * test-play doesn't keep using stale (e.g. un-cropped) audio. */
+export function refreshSoundboard(): void {
+  loaded = false;
+  loadedAt = 0;
+  loadingPromise = null;
+  void ensureLoaded();
+}
+
+// Active looping voices (e.g. sprint-while-held), keyed by eventKey, so a
+// caller can start a loop once and stop it later without tracking the node.
+const loopVoices = new Map<string, AudioBufferSourceNode>();
+
+/** Start looping playback for a game-engine event (see shared/sound-events.ts
+ * for valid keys) and keep it playing until stopLoopedSound(eventKey) is
+ * called. Safe to call repeatedly while already looping — it's a no-op in
+ * that case, so callers can invoke it every frame while a held input
+ * (e.g. sprint) is active. No-ops if nothing is bound to the event. */
+export function playLoopedSound(eventKey: string, opts?: { volume?: number }): void {
+  if (typeof window === 'undefined' || typeof AudioContext === 'undefined') return;
+  if (loopVoices.has(eventKey)) return;
+  void ensureLoaded().then(async () => {
+    if (loopVoices.has(eventKey)) return;
+    const entry = cache[eventKey];
+    if (!entry?.fileUrl) return;
+    try {
+      const ctx = getAudioContext();
+      if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+      const buffer = await getProcessedBuffer(entry.fileUrl, entry);
+      if (loopVoices.has(eventKey)) return; // lost a race while awaiting decode
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.loop = true;
+      const gain = ctx.createGain();
+      gain.gain.value = Math.max(0, Math.min(1, (opts?.volume ?? 1) * entry.volume));
+      src.connect(gain).connect(ctx.destination);
+      src.onended = () => {
+        if (loopVoices.get(eventKey) === src) loopVoices.delete(eventKey);
+      };
+      src.start();
+      loopVoices.set(eventKey, src);
+    } catch {
+      // Never let audio playback break gameplay.
+    }
+  });
+}
+
+/** Stop a loop previously started with playLoopedSound(eventKey). No-op if
+ * nothing is currently looping for that event. */
+export function stopLoopedSound(eventKey: string): void {
+  const src = loopVoices.get(eventKey);
+  if (!src) return;
+  loopVoices.delete(eventKey);
+  try {
+    src.onended = null;
+    src.stop();
+  } catch {
+    // Already stopped/ended — fine.
+  }
 }
 
 /** Fire-and-forget playback for a game-engine event (see
