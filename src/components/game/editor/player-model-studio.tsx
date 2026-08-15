@@ -367,8 +367,12 @@ export function PlayerModelStudio({
     setMixamoStatus(null);
     setMixamoFileName(file.name);
     const url = URL.createObjectURL(file);
+    // Blob URLs (blob:https://…/uuid) have no file extension for the loader
+    // to sniff, so an FBX upload silently fell through to the glTF loader
+    // and failed — pass the real filename's extension through explicitly.
+    const forceFbx = /\.fbx$/i.test(file.name);
     try {
-      const loaded = await loadAnimatedPrefab(url);
+      const loaded = await loadAnimatedPrefab(url, forceFbx);
       if (!loaded.clips.length) {
         setMixamoError('No animation clips found in that file.');
         setMixamoClips([]);

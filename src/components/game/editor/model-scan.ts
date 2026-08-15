@@ -46,9 +46,15 @@ export async function scanModelClips(src: string): Promise<string[]> {
 }
 
 export async function loadAnimatedPrefab(
-  src: string
+  src: string,
+  /**
+   * Override the FBX-vs-glTF loader choice — needed for blob: URLs (e.g. a
+   * freshly uploaded File), which have no file extension for isFbxUrl to
+   * sniff and would otherwise silently fall through to the glTF loader.
+   */
+  forceFbx?: boolean
 ): Promise<{ root: THREE.Object3D; clips: THREE.AnimationClip[]; clipNames: string[] }> {
-  if (isFbxUrl(src)) {
+  if (forceFbx ?? isFbxUrl(src)) {
     const fbx = await loadFbxModel(src);
     const root = cloneFbxScene(fbx.scene);
     applyPackBodyTintIfNeeded(root, src);
