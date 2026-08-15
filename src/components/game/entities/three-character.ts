@@ -14,6 +14,7 @@ import {
   type WeaponSwayOpts,
 } from '../editor/skin-attachments';
 import { resolveModelSrc } from '../editor/model-scan';
+import { splitTrackName } from '../editor/mixamo-import';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { PLAYER_RADIUS } from '@shared/sim-constants';
 import { BODY_COLOR_NONE } from '@/lib/body-colors';
@@ -28,6 +29,24 @@ import { applyTeamTint } from '@/lib/premium-skin-config';
  * death/dead-labeled clips for every slot except the actual 'die' lookup.
  */
 const DEATH_CLIP_MARKERS = ['death', 'dead'];
+
+/**
+ * Pack rig (Rigify DEF-*) bones that make up the upper body: chest and above,
+ * shoulders, arms, hands, fingers. Excludes hips/lower-spine and legs so a
+ * filtered clip can play on a second mixer layered over full-body locomotion
+ * without touching leg bones.
+ */
+const UPPER_BODY_BONE_PATTERN =
+  /^DEF-(spine\.00[2-6]|shoulder|upper_arm|forearm|hand\.|thumb|f_index|f_middle|f_ring|f_pinky)/i;
+
+/** Keep only the tracks driving upper-body bones, for layered playback. */
+function filterClipToUpperBody(clip: THREE.AnimationClip): THREE.AnimationClip {
+  const tracks = clip.tracks.filter((t) => {
+    const parsed = splitTrackName(t.name);
+    return parsed ? UPPER_BODY_BONE_PATTERN.test(parsed.boneName) : false;
+  });
+  return new THREE.AnimationClip(`${clip.name || 'clip'}__upper`, clip.duration, tracks);
+}
 
 function pickClip(clips: THREE.AnimationClip[], patterns: string[]): THREE.AnimationClip | null {
   const lower = clips.map((c) => ({ clip: c, name: c.name.toLowerCase() }));
@@ -97,6 +116,11 @@ export class ThreeCharacter {
   private wasGrounded = true;
   private landUntil = 0;
   private attackUntil = 0;
+  /** Second mixer layered over the main one — arms/spine only (reload/aim/equip). */
+  private upperMixer: THREE.AnimationMixer | null = null;
+  private upperActions = new Map<string, THREE.AnimationAction>();
+  private currentUpper = '';
+  private blendSec = 0.12;
   private avatarOpts: CharacterAvatarOptions;
   private avatarScene: THREE.Object3D | null = null;
   private skinTime = 0;
@@ -111,7 +135,7 @@ export class ThreeCharacter {
   private weaponKickTarget = 0;
   private weaponMixer: THREE.AnimationMixer | null = null;
   private weaponActions = new Map<string, THREE.AnimationAction>();
-  private weaponClipNames = { fire: '', reload: '', idle: '' };
+  private weaponClipNames = { fire: '', reload: '', idle: '', equip: '' };
 
   constructor(_username: string, isLocal: boolean, avatar?: CharacterAvatarOptions) {
     this.isLocal = isLocal;
@@ -174,6 +198,7 @@ export class ThreeCharacter {
 
       this.root.add(fitted);
       this.avatarScene = scene;
+      this.blendSec = Math.max(0, (entity?.animation?.blendMs ?? 120) / 1000);
 
       // Layer equipped skins (fullbody overlays + clothing + body swaps).
       if (allSkins.length > 0) {
@@ -183,6 +208,7 @@ export class ThreeCharacter {
         this.rebindWeaponMixer({
           fire: wep?.weapon?.fireClip,
           reload: wep?.weapon?.reloadClip,
+          equip: wep?.weapon?.equipClip,
         });
       }
 
@@ -230,6 +256,23 @@ export class ThreeCharacter {
       bindSlot('punch', ['punch', 'hit', 'jab', 'melee'], false);
       bindSlot('die', ['die', 'death', 'dead'], false);
 
+      this.upperMixer = new THREE.AnimationMixer(scene);
+      const bindUpperSlot = (slot: 'reload' | 'aim' | 'equip', loop: boolean) => {
+        if (!this.upperMixer) return;
+        const clipName = authored[slot];
+        const clip = clipName ? byName.get(clipName) : undefined;
+        if (!clip) return;
+        const filtered = filterClipToUpperBody(clip);
+        if (!filtered.tracks.length) return;
+        const action = this.upperMixer.clipAction(filtered);
+        action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+        action.clampWhenFinished = !loop;
+        this.upperActions.set(slot, action);
+      };
+      bindUpperSlot('reload', false);
+      bindUpperSlot('aim', true);
+      bindUpperSlot('equip', false);
+
       this.actions.get('idle')?.reset().play();
       this.current = 'idle';
       this.loaded = true;
@@ -260,11 +303,11 @@ export class ThreeCharacter {
     if (name === this.current) return;
     const next = this.actions.get(name)!;
     const prev = this.actions.get(this.current);
-    if (prev) prev.fadeOut(0.12);
+    if (prev) prev.fadeOut(this.blendSec);
     next.reset();
     next.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
     next.clampWhenFinished = !loop;
-    next.fadeIn(0.12).play();
+    next.fadeIn(this.blendSec).play();
     this.current = name;
   }
 
@@ -273,8 +316,47 @@ export class ThreeCharacter {
     const slot = style === 'punch' && this.actions.has('punch') ? 'punch' : 'attack';
     const fallback = this.actions.has(slot) ? slot : this.actions.has('punch') ? 'punch' : null;
     if (!fallback) return;
-    this.attackUntil = performance.now() + 480;
+    const clipDuration = this.actions.get(fallback)!.getClip().duration;
+    this.attackUntil = performance.now() + (clipDuration > 0 ? clipDuration * 1000 : 480);
     this.play(fallback, false);
+  }
+
+  /**
+   * Play an upper-body-only one-shot (reload/equip) — legs keep running the
+   * normal locomotion state machine underneath. Returns clip duration in ms.
+   */
+  private playUpperOneShot(slot: 'reload' | 'equip'): number {
+    const action = this.upperActions.get(slot);
+    if (!action) return 0;
+    if (this.currentUpper && this.currentUpper !== slot) {
+      this.upperActions.get(this.currentUpper)?.fadeOut(this.blendSec);
+    }
+    action.reset().fadeIn(this.blendSec).play();
+    this.currentUpper = slot;
+    return action.getClip().duration * 1000;
+  }
+
+  /** Upper-body reload pose — plays over locomotion instead of freezing the character. */
+  public triggerReload(): number {
+    return this.playUpperOneShot('reload');
+  }
+
+  /** Upper-body draw/equip pose (weapon switch). */
+  public triggerEquip(): number {
+    return this.playUpperOneShot('equip');
+  }
+
+  /** Hold/release the upper-body aim pose (ADS) — blends with legs, no fixed duration. */
+  public setAiming(active: boolean) {
+    const action = this.upperActions.get('aim');
+    if (!action) return;
+    if (active) {
+      if (!action.isRunning()) action.reset().fadeIn(this.blendSec).play();
+      this.currentUpper = 'aim';
+    } else if (this.currentUpper === 'aim') {
+      action.fadeOut(this.blendSec);
+      this.currentUpper = '';
+    }
   }
 
   /** Brief muzzle flash + optional weapon push-back (local feel). */
@@ -291,7 +373,12 @@ export class ThreeCharacter {
   }
 
   /** Bind AnimationMixer to the hand weapon mesh (uses GLB clips if present). */
-  private rebindWeaponMixer(clipHints?: { fire?: string; reload?: string; idle?: string }) {
+  private rebindWeaponMixer(clipHints?: {
+    fire?: string;
+    reload?: string;
+    idle?: string;
+    equip?: string;
+  }) {
     this.weaponMixer?.stopAllAction();
     this.weaponMixer = null;
     this.weaponActions.clear();
@@ -325,9 +412,18 @@ export class ThreeCharacter {
       fire: clipHints?.fire || '',
       reload: clipHints?.reload || '',
       idle: clipHints?.idle || '',
+      equip: clipHints?.equip || '',
     };
-    const idleName = this.weaponClipNames.idle;
-    if (idleName) this.playWeaponClip(idleName, true);
+    if (this.weaponClipNames.equip) {
+      this.playWeaponClip(this.weaponClipNames.equip, false);
+      const idleName = this.weaponClipNames.idle;
+      if (idleName) {
+        this.weaponMixer.addEventListener('finished', () => this.playWeaponClip(idleName, true));
+      }
+    } else if (this.weaponClipNames.idle) {
+      this.playWeaponClip(this.weaponClipNames.idle, true);
+    }
+    this.triggerEquip();
   }
 
   /**
@@ -414,6 +510,7 @@ export class ThreeCharacter {
       fireClip?: string;
       reloadClip?: string;
       idleClip?: string;
+      equipClip?: string;
     }
   ) {
     if (this.disposed || !this.avatarScene) return;
@@ -439,6 +536,7 @@ export class ThreeCharacter {
             coneRadians: combat.coneRadians ?? 0.18,
             fireClip: combat.fireClip,
             reloadClip: combat.reloadClip,
+            equipClip: combat.equipClip,
           }
         : undefined,
     };
@@ -451,6 +549,7 @@ export class ThreeCharacter {
       fire: combat?.fireClip || prevWeapon?.weapon?.fireClip,
       reload: combat?.reloadClip || prevWeapon?.weapon?.reloadClip,
       idle: combat?.idleClip,
+      equip: combat?.equipClip,
     });
   }
 
@@ -483,6 +582,7 @@ export class ThreeCharacter {
     this.rebindWeaponMixer({
       fire: nextWeapon.weapon?.fireClip,
       reload: nextWeapon.weapon?.reloadClip,
+      equip: nextWeapon.weapon?.equipClip,
     });
   }
 
@@ -650,6 +750,7 @@ export class ThreeCharacter {
     }
 
     this.mixer?.update(dt);
+    this.upperMixer?.update(dt);
     this.weaponMixer?.update(dt);
     this.skinTime += dt;
     if (this.avatarScene) {
@@ -666,6 +767,9 @@ export class ThreeCharacter {
     this.disposed = true;
     this.mixer?.stopAllAction();
     this.mixer = null;
+    this.upperMixer?.stopAllAction();
+    this.upperMixer = null;
+    this.upperActions.clear();
     this.weaponMixer?.stopAllAction();
     this.weaponMixer = null;
     this.weaponActions.clear();

@@ -63,6 +63,8 @@ export interface WeaponCombatConfig {
   fireClip?: string;
   /** Clip name on the weapon GLB for reload (optional). */
   reloadClip?: string;
+  /** Clip name on the weapon GLB for equip/draw (optional). */
+  equipClip?: string;
 }
 
 export const WEAPON_COMBAT_KINDS: {

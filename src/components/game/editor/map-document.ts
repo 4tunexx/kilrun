@@ -272,7 +272,10 @@ export type PlayerAnimSlot =
   | 'back'
   | 'die'
   | 'attack'
-  | 'punch';
+  | 'punch'
+  | 'reload'
+  | 'aim'
+  | 'equip';
 
 export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string; hint?: string }[] = [
   { id: 'idle', label: 'Idle', hint: 'Standing still' },
@@ -288,6 +291,21 @@ export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string; hint?: stri
   { id: 'back', label: 'Walk Back (S)' },
   { id: 'attack', label: 'Attack / Swing', hint: 'Weapon swing or shoot pose' },
   { id: 'punch', label: 'Punch / Unarmed', hint: 'Fallback when no weapon' },
+  {
+    id: 'reload',
+    label: 'Reload',
+    hint: 'Upper-body only — plays over locomotion while reloading',
+  },
+  {
+    id: 'aim',
+    label: 'Aim / ADS',
+    hint: 'Upper-body only — held while aiming, blends with legs',
+  },
+  {
+    id: 'equip',
+    label: 'Equip / Draw',
+    hint: 'Upper-body only — plays once when switching weapons',
+  },
   { id: 'die', label: 'Die / Eliminated', hint: 'Plays once on death' },
 ];
 
@@ -388,6 +406,8 @@ export interface EntityAnimation {
    * Also auto-wires their listenToEntityId when set from the UI.
    */
   activatesEntityIds?: string[];
+  /** Player only: crossfade time (ms) between locomotion/combat clips. Default 120. */
+  blendMs?: number;
 }
 
 /** Touch / death-zone damage (kind hazard, or any entity with hazard enabled). */
@@ -1107,6 +1127,8 @@ export interface MapWeaponDef {
   fireClip?: string;
   /** Reload anim clip name. */
   reloadClip?: string;
+  /** Equip/draw anim clip name (played on weapon mesh when switching to it). */
+  equipClip?: string;
 }
 
 export const DEFAULT_WEAPON_DEF: MapWeaponDef = {

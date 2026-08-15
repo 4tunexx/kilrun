@@ -1010,6 +1010,7 @@ export default function KilrunEngine({
                 fireClip: mapWep?.fireClip,
                 reloadClip: mapWep?.reloadClip,
                 idleClip: mapWep?.idleClip,
+                equipClip: mapWep?.equipClip,
               });
             } else if (skinTex) {
               void view.applyWeaponSkinTexture(skinTex);
@@ -1138,7 +1139,11 @@ export default function KilrunEngine({
           connectionRef.current?.sendReload();
           playSound('weapon_reload');
           const localView = localSessionId ? characters.get(localSessionId) : undefined;
-          localView?.triggerAttack('punch');
+          if (!localView?.triggerReload()) {
+            // No dedicated reload clip authored for this avatar — fall back
+            // to the old full-body punch pose so reload still reads visually.
+            localView?.triggerAttack('punch');
+          }
           if (mapWeaponDef?.reloadClip) {
             localView?.playWeaponClip(mapWeaponDef.reloadClip, false);
           } else {

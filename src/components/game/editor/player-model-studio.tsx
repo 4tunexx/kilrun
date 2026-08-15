@@ -110,10 +110,16 @@ export function PlayerModelStudio({
   const [mixamoClips, setMixamoClips] = useState<THREE.AnimationClip[]>([]);
   const [mixamoClipIdx, setMixamoClipIdx] = useState(0);
   const [mixamoBoneMap, setMixamoBoneMap] = useState<Record<string, string>>({});
+  const [mixamoBoneMapHistory, setMixamoBoneMapHistory] = useState<Record<string, string>[]>([]);
   const [mixamoClipName, setMixamoClipName] = useState('');
   const [mixamoLoading, setMixamoLoading] = useState(false);
   const [mixamoError, setMixamoError] = useState<string | null>(null);
   const [mixamoStatus, setMixamoStatus] = useState<string | null>(null);
+  const [renamingClip, setRenamingClip] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [scrubTime, setScrubTime] = useState(0);
+  const [scrubDuration, setScrubDuration] = useState(0);
+  const [scrubPaused, setScrubPaused] = useState(false);
 
   const anim = ensureAnimation(entity);
   const clips = anim.availableClips;
@@ -192,6 +198,18 @@ export function PlayerModelStudio({
   }, []);
 
   useEffect(() => {
+    if (!previewSlot) return;
+    const id = window.setInterval(() => {
+      const info = previewRef.current?.getCurrentClipInfo();
+      if (!info) return;
+      setScrubDuration(info.duration);
+      if (!info.paused) setScrubTime(info.time);
+      setScrubPaused(info.paused);
+    }, 80);
+    return () => window.clearInterval(id);
+  }, [previewSlot]);
+
+  useEffect(() => {
     previewRef.current?.setSelectedBone(selectedBone);
     if (selectedBone) {
       const s = previewRef.current?.getBoneScale(selectedBone) ?? [1, 1, 1];
@@ -209,12 +227,42 @@ export function PlayerModelStudio({
     });
   };
 
+  /** Rename an authored clip, keeping availableClips and slot bindings in sync. */
+  const renameAuthoredClip = (oldName: string, rawNewName: string) => {
+    const newName = rawNewName.trim();
+    if (!newName || newName === oldName) return;
+    if (authoredClips.some((c) => c.name === newName)) {
+      setMixamoError(`A clip named "${newName}" already exists.`);
+      return;
+    }
+    const nextAuthored = authoredClips.map((c) =>
+      c.name === oldName ? { ...c, name: newName } : c
+    );
+    const nextAvailable = clips.map((n) => (n === oldName ? newName : n));
+    const nextBindings = { ...bindings };
+    for (const slot of Object.keys(nextBindings) as PlayerAnimSlot[]) {
+      if (nextBindings[slot] === oldName) nextBindings[slot] = newName;
+    }
+    onChange({
+      playerAuthoredClips: nextAuthored,
+      animation: { ...anim, availableClips: nextAvailable },
+      playerAnims: nextBindings,
+    });
+  };
+
   const playSlot = (slot: PlayerAnimSlot) => {
     const clip = bindings[slot] || bindings.idle;
     if (!clip) return;
     setPreviewSlot(slot);
     const loop = slot !== 'die' && slot !== 'land' && slot !== 'jump';
     previewRef.current?.playClip(clip, loop);
+  };
+
+  /** Quick sanity check: play attack then reload back-to-back so combat feel can be eyeballed. */
+  const testCombatCombo = () => {
+    playSlot('attack');
+    window.setTimeout(() => playSlot('reload'), 500);
+    window.setTimeout(() => playSlot('idle'), 1600);
   };
 
   const playRawClip = (clip: string) => {
@@ -309,6 +357,7 @@ export function PlayerModelStudio({
       if (guess) map[sourceBone] = guess;
     }
     setMixamoBoneMap(map);
+    setMixamoBoneMapHistory([]);
     setMixamoClipName(clip.name || 'mixamo_clip');
   };
 
@@ -377,6 +426,35 @@ export function PlayerModelStudio({
     });
     setClipCount(allNames.length);
     setMixamoStatus(`Saved “${built.authored.name}” — pick it in the Anims tab to bind it to a slot.`);
+  };
+
+  /**
+   * Import every clip in the uploaded FBX/GLB in one pass, reusing the
+   * current bone map (same source rig for every clip in the file, so the
+   * mapping the user reviewed for clip 0 applies to all of them).
+   */
+  const saveAllMixamoClips = () => {
+    if (!mixamoClips.length) return;
+    const built = mixamoClips.map((clip, i) =>
+      retargetClip(clip, mixamoBoneMap, clip.name || `${mixamoFileName ?? 'mixamo'}_${i}`)
+    );
+    const existingByName = new Map(authoredClips.map((c) => [c.name, c]));
+    for (const b of built) existingByName.set(b.authored.name, b.authored);
+    const nextAuthored = Array.from(existingByName.values());
+    const threeClips = authoredClipsToThree(built.map((b) => b.authored));
+    previewRef.current?.registerClips(threeClips);
+    const allNames = Array.from(
+      new Set([...(entity.animation?.availableClips ?? clips), ...built.map((b) => b.authored.name)])
+    );
+    onChange({
+      playerAuthoredClips: nextAuthored,
+      animation: {
+        ...(entity.animation ?? ensureAnimation(entity)),
+        availableClips: allNames,
+      },
+    });
+    setClipCount(allNames.length);
+    setMixamoStatus(`Imported ${built.length} clip(s) — pick them in the Anims tab to bind slots.`);
   };
 
   const tabs: { id: StudioTab; label: string }[] = [
@@ -449,6 +527,38 @@ export function PlayerModelStudio({
         {recording && (
           <div className="absolute top-2 right-2 rounded-md bg-rose-600/80 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white flex items-center gap-1">
             <Disc3 className="w-3 h-3" /> Recording {selectedBone || '—'}
+          </div>
+        )}
+        {previewSlot && scrubDuration > 0 && (
+          <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-black/55 px-2 py-1">
+            <button
+              type="button"
+              className="text-[10px] text-cyan-200 w-6 shrink-0"
+              onClick={() => {
+                const next = !scrubPaused;
+                previewRef.current?.setPaused(next);
+                setScrubPaused(next);
+              }}
+            >
+              {scrubPaused ? '▶' : '⏸'}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={scrubDuration}
+              step={scrubDuration / 200}
+              value={scrubTime}
+              onChange={(e) => {
+                const t = Number(e.target.value);
+                setScrubTime(t);
+                previewRef.current?.scrubTo(t);
+                setScrubPaused(true);
+              }}
+              className="flex-1 h-1"
+            />
+            <span className="text-[9px] text-white/50 w-14 text-right tabular-nums shrink-0">
+              {scrubTime.toFixed(2)}s / {scrubDuration.toFixed(2)}s
+            </span>
           </div>
         )}
       </div>
@@ -960,9 +1070,26 @@ export function PlayerModelStudio({
                 </label>
 
                 <div className="rounded-lg border border-white/10 bg-black/25 p-2 space-y-1.5 max-h-56 overflow-y-auto">
-                  <p className="text-[10px] uppercase tracking-wider text-white/45">
-                    Bone mapping ({Object.keys(mixamoBoneMap).length} mapped)
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] uppercase tracking-wider text-white/45">
+                      Bone mapping ({Object.keys(mixamoBoneMap).length} mapped)
+                    </p>
+                    <button
+                      type="button"
+                      disabled={!mixamoBoneMapHistory.length}
+                      className="text-[10px] text-cyan-300 hover:text-cyan-200 disabled:opacity-30 disabled:hover:text-cyan-300"
+                      onClick={() => {
+                        setMixamoBoneMapHistory((h) => {
+                          if (!h.length) return h;
+                          const prev = h[h.length - 1];
+                          setMixamoBoneMap(prev);
+                          return h.slice(0, -1);
+                        });
+                      }}
+                    >
+                      Undo
+                    </button>
+                  </div>
                   {listClipBones(mixamoClips[mixamoClipIdx], targetBoneNames()).map(
                     ({ sourceBone }) => (
                       <div key={sourceBone} className="flex items-center gap-2 text-[11px]">
@@ -972,14 +1099,15 @@ export function PlayerModelStudio({
                         <select
                           className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[11px] w-40 shrink-0"
                           value={mixamoBoneMap[sourceBone] ?? ''}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            setMixamoBoneMapHistory((h) => [...h, mixamoBoneMap]);
                             setMixamoBoneMap((prev) => {
                               const next = { ...prev };
                               if (e.target.value) next[sourceBone] = e.target.value;
                               else delete next[sourceBone];
                               return next;
-                            })
-                          }
+                            });
+                          }}
                         >
                           <option value="">— skip —</option>
                           {targetBoneNames().map((b) => (
@@ -1012,6 +1140,16 @@ export function PlayerModelStudio({
                     Save clip to avatar
                   </Button>
                 </div>
+                {mixamoClips.length > 1 && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="w-full min-h-9"
+                    onClick={saveAllMixamoClips}
+                  >
+                    Import all {mixamoClips.length} clips (same bone map)
+                  </Button>
+                )}
                 {mixamoStatus && (
                   <p className="text-[10px] text-emerald-300 leading-snug">{mixamoStatus}</p>
                 )}
@@ -1043,6 +1181,32 @@ export function PlayerModelStudio({
                   </button>
                 )}
               </div>
+              {(bindings.attack || bindings.punch) && bindings.reload && (
+                <button
+                  type="button"
+                  className="w-full text-[10px] py-1.5 rounded-md bg-amber-600/25 hover:bg-amber-500/35 border border-amber-400/30 text-amber-100"
+                  onClick={testCombatCombo}
+                >
+                  Test combo (attack → reload)
+                </button>
+              )}
+
+              <label className="flex items-center gap-2 text-[10px] text-white/50">
+                <span className="shrink-0">
+                  Blend time: {anim.blendMs ?? 120}ms
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={400}
+                  step={10}
+                  value={anim.blendMs ?? 120}
+                  onChange={(e) =>
+                    onChange({ animation: { ...anim, blendMs: Number(e.target.value) } })
+                  }
+                  className="flex-1"
+                />
+              </label>
 
               {!clips.length && !loading ? (
                 <p className="text-[11px] text-amber-200/80">
@@ -1109,29 +1273,75 @@ export function PlayerModelStudio({
                 <p className="text-[10px] tracking-widest text-white/50 uppercase">
                   Recorded clips
                 </p>
-                {authoredClips.map((c) => (
-                  <div key={c.name} className="flex items-center gap-2 text-[11px]">
-                    <button
-                      type="button"
-                      className="text-cyan-200 underline"
-                      onClick={() => playRawClip(c.name)}
-                    >
-                      {c.name}
-                    </button>
-                    <span className="text-white/35">{c.duration.toFixed(2)}s</span>
-                    <button
-                      type="button"
-                      className="ml-auto text-rose-300"
-                      onClick={() => {
-                        onChange({
-                          playerAuthoredClips: authoredClips.filter((x) => x.name !== c.name),
-                        });
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ))}
+                {authoredClips.map((c) =>
+                  renamingClip === c.name ? (
+                    <div key={c.name} className="flex items-center gap-1.5 text-[11px]">
+                      <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            renameAuthoredClip(c.name, renameValue);
+                            setRenamingClip(null);
+                          } else if (e.key === 'Escape') {
+                            setRenamingClip(null);
+                          }
+                        }}
+                        className="flex-1 min-w-0 bg-white/10 border border-white/20 rounded px-1.5 py-0.5 text-white"
+                      />
+                      <button
+                        type="button"
+                        className="text-emerald-300"
+                        onClick={() => {
+                          renameAuthoredClip(c.name, renameValue);
+                          setRenamingClip(null);
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="text-white/50"
+                        onClick={() => setRenamingClip(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div key={c.name} className="flex items-center gap-2 text-[11px]">
+                      <button
+                        type="button"
+                        className="text-cyan-200 underline truncate"
+                        onClick={() => playRawClip(c.name)}
+                      >
+                        {c.name}
+                      </button>
+                      <span className="text-white/35">{c.duration.toFixed(2)}s</span>
+                      <button
+                        type="button"
+                        className="ml-auto text-white/50 hover:text-white/80"
+                        onClick={() => {
+                          setRenamingClip(c.name);
+                          setRenameValue(c.name);
+                        }}
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        className="text-rose-300"
+                        onClick={() => {
+                          onChange({
+                            playerAuthoredClips: authoredClips.filter((x) => x.name !== c.name),
+                          });
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )
+                )}
               </div>
             )}
           </>
@@ -1384,10 +1594,32 @@ class StudioPreview {
     const prev = this.current ? this.actions.get(this.current) : undefined;
     prev?.fadeOut(0.12);
     next.reset();
+    next.paused = false;
     next.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
     next.clampWhenFinished = !loop;
     next.fadeIn(0.12).play();
     this.current = name;
+  }
+
+  /** Current clip's playhead / length, for the scrub bar. Null when nothing is playing. */
+  getCurrentClipInfo(): { time: number; duration: number; paused: boolean } | null {
+    const action = this.current ? this.actions.get(this.current) : undefined;
+    if (!action) return null;
+    return { time: action.time, duration: action.getClip().duration, paused: action.paused };
+  }
+
+  setPaused(paused: boolean) {
+    const action = this.current ? this.actions.get(this.current) : undefined;
+    if (action) action.paused = paused;
+  }
+
+  /** Jump the current clip's playhead to `t` seconds (pauses playback). */
+  scrubTo(t: number) {
+    const action = this.current ? this.actions.get(this.current) : undefined;
+    if (!action) return;
+    action.paused = true;
+    action.time = Math.max(0, Math.min(t, action.getClip().duration || 0));
+    this.mixer?.update(0);
   }
 
   dispose() {

@@ -34,7 +34,7 @@ import { makeHammerSolidObject, type HammerPrimitive } from './hammer-shapes';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
-import { playSound, preloadSoundboard } from '../effects/soundboard';
+import { playSound, playLoopedSound, stopLoopedSound, preloadSoundboard } from '../effects/soundboard';
 import {
   createSimScratch,
   simToThree,
@@ -767,7 +767,8 @@ export function MapPlayPreview({
         wishStrafe += moveStick.x;
       }
       const sprintingNow = sprint && wasGrounded && (wishFwd !== 0 || wishStrafe !== 0);
-      if (sprintingNow && !wasSprintingForSound) playSound('sprint_start');
+      if (sprintingNow && !wasSprintingForSound) playLoopedSound('sprint_start');
+      else if (!sprintingNow && wasSprintingForSound) stopLoopedSound('sprint_start');
       wasSprintingForSound = sprintingNow;
       // Camera-relative: W into look, A = screen-left, D = screen-right.
       // Look flat = (sinYaw, cosYaw) in Three XZ; screen-right = (−cosYaw, sinYaw).
@@ -1213,6 +1214,7 @@ export function MapPlayPreview({
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      stopLoopedSound('sprint_start');
       ro.disconnect();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);

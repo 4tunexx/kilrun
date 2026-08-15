@@ -1092,6 +1092,7 @@ function AnimsTab({
             { key: 'idleClip', label: 'Idle clip', hint: 'Idle fidget / breathing' },
             { key: 'fireClip', label: 'Fire clip', hint: 'Played on each shot' },
             { key: 'reloadClip', label: 'Reload clip', hint: 'Reload animation' },
+            { key: 'equipClip', label: 'Equip clip', hint: 'Played once on weapon switch / draw' },
           ] as const
         ).map(({ key, label, hint }) => (
           <label key={key} className="block text-[10px] text-white/50">
