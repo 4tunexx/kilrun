@@ -640,6 +640,7 @@ export default function KilrunEngine({
     let wasAliveForDeathSound = true;
     let wasSprintingForSound = false;
     let wasSlidingForSound = false;
+    let wasFlippingForSound = false;
     /** Sprint/slide screen FX intensity, eased toward 0/1 each frame. */
     let sprintFx = 0;
     const sprintParticles = new SprintParticles(world.camera);
@@ -866,6 +867,7 @@ export default function KilrunEngine({
                   sprint: inputManager.isSprintPressed(),
                   crouch: inputManager.isCrouchPressed(),
                   meleeActive: performance.now() < meleeUntil,
+                  flipPressed: inputManager.isFlipPressed(),
                 },
                 dt,
                 predictedPads,
@@ -921,6 +923,9 @@ export default function KilrunEngine({
         wasSprintingForSound = sprinting;
         if (sliding && !wasSlidingForSound) playSound('slide');
         wasSlidingForSound = sliding;
+        const flipping = predictedScratch.flipMs > 0;
+        if (flipping && !wasFlippingForSound) playSound('flip');
+        wasFlippingForSound = flipping;
         const targetFx = sliding ? 1 : sprinting ? Math.min(1, horizSpeed / 9) : 0;
         const rate = targetFx > sprintFx ? 7 : 3.2;
         sprintFx += (targetFx - sprintFx) * Math.min(1, dt * rate);
@@ -1031,6 +1036,7 @@ export default function KilrunEngine({
                 vz: predictedBody.vz,
                 isGrounded: predictedBody.isGrounded,
                 isSliding: predictedScratch.slideMs > 0,
+                isFlipping: predictedScratch.flipMs > 0,
               }
             : player;
         view.update(
@@ -1240,6 +1246,7 @@ export default function KilrunEngine({
             aimHeld,
             interactPressed: inputManager.isInteractPressed(),
             meleeActive: performance.now() < meleeUntil,
+            flipPressed: inputManager.isFlipPressed(),
           };
           connectionRef.current?.sendInput(message);
           shootHeld = false;

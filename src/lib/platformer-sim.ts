@@ -16,6 +16,10 @@ import {
   ENERGY_EXHAUSTED_SPEED_MULT,
   ENERGY_EXHAUSTED_THRESHOLD,
   ENERGY_REGEN_RATE,
+  FLIP_COOLDOWN_MS,
+  FLIP_DURATION_MS,
+  FLIP_ENERGY_COST,
+  FLIP_VELOCITY,
   GRAVITY,
   GROUND_FOLLOW_SPEED,
   JUMP_BUFFER_MS,
@@ -34,6 +38,7 @@ import {
   MELEE_MOVE_MULT,
   PLAYER_HEIGHT,
   PLAYER_RADIUS,
+  SLIDE_ENERGY_COST,
   SPRINT_MULTIPLIER,
   WALL_JUMP_HORIZ_VEL,
   WALL_JUMP_LOCKOUT_MS,
@@ -117,6 +122,12 @@ export interface SimScratch {
   slideCooldownMs: number;
   /** Edge-detects the crouch button so holding it doesn't retrigger every tick. */
   wasCrouchHeld: boolean;
+  /** Remaining ms of an active back flip (0 = not flipping). */
+  flipMs: number;
+  /** Remaining ms before a new flip can start. */
+  flipCooldownMs: number;
+  /** Edge-detects the flip button so holding it doesn't retrigger every tick. */
+  wasFlipHeld: boolean;
 }
 
 export interface SimInput {
@@ -126,6 +137,7 @@ export interface SimInput {
   sprint: boolean;
   crouch: boolean;
   meleeActive?: boolean;
+  flipPressed?: boolean;
 }
 
 /** === Tunables from shared/sim-constants.ts === */
@@ -188,6 +200,9 @@ export function createSimScratch(): SimScratch {
     slideMs: 0,
     slideCooldownMs: 0,
     wasCrouchHeld: false,
+    flipMs: 0,
+    flipCooldownMs: 0,
+    wasFlipHeld: false,
   };
 }
 
@@ -475,9 +490,11 @@ export function stepPlatformer(
     wishMag > 0.2 &&
     !scratch.exhausted &&
     scratch.slideMs <= 0 &&
-    scratch.slideCooldownMs <= 0
+    scratch.slideCooldownMs <= 0 &&
+    body.energy >= SLIDE_ENERGY_COST
   ) {
     scratch.slideMs = SLIDE_DURATION_MS;
+    body.energy = Math.max(0, body.energy - SLIDE_ENERGY_COST);
   }
   if (scratch.slideMs > 0) {
     maxSpeed = MAX_GROUND_SPEED * SLIDE_MULT;
@@ -485,6 +502,32 @@ export function stepPlatformer(
     if (scratch.slideMs <= 0) scratch.slideCooldownMs = SLIDE_COOLDOWN_MS;
   } else if (scratch.slideCooldownMs > 0) {
     scratch.slideCooldownMs = Math.max(0, scratch.slideCooldownMs - dt * 1000);
+  }
+
+  // Back flip (V) — mirrors server/src/sim/movement.ts's grounded acrobatic
+  // hop: energy-gated, edge-triggered, brief cooldown, independent of
+  // sprint/crouch.
+  const flipEdge = (input.flipPressed ?? false) && !scratch.wasFlipHeld;
+  scratch.wasFlipHeld = input.flipPressed ?? false;
+  if (
+    flipEdge &&
+    grounded &&
+    !scratch.exhausted &&
+    scratch.flipMs <= 0 &&
+    scratch.flipCooldownMs <= 0 &&
+    body.energy >= FLIP_ENERGY_COST
+  ) {
+    scratch.flipMs = FLIP_DURATION_MS;
+    body.energy = Math.max(0, body.energy - FLIP_ENERGY_COST);
+    body.vz = FLIP_VELOCITY;
+    body.isGrounded = false;
+    grounded = false;
+  }
+  if (scratch.flipMs > 0) {
+    scratch.flipMs = Math.max(0, scratch.flipMs - dt * 1000);
+    if (scratch.flipMs <= 0) scratch.flipCooldownMs = FLIP_COOLDOWN_MS;
+  } else if (scratch.flipCooldownMs > 0) {
+    scratch.flipCooldownMs = Math.max(0, scratch.flipCooldownMs - dt * 1000);
   }
 
   // Soft ground glue (mirrors server movement.ts). Stepped ramp pads change

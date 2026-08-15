@@ -52,6 +52,10 @@ export interface NetPlayerState {
   isGrounded: boolean;
   isSprinting: boolean;
   isSliding: boolean;
+  isFlipping: boolean;
+  /** Timestamp (Date.now() ms) each move can be used again — HUD cooldown rings. */
+  slideCooldownEndsAt?: number;
+  flipCooldownEndsAt?: number;
   isReady: boolean;
   kp?: number;
   /** Compact SkinAttachment[] JSON for remote cosmetics. */
@@ -200,6 +204,8 @@ export interface PlayerInputMessage {
   interactPressed: boolean;
   /** Foundry melee speed_mod 0.5 while swing is active. */
   meleeActive?: boolean;
+  /** Held state for the back-flip move (V) — server edge-detects like crouch. */
+  flipPressed?: boolean;
 }
 
 /** Broadcast in-match chat message (server/src/lib/chat.ts). */

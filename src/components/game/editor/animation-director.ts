@@ -162,6 +162,8 @@ export class AnimationDirector {
       crouch: boolean;
       /** Slide burst active (CombatSettings slideEnabled — crouch while sprinting). */
       sliding?: boolean;
+      /** Back-flip burst active (V key). */
+      flipping?: boolean;
       moveX: number; // -1 left … +1 right (camera relative wish)
       moveZ: number; // -1 back … +1 forward
       /** When false, play die once. */
@@ -202,7 +204,9 @@ export class AnimationDirector {
       return;
     }
     let slot: PlayerAnimSlot = 'idle';
-    if (state.justLanded && bindings.land) {
+    if (state.flipping && bindings.flip) {
+      slot = 'flip';
+    } else if (state.justLanded && bindings.land) {
       slot = 'land';
     } else if (!state.grounded) {
       slot = state.moveZ !== 0 || state.moving ? 'jump' : 'fall';
@@ -220,7 +224,7 @@ export class AnimationDirector {
       }
     }
     const clip = bindings[slot] || bindings.idle;
-    const loop = slot !== 'land' && slot !== 'jump';
+    const loop = slot !== 'land' && slot !== 'jump' && slot !== 'flip';
     this.play(entityId, clip, loop);
   }
 

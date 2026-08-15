@@ -249,6 +249,7 @@ export class ThreeCharacter {
       bindSlot('land', ['land', 'landing'], false);
       bindSlot('crouch', ['crouch', 'sneak', 'duck']);
       bindSlot('slide', ['slide', 'sliding', 'slid']);
+      bindSlot('flip', ['flip', 'backflip', 'back_flip', 'back flip'], false);
       bindSlot('strafe_left', ['left', 'strafe']);
       bindSlot('strafe_right', ['right', 'strafe']);
       bindSlot('back', ['back', 'backward']);
@@ -712,6 +713,10 @@ export class ThreeCharacter {
       this.play(slot, false);
     } else if (performance.now() < this.attackUntil) {
       // attack / punch keeps playing until finished
+    } else if (player.isFlipping && this.actions.has('flip')) {
+      // Back flip briefly leaves the ground (small hop) — keep the flip
+      // pose instead of falling through to the jump/fall branch below.
+      this.play('flip', false);
     } else if (performance.now() < this.landUntil && this.actions.has('land')) {
       this.play('land', false);
     } else if (!player.isGrounded) {

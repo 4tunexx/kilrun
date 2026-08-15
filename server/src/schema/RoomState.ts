@@ -66,6 +66,11 @@ export class PlayerState extends Schema {
   @type('boolean') isGrounded = true;
   @type('boolean') isSprinting = false;
   @type('boolean') isSliding = false;
+  @type('boolean') isFlipping = false;
+  /** Timestamp (Date.now() ms) each move can be used again — drives the HUD
+   * movement cooldown rings. 0 = not on cooldown. */
+  @type('number') slideCooldownEndsAt = 0;
+  @type('number') flipCooldownEndsAt = 0;
   @type('boolean') isReady = false;
   @type('boolean') isInvisible = false;
   /** Last checkpoint touch (sim space). 0 = unset. */

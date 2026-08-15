@@ -58,6 +58,15 @@ export const ENERGY_REGEN_RATE = 18;
 export const ENERGY_EXHAUSTED_THRESHOLD = 50;
 export const ENERGY_EXHAUSTED_SPEED_MULT = 0.72;
 export const JUMP_ENERGY_COST = 4;
+/** Flat cost taken once when a slide successfully starts (on top of the
+ * ongoing sprint drain already running while sliding). */
+export const SLIDE_ENERGY_COST = 12;
+export const FLIP_ENERGY_COST = 20;
+export const FLIP_DURATION_MS = 700;
+export const FLIP_COOLDOWN_MS = 1500;
+/** Small vertical hop so a grounded flip reads as an actual jump-flip, not a
+ * feet-planted animation. ~55% of a normal jump. */
+export const FLIP_VELOCITY = JUMP_VELOCITY * 0.55;
 
 export const JUMP_PAD_BOOST = 14;
 

@@ -84,6 +84,11 @@ export class InputManager {
     return this.keyboard.isPressed('shift') || this.joystick.isSprintHeld();
   }
 
+  /** Back flip (V). Held state — server/prediction edge-detect it themselves. */
+  public isFlipPressed(): boolean {
+    return this.keyboard.isPressed('v');
+  }
+
   public isAttackPressed(): boolean {
     return this.isMobile
       ? this.joystick.consumeAttackPulse() || this.joystick.consumeShootPulse()

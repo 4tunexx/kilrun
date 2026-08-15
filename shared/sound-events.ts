@@ -29,6 +29,7 @@ export const SOUND_EVENTS: SoundEventDef[] = [
   { key: 'footstep', label: 'Footstep', category: 'Movement' },
   { key: 'sprint_start', label: 'Sprint Start', category: 'Movement' },
   { key: 'slide', label: 'Slide', category: 'Movement' },
+  { key: 'flip', label: 'Back Flip', category: 'Movement' },
   { key: 'crouch', label: 'Crouch', category: 'Movement' },
   { key: 'energy_exhausted', label: 'Energy Exhausted', category: 'Movement' },
 

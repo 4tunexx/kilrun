@@ -10,6 +10,18 @@ import {
 } from '@shared/power-definitions';
 import type { NetAbilityLoadoutState } from '../net/types';
 import type { AbilityLevels } from '@shared/ability-progression';
+import {
+  FLIP_COOLDOWN_MS,
+  FLIP_ENERGY_COST,
+  JUMP_ENERGY_COST,
+  SLIDE_ENERGY_COST,
+} from '@shared/sim-constants';
+
+/** Default slide cooldown — mirrors movement.ts's `effSlideCooldownMs` default.
+ * The actual per-map value (CombatSettings.slideCooldownMs) isn't synced to
+ * the client, so this ring's fill duration is an approximation when a map
+ * author overrides it; the ring still starts/clears at the right times either way. */
+const SLIDE_COOLDOWN_MS_DEFAULT = 1000;
 
 const SLOT_FIELDS: Record<AbilitySlotKind, { endsAt: keyof NetAbilityLoadoutState; cooldownEndsAt: keyof NetAbilityLoadoutState }> = {
   visibility: { endsAt: 'visibilityEndsAt', cooldownEndsAt: 'visibilityCooldownEndsAt' },
@@ -43,7 +55,7 @@ function useNowWhileActive(endsAt: number): number {
   return now;
 }
 
-function AbilityRingIcon({
+export function AbilityRingIcon({
   icon,
   cooldownMs,
   cooldownEndsAt,
@@ -144,6 +156,55 @@ export const AbilityCooldownRow: React.FC<{
           />
         );
       })}
+    </div>
+  );
+};
+
+/**
+ * Cooldown rings for base movement abilities (slide, flip, double jump) —
+ * everyone has these from the start, unlike the leveled powers above, so
+ * they're driven directly off `NetPlayerState` fields rather than the
+ * skill-tree's ability-level gating.
+ */
+export const MovementCooldownRow: React.FC<{
+  slideCooldownEndsAt?: number;
+  flipCooldownEndsAt?: number;
+  playerEnergy: number;
+}> = ({ slideCooldownEndsAt, flipCooldownEndsAt, playerEnergy }) => {
+  const canDoubleJump = playerEnergy >= JUMP_ENERGY_COST;
+  return (
+    <div className="flex items-end gap-2">
+      <AbilityRingIcon
+        icon="🛹"
+        cooldownMs={SLIDE_COOLDOWN_MS_DEFAULT}
+        cooldownEndsAt={slideCooldownEndsAt ?? 0}
+        buffEndsAt={0}
+        energyCost={SLIDE_ENERGY_COST}
+        playerEnergy={playerEnergy}
+      />
+      <AbilityRingIcon
+        icon="🤸"
+        cooldownMs={FLIP_COOLDOWN_MS}
+        cooldownEndsAt={flipCooldownEndsAt ?? 0}
+        buffEndsAt={0}
+        energyCost={FLIP_ENERGY_COST}
+        playerEnergy={playerEnergy}
+      />
+      {/* Double jump has no timed cooldown — it recharges instantly on
+          landing — so this just dims when there isn't enough energy for
+          one, no ring animation. */}
+      <div className="relative shrink-0" style={{ width: 44, height: 44 }}>
+        <div
+          className="absolute inset-[3px] rounded-full flex items-center justify-center text-[17px] leading-none"
+          style={{
+            background: 'rgba(10,16,28,0.78)',
+            border: `1.5px solid ${canDoubleJump ? 'rgba(255,255,255,0.32)' : 'rgba(255,80,80,0.55)'}`,
+            filter: canDoubleJump ? 'none' : 'grayscale(0.65) brightness(0.6)',
+          }}
+        >
+          <span aria-hidden>⬆️</span>
+        </div>
+      </div>
     </div>
   );
 };

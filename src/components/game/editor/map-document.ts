@@ -267,6 +267,7 @@ export type PlayerAnimSlot =
   | 'land'
   | 'crouch'
   | 'slide'
+  | 'flip'
   | 'strafe_left'
   | 'strafe_right'
   | 'back'
@@ -286,6 +287,7 @@ export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string; hint?: stri
   { id: 'land', label: 'Land', hint: 'Touching down after a fall' },
   { id: 'crouch', label: 'Crouch', hint: 'Ctrl / C held' },
   { id: 'slide', label: 'Slide', hint: 'Crouch while sprinting (CombatSettings slideEnabled)' },
+  { id: 'flip', label: 'Back Flip', hint: 'V key — grounded acrobatic hop, costs energy' },
   { id: 'strafe_left', label: 'Strafe Left (A)' },
   { id: 'strafe_right', label: 'Strafe Right (D)' },
   { id: 'back', label: 'Walk Back (S)' },
@@ -369,6 +371,7 @@ export function suggestPlayerBindings(clips: string[]): PlayerAnimBindings {
     land: find('land', 'landing') ?? idle,
     crouch: find('crouch', 'sneak', 'duck') ?? idle,
     slide: find('slide', 'sliding', 'slid') ?? find('crouch', 'sneak', 'duck') ?? idle,
+    flip: find('flip', 'backflip', 'back_flip', 'back flip'),
     strafe_left: find('left', 'strafe_l', 'strafe left') ?? walk,
     strafe_right: find('right', 'strafe_r', 'strafe right') ?? walk,
     back: find('back', 'backward', 'reverse') ?? walk,

@@ -469,6 +469,7 @@ export function MapPlayPreview({
     let checkpoint: { x: number; y: number; z: number } | null = null;
     let wasGrounded = true;
     let wasSprintingForSound = false;
+    let wasFlippingForSound = false;
     let landUntil = 0;
     let meleeUntil = 0;
     const avatarEntity = getMapPlayerAvatar(playDoc) ?? null;
@@ -755,6 +756,7 @@ export function MapPlayPreview({
       const sprint =
         keys.has('ShiftLeft') || keys.has('ShiftRight') || !!joy?.isSprintHeld();
       const crouch = keys.has('ControlLeft') || keys.has('KeyC');
+      const flipPressed = keys.has('KeyV');
 
       let wishFwd = 0;
       let wishStrafe = 0;
@@ -770,6 +772,9 @@ export function MapPlayPreview({
       if (sprintingNow && !wasSprintingForSound) playLoopedSound('sprint_start');
       else if (!sprintingNow && wasSprintingForSound) stopLoopedSound('sprint_start');
       wasSprintingForSound = sprintingNow;
+      const flippingNow = scratch.flipMs > 0;
+      if (flippingNow && !wasFlippingForSound) playSound('flip');
+      wasFlippingForSound = flippingNow;
       // Camera-relative: W into look, A = screen-left, D = screen-right.
       // Look flat = (sinYaw, cosYaw) in Three XZ; screen-right = (−cosYaw, sinYaw).
       const c = Math.cos(yaw);
@@ -843,6 +848,7 @@ export function MapPlayPreview({
               sprint,
               crouch,
               meleeActive: performance.now() < meleeUntil,
+              flipPressed,
             },
             dt,
             pads,
@@ -1180,6 +1186,7 @@ export function MapPlayPreview({
           grounded: body.isGrounded,
           crouch,
           sliding: scratch.slideMs > 0,
+          flipping: scratch.flipMs > 0,
           moveX: wishStrafe,
           moveZ: wishFwd,
           alive: hpLocal > 0,

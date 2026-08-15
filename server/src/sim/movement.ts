@@ -9,11 +9,16 @@ import {
   ENERGY_EXHAUSTED_SPEED_MULT,
   ENERGY_EXHAUSTED_THRESHOLD,
   ENERGY_REGEN_RATE,
+  FLIP_COOLDOWN_MS,
+  FLIP_DURATION_MS,
+  FLIP_ENERGY_COST,
+  FLIP_VELOCITY,
   GRAVITY,
   JUMP_BUFFER_MS,
   JUMP_CUT_MULTIPLIER,
   JUMP_ENERGY_COST,
   JUMP_PAD_BOOST,
+  SLIDE_ENERGY_COST,
   JUMP_VELOCITY,
   LAND_SNAP_FAST,
   LAND_SNAP_SLOW,
@@ -58,6 +63,8 @@ export interface PlayerInput {
   interactPressed: boolean;
   /** True while melee swing is active (Foundry speed_mod 0.5). */
   meleeActive?: boolean;
+  /** Held state for the back-flip move (V) — edge-detected here like crouch. */
+  flipPressed?: boolean;
 }
 
 const EMPTY_INPUT: PlayerInput = {
@@ -73,6 +80,7 @@ const EMPTY_INPUT: PlayerInput = {
   aimHeld: false,
   interactPressed: false,
   meleeActive: false,
+  flipPressed: false,
 };
 
 export function defaultInput(): PlayerInput {
@@ -109,6 +117,12 @@ export interface PlayerSimScratch {
   slideCooldownMs: number;
   /** Edge-detects the crouch button so holding it doesn't retrigger every tick. */
   wasCrouchHeld: boolean;
+  /** Remaining ms of an active back flip (0 = not flipping). */
+  flipMs: number;
+  /** Remaining ms before a new flip can start. */
+  flipCooldownMs: number;
+  /** Edge-detects the flip button so holding it doesn't retrigger every tick. */
+  wasFlipHeld: boolean;
 }
 
 export function createSimScratch(): PlayerSimScratch {
@@ -130,6 +144,9 @@ export function createSimScratch(): PlayerSimScratch {
     slideMs: 0,
     slideCooldownMs: 0,
     wasCrouchHeld: false,
+    flipMs: 0,
+    flipCooldownMs: 0,
+    wasFlipHeld: false,
   };
 }
 
@@ -309,17 +326,52 @@ export function applyMovement(
     wishMag > 0.2 &&
     !scratch.exhausted &&
     scratch.slideMs <= 0 &&
-    scratch.slideCooldownMs <= 0
+    scratch.slideCooldownMs <= 0 &&
+    player.energy >= SLIDE_ENERGY_COST
   ) {
     scratch.slideMs = effSlideDurationMs;
+    player.energy = Math.max(0, player.energy - SLIDE_ENERGY_COST);
   }
   player.isSliding = scratch.slideMs > 0;
   if (scratch.slideMs > 0) {
     maxSpeed = baseMax * effSlideMult;
     scratch.slideMs = Math.max(0, scratch.slideMs - dtSeconds * 1000);
-    if (scratch.slideMs <= 0) scratch.slideCooldownMs = effSlideCooldownMs;
+    if (scratch.slideMs <= 0) {
+      scratch.slideCooldownMs = effSlideCooldownMs;
+      player.slideCooldownEndsAt = Date.now() + effSlideCooldownMs;
+    }
   } else if (scratch.slideCooldownMs > 0) {
     scratch.slideCooldownMs = Math.max(0, scratch.slideCooldownMs - dtSeconds * 1000);
+  }
+
+  // Back flip (V) — grounded acrobatic hop, energy-gated + cooldown like
+  // slide but independent of sprint/crouch state. Mirrors the same
+  // edge-detect + duration/cooldown pattern as slide above.
+  const flipEdge = (input.flipPressed ?? false) && !scratch.wasFlipHeld;
+  scratch.wasFlipHeld = input.flipPressed ?? false;
+  if (
+    flipEdge &&
+    grounded &&
+    !scratch.exhausted &&
+    scratch.flipMs <= 0 &&
+    scratch.flipCooldownMs <= 0 &&
+    player.energy >= FLIP_ENERGY_COST
+  ) {
+    scratch.flipMs = FLIP_DURATION_MS;
+    player.energy = Math.max(0, player.energy - FLIP_ENERGY_COST);
+    player.vz = FLIP_VELOCITY;
+    player.isGrounded = false;
+    grounded = false;
+  }
+  player.isFlipping = scratch.flipMs > 0;
+  if (scratch.flipMs > 0) {
+    scratch.flipMs = Math.max(0, scratch.flipMs - dtSeconds * 1000);
+    if (scratch.flipMs <= 0) {
+      scratch.flipCooldownMs = FLIP_COOLDOWN_MS;
+      player.flipCooldownEndsAt = Date.now() + FLIP_COOLDOWN_MS;
+    }
+  } else if (scratch.flipCooldownMs > 0) {
+    scratch.flipCooldownMs = Math.max(0, scratch.flipCooldownMs - dtSeconds * 1000);
   }
 
   const flyActive = isFlyActive(player, Date.now());
