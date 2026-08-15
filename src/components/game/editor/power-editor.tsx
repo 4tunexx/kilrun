@@ -37,6 +37,7 @@ import {
   type TimedBuffParams,
   type BurstEffectParams,
 } from '@shared/power-definitions';
+import { getLucideIcon } from '@/lib/move-icons';
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -47,9 +48,12 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-/** Renders a power's `icon` as an uploaded image when it's a URL, else as
- * the plain emoji glyph — same convention used in-game (game-menu.tsx). */
+/** Renders a power's `icon` as an uploaded image, a lucide icon (auto-
+ * created custom-move powers use "lucide:Name"), or the legacy emoji glyph
+ * — same convention used in-game (game-menu.tsx). */
 function PowerIcon({ icon, className }: { icon: string; className?: string }) {
+  const Lucide = getLucideIcon(icon);
+  if (Lucide) return <Lucide className={className ?? 'w-5 h-5'} />;
   if (isImageIcon(icon)) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={icon} alt="" className={className ?? 'w-5 h-5 object-contain'} />;
@@ -383,6 +387,27 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={selectedKey ?? ''}
+            onChange={(e) => {
+              const p = powers.find((pw) => pw.key === e.target.value);
+              if (p) selectForEdit(p);
+            }}
+            className="bg-black/40 border border-white/15 rounded-lg px-2 py-1.5 text-xs text-white/80 max-w-[220px]"
+            title="Jump straight to a power to edit it — faster than hunting for it in the tree, especially for newly auto-created ones."
+          >
+            <option value="" disabled>
+              Jump to power…
+            </option>
+            {[...powers]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.name}
+                  {p.key.startsWith('custom_move_') ? ' (custom move)' : ''}
+                </option>
+              ))}
+          </select>
           <Button size="sm" variant="ghost" onClick={load} className="text-white/50 hover:text-white/80 gap-1">
             <RefreshCw className="w-3.5 h-3.5" />
             Refresh

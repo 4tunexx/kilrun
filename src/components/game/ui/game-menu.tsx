@@ -16,6 +16,7 @@ import {
   isImageIcon,
   type PowerDefinitionRecord,
 } from '@shared/power-definitions';
+import { getLucideIcon } from '@/lib/move-icons';
 import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
 import { getPowerTreeConfig, type PowerTreeConfig } from '@/lib/power-tree-config';
 import { playSound } from '../effects/soundboard';
@@ -24,9 +25,12 @@ import { playSound } from '../effects/soundboard';
  * both surfaces share a visual language. */
 const HEX_CLIP = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
 
-/** Renders a power's `icon` as an uploaded image when it's a URL, else as
- * the plain emoji glyph — mirrors the admin Power Editor's PowerIcon. */
+/** Renders a power's `icon` as an uploaded image, a lucide icon (auto-
+ * created custom-move powers use "lucide:Name"), or the legacy emoji glyph
+ * — mirrors the admin Power Editor's PowerIcon. */
 function PowerIcon({ icon, className }: { icon: string; className?: string }) {
+  const Lucide = getLucideIcon(icon);
+  if (Lucide) return <Lucide className={(className ?? '') + ' object-contain'} />;
   if (isImageIcon(icon)) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={icon} alt="" className={(className ?? '') + ' object-contain'} />;

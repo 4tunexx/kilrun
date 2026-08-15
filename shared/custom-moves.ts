@@ -47,7 +47,11 @@ export function defaultCustomMove(): CustomMoveDef {
     groundedOnly: true,
     vzBoost: 0,
     soundEvent: undefined,
-    icon: '⭐',
+    // "lucide:Name" — this platform renders lucide-react icons only, never
+    // emoji. Kept as a plain string literal (not imported from
+    // src/lib/move-icons.ts) since this file is shared with the server,
+    // which must never import a client-only React icon library.
+    icon: 'lucide:Sparkles',
   };
 }
 

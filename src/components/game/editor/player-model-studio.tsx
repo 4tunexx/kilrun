@@ -52,6 +52,12 @@ import {
 import { loadAnimatedPrefab } from './model-scan';
 import { listClipBones, retargetClip } from './mixamo-import';
 import { defaultCustomMove, RESERVED_MOVE_KEYS, type CustomMoveDef } from '@shared/custom-moves';
+import {
+  MOVE_ICON_NAMES,
+  MOVE_ICON_REGISTRY,
+  getLucideIcon,
+  toLucideIconString,
+} from '@/lib/move-icons';
 
 type StudioTab = 'model' | 'mesh' | 'bones' | 'record' | 'import' | 'anims' | 'moves';
 
@@ -126,6 +132,8 @@ export function PlayerModelStudio({
   const [scrubTime, setScrubTime] = useState(0);
   const [scrubDuration, setScrubDuration] = useState(0);
   const [scrubPaused, setScrubPaused] = useState(false);
+  const [iconPickerFor, setIconPickerFor] = useState<string | null>(null);
+  const movePowerSyncTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const anim = ensureAnimation(entity);
   const clips = anim.availableClips;
@@ -133,6 +141,72 @@ export function PlayerModelStudio({
   const meshEdits = entity.playerMeshEdits ?? {};
   const extraBones = entity.playerExtraBones ?? [];
   const authoredClips = entity.playerAuthoredClips ?? [];
+
+  /**
+   * Every custom move gets its own skill-tree unlock entry automatically —
+   * a real PowerDefinition (DB-backed, the same content the Power Editor /
+   * in-game skill tree read) so low-level players have something to spend
+   * points on. maxLevel 1 / no stat bonus: it's a pure unlock gate, not a
+   * scaling buff — server checks `abilityLevels[key] > 0` before letting the
+   * move trigger (see server/src/sim/movement.ts). Best-effort: sync
+   * failures (e.g. non-admin session) don't block editing the move itself.
+   */
+  const movePowerKey = (moveId: string) => `custom_move_${moveId}`;
+
+  const upsertMovePower = async (move: CustomMoveDef) => {
+    const body = {
+      key: movePowerKey(move.id),
+      name: move.name || 'Custom Move',
+      description: `Skill-tree unlock for the "${move.name}" custom move.`,
+      icon: move.icon,
+      maxLevel: 1,
+      unlockLevel: 1,
+      prerequisites: [],
+      cost: { type: 'flat', base: 1 },
+      effectType: 'stat_bonus',
+      effectParams: { bonuses: [] },
+      sortOrder: 0,
+    };
+    try {
+      const res = await fetch('/api/game/power-definitions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.status === 409) {
+        await fetch('/api/game/power-definitions', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      }
+    } catch (err) {
+      console.warn('[PlayerModelStudio] skill-tree sync failed for move', move.id, err);
+    }
+  };
+
+  const scheduleMovePowerSync = (move: CustomMoveDef) => {
+    const timers = movePowerSyncTimers.current;
+    const existing = timers.get(move.id);
+    if (existing) clearTimeout(existing);
+    timers.set(
+      move.id,
+      setTimeout(() => {
+        timers.delete(move.id);
+        void upsertMovePower(move);
+      }, 600)
+    );
+  };
+
+  const deleteMovePower = async (moveId: string) => {
+    try {
+      await fetch(`/api/game/power-definitions?key=${encodeURIComponent(movePowerKey(moveId))}`, {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      console.warn('[PlayerModelStudio] skill-tree delete failed for move', moveId, err);
+    }
+  };
 
   const refreshLists = () => {
     const bones = previewRef.current?.getBoneNames() ?? [];
@@ -1367,7 +1441,11 @@ export function PlayerModelStudio({
             <Button
               size="sm"
               className="w-full min-h-9 bg-sky-600 hover:bg-sky-500"
-              onClick={() => onCustomMovesChange?.([...customMoves, defaultCustomMove()])}
+              onClick={() => {
+                const move = defaultCustomMove();
+                onCustomMovesChange?.([...customMoves, move]);
+                void upsertMovePower(move);
+              }}
             >
               + Add Move
             </Button>
@@ -1378,19 +1456,51 @@ export function PlayerModelStudio({
               const keyConflict =
                 RESERVED_MOVE_KEYS.has(move.key.toLowerCase()) ||
                 customMoves.some((m) => m.id !== move.id && m.key.toLowerCase() === move.key.toLowerCase());
-              const update = (patch: Partial<CustomMoveDef>) =>
-                onCustomMovesChange?.(customMoves.map((m) => (m.id === move.id ? { ...m, ...patch } : m)));
+              const update = (patch: Partial<CustomMoveDef>) => {
+                const nextMove = { ...move, ...patch };
+                onCustomMovesChange?.(customMoves.map((m) => (m.id === move.id ? nextMove : m)));
+                if (patch.name !== undefined || patch.icon !== undefined) {
+                  scheduleMovePowerSync(nextMove);
+                }
+              };
               return (
                 <div
                   key={move.id}
                   className="rounded-lg border border-white/10 bg-black/25 p-2.5 space-y-2"
                 >
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      value={move.icon}
-                      onChange={(e) => update({ icon: e.target.value.slice(0, 2) })}
-                      className="w-9 bg-black/40 border border-white/10 rounded px-1 py-1.5 text-center text-sm"
-                    />
+                  <div className="flex items-center gap-1.5 relative">
+                    <button
+                      type="button"
+                      title="Choose icon"
+                      onClick={() => setIconPickerFor(iconPickerFor === move.id ? null : move.id)}
+                      className="w-9 h-9 shrink-0 flex items-center justify-center bg-black/40 border border-white/10 rounded hover:border-sky-400/50"
+                    >
+                      {(() => {
+                        const Icon = getLucideIcon(move.icon) ?? MOVE_ICON_REGISTRY.Sparkles;
+                        return <Icon className="w-4 h-4" />;
+                      })()}
+                    </button>
+                    {iconPickerFor === move.id && (
+                      <div className="absolute top-10 left-0 z-10 grid grid-cols-6 gap-1 p-2 rounded-lg border border-white/15 bg-[#121a24] shadow-xl">
+                        {MOVE_ICON_NAMES.map((name) => {
+                          const Icon = MOVE_ICON_REGISTRY[name];
+                          return (
+                            <button
+                              key={name}
+                              type="button"
+                              title={name}
+                              onClick={() => {
+                                update({ icon: toLucideIconString(name) });
+                                setIconPickerFor(null);
+                              }}
+                              className="w-7 h-7 flex items-center justify-center rounded hover:bg-white/15"
+                            >
+                              <Icon className="w-4 h-4" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                     <input
                       value={move.name}
                       onChange={(e) => update({ name: e.target.value })}
@@ -1399,7 +1509,10 @@ export function PlayerModelStudio({
                     <button
                       type="button"
                       className="text-rose-300 text-[11px] px-1.5"
-                      onClick={() => onCustomMovesChange?.(customMoves.filter((m) => m.id !== move.id))}
+                      onClick={() => {
+                        onCustomMovesChange?.(customMoves.filter((m) => m.id !== move.id));
+                        void deleteMovePower(move.id);
+                      }}
                     >
                       Delete
                     </button>

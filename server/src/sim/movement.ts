@@ -45,7 +45,7 @@ import {
 } from './constants.js';
 import { findSupportPlatform, resolveSolidCollisions } from './platforms.js';
 import { getMaxEnergyFor } from './ability-stats.js';
-import { isFlyActive } from './active-abilities.js';
+import { isFlyActive, getPlayerAbilityLevels } from './active-abilities.js';
 import type { CustomMoveDef } from '../../../shared/custom-moves.js';
 
 export interface PlayerInput {
@@ -390,14 +390,25 @@ export function applyMovement(
     const now = Date.now();
     const heldKeys = new Set(input.customMoveKeysHeld ?? []);
     const busy = now < player.customMoves.activeUntil;
+    // Each custom move auto-creates a matching skill-tree PowerDefinition
+    // ("custom_move_<id>", see player-model-studio.tsx's upsertMovePower) —
+    // gate on it being unlocked (level > 0) so low-level players have
+    // something to spend Skill Points on, same as any other power. Parsed
+    // lazily (only when a move's key is actually held this tick) since
+    // JSON.parse on every player every tick otherwise runs cold for maps
+    // with no custom moves defined.
+    let abilityLevels: ReturnType<typeof getPlayerAbilityLevels> | null = null;
     for (const move of physOpts.customMoves) {
       const wasHeld = scratch.customMoveWasHeld.get(move.id) ?? false;
       const isHeld = heldKeys.has(move.id);
       scratch.customMoveWasHeld.set(move.id, isHeld);
       const edge = isHeld && !wasHeld;
       const cooldownUntil = player.customMoves.cooldownEndsAt.get(move.id) ?? 0;
+      if (edge && !abilityLevels) abilityLevels = getPlayerAbilityLevels(player);
+      const unlocked = edge ? (abilityLevels?.[`custom_move_${move.id}`] ?? 0) > 0 : false;
       if (
         edge &&
+        unlocked &&
         !busy &&
         now >= cooldownUntil &&
         (!move.groundedOnly || grounded) &&

@@ -6,6 +6,7 @@ import {
   getAbilitySlotKind,
   getEnergyCostForAbility,
   getCooldownForAbility,
+  isImageIcon,
   type AbilitySlotKind,
 } from '@shared/power-definitions';
 import type { NetAbilityLoadoutState } from '../net/types';
@@ -17,6 +18,24 @@ import {
   SLIDE_ENERGY_COST,
 } from '@shared/sim-constants';
 import type { CustomMoveDef } from '@shared/custom-moves';
+import { getLucideIcon } from '@/lib/move-icons';
+import { ChevronsUp, FlipVertical, Waves, type LucideIcon } from 'lucide-react';
+
+/** Renders a ring icon: a LucideIcon component directly, a "lucide:Name"
+ * data string, or (only for pre-existing legacy power defs) emoji/image. */
+function RingGlyph({ icon }: { icon: string | LucideIcon }) {
+  if (typeof icon === 'function') {
+    const Icon = icon;
+    return <Icon className="w-[18px] h-[18px]" />;
+  }
+  const Lucide = getLucideIcon(icon);
+  if (Lucide) return <Lucide className="w-[18px] h-[18px]" />;
+  if (isImageIcon(icon)) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={icon} alt="" className="w-5 h-5 object-contain" />;
+  }
+  return <span aria-hidden>{icon}</span>;
+}
 
 /** Default slide cooldown — mirrors movement.ts's `effSlideCooldownMs` default.
  * The actual per-map value (CombatSettings.slideCooldownMs) isn't synced to
@@ -64,7 +83,7 @@ export function AbilityRingIcon({
   energyCost,
   playerEnergy,
 }: {
-  icon: string;
+  icon: string | LucideIcon;
   cooldownMs: number;
   cooldownEndsAt: number;
   buffEndsAt: number;
@@ -95,7 +114,7 @@ export function AbilityRingIcon({
           transition: 'filter 0.15s ease-out',
         }}
       >
-        <span aria-hidden>{icon}</span>
+        <RingGlyph icon={icon} />
       </div>
       {onCooldown && (
         <svg width={size} height={size} className="absolute inset-0 -rotate-90 pointer-events-none">
@@ -179,7 +198,7 @@ export const MovementCooldownRow: React.FC<{
   return (
     <div className="flex items-end gap-2">
       <AbilityRingIcon
-        icon="🛹"
+        icon={Waves}
         cooldownMs={SLIDE_COOLDOWN_MS_DEFAULT}
         cooldownEndsAt={slideCooldownEndsAt ?? 0}
         buffEndsAt={0}
@@ -187,7 +206,7 @@ export const MovementCooldownRow: React.FC<{
         playerEnergy={playerEnergy}
       />
       <AbilityRingIcon
-        icon="🤸"
+        icon={FlipVertical}
         cooldownMs={FLIP_COOLDOWN_MS}
         cooldownEndsAt={flipCooldownEndsAt ?? 0}
         buffEndsAt={0}
@@ -217,7 +236,7 @@ export const MovementCooldownRow: React.FC<{
             filter: canDoubleJump ? 'none' : 'grayscale(0.65) brightness(0.6)',
           }}
         >
-          <span aria-hidden>⬆️</span>
+          <ChevronsUp className="w-[18px] h-[18px]" />
         </div>
       </div>
     </div>

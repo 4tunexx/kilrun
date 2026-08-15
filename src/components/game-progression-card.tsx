@@ -9,6 +9,7 @@ import {
   type GameProgressionSnapshot,
 } from '@/lib/game-progression-actions';
 import { costForLevelFormula, isImageIcon } from '@shared/power-definitions';
+import { getLucideIcon } from '@/lib/move-icons';
 import {
   Popover,
   PopoverContent,
@@ -20,6 +21,8 @@ import {
  * Without this check, an admin-uploaded icon URL would render as literal
  * text instead of an image. */
 function AbilityIcon({ icon, className }: { icon: string; className?: string }) {
+  const Lucide = getLucideIcon(icon);
+  if (Lucide) return <Lucide className={(className ?? '') + ' object-contain'} />;
   if (isImageIcon(icon)) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={icon} alt="" className={(className ?? '') + ' object-contain'} />;
@@ -130,7 +133,7 @@ export function GameProgressionCard({ userId }: { userId: string }) {
                   >
                     <AbilityIcon
                       icon={def.icon}
-                      className={`shrink-0 ${isImageIcon(def.icon) ? 'w-6 h-6' : 'text-lg leading-none'} ${locked ? 'grayscale opacity-70' : ''}`}
+                      className={`shrink-0 ${isImageIcon(def.icon) || getLucideIcon(def.icon) ? 'w-6 h-6' : 'text-lg leading-none'} ${locked ? 'grayscale opacity-70' : ''}`}
                     />
                     <div className="min-w-0">
                       <p className="text-[11px] font-bold text-white truncate">{def.name}</p>
@@ -143,7 +146,7 @@ export function GameProgressionCard({ userId }: { userId: string }) {
                 <PopoverContent className="w-64 bg-slate-900 border-slate-700 p-3">
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <AbilityIcon icon={def.icon} className={isImageIcon(def.icon) ? 'w-8 h-8 shrink-0' : 'text-xl'} />
+                      <AbilityIcon icon={def.icon} className={isImageIcon(def.icon) || getLucideIcon(def.icon) ? 'w-8 h-8 shrink-0' : 'text-xl'} />
                       <div>
                         <p className="text-sm font-bold text-orange-300">{def.name}</p>
                         <p className="text-xs text-slate-400">
