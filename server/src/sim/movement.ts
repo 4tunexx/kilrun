@@ -46,6 +46,7 @@ import {
 import { findSupportPlatform, resolveSolidCollisions } from './platforms.js';
 import { getMaxEnergyFor } from './ability-stats.js';
 import { isFlyActive } from './active-abilities.js';
+import type { CustomMoveDef } from '../../../shared/custom-moves.js';
 
 export interface PlayerInput {
   moveX: number; // -1..1, camera-relative forward/back intent (world X after client rotates)
@@ -65,6 +66,8 @@ export interface PlayerInput {
   meleeActive?: boolean;
   /** Held state for the back-flip move (V) — edge-detected here like crouch. */
   flipPressed?: boolean;
+  /** ids of map-authored CustomMoveDef entries whose key is currently held. */
+  customMoveKeysHeld?: string[];
 }
 
 const EMPTY_INPUT: PlayerInput = {
@@ -123,6 +126,8 @@ export interface PlayerSimScratch {
   flipCooldownMs: number;
   /** Edge-detects the flip button so holding it doesn't retrigger every tick. */
   wasFlipHeld: boolean;
+  /** Edge-detects each custom move's key (CustomMoveDef.id -> was held last tick). */
+  customMoveWasHeld: Map<string, boolean>;
 }
 
 export function createSimScratch(): PlayerSimScratch {
@@ -147,6 +152,7 @@ export function createSimScratch(): PlayerSimScratch {
     flipMs: 0,
     flipCooldownMs: 0,
     wasFlipHeld: false,
+    customMoveWasHeld: new Map(),
   };
 }
 
@@ -186,6 +192,8 @@ export interface MovementPhysicsOpts {
   slideMult?: number;
   slideDurationMs?: number;
   slideCooldownMs?: number;
+  /** Map-authored custom moves (Player Model Studio → Moves tab). */
+  customMoves?: CustomMoveDef[];
 }
 
 /**
@@ -372,6 +380,43 @@ export function applyMovement(
     }
   } else if (scratch.flipCooldownMs > 0) {
     scratch.flipCooldownMs = Math.max(0, scratch.flipCooldownMs - dtSeconds * 1000);
+  }
+
+  // Map-authored custom moves (Player Model Studio → Moves tab). Only one
+  // can be active at a time (like attack). Cooldown is stamped immediately
+  // at trigger time (activeUntil + cooldownMs) rather than on expiry, so
+  // there's no separate "just finished" transition to detect.
+  if (physOpts?.customMoves?.length) {
+    const now = Date.now();
+    const heldKeys = new Set(input.customMoveKeysHeld ?? []);
+    const busy = now < player.customMoves.activeUntil;
+    for (const move of physOpts.customMoves) {
+      const wasHeld = scratch.customMoveWasHeld.get(move.id) ?? false;
+      const isHeld = heldKeys.has(move.id);
+      scratch.customMoveWasHeld.set(move.id, isHeld);
+      const edge = isHeld && !wasHeld;
+      const cooldownUntil = player.customMoves.cooldownEndsAt.get(move.id) ?? 0;
+      if (
+        edge &&
+        !busy &&
+        now >= cooldownUntil &&
+        (!move.groundedOnly || grounded) &&
+        !scratch.exhausted &&
+        player.energy >= move.energyCost
+      ) {
+        player.customMoves.activeMoveId = move.id;
+        player.customMoves.activeUntil = now + move.durationMs;
+        player.customMoves.cooldownEndsAt.set(move.id, now + move.durationMs + move.cooldownMs);
+        player.energy = Math.max(0, player.energy - move.energyCost);
+        if (move.vzBoost && grounded) {
+          player.vz = move.vzBoost;
+          player.isGrounded = false;
+          grounded = false;
+        }
+        break;
+      }
+    }
+    if (now >= player.customMoves.activeUntil) player.customMoves.activeMoveId = '';
   }
 
   const flyActive = isFlyActive(player, Date.now());

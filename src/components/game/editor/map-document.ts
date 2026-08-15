@@ -9,6 +9,10 @@ import type {
 } from '../tps/tps-view-settings';
 import type { HammerPrimitive } from './hammer-shapes';
 import { isHammerPrimitive } from './hammer-shapes';
+import type { CustomMoveDef } from '@shared/custom-moves';
+
+export type { CustomMoveDef } from '@shared/custom-moves';
+export { defaultCustomMove } from '@shared/custom-moves';
 
 export type { KilrunMode };
 export type { HammerPrimitive } from './hammer-shapes';
@@ -1584,6 +1588,8 @@ export interface MapDocument {
   combatSettings?: Partial<CombatSettings>;
   /** Custom weapon definition authored in the Weapon Editor. */
   weaponDef?: Partial<MapWeaponDef>;
+  /** Custom movement abilities authored in Player Model Studio → Moves tab. */
+  customMoves?: CustomMoveDef[];
   /**
    * In-match buy menu (Horde / Competitive). When omitted, catalog defaults are used.
    * Adjust in Map Editor → Shop tab.

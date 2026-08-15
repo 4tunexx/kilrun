@@ -1,5 +1,6 @@
 import { Client, Room } from 'colyseus';
 import { PlayerState, RoomState } from '../schema/RoomState.js';
+import type { CustomMoveDef } from '../../../shared/custom-moves.js';
 import {
   createFromBlueprints,
   createObstaclesFromBlueprints,
@@ -416,6 +417,7 @@ export class DeathrunRoom extends Room<RoomState> {
           worldBounds?: WorldBounds;
           modeSettings?: Record<string, unknown>;
           combatSettings?: Record<string, unknown>;
+          customMoves?: Record<string, unknown>[];
         }
       ) => {
         if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
@@ -462,6 +464,7 @@ export class DeathrunRoom extends Room<RoomState> {
       worldBounds?: WorldBounds;
       modeSettings?: Record<string, unknown>;
       combatSettings?: Record<string, unknown>;
+      customMoves?: Record<string, unknown>[];
     },
     source = 'client',
     force = false
@@ -536,6 +539,9 @@ export class DeathrunRoom extends Room<RoomState> {
         wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
         wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
         wallSlideGravMult: typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
+        customMoves: Array.isArray(data?.customMoves)
+          ? (data.customMoves as unknown as CustomMoveDef[])
+          : undefined,
       };
     }
 

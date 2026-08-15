@@ -1576,6 +1576,17 @@ export function MapEditor({
     });
   };
 
+  const saveCustomMoves = (moves: import('./map-document').CustomMoveDef[]) => {
+    scheduleHistory();
+    setDirty(true);
+    setDoc((d) => {
+      const next = { ...d, customMoves: moves };
+      docRef.current = next;
+      apiRef.current?.setDoc(next);
+      return next;
+    });
+  };
+
   const saveWeaponDef = (def: Partial<import('./map-document').MapWeaponDef>) => {
     scheduleHistory();
     setDirty(true);
@@ -2480,6 +2491,8 @@ export function MapEditor({
                   isMobile={isMobile}
                   onClose={closeStudioPanels}
                   onChange={(patch) => patchEntityById(playerAvatar.id, patch)}
+                  customMoves={doc.customMoves ?? []}
+                  onCustomMovesChange={saveCustomMoves}
                 />
               ) : (
                 <div className="p-4 space-y-3 text-sm text-white/70">

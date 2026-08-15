@@ -51,8 +51,9 @@ import {
 } from './player-mesh-edits';
 import { loadAnimatedPrefab } from './model-scan';
 import { listClipBones, retargetClip } from './mixamo-import';
+import { defaultCustomMove, RESERVED_MOVE_KEYS, type CustomMoveDef } from '@shared/custom-moves';
 
-type StudioTab = 'model' | 'mesh' | 'bones' | 'record' | 'import' | 'anims';
+type StudioTab = 'model' | 'mesh' | 'bones' | 'record' | 'import' | 'anims' | 'moves';
 
 type TimelineKey = {
   time: number;
@@ -72,6 +73,8 @@ export function PlayerModelStudio({
   onFocusInMap,
   isMobile,
   embedded,
+  customMoves = [],
+  onCustomMovesChange,
 }: {
   entity: EditorEntity;
   onChange: (patch: Partial<EditorEntity>) => void;
@@ -79,6 +82,9 @@ export function PlayerModelStudio({
   onFocusInMap?: () => void;
   isMobile?: boolean;
   embedded?: boolean;
+  /** Map-level custom moves (Moves tab) — lives on MapDocument, not the entity. */
+  customMoves?: CustomMoveDef[];
+  onCustomMovesChange?: (moves: CustomMoveDef[]) => void;
 }) {
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<StudioPreview | null>(null);
@@ -468,6 +474,7 @@ export function PlayerModelStudio({
     { id: 'record', label: 'Record' },
     { id: 'import', label: 'Import' },
     { id: 'anims', label: 'Anims' },
+    { id: 'moves', label: 'Moves' },
   ];
 
   return (
@@ -1349,6 +1356,174 @@ export function PlayerModelStudio({
               </div>
             )}
           </>
+        )}
+
+        {tab === 'moves' && (
+          <div className="space-y-3">
+            <p className="text-[10px] text-white/40 leading-snug">
+              Custom movement abilities — bind a key, an animation clip, an energy cost and
+              cooldown. Live in matches and Play Test immediately, no code changes needed.
+            </p>
+            <Button
+              size="sm"
+              className="w-full min-h-9 bg-sky-600 hover:bg-sky-500"
+              onClick={() => onCustomMovesChange?.([...customMoves, defaultCustomMove()])}
+            >
+              + Add Move
+            </Button>
+            {customMoves.length === 0 && (
+              <p className="text-[11px] text-white/40">No custom moves yet.</p>
+            )}
+            {customMoves.map((move) => {
+              const keyConflict =
+                RESERVED_MOVE_KEYS.has(move.key.toLowerCase()) ||
+                customMoves.some((m) => m.id !== move.id && m.key.toLowerCase() === move.key.toLowerCase());
+              const update = (patch: Partial<CustomMoveDef>) =>
+                onCustomMovesChange?.(customMoves.map((m) => (m.id === move.id ? { ...m, ...patch } : m)));
+              return (
+                <div
+                  key={move.id}
+                  className="rounded-lg border border-white/10 bg-black/25 p-2.5 space-y-2"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      value={move.icon}
+                      onChange={(e) => update({ icon: e.target.value.slice(0, 2) })}
+                      className="w-9 bg-black/40 border border-white/10 rounded px-1 py-1.5 text-center text-sm"
+                    />
+                    <input
+                      value={move.name}
+                      onChange={(e) => update({ name: e.target.value })}
+                      className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
+                    />
+                    <button
+                      type="button"
+                      className="text-rose-300 text-[11px] px-1.5"
+                      onClick={() => onCustomMovesChange?.(customMoves.filter((m) => m.id !== move.id))}
+                    >
+                      Delete
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block text-[10px] text-white/50">
+                      Key
+                      <input
+                        value={move.key}
+                        onChange={(e) => update({ key: e.target.value.slice(-1).toLowerCase() })}
+                        maxLength={1}
+                        className={`mt-0.5 w-full bg-black/40 border rounded px-2 py-1 text-sm uppercase text-center ${
+                          keyConflict ? 'border-rose-400/60 text-rose-200' : 'border-white/10'
+                        }`}
+                      />
+                    </label>
+                    <label className="block text-[10px] text-white/50">
+                      Animation clip
+                      <select
+                        value={move.clipName ?? ''}
+                        onChange={(e) => update({ clipName: e.target.value || undefined })}
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[11px]"
+                      >
+                        <option value="">— none —</option>
+                        {clips.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block text-[10px] text-white/50">
+                      Energy cost
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={move.energyCost}
+                        onChange={(e) => update({ energyCost: Math.max(0, Number(e.target.value) || 0) })}
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="block text-[10px] text-white/50">
+                      Duration (ms)
+                      <input
+                        type="number"
+                        min={50}
+                        max={5000}
+                        step={50}
+                        value={move.durationMs}
+                        onChange={(e) => update({ durationMs: Math.max(50, Number(e.target.value) || 50) })}
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="block text-[10px] text-white/50">
+                      Cooldown (ms)
+                      <input
+                        type="number"
+                        min={0}
+                        max={30000}
+                        step={100}
+                        value={move.cooldownMs}
+                        onChange={(e) => update({ cooldownMs: Math.max(0, Number(e.target.value) || 0) })}
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="block text-[10px] text-white/50">
+                      Vertical hop (0 = none)
+                      <input
+                        type="number"
+                        min={0}
+                        max={20}
+                        step={0.5}
+                        value={move.vzBoost}
+                        onChange={(e) => update({ vzBoost: Math.max(0, Number(e.target.value) || 0) })}
+                        className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-sm"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-[10px] text-white/50">
+                    <input
+                      type="checkbox"
+                      checked={move.groundedOnly}
+                      onChange={(e) => update({ groundedOnly: e.target.checked })}
+                    />
+                    Grounded only
+                  </label>
+
+                  <label className="block text-[10px] text-white/50">
+                    Sound event (optional — Sound Board key)
+                    <input
+                      value={move.soundEvent ?? ''}
+                      onChange={(e) => update({ soundEvent: e.target.value || undefined })}
+                      placeholder="e.g. flip"
+                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-sm"
+                    />
+                  </label>
+
+                  {keyConflict && (
+                    <p className="text-[10px] text-rose-300">
+                      Key &quot;{move.key.toUpperCase()}&quot; is already used by another move or a
+                      built-in control — pick a different one.
+                    </p>
+                  )}
+
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="w-full min-h-8"
+                    disabled={!move.clipName}
+                    onClick={() => {
+                      if (move.clipName) previewRef.current?.playClip(move.clipName, false);
+                      setPreviewSlot('clip');
+                    }}
+                  >
+                    <Play className="w-3.5 h-3.5 mr-1" />
+                    Preview clip
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </aside>

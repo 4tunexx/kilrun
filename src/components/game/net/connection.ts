@@ -799,6 +799,7 @@ export class GameConnection {
     modeSettings?: Record<string, unknown>;
     combatSettings?: Record<string, unknown>;
     shopSettings?: Record<string, unknown>;
+    customMoves?: Record<string, unknown>[];
   }): void {
     this.safeSend('loadCustomMap', payload);
   }

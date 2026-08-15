@@ -46,6 +46,7 @@ import {
   WALL_JUMP_VERT_VEL,
   WALL_SLIDE_GRAV_MULT,
 } from '@shared/sim-constants';
+import type { CustomMoveDef } from '@shared/custom-moves';
 
 export interface SimPad {
   x: number;
@@ -128,6 +129,13 @@ export interface SimScratch {
   flipCooldownMs: number;
   /** Edge-detects the flip button so holding it doesn't retrigger every tick. */
   wasFlipHeld: boolean;
+  /** Local (non-networked) custom-move state — Play Test has no server, so
+   * this scratch object IS the source of truth, unlike movement.ts where
+   * the equivalent lives on the synced PlayerState.customMoves schema. */
+  customMoveWasHeld: Map<string, boolean>;
+  customMoveActiveId: string;
+  customMoveActiveUntil: number;
+  customMoveCooldownEndsAt: Map<string, number>;
 }
 
 export interface SimInput {
@@ -138,6 +146,7 @@ export interface SimInput {
   crouch: boolean;
   meleeActive?: boolean;
   flipPressed?: boolean;
+  customMoveKeysHeld?: string[];
 }
 
 /** === Tunables from shared/sim-constants.ts === */
@@ -179,6 +188,8 @@ export interface SimPhysicsOpts {
   wallJumpHorizVel?: number;
   wallJumpVertVel?: number;
   wallSlideGravMult?: number;
+  /** Map-authored custom moves (Player Model Studio → Moves tab). */
+  customMoves?: CustomMoveDef[];
 }
 
 export function createSimScratch(): SimScratch {
@@ -203,6 +214,10 @@ export function createSimScratch(): SimScratch {
     flipMs: 0,
     flipCooldownMs: 0,
     wasFlipHeld: false,
+    customMoveWasHeld: new Map(),
+    customMoveActiveId: '',
+    customMoveActiveUntil: 0,
+    customMoveCooldownEndsAt: new Map(),
   };
 }
 
@@ -528,6 +543,42 @@ export function stepPlatformer(
     if (scratch.flipMs <= 0) scratch.flipCooldownMs = FLIP_COOLDOWN_MS;
   } else if (scratch.flipCooldownMs > 0) {
     scratch.flipCooldownMs = Math.max(0, scratch.flipCooldownMs - dt * 1000);
+  }
+
+  // Map-authored custom moves — mirrors movement.ts's generic loop, but
+  // against local scratch state instead of the (nonexistent, in Play Test)
+  // synced PlayerState.customMoves schema.
+  if (physOpts?.customMoves?.length) {
+    const now = Date.now();
+    const heldKeys = new Set(input.customMoveKeysHeld ?? []);
+    const busy = now < scratch.customMoveActiveUntil;
+    for (const move of physOpts.customMoves) {
+      const wasHeld = scratch.customMoveWasHeld.get(move.id) ?? false;
+      const isHeld = heldKeys.has(move.id);
+      scratch.customMoveWasHeld.set(move.id, isHeld);
+      const edge = isHeld && !wasHeld;
+      const cooldownUntil = scratch.customMoveCooldownEndsAt.get(move.id) ?? 0;
+      if (
+        edge &&
+        !busy &&
+        now >= cooldownUntil &&
+        (!move.groundedOnly || grounded) &&
+        !scratch.exhausted &&
+        body.energy >= move.energyCost
+      ) {
+        scratch.customMoveActiveId = move.id;
+        scratch.customMoveActiveUntil = now + move.durationMs;
+        scratch.customMoveCooldownEndsAt.set(move.id, now + move.durationMs + move.cooldownMs);
+        body.energy = Math.max(0, body.energy - move.energyCost);
+        if (move.vzBoost && grounded) {
+          body.vz = move.vzBoost;
+          body.isGrounded = false;
+          grounded = false;
+        }
+        break;
+      }
+    }
+    if (now >= scratch.customMoveActiveUntil) scratch.customMoveActiveId = '';
   }
 
   // Soft ground glue (mirrors server movement.ts). Stepped ramp pads change

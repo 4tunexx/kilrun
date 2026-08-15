@@ -1,5 +1,6 @@
 import { Client, Room } from 'colyseus';
 import { PlayerState, RoomState } from '../schema/RoomState.js';
+import type { CustomMoveDef } from '../../../shared/custom-moves.js';
 import {
   createFromBlueprints,
   createObstaclesFromBlueprints,
@@ -786,6 +787,9 @@ export class CompetitiveRoom extends Room<RoomState> {
           wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
           wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
           wallSlideGravMult: typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
+          customMoves: Array.isArray(data?.customMoves)
+            ? (data.customMoves as unknown as CustomMoveDef[])
+            : undefined,
         };
       }
 
@@ -877,6 +881,9 @@ export class CompetitiveRoom extends Room<RoomState> {
           wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
           wallSlideGravMult:
             typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
+          customMoves: Array.isArray(data?.customMoves)
+            ? (data.customMoves as unknown as CustomMoveDef[])
+            : undefined,
         };
       }
       this.customMapLoaded = true;

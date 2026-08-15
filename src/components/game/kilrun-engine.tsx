@@ -447,6 +447,7 @@ export default function KilrunEngine({
         worldBounds,
         modeSettings: doc.modeSettings as Record<string, unknown> | undefined,
         combatSettings: doc.combatSettings as Record<string, unknown> | undefined,
+        customMoves: doc.customMoves as unknown as Record<string, unknown>[] | undefined,
         ...(mode === 'horde' || mode === 'competitive'
           ? {
               shopSettings: ensureShopSettings(doc) as unknown as Record<string, unknown>,
@@ -721,6 +722,7 @@ export default function KilrunEngine({
         avatarEntity: avatarForPlay,
         // Local: purchased/equipped. Remotes: synced loadout from join.
         equippedSkins: isLocal ? equippedSkinsRef.current : remoteSkins,
+        customMoves: customDocRef.current?.customMoves,
       });
       if (typeof netPlayer?.bodyColorIndex === 'number') {
         view.setBodyColor(netPlayer.bodyColorIndex);
@@ -1247,6 +1249,9 @@ export default function KilrunEngine({
             interactPressed: inputManager.isInteractPressed(),
             meleeActive: performance.now() < meleeUntil,
             flipPressed: inputManager.isFlipPressed(),
+            customMoveKeysHeld: (customDocRef.current?.customMoves ?? [])
+              .filter((m) => inputManager.keyboard.isPressed(m.key))
+              .map((m) => m.id),
           };
           connectionRef.current?.sendInput(message);
           shootHeld = false;
@@ -1362,6 +1367,7 @@ export default function KilrunEngine({
                 (localPlayer.weaponKind as WeaponCombatKind | undefined) ??
                 resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind
               }
+              customMoveDefs={customDocRef.current?.customMoves}
             />
             <ModeStatusHud mode={mode} room={room} />
             <KillStreakBanner killStreak={localPlayer.killStreak ?? 0} />

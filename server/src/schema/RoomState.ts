@@ -39,6 +39,21 @@ export class AbilityLoadoutState extends Schema {
   @type('number') backflipCooldownEndsAt = 0;
 }
 
+/**
+ * Map-authored custom move state (Player Model Studio → Moves tab) — only
+ * one custom move can play at a time per player, so this tracks just the
+ * currently-active one plus a per-move-id cooldown map. Own Schema class
+ * (not flattened onto PlayerState) for the same 64-field-budget reason as
+ * AbilityLoadoutState above.
+ */
+export class CustomMoveState extends Schema {
+  /** id of the CustomMoveDef currently playing (empty = none). */
+  @type('string') activeMoveId = '';
+  @type('number') activeUntil = 0;
+  /** CustomMoveDef.id -> timestamp (Date.now() ms) it can be used again. */
+  @type({ map: 'number' }) cooldownEndsAt = new MapSchema<number>();
+}
+
 /** A single networked player -- position/aim are authoritative (server-simulated). */
 export class PlayerState extends Schema {
   @type('string') sessionId = '';
@@ -71,6 +86,7 @@ export class PlayerState extends Schema {
    * movement cooldown rings. 0 = not on cooldown. */
   @type('number') slideCooldownEndsAt = 0;
   @type('number') flipCooldownEndsAt = 0;
+  @type(CustomMoveState) customMoves = new CustomMoveState();
   @type('boolean') isReady = false;
   @type('boolean') isInvisible = false;
   /** Last checkpoint touch (sim space). 0 = unset. */

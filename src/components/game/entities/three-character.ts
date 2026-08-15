@@ -19,6 +19,7 @@ import type { SkinAttachment } from '@/lib/player-skins';
 import { PLAYER_RADIUS } from '@shared/sim-constants';
 import { BODY_COLOR_NONE } from '@/lib/body-colors';
 import { applyTeamTint } from '@/lib/premium-skin-config';
+import type { CustomMoveDef } from '@shared/custom-moves';
 
 /**
  * Clip names like the Characters_7 pack's "Death_1_(idle)" contain the
@@ -98,6 +99,8 @@ export interface CharacterAvatarOptions {
   avatarEntity?: EditorEntity | null;
   /** Purchased/equipped shop skins only (map editor skins are ignored in live play). */
   equippedSkins?: SkinAttachment[] | null;
+  /** Map-authored custom moves (Player Model Studio → Moves tab). */
+  customMoves?: CustomMoveDef[] | null;
 }
 
 export class ThreeCharacter {
@@ -121,6 +124,10 @@ export class ThreeCharacter {
   private upperActions = new Map<string, THREE.AnimationAction>();
   private currentUpper = '';
   private blendSec = 0.12;
+  /** Map-authored custom moves — bound at load, played by CustomMoveDef.id. */
+  private customMoveDefs: CustomMoveDef[] = [];
+  private customMoveActions = new Map<string, THREE.AnimationAction>();
+  private currentCustomMove = '';
   private avatarOpts: CharacterAvatarOptions;
   private avatarScene: THREE.Object3D | null = null;
   private skinTime = 0;
@@ -274,6 +281,17 @@ export class ThreeCharacter {
       bindUpperSlot('aim', true);
       bindUpperSlot('equip', false);
 
+      this.customMoveDefs = this.avatarOpts.customMoves ?? [];
+      for (const move of this.customMoveDefs) {
+        const clip = move.clipName ? byName.get(move.clipName) : undefined;
+        if (!clip || !this.mixer) continue;
+        const action = this.mixer.clipAction(clip);
+        action.enabled = true;
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+        this.customMoveActions.set(move.id, action);
+      }
+
       this.actions.get('idle')?.reset().play();
       this.current = 'idle';
       this.loaded = true;
@@ -320,6 +338,19 @@ export class ThreeCharacter {
     const clipDuration = this.actions.get(fallback)!.getClip().duration;
     this.attackUntil = performance.now() + (clipDuration > 0 ? clipDuration * 1000 : 480);
     this.play(fallback, false);
+  }
+
+  /** Play a map-authored custom move's clip (full-body one-shot, like attack/flip). */
+  private playCustomMove(id: string) {
+    if (this.currentCustomMove === id) return;
+    const action = this.customMoveActions.get(id);
+    if (!action) return;
+    const prevLoco = this.actions.get(this.current);
+    if (prevLoco) prevLoco.fadeOut(this.blendSec);
+    if (this.currentCustomMove) this.customMoveActions.get(this.currentCustomMove)?.fadeOut(this.blendSec);
+    action.reset().fadeIn(this.blendSec).play();
+    this.currentCustomMove = id;
+    this.current = '';
   }
 
   /**
@@ -708,6 +739,11 @@ export class ThreeCharacter {
 
     // Use EXACT state machine copied from animation-director.ts →
     // updatePlayer() so Live matches behave 1:1 with Play Test.
+    const activeCustomMoveId = player.customMoves?.activeMoveId ?? '';
+    if (this.currentCustomMove && this.currentCustomMove !== activeCustomMoveId) {
+      this.customMoveActions.get(this.currentCustomMove)?.fadeOut(this.blendSec);
+      this.currentCustomMove = '';
+    }
     if (!player.isAlive) {
       const slot = this.actions.has('die') ? 'die' : 'idle';
       this.play(slot, false);
@@ -717,6 +753,8 @@ export class ThreeCharacter {
       // Back flip briefly leaves the ground (small hop) — keep the flip
       // pose instead of falling through to the jump/fall branch below.
       this.play('flip', false);
+    } else if (activeCustomMoveId && this.customMoveActions.has(activeCustomMoveId)) {
+      this.playCustomMove(activeCustomMoveId);
     } else if (performance.now() < this.landUntil && this.actions.has('land')) {
       this.play('land', false);
     } else if (!player.isGrounded) {
@@ -779,6 +817,7 @@ export class ThreeCharacter {
     this.weaponMixer = null;
     this.weaponActions.clear();
     this.actions.clear();
+    this.customMoveActions.clear();
     this.root.removeFromParent();
   }
 }

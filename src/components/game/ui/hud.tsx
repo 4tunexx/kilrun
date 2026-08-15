@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import type { NetPlayerState, NetRoomState } from '../net/types';
 import { RunnerHud } from '../modes/deathrun/runner-hud';
 import { AbilityCooldownRow, MovementCooldownRow } from './ability-hud';
+import type { CustomMoveDef } from '@shared/custom-moves';
 import type { WeaponCombatKind } from '@/lib/weapons';
 import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
 
@@ -179,7 +180,16 @@ export const HUD: React.FC<{
   runnersLeft?: number;
   /** Loadout weapon combat kind (from equipped skins). */
   weaponKind?: WeaponCombatKind | null;
-}> = ({ player, room, gameProgress = null, runnersLeft = 1, weaponKind = null }) => {
+  /** Map-authored custom moves (Player Model Studio → Moves tab), if any. */
+  customMoveDefs?: CustomMoveDef[];
+}> = ({
+  player,
+  room,
+  gameProgress = null,
+  runnersLeft = 1,
+  weaponKind = null,
+  customMoveDefs,
+}) => {
   const isTrapper = player.role === 'trapper';
   const level = gameProgress?.level ?? 1;
   const percent = gameProgress
@@ -299,6 +309,8 @@ export const HUD: React.FC<{
           slideCooldownEndsAt={player.slideCooldownEndsAt}
           flipCooldownEndsAt={player.flipCooldownEndsAt}
           playerEnergy={energy}
+          customMoveDefs={customMoveDefs}
+          customMoveState={player.customMoves}
         />
       </div>
 

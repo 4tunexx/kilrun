@@ -56,6 +56,14 @@ export interface NetPlayerState {
   /** Timestamp (Date.now() ms) each move can be used again — HUD cooldown rings. */
   slideCooldownEndsAt?: number;
   flipCooldownEndsAt?: number;
+  /** Map-authored custom move state (mirrors server CustomMoveState). */
+  customMoves?: {
+    activeMoveId: string;
+    activeUntil: number;
+    /** CustomMoveDef.id -> cooldown-ends-at timestamp. Real object is a
+     * Colyseus MapSchema<number> — use .get(id), not bracket access. */
+    cooldownEndsAt: { get(key: string): number | undefined };
+  };
   isReady: boolean;
   kp?: number;
   /** Compact SkinAttachment[] JSON for remote cosmetics. */
@@ -206,6 +214,8 @@ export interface PlayerInputMessage {
   meleeActive?: boolean;
   /** Held state for the back-flip move (V) — server edge-detects like crouch. */
   flipPressed?: boolean;
+  /** ids of map-authored CustomMoveDef entries whose key is currently held. */
+  customMoveKeysHeld?: string[];
 }
 
 /** Broadcast in-match chat message (server/src/lib/chat.ts). */

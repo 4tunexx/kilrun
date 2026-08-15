@@ -220,6 +220,7 @@ export function MapPlayPreview({
       wallJumpHorizVel: cs.wallJumpHorizVel,
       wallJumpVertVel: cs.wallJumpVertVel,
       wallSlideGravMult: cs.wallSlideGravMult,
+      customMoves: doc.customMoves,
     };
   }, [doc]);
   const physOptsRef = useRef(physOpts);
@@ -470,6 +471,7 @@ export function MapPlayPreview({
     let wasGrounded = true;
     let wasSprintingForSound = false;
     let wasFlippingForSound = false;
+    let lastCustomMoveId = '';
     let landUntil = 0;
     let meleeUntil = 0;
     const avatarEntity = getMapPlayerAvatar(playDoc) ?? null;
@@ -757,6 +759,9 @@ export function MapPlayPreview({
         keys.has('ShiftLeft') || keys.has('ShiftRight') || !!joy?.isSprintHeld();
       const crouch = keys.has('ControlLeft') || keys.has('KeyC');
       const flipPressed = keys.has('KeyV');
+      const customMoveKeysHeld = (playDoc.customMoves ?? [])
+        .filter((m) => keys.has(`Key${m.key.toUpperCase()}`))
+        .map((m) => m.id);
 
       let wishFwd = 0;
       let wishStrafe = 0;
@@ -775,6 +780,11 @@ export function MapPlayPreview({
       const flippingNow = scratch.flipMs > 0;
       if (flippingNow && !wasFlippingForSound) playSound('flip');
       wasFlippingForSound = flippingNow;
+      if (scratch.customMoveActiveId && scratch.customMoveActiveId !== lastCustomMoveId) {
+        const move = (playDoc.customMoves ?? []).find((m) => m.id === scratch.customMoveActiveId);
+        if (move?.soundEvent) playSound(move.soundEvent);
+      }
+      lastCustomMoveId = scratch.customMoveActiveId;
       // Camera-relative: W into look, A = screen-left, D = screen-right.
       // Look flat = (sinYaw, cosYaw) in Three XZ; screen-right = (−cosYaw, sinYaw).
       const c = Math.cos(yaw);
@@ -849,6 +859,7 @@ export function MapPlayPreview({
               crouch,
               meleeActive: performance.now() < meleeUntil,
               flipPressed,
+              customMoveKeysHeld,
             },
             dt,
             pads,
@@ -1193,6 +1204,9 @@ export function MapPlayPreview({
           justLanded: performance.now() < landUntil,
           attack: attackThisFrame,
           attackStyle: combat.attackStyle ?? 'attack',
+          customMoveClipName: scratch.customMoveActiveId
+            ? (playDoc.customMoves ?? []).find((m) => m.id === scratch.customMoveActiveId)?.clipName
+            : undefined,
         });
       }
 

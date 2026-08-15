@@ -16,6 +16,7 @@ import {
   JUMP_ENERGY_COST,
   SLIDE_ENERGY_COST,
 } from '@shared/sim-constants';
+import type { CustomMoveDef } from '@shared/custom-moves';
 
 /** Default slide cooldown — mirrors movement.ts's `effSlideCooldownMs` default.
  * The actual per-map value (CombatSettings.slideCooldownMs) isn't synced to
@@ -170,7 +171,10 @@ export const MovementCooldownRow: React.FC<{
   slideCooldownEndsAt?: number;
   flipCooldownEndsAt?: number;
   playerEnergy: number;
-}> = ({ slideCooldownEndsAt, flipCooldownEndsAt, playerEnergy }) => {
+  /** Map-authored custom moves (Player Model Studio → Moves tab), if any. */
+  customMoveDefs?: CustomMoveDef[];
+  customMoveState?: { cooldownEndsAt: { get(key: string): number | undefined } };
+}> = ({ slideCooldownEndsAt, flipCooldownEndsAt, playerEnergy, customMoveDefs, customMoveState }) => {
   const canDoubleJump = playerEnergy >= JUMP_ENERGY_COST;
   return (
     <div className="flex items-end gap-2">
@@ -190,6 +194,17 @@ export const MovementCooldownRow: React.FC<{
         energyCost={FLIP_ENERGY_COST}
         playerEnergy={playerEnergy}
       />
+      {customMoveDefs?.map((move) => (
+        <AbilityRingIcon
+          key={move.id}
+          icon={move.icon}
+          cooldownMs={move.durationMs + move.cooldownMs}
+          cooldownEndsAt={customMoveState?.cooldownEndsAt.get(move.id) ?? 0}
+          buffEndsAt={0}
+          energyCost={move.energyCost}
+          playerEnergy={playerEnergy}
+        />
+      ))}
       {/* Double jump has no timed cooldown — it recharges instantly on
           landing — so this just dims when there isn't enough energy for
           one, no ring animation. */}

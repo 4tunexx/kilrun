@@ -174,6 +174,9 @@ export class AnimationDirector {
       attack?: boolean;
       /** Prefer attack vs punch clip. */
       attackStyle?: 'attack' | 'punch';
+      /** Map-authored custom move clip currently active (raw clip name, not
+       * a PlayerAnimSlot — bypasses `bindings` entirely). Empty = none. */
+      customMoveClipName?: string;
     }
   ) {
     if (!bindings) return;
@@ -193,6 +196,10 @@ export class AnimationDirector {
           if (action.time < dur * 0.92) return;
         }
       }
+    }
+    if (state.customMoveClipName) {
+      this.play(entityId, state.customMoveClipName, false);
+      return;
     }
     if (state.attack) {
       const style = state.attackStyle ?? 'attack';
