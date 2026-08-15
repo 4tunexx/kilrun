@@ -1,23 +1,25 @@
 import type { PlayerState } from '../schema/RoomState.js';
+import { parseAbilityLevels, type AbilityLevels } from '../../../shared/ability-progression.js';
 import {
-  getTimedBuffStatsByKey,
-  getBurstEffectStatsByKey,
-  getEnergyCostForAbility,
-  getCooldownForAbility,
-  getAbilitySlotKind,
-  parseAbilityLevels,
-  type AbilityLevels,
-  type AbilitySlotKind,
-} from '../../../shared/ability-progression.js';
+  activateAbility as activateAbilityGeneric,
+  tickActiveAbilityTimers as tickActiveAbilityTimersGeneric,
+  isUnlimitedAmmoActive as isUnlimitedAmmoActiveGeneric,
+  isBerserkActive as isBerserkActiveGeneric,
+  isFlyActive as isFlyActiveGeneric,
+  isInvisibleActive as isInvisibleActiveGeneric,
+  type ActiveAbilityKey,
+} from '../../../shared/active-abilities.js';
 
-export type ActiveAbilityKey =
-  | 'visibility'
-  | 'fly'
-  | 'hook'
-  | 'berserk'
-  | 'bullet'
-  | 'thunder'
-  | 'backflip';
+export type { ActiveAbilityKey };
+
+/**
+ * Thin Colyseus-specific wrapper around shared/active-abilities.ts's
+ * generic activation logic — PlayerState (the Colyseus schema class)
+ * structurally satisfies the shared `AbilityHost` interface (plain getters/
+ * setters for the same field names), so the exact same activate/tick/is*Active
+ * logic runs for live matches AND Play Test (which builds a plain object
+ * instead of a schema instance) with zero duplicated behavior to drift.
+ */
 
 export function applyAbilityLevelsToPlayer(
   player: PlayerState,
@@ -35,203 +37,27 @@ export function getPlayerAbilityLevels(player: PlayerState): AbilityLevels {
   }
 }
 
-function getSlotCooldownEndsAt(player: PlayerState, slot: AbilitySlotKind): number {
-  switch (slot) {
-    case 'visibility':
-      return player.ability.visibilityCooldownEndsAt;
-    case 'fly':
-      return player.ability.flyCooldownEndsAt;
-    case 'berserk':
-      return player.ability.berserkCooldownEndsAt;
-    case 'bullet':
-      return player.ability.bulletCooldownEndsAt;
-    case 'hook':
-      return player.ability.hookCooldownEndsAt;
-    case 'backflip':
-      return player.ability.backflipCooldownEndsAt;
-    case 'thunder':
-      return player.ability.thunderCooldownEndsAt;
-    default:
-      return 0;
-  }
-}
-
-function setSlotCooldownEndsAt(player: PlayerState, slot: AbilitySlotKind, endsAt: number): void {
-  switch (slot) {
-    case 'visibility':
-      player.ability.visibilityCooldownEndsAt = endsAt;
-      break;
-    case 'fly':
-      player.ability.flyCooldownEndsAt = endsAt;
-      break;
-    case 'berserk':
-      player.ability.berserkCooldownEndsAt = endsAt;
-      break;
-    case 'bullet':
-      player.ability.bulletCooldownEndsAt = endsAt;
-      break;
-    case 'hook':
-      player.ability.hookCooldownEndsAt = endsAt;
-      break;
-    case 'backflip':
-      player.ability.backflipCooldownEndsAt = endsAt;
-      break;
-    case 'thunder':
-      player.ability.thunderCooldownEndsAt = endsAt;
-      break;
-  }
-}
-
-/**
- * Generic activation: dispatches on the power's EFFECT TEMPLATE (timed_buff
- * buffKind / burst_effect kind), not the literal ability key. This means a
- * brand-new custom power created in the Power Editor that reuses one of
- * these templates (e.g. "Ghost Step" wrapping invisibility with different
- * numbers) activates for real in matches, exactly like the original 6.
- */
 export function activateAbility(player: PlayerState, abilityKey: string | null | undefined, now: number): boolean {
-  if (!player.isAlive || player.hasFinished) return false;
-  if (!abilityKey) return false;
-
   const levels = getPlayerAbilityLevels(player);
-  const level = levels[abilityKey] ?? 0;
-  if (level <= 0) return false;
-
-  const slot = getAbilitySlotKind(abilityKey);
-  if (slot && getSlotCooldownEndsAt(player, slot) > now) return false;
-
-  // Powers draw from the same energy pool as sprinting/jumping — block
-  // activation if the player can't afford it, and only spend once the
-  // effect actually applies below.
-  const energyCost = getEnergyCostForAbility(abilityKey);
-  if (energyCost > 0 && player.energy < energyCost) return false;
-
-  const applied = applyAbilityEffect(player, abilityKey, level, now);
-  if (!applied) return false;
-
-  if (energyCost > 0) {
-    player.energy = Math.max(0, player.energy - energyCost);
-  }
-  if (slot) {
-    const cooldownMs = getCooldownForAbility(abilityKey);
-    if (cooldownMs > 0) setSlotCooldownEndsAt(player, slot, now + cooldownMs);
-  }
-  return true;
-}
-
-function applyAbilityEffect(player: PlayerState, abilityKey: string, level: number, now: number): boolean {
-  const timedBuff = getTimedBuffStatsByKey(abilityKey, level);
-  if (timedBuff.buffKind) {
-    if (!timedBuff.durationMs) return false;
-    switch (timedBuff.buffKind) {
-      case 'invisibility':
-        player.ability.visibilityEndsAt = now + timedBuff.durationMs;
-        player.isInvisible = true;
-        return true;
-      case 'fly':
-        player.ability.flyEndsAt = now + timedBuff.durationMs;
-        return true;
-      case 'berserk':
-        player.ability.berserkEndsAt = now + timedBuff.durationMs;
-        return true;
-      case 'unlimited_ammo':
-        player.ability.bulletEndsAt = now + timedBuff.durationMs;
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  const burst = getBurstEffectStatsByKey(abilityKey, level);
-  if (burst.kind === 'range_pull') {
-    if (!burst.rangeMeters || !burst.pullDurationMs) return false;
-    player.ability.hookEndsAt = now + burst.pullDurationMs;
-    const pushX = Math.cos(player.aimAngle || 0) * burst.rangeMeters;
-    const pushY = Math.sin(player.aimAngle || 0) * burst.rangeMeters;
-    player.x += pushX;
-    player.y += pushY;
-    player.vz = Math.max(player.vz, 0.35);
-    return true;
-  }
-  if (burst.kind === 'range_dash') {
-    // Same range/pullDuration numbers as range_pull (hook), reused as an
-    // evasive dash — pushes AWAY from aim direction instead of toward it.
-    if (!burst.rangeMeters || !burst.pullDurationMs) return false;
-    player.ability.backflipEndsAt = now + burst.pullDurationMs;
-    const pushX = -Math.cos(player.aimAngle || 0) * burst.rangeMeters;
-    const pushY = -Math.sin(player.aimAngle || 0) * burst.rangeMeters;
-    player.x += pushX;
-    player.y += pushY;
-    player.vz = Math.max(player.vz, 0.5);
-    return true;
-  }
-  if (burst.kind === 'radius_damage') {
-    if (!burst.radiusMeters || !burst.damage) return false;
-    player.ability.thunderEndsAt = now + 250;
-    return true;
-  }
-
-  return false;
+  return activateAbilityGeneric(player, abilityKey, now, levels);
 }
 
 export function tickActiveAbilityTimers(player: PlayerState, now: number): void {
-  if (player.ability.visibilityEndsAt > 0 && now >= player.ability.visibilityEndsAt) {
-    player.ability.visibilityEndsAt = 0;
-    player.isInvisible = false;
-  }
-  if (player.ability.flyEndsAt > 0 && now >= player.ability.flyEndsAt) {
-    player.ability.flyEndsAt = 0;
-  }
-  if (player.ability.hookEndsAt > 0 && now >= player.ability.hookEndsAt) {
-    player.ability.hookEndsAt = 0;
-  }
-  if (player.ability.berserkEndsAt > 0 && now >= player.ability.berserkEndsAt) {
-    player.ability.berserkEndsAt = 0;
-  }
-  if (player.ability.bulletEndsAt > 0 && now >= player.ability.bulletEndsAt) {
-    player.ability.bulletEndsAt = 0;
-  }
-  if (player.ability.thunderEndsAt > 0 && now >= player.ability.thunderEndsAt) {
-    player.ability.thunderEndsAt = 0;
-  }
-  if (player.ability.backflipEndsAt > 0 && now >= player.ability.backflipEndsAt) {
-    player.ability.backflipEndsAt = 0;
-  }
-  if (player.ability.visibilityCooldownEndsAt > 0 && now >= player.ability.visibilityCooldownEndsAt) {
-    player.ability.visibilityCooldownEndsAt = 0;
-  }
-  if (player.ability.flyCooldownEndsAt > 0 && now >= player.ability.flyCooldownEndsAt) {
-    player.ability.flyCooldownEndsAt = 0;
-  }
-  if (player.ability.hookCooldownEndsAt > 0 && now >= player.ability.hookCooldownEndsAt) {
-    player.ability.hookCooldownEndsAt = 0;
-  }
-  if (player.ability.berserkCooldownEndsAt > 0 && now >= player.ability.berserkCooldownEndsAt) {
-    player.ability.berserkCooldownEndsAt = 0;
-  }
-  if (player.ability.bulletCooldownEndsAt > 0 && now >= player.ability.bulletCooldownEndsAt) {
-    player.ability.bulletCooldownEndsAt = 0;
-  }
-  if (player.ability.thunderCooldownEndsAt > 0 && now >= player.ability.thunderCooldownEndsAt) {
-    player.ability.thunderCooldownEndsAt = 0;
-  }
-  if (player.ability.backflipCooldownEndsAt > 0 && now >= player.ability.backflipCooldownEndsAt) {
-    player.ability.backflipCooldownEndsAt = 0;
-  }
+  tickActiveAbilityTimersGeneric(player, now);
 }
 
 export function isUnlimitedAmmoActive(player: PlayerState, now: number): boolean {
-  return player.ability.bulletEndsAt > 0 && now < player.ability.bulletEndsAt;
+  return isUnlimitedAmmoActiveGeneric(player, now);
 }
 
 export function isBerserkActive(player: PlayerState, now: number): boolean {
-  return player.ability.berserkEndsAt > 0 && now < player.ability.berserkEndsAt;
+  return isBerserkActiveGeneric(player, now);
 }
 
 export function isFlyActive(player: PlayerState, now: number): boolean {
-  return player.ability.flyEndsAt > 0 && now < player.ability.flyEndsAt;
+  return isFlyActiveGeneric(player, now);
 }
 
 export function isInvisibleActive(player: PlayerState, now: number): boolean {
-  return player.ability.visibilityEndsAt > 0 && now < player.ability.visibilityEndsAt;
+  return isInvisibleActiveGeneric(player, now);
 }

@@ -72,6 +72,35 @@ import {
 } from '@/lib/weapons';
 import { Crosshair } from '../ui/crosshair';
 import {
+  activateAbility,
+  tickActiveAbilityTimers,
+  isFlyActive,
+  isBerserkActive,
+  isUnlimitedAmmoActive,
+  isInvisibleActive,
+  defaultAbilityHostState,
+  type AbilityHost,
+} from '@shared/active-abilities';
+import {
+  getActivePowerDefinitions,
+  applyDynamicPowerDefinitions,
+  getAbilitySlotKind,
+  getEnergyCostForAbility,
+  getCooldownForAbility,
+  type AbilitySlotKind,
+} from '@shared/power-definitions';
+import { AbilityRingIcon } from '../ui/ability-hud';
+
+const ABILITY_UI_FIELDS: Record<AbilitySlotKind, { endsAt: string; cooldownEndsAt: string }> = {
+  visibility: { endsAt: 'visibilityEndsAt', cooldownEndsAt: 'visibilityCooldownEndsAt' },
+  fly: { endsAt: 'flyEndsAt', cooldownEndsAt: 'flyCooldownEndsAt' },
+  berserk: { endsAt: 'berserkEndsAt', cooldownEndsAt: 'berserkCooldownEndsAt' },
+  bullet: { endsAt: 'bulletEndsAt', cooldownEndsAt: 'bulletCooldownEndsAt' },
+  hook: { endsAt: 'hookEndsAt', cooldownEndsAt: 'hookCooldownEndsAt' },
+  backflip: { endsAt: 'backflipEndsAt', cooldownEndsAt: 'backflipCooldownEndsAt' },
+  thunder: { endsAt: 'thunderEndsAt', cooldownEndsAt: 'thunderCooldownEndsAt' },
+};
+import {
   mouseSensRadians,
   resolvePlatformTpsView,
   sanitizeTpsView,
@@ -237,6 +266,8 @@ export function MapPlayPreview({
   const tpsRef = useRef<TpsViewSettings>(resolvedTps);
   const onCloseRef = useRef(onClose);
   const [hp, setHp] = useState(100);
+  const [energyUi, setEnergyUi] = useState(100);
+  const [abilityUi, setAbilityUi] = useState(() => defaultAbilityHostState());
   // Live text readout of player Z vs. the nearest collision pad's top —
   // lets you SEE the exact sink/float amount on screen (e.g. "legs inside
   // the mesh") without needing DevTools open. Remove once collision
@@ -258,6 +289,28 @@ export function MapPlayPreview({
     tpsRef.current = resolvedTps;
     setTpsHud(resolvedTps);
   }, [resolvedTps]);
+
+  // Hydrate the shared power-definitions registry with live (admin-tuned)
+  // data once, so Play Test's power activations use the same numbers a real
+  // match would instead of the static fallback defaults. Best-effort — the
+  // static fallback (already loaded at module init) covers powers fine if
+  // this fetch fails.
+  useEffect(() => {
+    let cancelled = false;
+    import('@/lib/game-progression-actions')
+      .then(({ getPowerDefinitionsForMenu }) => getPowerDefinitionsForMenu())
+      .then((records) => {
+        if (!cancelled && Array.isArray(records) && records.length > 0) {
+          applyDynamicPowerDefinitions(records);
+        }
+      })
+      .catch(() => {
+        /* keep static fallback */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -458,6 +511,45 @@ export function MapPlayPreview({
     let hpLocal = 100;
     const lastDamageAt = new Map<string, number>();
 
+    // Powers (visibility/fly/hook/berserk/bullet/thunder/backflip-dash) —
+    // Play Test intentionally treats every power as unlocked at max level
+    // (no real account/skill-tree context here) so a map author can freely
+    // test all of them, per product decision. Shares the exact same
+    // activation/cooldown/effect logic as live matches via
+    // shared/active-abilities.ts — only the "host" object differs (plain
+    // object here vs. the Colyseus PlayerState schema in a real match).
+    const abilityHost: AbilityHost = {
+      isAlive: true,
+      hasFinished: false,
+      energy: 100,
+      x: 0,
+      y: 0,
+      vz: 0,
+      aimAngle: 0,
+      isInvisible: false,
+      ability: defaultAbilityHostState(),
+    };
+    const ABILITY_KEY_BINDINGS: Record<string, string> = {
+      KeyH: 'hook',
+      KeyB: 'berserk',
+      KeyU: 'bullet',
+      KeyT: 'thunder',
+      KeyZ: 'visibility',
+      KeyX: 'fly',
+      KeyQ: 'backflip',
+    };
+    const abilityWasHeld = new Map<string, boolean>();
+    // Play Test = every power "unlocked" at max level (no skill-tree context
+    // here). Recomputed each call (not cached) since the power-definitions
+    // hydration fetch (separate effect) can resolve after this sim starts.
+    const abilityLevelsMaxed = (): Record<string, number> =>
+      Object.fromEntries(getActivePowerDefinitions().map((def) => [def.key, def.maxLevel]));
+    let abilityHudCounter = 0;
+    const pushAbilityUiState = () => {
+      setEnergyUi(Math.round(body.energy));
+      setAbilityUi({ ...abilityHost.ability });
+    };
+
     const keys = new Set<string>();
     let yaw = 0;
     let pitch = initialTps.camera.defaultPitch;
@@ -471,6 +563,7 @@ export function MapPlayPreview({
     let wasGrounded = true;
     let wasSprintingForSound = false;
     let wasFlippingForSound = false;
+    let wasInvisibleForMaterial = false;
     let lastCustomMoveId = '';
     let landUntil = 0;
     let meleeUntil = 0;
@@ -868,6 +961,45 @@ export function MapPlayPreview({
             physOptsRef.current
           );
 
+          // Powers — sync the local ability host from the sim body, process
+          // activations, tick timers, then write position/vz changes (hook
+          // pull, backflip dash) back to the body.
+          {
+            const nowMs = Date.now();
+            abilityHost.x = body.x;
+            abilityHost.y = body.y;
+            abilityHost.vz = body.vz;
+            abilityHost.aimAngle = yaw;
+            abilityHost.energy = body.energy;
+            abilityHost.isAlive = hpLocal > 0;
+            abilityHost.hasFinished = finishedLocal;
+            let abilityChanged = false;
+            for (const [code, abilityKey] of Object.entries(ABILITY_KEY_BINDINGS)) {
+              const isHeld = keys.has(code);
+              const wasHeld = abilityWasHeld.get(code) ?? false;
+              abilityWasHeld.set(code, isHeld);
+              if (isHeld && !wasHeld) {
+                const activated = activateAbility(abilityHost, abilityKey, nowMs, abilityLevelsMaxed());
+                if (activated) {
+                  abilityChanged = true;
+                  playSound(`power_${abilityKey}`);
+                }
+              }
+            }
+            tickActiveAbilityTimers(abilityHost, nowMs);
+            body.x = abilityHost.x;
+            body.y = abilityHost.y;
+            body.vz = abilityHost.vz;
+            body.energy = abilityHost.energy;
+            if (isFlyActive(abilityHost, nowMs)) {
+              body.isGrounded = false;
+              body.vz = 0;
+              body.z += (jumpPressed ? 1.4 : crouch ? -1.4 : 0) * dt;
+            }
+            abilityHudCounter += 1;
+            if (abilityChanged || abilityHudCounter % 10 === 0) pushAbilityUiState();
+          }
+
           if (matchElapsedMs - lastGhostSampleAt >= 80) {
             lastGhostSampleAt = matchElapsedMs;
             recordedSamples.push({
@@ -991,6 +1123,9 @@ export function MapPlayPreview({
           ) {
             continue;
           }
+          // Berserk = damage immunity while active (mirrors the server's
+          // damagePlayer() early-return on isBerserkActive).
+          if (isBerserkActive(abilityHost, Date.now())) continue;
           if (h.instantKill) {
             if (hpLocal > 0) playSound('trap_trigger');
             hpLocal = 0;
@@ -1146,6 +1281,24 @@ export function MapPlayPreview({
         bodyYaw = stepBodyYaw(bodyYaw, targetYaw, frameDt, aimNow ? 18 : 16);
         playerRoot.rotation.y =
           bodyYaw + (liveTps.player.yawOffsetDeg * Math.PI) / 180;
+        // Visibility power: fade the local model so a map author can
+        // confirm it's actually toggling (no other players in solo Play
+        // Test to actually hide it from, so this is a visual self-check).
+        const invisibleNow = isInvisibleActive(abilityHost, Date.now());
+        if (invisibleNow !== wasInvisibleForMaterial) {
+          wasInvisibleForMaterial = invisibleNow;
+          playerRoot.traverse((obj) => {
+            const mesh = obj as THREE.Mesh;
+            if (!mesh.isMesh || !mesh.material) return;
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const m of mats) {
+              const std = m as THREE.MeshStandardMaterial;
+              std.transparent = true;
+              std.opacity = invisibleNow ? 0.25 : 1;
+              std.needsUpdate = true;
+            }
+          });
+        }
         const justLanded = !wasGrounded && body.isGrounded;
         if (justLanded) playSound('land');
         else if (wasGrounded && !body.isGrounded && body.vz > 0.5) playSound('jump');
@@ -1159,7 +1312,13 @@ export function MapPlayPreview({
         if (joy?.consumeAttackPulse()) attackPulse = true;
         if (attackPulse) {
           attackPulse = false;
-          if (now - lastAttackAt >= combat.cooldownMs) {
+          // Bullet power: Play Test doesn't track ammo/reload at all, so
+          // "unlimited ammo" stands in as a rapid-fire cooldown bypass —
+          // the closest testable proxy for its real effect.
+          const effectiveCooldownMs = isUnlimitedAmmoActive(abilityHost, Date.now())
+            ? Math.min(combat.cooldownMs, 80)
+            : combat.cooldownMs;
+          if (now - lastAttackAt >= effectiveCooldownMs) {
             lastAttackAt = now;
             attackThisFrame = true;
             if (combat.kind === 'melee') meleeUntil = now + 500;
@@ -1284,6 +1443,30 @@ export function MapPlayPreview({
             />
           </div>
           <span className={hp <= 0 ? 'text-red-400 font-bold' : 'text-white/70'}>{hp}</span>
+          <span className="text-white/50 ml-2">EN</span>
+          <div className="w-24 h-2 rounded bg-white/10 overflow-hidden">
+            <div className="h-full bg-sky-400" style={{ width: `${energyUi}%` }} />
+          </div>
+          <span className="text-white/70">{energyUi}</span>
+        </div>
+        <div className="ml-3 flex items-end gap-1.5">
+          {getActivePowerDefinitions()
+            .filter((def) => getAbilitySlotKind(def.key) !== null)
+            .map((def) => {
+              const slot = getAbilitySlotKind(def.key)!;
+              const fields = ABILITY_UI_FIELDS[slot];
+              return (
+                <AbilityRingIcon
+                  key={def.key}
+                  icon={def.icon}
+                  cooldownMs={getCooldownForAbility(def.key)}
+                  cooldownEndsAt={(abilityUi as unknown as Record<string, number>)[fields.cooldownEndsAt] ?? 0}
+                  buffEndsAt={(abilityUi as unknown as Record<string, number>)[fields.endsAt] ?? 0}
+                  energyCost={getEnergyCostForAbility(def.key)}
+                  playerEnergy={energyUi}
+                />
+              );
+            })}
         </div>
         <div className="flex-1" />
         {ghostLabel && (
