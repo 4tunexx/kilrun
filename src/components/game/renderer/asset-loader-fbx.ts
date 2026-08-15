@@ -76,6 +76,11 @@ async function resolveTextureSource(fbxUrl: string): Promise<TextureSource> {
   let pending = textureSourceCache.get(fbxUrl);
   if (!pending) {
     pending = (async () => {
+      // blob: URLs (user-uploaded files) have no sibling/folder assets on
+      // the server to probe for — skip straight to the global atlas instead
+      // of firing HEAD requests blob: URLs don't support (console noise,
+      // never resolves true anyway).
+      if (fbxUrl.startsWith('blob:')) return { kind: 'global' as const, path: SHARED_SKIN_ATLAS };
       const sibling = siblingPngPath(fbxUrl);
       const folder = folderAtlasPath(fbxUrl);
       const [siblingOk, folderOk] = await Promise.all([urlExists(sibling), urlExists(folder)]);
@@ -206,6 +211,17 @@ export function loadFbxModel(
         .toLowerCase();
       const manager = new THREE.LoadingManager();
       manager.setURLModifier((texUrl) => {
+        // LoadingManager.resolveURL runs this modifier for EVERY request
+        // made through `manager`, including FBXLoader's own top-level
+        // `loader.load(url, ...)` call for the model file itself — not just
+        // texture refs resolved while parsing. For a blob: URL (no `.fbx`
+        // suffix to strip), fbxBase reduces to the raw last path segment,
+        // which trivially equals texBase for that same request — the
+        // self-reference heuristic below then "resolved" the main FBX file
+        // itself to the shared texture PNG, so FBXLoader fetched an image
+        // and failed to parse it as FBX ("Cannot find the version number").
+        // Never rewrite the request for the model file itself.
+        if (texUrl === url) return texUrl;
         const cleaned = texUrl.replace(/\\/g, '/').split('?')[0]!;
         const texBase = (cleaned.split('/').pop() ?? '')
           .replace(/\.(png|jpe?g|tga|bmp)$/i, '')
