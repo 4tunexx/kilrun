@@ -811,6 +811,16 @@ export function MapPlayPreview({
       const active = document.activeElement as HTMLElement | null;
       const tag = active?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.isContentEditable) return;
+      // Space/arrows default to page-scroll, and Space additionally
+      // re-clicks whatever <button> last had focus (e.g. the "Play Test"
+      // trigger, or a role-prompt button) since browsers treat Space as
+      // "activate the focused control" for buttons. Both silently eat the
+      // jump/slide/move keypress before the game ever sees it register as
+      // a *problem* — the key event still reaches this handler and `keys`
+      // still gets the code, but the browser's side effect (scroll, or a
+      // stray re-click) makes it look like the action "did nothing".
+      if (tag === 'BUTTON' || tag === 'A') active?.blur();
+      if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
       keys.add(e.code);
       if (keyBindToCodes(bindingsRef.current.interact).includes(e.code)) interactPulse = true;
       if (e.code === 'KeyF' || e.code === 'Mouse0') attackPulse = true;

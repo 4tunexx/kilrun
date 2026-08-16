@@ -243,13 +243,13 @@ describe('stepPlatformer (Foundry feel)', () => {
       slideCooldownMs: 1000,
     };
 
-    // Enabled: sprinting forward, then a crouch *edge* while still sprinting
-    // triggers a slide burst well above plain sprint speed.
+    // Enabled: sprinting forward, then a slide-key *edge* while still
+    // sprinting triggers a slide burst well above plain sprint speed.
     const body = groundedBody();
     const scratch = createSimScratch();
     stepPlatformer(
       body,
-      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: false },
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: false, slidePressed: false },
       1 / 30,
       [floor],
       scratch,
@@ -258,7 +258,7 @@ describe('stepPlatformer (Foundry feel)', () => {
     );
     stepPlatformer(
       body,
-      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: true },
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: false, slidePressed: true },
       1 / 30,
       [floor],
       scratch,
@@ -268,12 +268,12 @@ describe('stepPlatformer (Foundry feel)', () => {
     expect(scratch.velX).toBeCloseTo(5 * 2.2, 5);
     expect(scratch.slideMs).toBeGreaterThan(0);
 
-    // Cooldown gates an immediate retrigger even if crouch is released/re-pressed.
+    // Cooldown gates an immediate retrigger even if the slide key is released/re-pressed.
     scratch.slideMs = 0;
     scratch.slideCooldownMs = 500;
     stepPlatformer(
       body,
-      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: false },
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: false, slidePressed: false },
       1 / 30,
       [floor],
       scratch,
@@ -282,7 +282,7 @@ describe('stepPlatformer (Foundry feel)', () => {
     );
     stepPlatformer(
       body,
-      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: true },
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: false, slidePressed: true },
       1 / 30,
       [floor],
       scratch,

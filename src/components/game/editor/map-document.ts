@@ -988,7 +988,7 @@ export interface CombatSettings {
   jumpCutMult: number;
 
   // ── Slide ─────────────────────────────────────────────────────────────────
-  /** Enable slide mechanic (crouch while sprinting). Default false. */
+  /** Enable slide mechanic (dedicated slide key, default G, held while sprinting). Default true. */
   slideEnabled: boolean;
   /** Slide speed multiplier (over walkSpeed). Default 2.2. */
   slideMult: number;
@@ -1058,7 +1058,7 @@ export const DEFAULT_COMBAT_SETTINGS: CombatSettings = {
   coyoteMs: 167,
   jumpBufferMs: 200,
   jumpCutMult: 0.5,
-  slideEnabled: false,
+  slideEnabled: true,
   slideMult: 2.2,
   slideDurationMs: 600,
   slideCooldownMs: 1000,
