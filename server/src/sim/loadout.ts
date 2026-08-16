@@ -167,6 +167,28 @@ function sanitizeFireMode(raw: unknown, fallback: WeaponFireMode = 'semi'): Weap
   return fallback;
 }
 
+/**
+ * Absolute DPS ceiling regardless of how damage/pellets/cooldown combine.
+ * Every field below is individually clamped (damage<=100, pellets<=16,
+ * cooldownMs>=80), but those clamps alone still let all three max out
+ * together — damage(100) * pellets(16) * (1000/cooldownMs(80)) ≈ 20,000 DPS
+ * vs. a legitimate default's ~89 DPS. Reachable whenever
+ * fetchTrustedLoadout fails/returns null (web app down, guest join) and
+ * applyLoadoutToPlayer falls back to raw client-supplied weaponCombat.
+ * Scales damage down proportionally instead of rejecting outright, so a
+ * legitimately-configured high-fire-rate low-damage or high-damage
+ * low-fire-rate weapon from a trusted DB loadout is unaffected.
+ */
+const MAX_WEAPON_DPS = 220;
+
+function capDps(weapon: SanitizedWeapon): SanitizedWeapon {
+  const shotsPerSec = 1000 / Math.max(1, weapon.cooldownMs);
+  const dps = weapon.damage * Math.max(1, weapon.pellets) * shotsPerSec;
+  if (dps <= MAX_WEAPON_DPS) return weapon;
+  const scale = MAX_WEAPON_DPS / dps;
+  return { ...weapon, damage: Math.max(1, Math.floor(weapon.damage * scale)) };
+}
+
 export function sanitizeWeaponCombat(raw: unknown): SanitizedWeapon {
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_WEAPON };
   const o = raw as Record<string, unknown>;
@@ -195,7 +217,7 @@ export function sanitizeWeaponCombat(raw: unknown): SanitizedWeapon {
   }
 
   if (kind === 'melee') {
-    return {
+    return capDps({
       kind: 'melee',
       range: clamp(Number(o.range ?? 2.4), 0.8, 3.5),
       damage: clamp(Number(o.damage ?? 20), 1, 80),
@@ -209,10 +231,10 @@ export function sanitizeWeaponCombat(raw: unknown): SanitizedWeapon {
       magSize: 0,
       reserveAmmo: 0,
       reloadMs: 0,
-    };
+    });
   }
 
-  return {
+  return capDps({
     kind: 'hitscan',
     range: clamp(Number(o.range ?? 14), 4, 28),
     damage: clamp(Number(o.damage ?? 25), 1, 100),
@@ -226,7 +248,7 @@ export function sanitizeWeaponCombat(raw: unknown): SanitizedWeapon {
     magSize: clamp(Math.floor(Number(o.magSize ?? 12)), 0, 120),
     reserveAmmo: clamp(Math.floor(Number(o.reserveAmmo ?? 48)), 0, 400),
     reloadMs: clamp(Math.floor(Number(o.reloadMs ?? 1600)), 200, 5000),
-  };
+  });
 }
 
 /**

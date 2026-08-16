@@ -915,6 +915,7 @@ export function MapPlayPreview({
         keys.has('ControlRight') ||
         keyBindToCodes(bindingsRef.current.crouch).some((c) => keys.has(c));
       const flipPressed = keyBindToCodes(bindingsRef.current.flip).some((c) => keys.has(c));
+      const slidePressed = keyBindToCodes(bindingsRef.current.slide).some((c) => keys.has(c));
       const customMoveKeysHeld = (playDoc.customMoves ?? [])
         .filter((m) => keyBindToCodes(m.key).some((c) => keys.has(c)))
         .map((m) => m.id);
@@ -1015,6 +1016,7 @@ export function MapPlayPreview({
               crouch,
               meleeActive: performance.now() < meleeUntil,
               flipPressed,
+              slidePressed,
               customMoveKeysHeld,
               cameraYaw: yaw,
             },

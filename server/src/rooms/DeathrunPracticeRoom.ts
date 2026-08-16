@@ -42,8 +42,13 @@ export class DeathrunPracticeRoom extends DeathrunRoom {
     );
   }
 
-  onLeave(client: Client) {
-    super.onLeave(client);
+  async onLeave(client: Client) {
+    // Always pass consented=true regardless of the real disconnect reason —
+    // DeathrunRoom's onLeave now waits out a 120s reconnection window on an
+    // unexpected drop, but a solo practice room should self-dispose quickly
+    // (see class doc comment) rather than idle holding a seat nobody else
+    // is waiting on.
+    await super.onLeave(client, true);
     // Solo room — once the only player leaves, nothing useful is left running.
     if (this.state.players.size === 0) {
       void this.disconnect();

@@ -945,6 +945,7 @@ export default function KilrunEngine({
                   crouch: inputManager.isCrouchPressed(),
                   meleeActive: performance.now() < meleeUntil,
                   flipPressed: inputManager.isFlipPressed(),
+                  slidePressed: inputManager.isSlidePressed(),
                   cameraYaw,
                   customMoveKeysHeld: computeCustomMoveKeysHeld(),
                 },
@@ -1346,6 +1347,7 @@ export default function KilrunEngine({
             interactPressed: inputManager.isInteractPressed(),
             meleeActive: performance.now() < meleeUntil,
             flipPressed: inputManager.isFlipPressed(),
+            slidePressed: inputManager.isSlidePressed(),
             customMoveKeysHeld: computeCustomMoveKeysHeld(),
           };
           connectionRef.current?.sendInput(message);

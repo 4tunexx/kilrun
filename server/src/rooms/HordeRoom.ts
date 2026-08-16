@@ -25,6 +25,7 @@ import {
   createSimScratch,
   DEFAULT_WORLD_BOUNDS,
   defaultInput,
+  sanitizeInput,
   type MovementPhysicsOpts,
   type PlayerInput,
   type PlayerSimScratch,
@@ -204,6 +205,11 @@ const HORDE_MATCH_MS = 600_000;
 const MAX_SQUAD_TIMEOUTS = 3;
 const TIMEOUT_DURATION_MS = 60_000;
 const SURRENDER_VOTE_DURATION_MS = 30_000;
+/** Matches CompetitiveRoom's grace window — a WiFi blip mid-wave used to
+ *  permanently eject the player instead of holding their seat, and if they
+ *  were the last one alive, ended the match instantly with no chance to
+ *  reconnect. */
+const RECONNECT_WINDOW_SEC = 120;
 
 const MONSTER_STATS = {
   basic: { hp: 40, speed: 2.4, damage: 12, radius: 0.55 },
@@ -225,6 +231,10 @@ export class HordeRoom extends Room<RoomState> {
   private simScratch = new Map<string, PlayerSimScratch>();
   private lastObstacleHitAt = new Map<string, number>();
   private lastShotAt = new Map<string, number>();
+  /** Edge-detects shootPressed for semi/bolt fire modes — see the fire loop
+   *  below. Without this, holding the trigger fired a "semi-auto"/
+   *  "bolt-action" weapon as fast as the cooldown allowed. */
+  private wasShootHeld = new Map<string, boolean>();
   private lastHealAt = new Map<string, number>();
   private resultsElapsedMs = 0;
   private worldBounds: WorldBounds = { ...DEFAULT_WORLD_BOUNDS };
@@ -344,12 +354,12 @@ export class HordeRoom extends Room<RoomState> {
       },
     ];
 
-    this.onMessage('input', (client, input: Partial<PlayerInput>) => {
+    this.onMessage('input', (client, input: unknown) => {
       if (!this.state.players.get(client.sessionId)) return;
       this.latestInputs.set(client.sessionId, {
         ...defaultInput(),
         ...this.latestInputs.get(client.sessionId),
-        ...input,
+        ...sanitizeInput(input),
       });
     });
 
@@ -765,7 +775,18 @@ export class HordeRoom extends Room<RoomState> {
 
     this.syncActiveMapFromCloud();
 
-    this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
+    // Defense-in-depth alongside sanitizeInput above: no code path in the sim
+    // should be able to throw here anymore, but there's no process-level
+    // uncaughtException handler either — an uncaught throw in this callback
+    // would otherwise crash the whole Node process, killing every room/match
+    // on this server instance, not just this one. Skip the tick instead.
+    this.setSimulationInterval(() => {
+      try {
+        this.update(TICK_DT_MS);
+      } catch (err) {
+        console.error('[HordeRoom] tick error — skipping frame', err);
+      }
+    }, TICK_DT_MS);
   }
 
   /**
@@ -899,12 +920,37 @@ export class HordeRoom extends Room<RoomState> {
     this.simScratch.set(client.sessionId, createSimScratch());
   }
 
-  onLeave(client: Client) {
+  async onLeave(client: Client, consented: boolean) {
+    const player = this.state.players.get(client.sessionId);
+    // Unexpected drop (crash, network blip, tab kill) mid-wave — hold the
+    // seat open so the player can rejoin, same grace window CompetitiveRoom
+    // already has. Without this, HordeRoom permanently ejected on ANY
+    // disconnect, and if the disconnecting player was the last one alive it
+    // ended the match instantly — a WiFi blip could turn into an
+    // unrecoverable loss with zero chance to reconnect.
+    if (!consented && player && this.state.phase === 'playing') {
+      try {
+        await this.allowReconnection(client, RECONNECT_WINDOW_SEC);
+        console.log(`[HordeRoom] ${player.username} reconnected`);
+        return;
+      } catch {
+        // Window expired without a reconnect — fall through to full cleanup.
+      }
+    }
+
     this.state.players.delete(client.sessionId);
     this.latestInputs.delete(client.sessionId);
     this.simScratch.delete(client.sessionId);
-    this.lastObstacleHitAt.delete(client.sessionId);
+    // lastObstacleHitAt is keyed `${sessionId}:${obstacleId}` (see the hit
+    // check below), not bare sessionId — deleting by bare sessionId here was
+    // dead code, a key that never existed. Every obstacle a player ever
+    // touched leaked a permanent entry for the room instance's lifetime.
+    const obstacleHitPrefix = `${client.sessionId}:`;
+    for (const key of this.lastObstacleHitAt.keys()) {
+      if (key.startsWith(obstacleHitPrefix)) this.lastObstacleHitAt.delete(key);
+    }
     this.lastShotAt.delete(client.sessionId);
+    this.wasShootHeld.delete(client.sessionId);
     this.adminSessions.delete(client.sessionId);
     this.staffSessions.delete(client.sessionId);
     this.lastChatAt.delete(client.sessionId);
@@ -1044,6 +1090,12 @@ export class HordeRoom extends Room<RoomState> {
     this.state.matchTimeRemainingMs = this.matchDurationMs;
     this.matchElapsedMs = 0;
     this.platformMotion.clear();
+    // Never reset before — this room cycles results -> lobby -> new match
+    // without disposing, so the squad's 3-timeout budget (and any leftover
+    // surrender vote) silently persisted and depleted across consecutive
+    // matches hosted by the same room instance instead of resetting per-match.
+    this.squadTimeoutsUsed = 0;
+    this.surrenderVote = null;
     this.beginWave(this.startingWave);
   }
 
@@ -1207,22 +1259,32 @@ export class HordeRoom extends Room<RoomState> {
       return;
     }
 
+    // A timed wave (waveTimeSec) used to jump straight to beginWave() the
+    // instant its clock ran out, completely bypassing the "wave clear" block
+    // below — the only place creditsPerWaveClear is granted and the
+    // between-wave buy window opens. Any map using waveTimeSec had a
+    // permanently dead economy: no wave-clear credits, no buy phase, ever.
+    // Clearing monsters/queue here (mirroring what beginWave() itself does)
+    // and falling into the shared block below fixes that while keeping the
+    // "time's up, move on regardless of what's left alive" behavior.
+    let waveClearedByTimer = false;
     if (this.waveTimeMs > 0) {
       this.waveElapsedMs += dtMs;
       if (this.waveElapsedMs >= this.waveTimeMs) {
         if (this.state.wave >= this.maxWaves) {
           this.endMatch('survivor');
-        } else {
-          this.beginWave(this.state.wave + 1);
+          return;
         }
-        return;
+        waveClearedByTimer = true;
+        this.clearMonsters();
+        this.waveSpawnQueue = [];
       }
     }
 
-    // Wave clear: queue empty and no monsters left
+    // Wave clear: queue empty and no monsters left (or the wave timer expired).
     if (
-      this.waveSpawnQueue.every((q) => q.remaining <= 0) &&
-      this.monsters.length === 0
+      waveClearedByTimer ||
+      (this.waveSpawnQueue.every((q) => q.remaining <= 0) && this.monsters.length === 0)
     ) {
       if (this.state.wave >= this.maxWaves) {
         this.endMatch('survivor');
@@ -1448,7 +1510,11 @@ export class HordeRoom extends Room<RoomState> {
         this.damagePlayer(player, 100);
       }
 
-      if (input.shootPressed && player.weaponKind !== 'cosmetic') {
+      const shootHeldNow = !!input.shootPressed;
+      const wasShootHeld = this.wasShootHeld.get(sessionId) ?? false;
+      this.wasShootHeld.set(sessionId, shootHeldNow);
+      const canFire = shootHeldNow && (player.weaponFireMode === 'auto' || !wasShootHeld);
+      if (canFire && player.weaponKind !== 'cosmetic') {
         const lastShot = this.lastShotAt.get(sessionId) ?? 0;
         const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
         if (now - lastShot >= cooldown) {

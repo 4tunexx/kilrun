@@ -24,6 +24,7 @@ import {
   createSimScratch,
   DEFAULT_WORLD_BOUNDS,
   defaultInput,
+  sanitizeInput,
   type MovementPhysicsOpts,
   type PlayerInput,
   type PlayerSimScratch,
@@ -209,6 +210,12 @@ export class CompetitiveRoom extends Room<RoomState> {
   private simScratch = new Map<string, PlayerSimScratch>();
   private lastObstacleHitAt = new Map<string, number>();
   private lastShotAt = new Map<string, number>();
+  /** Edge-detects shootPressed for semi/bolt fire modes — see the fire loop
+   *  below. Without this, weaponFireMode was stored/synced but never
+   *  actually enforced: holding the trigger fired a "semi-auto" or
+   *  "bolt-action" weapon exactly as fast as the cooldown allowed, i.e.
+   *  full-auto regardless of the declared mode. */
+  private wasShootHeld = new Map<string, boolean>();
   private resultsElapsedMs = 0;
   private worldBounds: WorldBounds = { ...DEFAULT_WORLD_BOUNDS };
   private hostSessionId: string | null = null;
@@ -350,12 +357,12 @@ export class CompetitiveRoom extends Room<RoomState> {
       { x: 6, y: 3, z: 0.5 },
     ];
 
-    this.onMessage('input', (client, input: Partial<PlayerInput>) => {
+    this.onMessage('input', (client, input: unknown) => {
       if (!this.state.players.get(client.sessionId)) return;
       this.latestInputs.set(client.sessionId, {
         ...defaultInput(),
         ...this.latestInputs.get(client.sessionId),
-        ...input,
+        ...sanitizeInput(input),
       });
     });
 
@@ -803,7 +810,18 @@ export class CompetitiveRoom extends Room<RoomState> {
 
     this.syncActiveMapFromCloud();
 
-    this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
+    // Defense-in-depth alongside sanitizeInput above: no code path in the sim
+    // should be able to throw here anymore, but there's no process-level
+    // uncaughtException handler either — an uncaught throw in this callback
+    // would otherwise crash the whole Node process, killing every room/match
+    // on this server instance, not just this one. Skip the tick instead.
+    this.setSimulationInterval(() => {
+      try {
+        this.update(TICK_DT_MS);
+      } catch (err) {
+        console.error('[CompetitiveRoom] tick error — skipping frame', err);
+      }
+    }, TICK_DT_MS);
   }
 
   /**
@@ -976,14 +994,30 @@ export class CompetitiveRoom extends Room<RoomState> {
         console.log(`[CompetitiveRoom] ${player.username} reconnected`);
         return;
       } catch {
-        // Window expired without a reconnect — fall through to full cleanup.
+        // Window expired without a reconnect. The explicit abandonMatch
+        // message is the only other place this penalty fires — a force-quit
+        // / tab-close / network drop never sends it, so without this a
+        // ranked player could dodge the abandon penalty simply by not
+        // clicking "leave". This is the same mid-match check that gate uses.
+        const result = await reportMatchAbandon(player.userId);
+        if (!result.ok) {
+          console.error('[CompetitiveRoom] reportMatchAbandon (timeout) failed:', result.error);
+        }
       }
     }
     this.state.players.delete(client.sessionId);
     this.latestInputs.delete(client.sessionId);
     this.simScratch.delete(client.sessionId);
-    this.lastObstacleHitAt.delete(client.sessionId);
+    // lastObstacleHitAt is keyed `${sessionId}:${obstacleId}` (see the hit
+    // check below), not bare sessionId — deleting by bare sessionId here was
+    // dead code, a key that never existed. Every obstacle a player ever
+    // touched leaked a permanent entry for the room instance's lifetime.
+    const obstacleHitPrefix = `${client.sessionId}:`;
+    for (const key of this.lastObstacleHitAt.keys()) {
+      if (key.startsWith(obstacleHitPrefix)) this.lastObstacleHitAt.delete(key);
+    }
     this.lastShotAt.delete(client.sessionId);
+    this.wasShootHeld.delete(client.sessionId);
     this.adminSessions.delete(client.sessionId);
     this.staffSessions.delete(client.sessionId);
     this.lastChatAt.delete(client.sessionId);
@@ -1147,12 +1181,25 @@ export class CompetitiveRoom extends Room<RoomState> {
     }
     this.state.phase = 'countdown';
     this.state.countdownMs = this.roundCountdownMs + this.buyTimeMs;
-    this.grantBuyPhaseCredits();
+    this.grantBuyPhaseCredits(true);
+    // Never reset before — this room cycles results -> lobby -> new match
+    // without disposing, so a team's 3-timeout budget (and any leftover
+    // surrender vote) silently persisted and depleted across consecutive
+    // matches hosted by the same room instance instead of resetting per-match.
+    this.teamTimeoutsUsed.clear();
+    this.surrenderVote = null;
   }
 
-  private grantBuyPhaseCredits() {
+  /** reset=true (match start / fresh join) sets credits to exactly
+   *  startingCredits. Every other call (between-rounds buy phase) ADDS
+   *  startingCredits as that round's stipend instead — buys only happen
+   *  during countdown/buy-phase, and this used to unconditionally overwrite
+   *  credits back to startingCredits right as that window opened, wiping out
+   *  whatever a player had just earned via creditsPerKill kills the round
+   *  before. Kill rewards could never actually be spent. */
+  private grantBuyPhaseCredits(reset = false) {
     for (const p of this.state.players.values()) {
-      p.credits = this.startingCredits;
+      p.credits = reset ? this.startingCredits : (p.credits || 0) + this.startingCredits;
     }
   }
 
@@ -1278,11 +1325,21 @@ export class CompetitiveRoom extends Room<RoomState> {
       .length;
 
     // If a team has no players at all, don't end (solo testing both roles won't happen)
-    if (aTotal > 0 && aAlive === 0) {
+    const aWiped = aTotal > 0 && aAlive === 0;
+    const bWiped = bTotal > 0 && bAlive === 0;
+    if (aWiped && bWiped) {
+      // Simultaneous double-elimination on the same tick — there's no signal
+      // here for which side actually died last, and checking team A first
+      // meant this always resolved in team B's favor regardless. Coin-flip
+      // instead of a hardcoded bias.
+      this.endRound(Math.random() < 0.5 ? 'team_a' : 'team_b');
+      return;
+    }
+    if (aWiped) {
       this.endRound('team_b');
       return;
     }
-    if (bTotal > 0 && bAlive === 0) {
+    if (bWiped) {
       this.endRound('team_a');
     }
   }
@@ -1684,7 +1741,11 @@ export class CompetitiveRoom extends Room<RoomState> {
         this.damagePlayer(player, 100);
       }
 
-      if (input.shootPressed && player.weaponKind !== 'cosmetic') {
+      const shootHeldNow = !!input.shootPressed;
+      const wasShootHeld = this.wasShootHeld.get(sessionId) ?? false;
+      this.wasShootHeld.set(sessionId, shootHeldNow);
+      const canFire = shootHeldNow && (player.weaponFireMode === 'auto' || !wasShootHeld);
+      if (canFire && player.weaponKind !== 'cosmetic') {
         const lastShot = this.lastShotAt.get(sessionId) ?? 0;
         const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;
         if (now - lastShot >= cooldown) {

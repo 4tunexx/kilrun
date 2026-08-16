@@ -19,6 +19,7 @@ export type KeyBindAction =
   | 'jump'
   | 'sprint'
   | 'crouch'
+  | 'slide'
   | 'interact'
   | 'reload'
   | 'flip'
@@ -55,6 +56,7 @@ export const DEFAULT_KEY_BINDINGS: Record<KeyBindAction, string> = {
   jump: ' ',
   sprint: 'shift',
   crouch: 'c',
+  slide: 'g',
   interact: 'e',
   reload: 'r',
   flip: 'v',
@@ -76,6 +78,7 @@ export const KEY_BIND_ACTIONS: KeyBindActionMeta[] = [
   { action: 'jump', label: 'Jump', group: 'Actions' },
   { action: 'sprint', label: 'Sprint', group: 'Actions' },
   { action: 'crouch', label: 'Crouch', group: 'Actions' },
+  { action: 'slide', label: 'Slide (hold Sprint + press)', group: 'Actions' },
   { action: 'interact', label: 'Interact', group: 'Actions' },
   { action: 'reload', label: 'Reload', group: 'Actions' },
   { action: 'flip', label: 'Back Flip (free move)', group: 'Actions' },

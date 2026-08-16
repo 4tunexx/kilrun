@@ -27,6 +27,7 @@ import {
   createSimScratch,
   DEFAULT_WORLD_BOUNDS,
   defaultInput,
+  sanitizeInput,
   type MovementPhysicsOpts,
   type PlayerInput,
   type PlayerSimScratch,
@@ -149,6 +150,9 @@ const RESULTS_DISPLAY_MS = 8000;
 const MAX_TIMEOUTS_PER_TEAM = 3;
 const TIMEOUT_DURATION_MS = 60_000;
 const SURRENDER_VOTE_DURATION_MS = 30_000;
+/** Matches CompetitiveRoom's grace window — a WiFi blip mid-match used to
+ *  permanently eject the player instead of holding their seat. */
+const RECONNECT_WINDOW_SEC = 120;
 
 /**
  * Deathrun match room — authoritative platformer sim shared by all modes.
@@ -164,6 +168,10 @@ export class DeathrunRoom extends Room<RoomState> {
   private obstacleTimers: number[] = [];
   private lastObstacleHitAt = new Map<string, number>();
   private lastShotAt = new Map<string, number>();
+  /** Edge-detects shootPressed for semi/bolt fire modes — see the trapper
+   *  fire check below. Without this, holding the trigger fired a
+   *  "semi-auto"/"bolt-action" weapon as fast as the cooldown allowed. */
+  private wasShootHeld = new Map<string, boolean>();
   private resultsElapsedMs = 0;
   /** Editor MAIN map runner / start spawns (sim space). */
   private customRunnerSpawns: SpawnPoint[] = [];
@@ -254,13 +262,13 @@ export class DeathrunRoom extends Room<RoomState> {
     this.state.courseStartX = SPAWN_X;
     this.state.courseFinishX = FINISH_X;
 
-    this.onMessage('input', (client, input: Partial<PlayerInput>) => {
+    this.onMessage('input', (client, input: unknown) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
       this.latestInputs.set(client.sessionId, {
         ...defaultInput(),
         ...this.latestInputs.get(client.sessionId),
-        ...input,
+        ...sanitizeInput(input),
       });
     });
 
@@ -276,6 +284,7 @@ export class DeathrunRoom extends Room<RoomState> {
     });
 
     this.onMessage('reload', (client) => {
+      if (this.state.phase !== 'playing') return;
       const player = this.state.players.get(client.sessionId);
       if (!player || !player.isAlive) return;
       tryStartReload(player, Date.now());
@@ -373,6 +382,11 @@ export class DeathrunRoom extends Room<RoomState> {
     );
 
     this.onMessage('activateAbility', (client, payload: { ability?: string } | undefined) => {
+      // Radius-damage abilities (thunder/bullet-time burst etc.) could
+      // otherwise strike other players during lobby/results, before
+      // resetPlayerOnSpawn next overwrites health — stray damage/telemetry
+      // noise outside an active round.
+      if (this.state.phase !== 'playing') return;
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
       const now = Date.now();
@@ -446,7 +460,18 @@ export class DeathrunRoom extends Room<RoomState> {
       );
     });
 
-    this.setSimulationInterval(() => this.update(TICK_DT_MS), TICK_DT_MS);
+    // Defense-in-depth alongside sanitizeInput above: no code path in the sim
+    // should be able to throw here anymore, but there's no process-level
+    // uncaughtException handler either — an uncaught throw in this callback
+    // would otherwise crash the whole Node process, killing every room/match
+    // on this server instance, not just this one. Skip the tick instead.
+    this.setSimulationInterval(() => {
+      try {
+        this.update(TICK_DT_MS);
+      } catch (err) {
+        console.error('[DeathrunRoom] tick error — skipping frame', err);
+      }
+    }, TICK_DT_MS);
   }
 
   /** Apply MAIN map payload from server fetch or client push (shared body). */
@@ -472,6 +497,14 @@ export class DeathrunRoom extends Room<RoomState> {
     const platforms = data?.platforms;
     if (!Array.isArray(platforms) || platforms.length === 0) return;
     if (this.customMapLoaded && source.startsWith('server:') && !force) return;
+    // The two async fetchActiveMapPayload().then(...) call sites (onCreate,
+    // and the between-rounds refresh in tickResults with force=true) are not
+    // awaited — by the time either resolves, the match can already be mid-
+    // round. Applying here clears state.platforms/obstacles and
+    // force-teleports every player back to spawn (below), which used to be
+    // able to land in the middle of a live 'playing' round. Only ever safe
+    // outside an active round.
+    if (this.state.phase === 'playing') return;
 
     while (this.state.platforms.length > 0) this.state.platforms.pop();
     this.state.platforms.push(...createFromBlueprints(platforms));
@@ -638,12 +671,37 @@ export class DeathrunRoom extends Room<RoomState> {
     this.simScratch.set(client.sessionId, createSimScratch());
   }
 
-  onLeave(client: Client) {
+  async onLeave(client: Client, consented: boolean) {
+    const player = this.state.players.get(client.sessionId);
+    // Unexpected drop (crash, network blip, tab kill) mid-round — hold the
+    // seat open so the player can rejoin, same grace window CompetitiveRoom
+    // already has. Without this, DeathrunRoom permanently ejected on ANY
+    // disconnect, and losing the trapper specifically ended the round for
+    // everyone else instantly — a brief WiFi blip could end a match nobody
+    // actually wanted to end.
+    if (!consented && player && this.state.phase === 'playing') {
+      try {
+        await this.allowReconnection(client, RECONNECT_WINDOW_SEC);
+        console.log(`[DeathrunRoom] ${player.username} reconnected`);
+        return;
+      } catch {
+        // Window expired without a reconnect — fall through to full cleanup.
+      }
+    }
+
     this.state.players.delete(client.sessionId);
     this.latestInputs.delete(client.sessionId);
     this.simScratch.delete(client.sessionId);
-    this.lastObstacleHitAt.delete(client.sessionId);
+    // lastObstacleHitAt is keyed `${sessionId}:${obstacleId}` (see the hit
+    // check below), not bare sessionId — deleting by bare sessionId here was
+    // dead code, a key that never existed. Every obstacle a player ever
+    // touched leaked a permanent entry for the room instance's lifetime.
+    const obstacleHitPrefix = `${client.sessionId}:`;
+    for (const key of this.lastObstacleHitAt.keys()) {
+      if (key.startsWith(obstacleHitPrefix)) this.lastObstacleHitAt.delete(key);
+    }
     this.lastShotAt.delete(client.sessionId);
+    this.wasShootHeld.delete(client.sessionId);
     this.adminSessions.delete(client.sessionId);
     this.staffSessions.delete(client.sessionId);
     this.loadoutWeaponBySession.delete(client.sessionId);
@@ -655,6 +713,12 @@ export class DeathrunRoom extends Room<RoomState> {
     }
 
     if (this.state.phase === 'playing' && client.sessionId === this.state.trapperSessionId) {
+      this.endRound('runner');
+    } else if (this.state.phase === 'playing' && this.state.players.size === 0) {
+      // Solo/no-trapper round (trapperSessionId is '' — see startRound's
+      // sessionIds.length===1 branch) never matched the check above, so the
+      // sole runner disconnecting left the room simulating an empty match
+      // until matchDurationMs quietly ran out. Nobody left to simulate for.
       this.endRound('runner');
     }
   }
@@ -842,6 +906,16 @@ export class DeathrunRoom extends Room<RoomState> {
     this.state.winnerRole = '';
     this.matchElapsedMs = 0;
     this.platformMotion.clear();
+    // Neither was ever cleared between rounds — with a short custom
+    // roundTimeSec/warmupSec, a leftover surrenderVote from the PREVIOUS
+    // round could be finalized by a single new vote in this one (the 30s
+    // auto-expiry in update() doesn't always beat a short round boundary),
+    // and teamTimeoutsUsed counted room-lifetime instead of per-match,
+    // permanently exhausting a team's 3-timeout budget across matches since
+    // this room cycles results -> lobby -> new round without disposing.
+    this.surrenderVote = null;
+    this.teamTimeoutsUsed.clear();
+    this.teamTimeoutResumeAt = null;
   }
 
   private tickPlaying(dtMs: number) {
@@ -1009,7 +1083,11 @@ export class DeathrunRoom extends Room<RoomState> {
         }
       }
 
-      if (player.role === 'trapper' && player.isAlive && input.shootPressed) {
+      const shootHeldNow = !!input.shootPressed;
+      const wasShootHeld = this.wasShootHeld.get(sessionId) ?? false;
+      this.wasShootHeld.set(sessionId, shootHeldNow);
+      const canFire = shootHeldNow && (player.weaponFireMode === 'auto' || !wasShootHeld);
+      if (player.role === 'trapper' && player.isAlive && canFire) {
         if (player.weaponKind !== 'cosmetic') {
           const lastShot = this.lastShotAt.get(sessionId) ?? 0;
           const cooldown = player.weaponCooldownMs > 0 ? player.weaponCooldownMs : 350;

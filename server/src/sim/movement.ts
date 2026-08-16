@@ -67,6 +67,9 @@ export interface PlayerInput {
   meleeActive?: boolean;
   /** Held state for the back-flip move (V) — edge-detected here like crouch. */
   flipPressed?: boolean;
+  /** Dedicated slide key (default G, held while sprinting) — edge-detected
+   *  here. Replaced the old crouch+sprint combo trigger. */
+  slidePressed?: boolean;
   /** ids of map-authored CustomMoveDef entries whose key is currently held. */
   customMoveKeysHeld?: string[];
 }
@@ -85,10 +88,57 @@ const EMPTY_INPUT: PlayerInput = {
   interactPressed: false,
   meleeActive: false,
   flipPressed: false,
+  slidePressed: false,
 };
 
 export function defaultInput(): PlayerInput {
   return { ...EMPTY_INPUT };
+}
+
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+/**
+ * Validates a raw client 'input' message before it's merged into
+ * latestInputs. Two real bugs this closes:
+ *  - `new Set(input.customMoveKeysHeld ?? [])` below throws on any non-array
+ *    truthy value (e.g. a number or plain object) — uncaught, that crashes
+ *    the whole Node process (every room, not just this match) since the sim
+ *    tick has no surrounding try/catch.
+ *  - moveX/moveY/cameraYaw/aimAngle/aimPitch were assigned with no finite
+ *    check; msgpack (unlike JSON) can carry NaN/Infinity over the wire, and
+ *    once one lands here it permanently corrupts that player's x/y/z for
+ *    the rest of the match (collision/hit-detection math propagates it).
+ * Invalid fields are OMITTED (not zeroed) so the merge in each room's
+ * onMessage('input', ...) — `{...defaultInput(), ...latestInputs.get(id),
+ * ...sanitizeInput(input)}` — falls through to the last known-good value
+ * instead of snapping to a fallback a client could exploit as a signal.
+ */
+export function sanitizeInput(raw: unknown): Partial<PlayerInput> {
+  if (!raw || typeof raw !== 'object') return {};
+  const r = raw as Record<string, unknown>;
+  const out: Partial<PlayerInput> = {};
+  if (isFiniteNumber(r.moveX)) out.moveX = r.moveX;
+  if (isFiniteNumber(r.moveY)) out.moveY = r.moveY;
+  if (isFiniteNumber(r.aimAngle)) out.aimAngle = r.aimAngle;
+  if (isFiniteNumber(r.aimPitch)) out.aimPitch = r.aimPitch;
+  if (isFiniteNumber(r.cameraYaw)) out.cameraYaw = r.cameraYaw;
+  if (typeof r.crouch === 'boolean') out.crouch = r.crouch;
+  if (typeof r.sprint === 'boolean') out.sprint = r.sprint;
+  if (typeof r.jumpPressed === 'boolean') out.jumpPressed = r.jumpPressed;
+  if (typeof r.shootPressed === 'boolean') out.shootPressed = r.shootPressed;
+  if (typeof r.aimHeld === 'boolean') out.aimHeld = r.aimHeld;
+  if (typeof r.interactPressed === 'boolean') out.interactPressed = r.interactPressed;
+  if (typeof r.meleeActive === 'boolean') out.meleeActive = r.meleeActive;
+  if (typeof r.flipPressed === 'boolean') out.flipPressed = r.flipPressed;
+  if (typeof r.slidePressed === 'boolean') out.slidePressed = r.slidePressed;
+  if (Array.isArray(r.customMoveKeysHeld)) {
+    out.customMoveKeysHeld = r.customMoveKeysHeld
+      .filter((k): k is string => typeof k === 'string')
+      .slice(0, 32);
+  }
+  return out;
 }
 
 /** Per-player ephemeral sim state that does not need to sync to clients. */
@@ -121,6 +171,8 @@ export interface PlayerSimScratch {
   slideCooldownMs: number;
   /** Edge-detects the crouch button so holding it doesn't retrigger every tick. */
   wasCrouchHeld: boolean;
+  /** Edge-detects the dedicated slide key (see PlayerInput.slidePressed). */
+  wasSlideKeyHeld: boolean;
   /** Remaining ms of an active back flip (0 = not flipping). */
   flipMs: number;
   /** Remaining ms before a new flip can start. */
@@ -153,6 +205,7 @@ export function createSimScratch(): PlayerSimScratch {
     slideMs: 0,
     slideCooldownMs: 0,
     wasCrouchHeld: false,
+    wasSlideKeyHeld: false,
     flipMs: 0,
     flipCooldownMs: 0,
     wasFlipHeld: false,
@@ -320,20 +373,21 @@ export function applyMovement(
   let grounded = !!support && player.vz <= 0.2;
   player.isGrounded = grounded;
 
-  // Slide (crouch while sprinting) — see CombatSettings.slideEnabled doc.
-  // A speed-boosted burst for slideDurationMs, then a cooldown before it can
-  // retrigger. Slide-jump falls out naturally without extra logic: jumping
-  // only ever sets vz, so a jump mid-slide keeps whatever slide-boosted
-  // velX/velY the player already had (momentum carries into the air).
+  // Slide (dedicated key, default G, held while sprinting) — see
+  // CombatSettings.slideEnabled doc. A speed-boosted burst for
+  // slideDurationMs, then a cooldown before it can retrigger. Slide-jump
+  // falls out naturally without extra logic: jumping only ever sets vz, so
+  // a jump mid-slide keeps whatever slide-boosted velX/velY the player
+  // already had (momentum carries into the air).
   const effSlideEnabled = physOpts?.slideEnabled ?? false;
   const effSlideMult = physOpts?.slideMult ?? 2.2;
   const effSlideDurationMs = physOpts?.slideDurationMs ?? 600;
   const effSlideCooldownMs = physOpts?.slideCooldownMs ?? 1000;
-  const crouchEdge = input.crouch && !scratch.wasCrouchHeld;
-  scratch.wasCrouchHeld = input.crouch;
+  const slideKeyEdge = !!input.slidePressed && !scratch.wasSlideKeyHeld;
+  scratch.wasSlideKeyHeld = !!input.slidePressed;
   if (
     effSlideEnabled &&
-    crouchEdge &&
+    slideKeyEdge &&
     input.sprint &&
     grounded &&
     wishMag > 0.2 &&

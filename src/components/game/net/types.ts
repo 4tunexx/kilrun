@@ -214,6 +214,8 @@ export interface PlayerInputMessage {
   meleeActive?: boolean;
   /** Held state for the back-flip move (V) — server edge-detects like crouch. */
   flipPressed?: boolean;
+  /** Dedicated slide key (default G, held while sprinting) — server edge-detects. */
+  slidePressed?: boolean;
   /** ids of map-authored CustomMoveDef entries whose key is currently held. */
   customMoveKeysHeld?: string[];
 }

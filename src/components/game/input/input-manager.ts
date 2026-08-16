@@ -110,6 +110,12 @@ export class InputManager {
     return this.keyboard.isPressed(this.bindings.flip);
   }
 
+  /** Slide (default G, hold Sprint + press). Held state — server/prediction
+   *  edge-detect it themselves, same pattern as isFlipPressed above. */
+  public isSlidePressed(): boolean {
+    return this.keyboard.isPressed(this.bindings.slide);
+  }
+
   public isAttackPressed(): boolean {
     return this.isMobile
       ? this.joystick.consumeAttackPulse() || this.joystick.consumeShootPulse()

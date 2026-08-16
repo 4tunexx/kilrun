@@ -124,6 +124,8 @@ export interface SimScratch {
   slideCooldownMs: number;
   /** Edge-detects the crouch button so holding it doesn't retrigger every tick. */
   wasCrouchHeld: boolean;
+  /** Edge-detects the dedicated slide key (see SimInput.slidePressed). */
+  wasSlideKeyHeld: boolean;
   /** Remaining ms of an active back flip (0 = not flipping). */
   flipMs: number;
   /** Remaining ms before a new flip can start. */
@@ -150,6 +152,9 @@ export interface SimInput {
   crouch: boolean;
   meleeActive?: boolean;
   flipPressed?: boolean;
+  /** Dedicated slide key (default G) — hold Sprint + press. Replaces the
+   *  old crouch+sprint combo trigger below. */
+  slidePressed?: boolean;
   customMoveKeysHeld?: string[];
   /** Camera yaw (radians) — only needed for flip's backward kick direction. */
   cameraYaw?: number;
@@ -217,6 +222,7 @@ export function createSimScratch(): SimScratch {
     slideMs: 0,
     slideCooldownMs: 0,
     wasCrouchHeld: false,
+    wasSlideKeyHeld: false,
     flipMs: 0,
     flipCooldownMs: 0,
     wasFlipHeld: false,
@@ -493,20 +499,20 @@ export function stepPlatformer(
   let grounded = !!support && body.vz <= 0.2;
   body.isGrounded = grounded;
 
-  // Slide (crouch while sprinting) — mirrors server/src/sim/movement.ts so
-  // Play Test and live prediction show the same speed-boosted burst instead
-  // of the toggle silently doing nothing. Slide-jump falls out for free:
-  // jumping only ever sets vz, so a jump mid-slide keeps the boosted
-  // velX/velY the player already had.
+  // Slide (dedicated key, default G, held while sprinting) — mirrors
+  // server/src/sim/movement.ts so Play Test and live prediction show the
+  // same speed-boosted burst instead of the toggle silently doing nothing.
+  // Slide-jump falls out for free: jumping only ever sets vz, so a jump
+  // mid-slide keeps the boosted velX/velY the player already had.
   const SLIDE_ENABLED = physOpts?.slideEnabled ?? false;
   const SLIDE_MULT = physOpts?.slideMult ?? 2.2;
   const SLIDE_DURATION_MS = physOpts?.slideDurationMs ?? 600;
   const SLIDE_COOLDOWN_MS = physOpts?.slideCooldownMs ?? 1000;
-  const crouchEdge = input.crouch && !scratch.wasCrouchHeld;
-  scratch.wasCrouchHeld = input.crouch;
+  const slideKeyEdge = !!input.slidePressed && !scratch.wasSlideKeyHeld;
+  scratch.wasSlideKeyHeld = !!input.slidePressed;
   if (
     SLIDE_ENABLED &&
-    crouchEdge &&
+    slideKeyEdge &&
     input.sprint &&
     grounded &&
     wishMag > 0.2 &&

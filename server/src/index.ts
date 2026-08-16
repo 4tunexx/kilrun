@@ -9,6 +9,7 @@ import { DeathrunRoom } from './rooms/DeathrunRoom.js';
 import { DeathrunPracticeRoom } from './rooms/DeathrunPracticeRoom.js';
 import { HordeRoom } from './rooms/HordeRoom.js';
 import { CompetitiveRoom } from './rooms/CompetitiveRoom.js';
+import { isJoinTokenRequired } from './join-token.js';
 
 /** The 3 room classes all expose this same admin control surface (kept as
  * plain duck-typing rather than a shared base class, matching how the rest
@@ -30,6 +31,21 @@ interface AdminControllableRoom {
 
 const PORT = Number(process.env.PORT ?? 2567);
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*';
+
+// join-token.ts's authenticateJoin() has a dev-only fallback: when no join
+// secret is configured at all, it trusts options.isAdmin/isStaff/kp straight
+// from the client instead of a verified token — a full privilege-escalation
+// hole (anyone can self-assert isAdmin:true). That fallback is explicitly
+// documented as dev-only but was previously just a silent warn-once, one
+// missing env var away from shipping live. Fail fast instead.
+if (process.env.NODE_ENV === 'production' && !isJoinTokenRequired()) {
+  console.error(
+    '[server] Refusing to start in production with no join-token secret configured. ' +
+      'Set GAME_JOIN_TOKEN_SECRET (or GAME_SERVER_ADMIN_SECRET / AUTH_SECRET) before deploying — ' +
+      'without one, every client join is trusted at face value for admin/staff/kp claims.'
+  );
+  process.exit(1);
+}
 
 function secretsEqual(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
@@ -108,39 +124,49 @@ function requireAdminSecret(req: express.Request, res: express.Response): boolea
  */
 app.get('/admin/live-matches', async (req, res) => {
   if (!requireAdminSecret(req, res)) return;
-  const cached = await matchMaker.query({});
-  const matches = cached.map((c) => {
-    const room = matchMaker.getLocalRoomById(c.roomId) as unknown as
-      | (AdminControllableRoom & {
-          state?: {
-            phase?: string;
-            modeTag?: string;
-            adminPaused?: boolean;
-            players?: Map<string, { username?: string; role?: string; avatarUrl?: string }>;
-          };
-        })
-      | undefined;
-    const state = room?.state;
-    const players = state?.players
-      ? Array.from(state.players.entries()).map(([sessionId, p]) => ({
-          sessionId,
-          username: p.username ?? 'Player',
-          role: p.role ?? '',
-          avatarUrl: p.avatarUrl ?? '',
-          steamId: room?.adminGetPlayerSteamId(sessionId) ?? '',
-        }))
-      : [];
-    return {
-      roomId: c.roomId,
-      roomName: c.name,
-      mode: state?.modeTag ?? c.name,
-      phase: state?.phase ?? 'unknown',
-      paused: !!state?.adminPaused,
-      playerCount: players.length,
-      players,
-    };
-  });
-  res.json({ ok: true, matches });
+  // Express 5 auto-forwards a rejected async-handler promise to the default
+  // error handler (no explicit try/catch needed to avoid a hung request),
+  // but that default handler returns an HTML error page — inconsistent with
+  // every other route here returning {ok, error} JSON. Explicit catch for a
+  // consistent response shape.
+  try {
+    const cached = await matchMaker.query({});
+    const matches = cached.map((c) => {
+      const room = matchMaker.getLocalRoomById(c.roomId) as unknown as
+        | (AdminControllableRoom & {
+            state?: {
+              phase?: string;
+              modeTag?: string;
+              adminPaused?: boolean;
+              players?: Map<string, { username?: string; role?: string; avatarUrl?: string }>;
+            };
+          })
+        | undefined;
+      const state = room?.state;
+      const players = state?.players
+        ? Array.from(state.players.entries()).map(([sessionId, p]) => ({
+            sessionId,
+            username: p.username ?? 'Player',
+            role: p.role ?? '',
+            avatarUrl: p.avatarUrl ?? '',
+            steamId: room?.adminGetPlayerSteamId(sessionId) ?? '',
+          }))
+        : [];
+      return {
+        roomId: c.roomId,
+        roomName: c.name,
+        mode: state?.modeTag ?? c.name,
+        phase: state?.phase ?? 'unknown',
+        paused: !!state?.adminPaused,
+        playerCount: players.length,
+        players,
+      };
+    });
+    res.json({ ok: true, matches });
+  } catch (err) {
+    console.error('[admin] /admin/live-matches failed', err);
+    res.status(500).json({ ok: false, error: 'Failed to query matches' });
+  }
 });
 
 app.post('/admin/live-matches/:roomId/pause', (req, res) => {
@@ -258,32 +284,48 @@ app.post('/admin/live-matches/:roomId/ban', async (req, res) => {
     res.status(404).json({ ok: false, error: 'Match not found on this process' });
     return;
   }
-  const result = await room.adminBanPlayer(
-    targetSessionId,
-    { userId: actorUserId, username: actorUsername },
-    reason
-  );
-  res.json(result);
+  try {
+    const result = await room.adminBanPlayer(
+      targetSessionId,
+      { userId: actorUserId, username: actorUsername },
+      reason
+    );
+    res.json(result);
+  } catch (err) {
+    console.error('[admin] adminBanPlayer failed', err);
+    res.status(500).json({ ok: false, error: 'Ban failed' });
+  }
 });
 
 // Lightweight room-state dashboard for local debugging; not linked from the game itself.
-const adminSecret = process.env.GAME_SERVER_ADMIN_SECRET || '';
-if (adminSecret) {
-  app.use('/monitor', (req, res, next) => {
-    const header =
-      typeof req.headers['x-admin-secret'] === 'string'
-        ? req.headers['x-admin-secret']
-        : '';
-    const query =
-      typeof req.query.secret === 'string' ? req.query.secret : '';
-    const provided = header || query;
-    if (!provided || !secretsEqual(provided, adminSecret)) {
-      res.status(401).json({ ok: false, error: 'Unauthorized' });
-      return;
-    }
-    next();
-  });
-}
+// Every other admin route (requireAdminSecret above) fails CLOSED — 503 —
+// when GAME_SERVER_ADMIN_SECRET isn't set. This one only registered its auth
+// check `if (adminSecret)`, so an unset secret meant `app.use('/monitor',
+// monitor())` below ran with ZERO auth at all, exposing live room/player
+// state to anyone who could reach the port. Middleware is now unconditional
+// and fails closed like every other admin route.
+app.use('/monitor', (req, res, next) => {
+  const adminSecret = process.env.GAME_SERVER_ADMIN_SECRET || '';
+  if (!adminSecret) {
+    res.status(503).json({
+      ok: false,
+      error: 'GAME_SERVER_ADMIN_SECRET is not configured on the game server',
+    });
+    return;
+  }
+  const header =
+    typeof req.headers['x-admin-secret'] === 'string'
+      ? req.headers['x-admin-secret']
+      : '';
+  const query =
+    typeof req.query.secret === 'string' ? req.query.secret : '';
+  const provided = header || query;
+  if (!provided || !secretsEqual(provided, adminSecret)) {
+    res.status(401).json({ ok: false, error: 'Unauthorized' });
+    return;
+  }
+  next();
+});
 app.use('/monitor', monitor());
 
 const httpServer = http.createServer(app);
