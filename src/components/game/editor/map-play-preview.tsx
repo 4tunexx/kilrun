@@ -29,6 +29,8 @@ import {
 import {
   applyAuthoredEnvironment,
   applyEntityOpacity,
+  applyEntityGlow,
+  tickEntityGlow,
   makeAuthoredLight,
   makeGameplayFallback,
   shouldUseGameplayFallback,
@@ -698,6 +700,7 @@ export function MapPlayPreview({
             }
           );
           applyEntityOpacity(planted, ent.opacity);
+          applyEntityGlow(planted, ent.glow, ent.color);
           planted.position.set(...ent.position);
           planted.rotation.set(
             THREE.MathUtils.degToRad(ent.rotation[0]),
@@ -923,6 +926,13 @@ export function MapPlayPreview({
       clock.update();
       const frameDt = Math.min(clock.getDelta(), 0.05);
       const now = performance.now();
+
+      for (const ent of playDoc.entities) {
+        if (ent.glow?.enabled && ent.glow.pulse && ent.glow.pulse !== 'none') {
+          const r = roots.get(ent.id);
+          if (r) tickEntityGlow(r, ent.glow, now);
+        }
+      }
 
       const moveStick = joy?.getMoveVector() ?? { x: 0, y: 0 };
       const lookStick = joy?.getAimVector() ?? { x: 0, y: 0 };

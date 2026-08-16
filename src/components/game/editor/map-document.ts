@@ -637,6 +637,46 @@ export function ensurePushBlock(ent: EditorEntity): EntityPushBlock {
   return { ...defaultPushBlock(), ...ent.pushBlock };
 }
 
+export type GlowPulseMode = 'none' | 'breathe' | 'pulse' | 'flicker' | 'flash';
+
+export interface EntityGlow {
+  enabled: boolean;
+  /** Emissive glow color (hex, e.g. '#00f0ff') */
+  color?: string;
+  /** Emissive intensity multiplier (0.1 - 5.0+, default 1.5) */
+  intensity?: number;
+  /** Dynamic pulse animation mode */
+  pulse?: GlowPulseMode;
+  /** Pulse speed in Hz (cycles per second, default 1.0) */
+  pulseSpeed?: number;
+  /** Min intensity fraction during pulse (0.0 - 1.0, default 0.25) */
+  pulseMin?: number;
+  /** Cast dynamic point light into surrounding scene */
+  castLight?: boolean;
+  /** Cast light reach / distance in world units (default 6) */
+  lightDistance?: number;
+  /** Cast light intensity / brightness (default 1.0) */
+  lightIntensity?: number;
+}
+
+export function defaultEntityGlow(color = '#00f0ff'): EntityGlow {
+  return {
+    enabled: false,
+    color,
+    intensity: 1.5,
+    pulse: 'none',
+    pulseSpeed: 1.0,
+    pulseMin: 0.25,
+    castLight: false,
+    lightDistance: 6,
+    lightIntensity: 1.0,
+  };
+}
+
+export function ensureEntityGlow(ent: Pick<EditorEntity, 'glow' | 'color'>): EntityGlow {
+  const fallback = ent.color && ent.color !== '#ffffff' && ent.color !== '#64748b' ? ent.color : '#00f0ff';
+  return { ...defaultEntityGlow(fallback), ...ent.glow };
+}
 
 /** A single baked collision box from the Subtract/Union tool — see `EditorEntity.csgPads`. */
 export interface CsgLocalPad {
@@ -653,6 +693,8 @@ export interface EditorEntity {
   id: string;
   name: string;
   kind: EditorEntityKind;
+  /** Emissive glowing material and illumination settings */
+  glow?: EntityGlow;
   model?: string;
   /** Custom uploaded model URL (data URL or /uploads path) */
   customModelUrl?: string;

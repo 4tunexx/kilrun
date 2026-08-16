@@ -11,6 +11,8 @@ import { AnimationDirector } from '../editor/animation-director';
 import { applyTextureToObject, plantLocalFeet, resolveEntityTextureRepeat } from '../editor/editor-mesh';
 import {
   applyEntityOpacity,
+  applyEntityGlow,
+  tickEntityGlow,
   makeAuthoredLight,
   makeGameplayFallback,
   shouldUseGameplayFallback,
@@ -171,6 +173,7 @@ export class CustomMapOverlay {
         );
         obj.scale.set(...ent.scale);
         applyEntityOpacity(obj, ent.opacity);
+        applyEntityGlow(obj, ent.glow, ent.color);
         obj.userData.entityId = ent.id;
         obj.userData.editorEntity = ent;
         this.root.add(obj);
@@ -204,6 +207,7 @@ export class CustomMapOverlay {
           );
           placeholder.scale.set(...ent.scale);
           applyEntityOpacity(placeholder, ent.opacity);
+          applyEntityGlow(placeholder, ent.glow, ent.color);
           placeholder.userData.entityId = ent.id;
           placeholder.userData.editorEntity = ent;
           this.root.add(placeholder);
@@ -238,6 +242,13 @@ export class CustomMapOverlay {
     interactPressed: boolean,
     entities: EditorEntity[]
   ) {
+    const nowMs = performance.now();
+    for (const ent of entities) {
+      if (ent.glow?.enabled && ent.glow.pulse && ent.glow.pulse !== 'none') {
+        const root = this.entityRoots.get(ent.id);
+        if (root) tickEntityGlow(root, ent.glow, nowMs);
+      }
+    }
     if (!playerThreePos) {
       this.director.update(dt);
       return;

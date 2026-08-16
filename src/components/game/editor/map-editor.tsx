@@ -87,6 +87,7 @@ import type {
   EntityCollideMaterial,
   EntityLightType,
   FloorPreset,
+  GlowPulseMode,
   HammerPrimitive,
   MapDocument,
   SkyPreset,
@@ -96,6 +97,7 @@ import {
   ensureAnimation,
   ensureCompetitiveSettings,
   ensureDeathrunSettings,
+  ensureEntityGlow,
   ensureEnvironment,
   ensureHazard,
   ensureHealthFloor,
@@ -6871,6 +6873,219 @@ export function MapEditor({
                   onChange={(e) => patchSelected({ color: e.target.value })}
                 />
               </label>
+              {/* ── Glow / Emissive Effects ───────────────────────────── */}
+              {!isInvisibleMarkerKind(selected.kind) &&
+                !isPlatformPlayerKind(selected.kind) &&
+                selected.kind !== 'light' && (() => {
+                  const glow = ensureEntityGlow(selected);
+                  const isGlowOn = selected.glow?.enabled === true;
+                  const GLOW_PRESETS = [
+                    { label: 'Cyan', color: '#00f0ff' },
+                    { label: 'Pink', color: '#ff007f' },
+                    { label: 'Green', color: '#00ff66' },
+                    { label: 'Gold', color: '#ffaa00' },
+                    { label: 'Purple', color: '#b026ff' },
+                    { label: 'White', color: '#ffffff' },
+                    { label: 'Red', color: '#ff2244' },
+                    { label: 'Blue', color: '#3b82f6' },
+                  ];
+                  return (
+                    <div className="rounded-xl border border-cyan-500/25 bg-gradient-to-b from-cyan-950/20 to-black/40 p-3 space-y-3 shadow-lg backdrop-blur-sm">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Sparkles className={`w-4 h-4 transition-colors ${isGlowOn ? 'text-cyan-400 animate-pulse' : 'text-white/40'}`} />
+                          <span className="text-xs font-semibold text-white/90">Glow & Emissive</span>
+                        </div>
+                        <button
+                          type="button"
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-all ${
+                            isGlowOn
+                              ? 'bg-cyan-500 text-black shadow-[0_0_12px_rgba(6,182,212,0.6)]'
+                              : 'bg-white/10 text-white/50 hover:bg-white/15'
+                          }`}
+                          onClick={() => {
+                            patchSelected({
+                              glow: {
+                                ...glow,
+                                enabled: !isGlowOn,
+                              },
+                            });
+                          }}
+                        >
+                          {isGlowOn ? 'Active' : 'Disabled'}
+                        </button>
+                      </div>
+
+                      {isGlowOn && (
+                        <div className="space-y-3 pt-1">
+                          {/* Color & Quick Presets */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-[11px] text-white/60">
+                              <span>Glow Color</span>
+                              <span className="font-mono text-[10px] text-cyan-300">{glow.color}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                className="w-8 h-8 rounded border border-white/20 bg-transparent cursor-pointer"
+                                value={glow.color || '#00f0ff'}
+                                onChange={(e) =>
+                                  patchSelected({
+                                    glow: { ...glow, color: e.target.value },
+                                  })
+                                }
+                              />
+                              <div className="flex-1 flex flex-wrap gap-1">
+                                {GLOW_PRESETS.map((p) => (
+                                  <button
+                                    key={p.label}
+                                    type="button"
+                                    title={p.label}
+                                    className="w-5 h-5 rounded-full border border-white/20 transition-transform hover:scale-110 active:scale-95 shadow-sm"
+                                    style={{ backgroundColor: p.color }}
+                                    onClick={() =>
+                                      patchSelected({
+                                        glow: { ...glow, color: p.color },
+                                      })
+                                    }
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Glow Intensity */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[11px] text-white/60">
+                              <span>Brightness / Intensity</span>
+                              <span className="font-mono text-cyan-300">{(glow.intensity ?? 1.5).toFixed(1)}x</span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0.1}
+                              max={5.0}
+                              step={0.1}
+                              className="w-full accent-cyan-400"
+                              value={glow.intensity ?? 1.5}
+                              onChange={(e) =>
+                                patchSelected({
+                                  glow: { ...glow, intensity: Number(e.target.value) },
+                                })
+                              }
+                            />
+                          </div>
+
+                          {/* Animation / Pulse Mode */}
+                          <div className="space-y-1.5">
+                            <label className="block text-[11px] text-white/60">
+                              Animation Effect
+                              <select
+                                className="mt-1 w-full rounded-md border border-white/15 bg-black/60 px-2 py-1 text-xs text-white capitalize focus:border-cyan-500 focus:outline-none"
+                                value={glow.pulse || 'none'}
+                                onChange={(e) =>
+                                  patchSelected({
+                                    glow: {
+                                      ...glow,
+                                      pulse: e.target.value as GlowPulseMode,
+                                    },
+                                  })
+                                }
+                              >
+                                <option value="none">✨ Constant Glow (Static)</option>
+                                <option value="breathe">🌊 Smooth Breathe (Sine)</option>
+                                <option value="pulse">💓 Heartbeat Pulse</option>
+                                <option value="flicker">⚡ Neon Flicker (Electric)</option>
+                                <option value="flash">🚨 Warning Flash (Strobe)</option>
+                              </select>
+                            </label>
+                          </div>
+
+                          {/* Pulse Speed */}
+                          {glow.pulse && glow.pulse !== 'none' && (
+                            <div className="space-y-1 pl-2 border-l-2 border-cyan-500/30">
+                              <div className="flex justify-between text-[11px] text-white/60">
+                                <span>Pulse Speed</span>
+                                <span className="font-mono text-cyan-300">{(glow.pulseSpeed ?? 1.0).toFixed(1)} Hz</span>
+                              </div>
+                              <input
+                                type="range"
+                                min={0.2}
+                                max={4.0}
+                                step={0.1}
+                                className="w-full accent-cyan-400"
+                                value={glow.pulseSpeed ?? 1.0}
+                                onChange={(e) =>
+                                  patchSelected({
+                                    glow: { ...glow, pulseSpeed: Number(e.target.value) },
+                                  })
+                                }
+                              />
+                            </div>
+                          )}
+
+                          {/* Cast Surrounding Point Light */}
+                          <div className="pt-1 border-t border-white/10 space-y-2">
+                            <label className="flex items-center justify-between text-[11px] text-white/70 cursor-pointer">
+                              <span>Cast Surrounding Light</span>
+                              <input
+                                type="checkbox"
+                                className="rounded border-white/20 bg-black/40 text-cyan-500 focus:ring-0"
+                                checked={glow.castLight === true}
+                                onChange={(e) =>
+                                  patchSelected({
+                                    glow: { ...glow, castLight: e.target.checked },
+                                  })
+                                }
+                              />
+                            </label>
+                            {glow.castLight && (
+                              <div className="space-y-2 pl-2 border-l-2 border-cyan-500/30 pt-1">
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[10px] text-white/50">
+                                    <span>Light Radius</span>
+                                    <span className="font-mono text-cyan-300">{glow.lightDistance ?? 6}m</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min={1}
+                                    max={20}
+                                    step={0.5}
+                                    className="w-full accent-cyan-400"
+                                    value={glow.lightDistance ?? 6}
+                                    onChange={(e) =>
+                                      patchSelected({
+                                        glow: { ...glow, lightDistance: Number(e.target.value) },
+                                      })
+                                    }
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[10px] text-white/50">
+                                    <span>Light Brightness</span>
+                                    <span className="font-mono text-cyan-300">{(glow.lightIntensity ?? 1.0).toFixed(1)}</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min={0.1}
+                                    max={4.0}
+                                    step={0.1}
+                                    className="w-full accent-cyan-400"
+                                    value={glow.lightIntensity ?? 1.0}
+                                    onChange={(e) =>
+                                      patchSelected({
+                                        glow: { ...glow, lightIntensity: Number(e.target.value) },
+                                      })
+                                    }
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               {!isInvisibleMarkerKind(selected.kind) &&
                 !isPlatformPlayerKind(selected.kind) &&
                 selected.kind !== 'light' && (

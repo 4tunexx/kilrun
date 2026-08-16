@@ -48,7 +48,7 @@ import {
   resolveEntityTextureRepeat,
   worldScaleToUvRepeat,
 } from './editor-mesh';
-import { applyEntityOpacity, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
+import { applyEntityOpacity, applyEntityGlow, tickEntityGlow, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
 import {
   defaultSizeForHammer,
   isHammerPrimitive,
@@ -1616,6 +1616,7 @@ export function createEditorViewport(
       applyEntityOpacity(root, ent.opacity);
     }
     applyEntityTexture(root, ent);
+    applyEntityGlow(root, ent.glow, ent.color);
     if (ent.kind === 'light') syncLightParams(root, ent);
     refreshGizmos();
   }
@@ -2792,6 +2793,13 @@ export function createEditorViewport(
     raf = requestAnimationFrame(tick);
     if (paused) return;
     const dt = Math.min(clock.getDelta(), 0.05);
+    const nowMs = performance.now();
+    for (const ent of doc.entities) {
+      if (ent.glow?.enabled && ent.glow.pulse && ent.glow.pulse !== 'none') {
+        const r = roots.get(ent.id);
+        if (r) tickEntityGlow(r, ent.glow, nowMs);
+      }
+    }
 
     if (freeFly) {
       // Look stick (mobile) — gentle so you don't whip around and get lost

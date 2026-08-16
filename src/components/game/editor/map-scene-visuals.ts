@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { EditorEntity, MapEnvironment } from './map-document';
+import type { EditorEntity, MapEnvironment, EntityGlow } from './map-document';
 import { ensureLight, ensurePushRail, ensureSpinHazard } from './map-document';
 
 /** Sky preset hex colors — shared by editor, Play Test, and live match. */
@@ -35,6 +35,125 @@ export function applyEntityOpacity(root: THREE.Object3D, opacity: number | undef
       mat.needsUpdate = true;
     }
   });
+}
+
+/**
+ * Apply glowing emissive materials and optional surrounding point light to any entity root.
+ */
+export function applyEntityGlow(
+  root: THREE.Object3D,
+  glow: EntityGlow | undefined,
+  fallbackColor?: string
+) {
+  const isGlowing = glow?.enabled === true;
+  const glowHex = glow?.color || fallbackColor || '#00f0ff';
+  const glowColor = new THREE.Color(glowHex);
+  const baseIntensity = glow?.intensity ?? 1.5;
+
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !child.material) return;
+    const mats = Array.isArray(child.material) ? child.material : [child.material];
+    for (const m of mats) {
+      if (!m || !('emissive' in m)) continue;
+      const mat = m as THREE.MeshStandardMaterial;
+      if (!mat.userData.__origEmissive) {
+        mat.userData.__origEmissive = mat.emissive.clone();
+        mat.userData.__origEmissiveIntensity = mat.emissiveIntensity;
+      }
+      if (isGlowing) {
+        mat.emissive.copy(glowColor);
+        mat.emissiveIntensity = baseIntensity;
+      } else {
+        if (mat.userData.__origEmissive) {
+          mat.emissive.copy(mat.userData.__origEmissive);
+          mat.emissiveIntensity = mat.userData.__origEmissiveIntensity ?? 0;
+        } else {
+          mat.emissive.set(0x000000);
+          mat.emissiveIntensity = 0;
+        }
+      }
+      mat.needsUpdate = true;
+    }
+  });
+
+  // Cast dynamic point light into scene if requested
+  const existingLight = root.getObjectByName('__glow_point_light__') as THREE.PointLight | null;
+  if (isGlowing && glow?.castLight) {
+    const lightDist = glow.lightDistance ?? 6;
+    const lightInt = glow.lightIntensity ?? 1.0;
+    if (existingLight) {
+      existingLight.color.copy(glowColor);
+      existingLight.distance = lightDist;
+      existingLight.intensity = lightInt;
+    } else {
+      const pLight = new THREE.PointLight(glowColor, lightInt, lightDist);
+      pLight.name = '__glow_point_light__';
+      pLight.position.set(0, 0.5, 0);
+      root.add(pLight);
+    }
+  } else if (existingLight) {
+    existingLight.removeFromParent();
+    existingLight.dispose();
+  }
+}
+
+/**
+ * Animate dynamic glow pulse / breathe / flicker / flash each frame.
+ */
+export function tickEntityGlow(
+  root: THREE.Object3D,
+  glow: EntityGlow | undefined,
+  elapsedMs: number
+) {
+  if (!glow?.enabled || !glow.pulse || glow.pulse === 'none') return;
+  const minFactor = Math.max(0, Math.min(1, glow.pulseMin ?? 0.25));
+  const hz = Math.max(0.1, glow.pulseSpeed ?? 1.0);
+  const t = (elapsedMs / 1000) * hz * Math.PI * 2;
+
+  let factor = 1.0;
+  switch (glow.pulse) {
+    case 'breathe': {
+      // Smooth sinusoidal glow
+      factor = minFactor + (1 - minFactor) * (0.5 + 0.5 * Math.sin(t));
+      break;
+    }
+    case 'pulse': {
+      // Sharp heartbeat pulse
+      const s = Math.sin(t);
+      factor = minFactor + (1 - minFactor) * Math.pow(Math.max(0, s), 3);
+      break;
+    }
+    case 'flicker': {
+      // Neon sign electric buzzing flicker
+      const noise =
+        Math.sin(t * 1.7) * 0.25 +
+        Math.sin(t * 3.3) * 0.2 +
+        Math.sin(t * 7.1) * 0.15;
+      const glitch = Math.sin(t * 11) > 0.82 ? -0.4 : 0.05;
+      factor = Math.max(minFactor, Math.min(1.2, 0.75 + noise + glitch));
+      break;
+    }
+    case 'flash': {
+      // Strobe / warning flash
+      factor = Math.sin(t) > 0.2 ? 1.0 : minFactor;
+      break;
+    }
+  }
+
+  const currentIntensity = (glow.intensity ?? 1.5) * factor;
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !child.material) return;
+    const mats = Array.isArray(child.material) ? child.material : [child.material];
+    for (const m of mats) {
+      if (!m || !('emissiveIntensity' in m)) continue;
+      (m as THREE.MeshStandardMaterial).emissiveIntensity = currentIntensity;
+    }
+  });
+
+  const pLight = root.getObjectByName('__glow_point_light__') as THREE.PointLight | null;
+  if (pLight) {
+    pLight.intensity = (glow.lightIntensity ?? 1.0) * factor;
+  }
 }
 
 export type AuthoredEnvLights = {
