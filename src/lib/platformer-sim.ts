@@ -504,16 +504,18 @@ export function stepPlatformer(
   // same speed-boosted burst instead of the toggle silently doing nothing.
   // Slide-jump falls out for free: jumping only ever sets vz, so a jump
   // mid-slide keeps the boosted velX/velY the player already had.
-  const SLIDE_ENABLED = physOpts?.slideEnabled ?? false;
+  const SLIDE_ENABLED = physOpts?.slideEnabled ?? true;
   const SLIDE_MULT = physOpts?.slideMult ?? 2.2;
   const SLIDE_DURATION_MS = physOpts?.slideDurationMs ?? 600;
   const SLIDE_COOLDOWN_MS = physOpts?.slideCooldownMs ?? 1000;
+  const crouchKeyEdge = !!input.crouch && !scratch.wasCrouchHeld;
+  scratch.wasCrouchHeld = !!input.crouch;
   const slideKeyEdge = !!input.slidePressed && !scratch.wasSlideKeyHeld;
   scratch.wasSlideKeyHeld = !!input.slidePressed;
+  const slideTriggered = slideKeyEdge || (crouchKeyEdge && input.sprint);
   if (
     SLIDE_ENABLED &&
-    slideKeyEdge &&
-    input.sprint &&
+    slideTriggered &&
     grounded &&
     wishMag > 0.2 &&
     !scratch.exhausted &&

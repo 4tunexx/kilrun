@@ -810,7 +810,21 @@ export function MapPlayPreview({
       // gained focus can't get stuck "down" once it's released.
       const active = document.activeElement as HTMLElement | null;
       const tag = active?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.isContentEditable) return;
+      const isRangeSlider = tag === 'INPUT' && (active as HTMLInputElement).type === 'range';
+      // A focused <input type="range"> (TpsViewStudio's sliders, right next
+      // to the embedded canvas) only actually conflicts with Left/Right/
+      // Up/Down — those also nudge the slider's value. Blocking ALL keys
+      // here (as before) meant that after dragging any slider, Space/G/WASD
+      // silently did nothing — not because the game ignored them, but
+      // because this guard never even added them to `keys` — until the
+      // player clicked back onto the canvas to steal focus. Real text
+      // inputs/textareas still block everything (typing would otherwise
+      // fight with movement).
+      if (isRangeSlider) {
+        if (e.code.startsWith('Arrow')) return;
+      } else if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.isContentEditable) {
+        return;
+      }
       // Space/arrows default to page-scroll, and Space additionally
       // re-clicks whatever <button> last had focus (e.g. the "Play Test"
       // trigger, or a role-prompt button) since browsers treat Space as
@@ -840,6 +854,13 @@ export function MapPlayPreview({
     };
     const onMouseDown = (e: MouseEvent) => {
       if (embedded && e.target instanceof Node && !host.contains(e.target)) return;
+      // Clicking into the canvas reclaims keyboard focus from a still-
+      // focused slider (see onKeyDown's range-slider carve-out above) —
+      // without this, clicking the canvas after dragging a slider left the
+      // slider focused, so the very first Space/G press after that click
+      // could still be swallowed even though the click itself lands on
+      // the game.
+      (document.activeElement as HTMLElement | null)?.blur();
       if (e.button === 0) {
         attackPulse = true;
         host.requestPointerLock?.().catch(() => {});

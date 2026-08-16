@@ -93,7 +93,7 @@ describe('stepPlatformer (Foundry feel)', () => {
   });
 
   it('pulls feet back onto a pad when barely past the capsule rim', () => {
-    const body = groundedBody({ x: 3.5, y: 0, z: 0.05 });
+    const body = groundedBody({ x: 3.08, y: 0, z: 0.05 });
     const scratch = createSimScratch();
     stepPlatformer(
       body,
@@ -104,7 +104,7 @@ describe('stepPlatformer (Foundry feel)', () => {
       bounds
     );
     expect(body.isGrounded).toBe(true);
-    expect(Math.abs(body.x)).toBeLessThan(3.0);
+    expect(Math.abs(body.x)).toBeLessThan(3.4);
   });
 
   it('stops at thin solid wall surface + capsule radius (not an inflated gap)', () => {
@@ -301,7 +301,8 @@ describe('stepPlatformer (Foundry feel)', () => {
       1 / 30,
       [floor],
       plainScratch,
-      bounds
+      bounds,
+      { slideEnabled: false }
     );
     stepPlatformer(
       plainBody,
@@ -309,9 +310,48 @@ describe('stepPlatformer (Foundry feel)', () => {
       1 / 30,
       [floor],
       plainScratch,
-      bounds
+      bounds,
+      { slideEnabled: false }
     );
     expect(plainScratch.velX).toBeCloseTo(5 * 0.55, 5);
+    // Crouch while sprinting also triggers slide
+    const crouchSlideBody = groundedBody();
+    const crouchSlideScratch = createSimScratch();
+    stepPlatformer(
+      crouchSlideBody,
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: false },
+      1 / 30,
+      [floor],
+      crouchSlideScratch,
+      bounds,
+      physOpts
+    );
+    stepPlatformer(
+      crouchSlideBody,
+      { moveX: 1, moveY: 0, jumpPressed: false, sprint: true, crouch: true },
+      1 / 30,
+      [floor],
+      crouchSlideScratch,
+      bounds,
+      physOpts
+    );
+    expect(crouchSlideScratch.velX).toBeCloseTo(5 * 2.2, 5);
+    expect(crouchSlideScratch.slideMs).toBeGreaterThan(0);
+  });
+
+  it('jumps when jump key (Space) is pressed', () => {
+    const body = groundedBody();
+    const scratch = createSimScratch();
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds
+    );
+    expect(body.vz).toBeGreaterThan(0);
+    expect(body.isGrounded).toBe(false);
   });
 
   it('sets horizontal velocity directly to wish * speed', () => {

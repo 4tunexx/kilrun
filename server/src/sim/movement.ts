@@ -379,16 +379,18 @@ export function applyMovement(
   // falls out naturally without extra logic: jumping only ever sets vz, so
   // a jump mid-slide keeps whatever slide-boosted velX/velY the player
   // already had (momentum carries into the air).
-  const effSlideEnabled = physOpts?.slideEnabled ?? false;
+  const effSlideEnabled = physOpts?.slideEnabled ?? true;
   const effSlideMult = physOpts?.slideMult ?? 2.2;
   const effSlideDurationMs = physOpts?.slideDurationMs ?? 600;
   const effSlideCooldownMs = physOpts?.slideCooldownMs ?? 1000;
+  const crouchKeyEdge = !!input.crouch && !scratch.wasCrouchHeld;
+  scratch.wasCrouchHeld = !!input.crouch;
   const slideKeyEdge = !!input.slidePressed && !scratch.wasSlideKeyHeld;
   scratch.wasSlideKeyHeld = !!input.slidePressed;
+  const slideTriggered = slideKeyEdge || (crouchKeyEdge && input.sprint);
   if (
     effSlideEnabled &&
-    slideKeyEdge &&
-    input.sprint &&
+    slideTriggered &&
     grounded &&
     wishMag > 0.2 &&
     !scratch.exhausted &&

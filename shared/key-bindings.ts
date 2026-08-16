@@ -102,6 +102,8 @@ export const KEY_BIND_ACTIONS: KeyBindActionMeta[] = [
  * action then never fired again, with no error surfaced anywhere.
  */
 export function isValidBindKey(key: string): boolean {
+  if (typeof key !== 'string') return false;
+  if (key === ' ') return true;
   const k = key.trim().toLowerCase();
   return keyBindToCodes(k).length > 0;
 }
@@ -114,7 +116,7 @@ export function normalizeBindings(
   for (const meta of KEY_BIND_ACTIONS) {
     const raw = input[meta.action];
     if (typeof raw === 'string' && isValidBindKey(raw)) {
-      result[meta.action] = raw.trim().toLowerCase();
+      result[meta.action] = raw === ' ' ? ' ' : raw.trim().toLowerCase();
     }
   }
   return result;
@@ -130,8 +132,9 @@ export function normalizeBindings(
  * variants since either should count as "pressed".
  */
 export function keyBindToCodes(key: string): string[] {
+  if (typeof key !== 'string') return [];
+  if (key === ' ' || key.trim().toLowerCase() === 'space') return ['Space'];
   const k = key.trim().toLowerCase();
-  if (k === ' ') return ['Space'];
   if (k === 'shift') return ['ShiftLeft', 'ShiftRight'];
   if (k === 'control') return ['ControlLeft', 'ControlRight'];
   if (/^[0-9]$/.test(k)) return [`Digit${k}`];
