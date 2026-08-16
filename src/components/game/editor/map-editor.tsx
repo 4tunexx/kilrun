@@ -77,6 +77,7 @@ import {
   ArrowUpToLine,
   ArrowDownToLine,
   Fan,
+  Keyboard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -176,6 +177,7 @@ import { TpsViewStudio } from './tps-view-studio';
 import { WeaponEditor } from './weapon-editor';
 import { CombatEditor } from './combat-editor';
 import { PowerEditor } from './power-editor';
+import { ControlsPanel } from './controls-panel';
 import { SoundBoardEditor } from './sound-board-editor';
 import { MapShopPanel } from './map-shop-panel';
 import { ensureMapPlayerEntity } from './player-avatar';
@@ -235,7 +237,8 @@ type SidebarTab =
   | 'combat'
   | 'powers'
   | 'sound'
-  | 'shop';
+  | 'shop'
+  | 'controls';
 
 const STUDIO_SIDEBAR_TABS: SidebarTab[] = [
   'tps',
@@ -246,6 +249,7 @@ const STUDIO_SIDEBAR_TABS: SidebarTab[] = [
   'powers',
   'sound',
   'shop',
+  'controls',
 ];
 
 function isStudioSidebarTab(tab: SidebarTab): boolean {
@@ -491,6 +495,7 @@ export function MapEditor({
   const combatEditorOpen = tab === 'combat';
   const powersEditorOpen = tab === 'powers';
   const soundEditorOpen = tab === 'sound';
+  const controlsEditorOpen = tab === 'controls';
   const shopEditorOpen = tab === 'shop';
   const anyStudioOpen = isStudioSidebarTab(tab);
   const [mapListTick, setMapListTick] = useState(0);
@@ -1019,7 +1024,13 @@ export function MapEditor({
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if ((e.target as HTMLElement)?.isContentEditable) return;
-      if (playTest) return;
+      // playTestLive mounts the real KilrunEngine (gameplay's own keyboard
+      // handling) over the editor — without this guard, ordinary gameplay
+      // keys (WASD, E, R, V, H, B, …) also drove the hidden editor
+      // underneath: switching tools/gizmo mode, toggling grid snap, and
+      // Delete/Escape could delete the prior selection or pop the exit-editor
+      // confirm dialog mid-test.
+      if (playTest || playTestLive) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -1555,6 +1566,14 @@ export function MapEditor({
 
   const openSoundEditor = () => {
     setTab('sound');
+    setUiCollapsed(false);
+    setPropsOpen(false);
+    setSidebarOpen(true);
+    setToolsOpen(false);
+  };
+
+  const openControlsEditor = () => {
+    setTab('controls');
     setUiCollapsed(false);
     setPropsOpen(false);
     setSidebarOpen(true);
@@ -2235,7 +2254,7 @@ export function MapEditor({
               const parsed = importJson(await f.text());
               const cleaned = stripLegacyBakedStairPads(parsed);
               const withEnv = { ...cleaned, environment: ensureEnvironment(cleaned) };
-              const id = `map_${Date.now().toString(36)}`;
+              const id = generateId('map');
               saveMap(id, withEnv);
               closeStudioPanels();
               setMapId(id);
@@ -2299,6 +2318,7 @@ export function MapEditor({
               ['powers', Sparkles, 'Power Editor'],
               ['sound', Volume2, 'Sound Board'],
               ['shop', ShoppingCart, 'Buy Menu'],
+              ['controls', Keyboard, 'Controls'],
               ['settings', Settings2, 'Settings'],
               ['help', HelpCircle, 'Help'],
             ] as const
@@ -2337,6 +2357,10 @@ export function MapEditor({
                 }
                 if (id === 'sound') {
                   if (soundEditorOpen) { closeStudioPanels(); } else { openSoundEditor(); }
+                  return;
+                }
+                if (id === 'controls') {
+                  if (controlsEditorOpen) { closeStudioPanels(); } else { openControlsEditor(); }
                   return;
                 }
                 if (id === 'shop') {
@@ -2577,6 +2601,11 @@ export function MapEditor({
           {tab === 'sound' && (
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
               <SoundBoardEditor embedded onClose={closeStudioPanels} />
+            </div>
+          )}
+          {tab === 'controls' && (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <ControlsPanel embedded onClose={closeStudioPanels} customMoves={doc.customMoves} />
             </div>
           )}
           {tab === 'shop' && (

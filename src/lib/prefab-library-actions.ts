@@ -19,11 +19,13 @@ async function requireStaff() {
 
 /** List every uploaded prefab model, grouped for the catalog panel. */
 export async function getPrefabLibrary() {
+  await requireStaff();
   return prisma.mapPrefabModel.findMany({ orderBy: [{ category: 'asc' }, { name: 'asc' }] });
 }
 
 /** Distinct category names in use, for the "existing category" picker. */
 export async function getPrefabLibraryCategories(): Promise<string[]> {
+  await requireStaff();
   const rows = await prisma.mapPrefabModel.findMany({
     select: { category: true },
     distinct: ['category'],

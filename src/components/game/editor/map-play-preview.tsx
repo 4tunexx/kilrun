@@ -90,6 +90,9 @@ import {
   type AbilitySlotKind,
 } from '@shared/power-definitions';
 import { AbilityRingIcon } from '../ui/ability-hud';
+import { getKeyBindings } from '@/lib/key-bindings-config';
+import { DEFAULT_KEY_BINDINGS, keyBindToCodes, type KeyBindAction } from '@shared/key-bindings';
+import { customMoveSoundKey } from '@shared/custom-moves';
 
 const ABILITY_UI_FIELDS: Record<AbilitySlotKind, { endsAt: string; cooldownEndsAt: string }> = {
   visibility: { endsAt: 'visibilityEndsAt', cooldownEndsAt: 'visibilityCooldownEndsAt' },
@@ -226,6 +229,21 @@ export function MapPlayPreview({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const joystickRef = useRef<DualJoystick | null>(null);
+  // Admin-configured global scheme (Map Editor → Controls) — same source
+  // live matches use (kilrun-engine.tsx), so Play Test never drifts.
+  // Defaults apply until the async fetch resolves.
+  const bindingsRef = useRef<Record<KeyBindAction, string>>(DEFAULT_KEY_BINDINGS);
+  useEffect(() => {
+    let cancelled = false;
+    getKeyBindings()
+      .then((b) => {
+        if (!cancelled) bindingsRef.current = b;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const physOpts = useMemo<SimPhysicsOpts>(() => {
     const cs = ensureCombatSettings(doc);
     return {
@@ -529,15 +547,7 @@ export function MapPlayPreview({
       isInvisible: false,
       ability: defaultAbilityHostState(),
     };
-    const ABILITY_KEY_BINDINGS: Record<string, string> = {
-      KeyH: 'hook',
-      KeyB: 'berserk',
-      KeyU: 'bullet',
-      KeyT: 'thunder',
-      KeyZ: 'visibility',
-      KeyX: 'fly',
-      KeyQ: 'backflip',
-    };
+    const ABILITY_KEYS = ['hook', 'berserk', 'bullet', 'thunder', 'visibility', 'fly', 'backflip'] as const;
     const abilityWasHeld = new Map<string, boolean>();
     // Play Test = every power "unlocked" at max level (no skill-tree context
     // here). Recomputed each call (not cached) since the power-definitions
@@ -752,7 +762,7 @@ export function MapPlayPreview({
 
     const onKeyDown = (e: KeyboardEvent) => {
       keys.add(e.code);
-      if (e.code === 'KeyE') interactPulse = true;
+      if (keyBindToCodes(bindingsRef.current.interact).includes(e.code)) interactPulse = true;
       if (e.code === 'KeyF' || e.code === 'Mouse0') attackPulse = true;
       if (e.key === 'Escape') onCloseRef.current?.();
     };
@@ -849,19 +859,22 @@ export function MapPlayPreview({
       }
 
       const sprint =
-        keys.has('ShiftLeft') || keys.has('ShiftRight') || !!joy?.isSprintHeld();
-      const crouch = keys.has('ControlLeft') || keys.has('KeyC');
-      const flipPressed = keys.has('KeyV');
+        keyBindToCodes(bindingsRef.current.sprint).some((c) => keys.has(c)) || !!joy?.isSprintHeld();
+      const crouch =
+        keys.has('ControlLeft') ||
+        keys.has('ControlRight') ||
+        keyBindToCodes(bindingsRef.current.crouch).some((c) => keys.has(c));
+      const flipPressed = keyBindToCodes(bindingsRef.current.flip).some((c) => keys.has(c));
       const customMoveKeysHeld = (playDoc.customMoves ?? [])
-        .filter((m) => keys.has(`Key${m.key.toUpperCase()}`))
+        .filter((m) => keyBindToCodes(m.key).some((c) => keys.has(c)))
         .map((m) => m.id);
 
       let wishFwd = 0;
       let wishStrafe = 0;
-      if (keys.has('KeyW') || keys.has('ArrowUp')) wishFwd += 1;
-      if (keys.has('KeyS') || keys.has('ArrowDown')) wishFwd -= 1;
-      if (keys.has('KeyA') || keys.has('ArrowLeft')) wishStrafe -= 1;
-      if (keys.has('KeyD') || keys.has('ArrowRight')) wishStrafe += 1;
+      if (keyBindToCodes(bindingsRef.current.moveForward).some((c) => keys.has(c)) || keys.has('ArrowUp')) wishFwd += 1;
+      if (keyBindToCodes(bindingsRef.current.moveBack).some((c) => keys.has(c)) || keys.has('ArrowDown')) wishFwd -= 1;
+      if (keyBindToCodes(bindingsRef.current.moveLeft).some((c) => keys.has(c)) || keys.has('ArrowLeft')) wishStrafe -= 1;
+      if (keyBindToCodes(bindingsRef.current.moveRight).some((c) => keys.has(c)) || keys.has('ArrowRight')) wishStrafe += 1;
       if (moveStick.y || moveStick.x) {
         wishFwd += -moveStick.y;
         wishStrafe += moveStick.x;
@@ -874,8 +887,7 @@ export function MapPlayPreview({
       if (flippingNow && !wasFlippingForSound) playSound('flip');
       wasFlippingForSound = flippingNow;
       if (scratch.customMoveActiveId && scratch.customMoveActiveId !== lastCustomMoveId) {
-        const move = (playDoc.customMoves ?? []).find((m) => m.id === scratch.customMoveActiveId);
-        if (move?.soundEvent) playSound(move.soundEvent);
+        playSound(customMoveSoundKey(scratch.customMoveActiveId));
       }
       lastCustomMoveId = scratch.customMoveActiveId;
       // Camera-relative: W into look, A = screen-left, D = screen-right.
@@ -884,7 +896,8 @@ export function MapPlayPreview({
       const s = Math.sin(yaw);
       const moveX = wishFwd * c + wishStrafe * s;
       const moveY = wishFwd * s - wishStrafe * c;
-      const jumpPressed = keys.has('Space') || !!joy?.isJumpHeld();
+      const jumpPressed =
+        keyBindToCodes(bindingsRef.current.jump).some((c) => keys.has(c)) || !!joy?.isJumpHeld();
 
       // --- Fixed-rate simulation: platforms, stepPlatformer, hazards,
       // checkpoints, finish/void — identical cadence to the server tick, run
@@ -975,10 +988,11 @@ export function MapPlayPreview({
             abilityHost.isAlive = hpLocal > 0;
             abilityHost.hasFinished = finishedLocal;
             let abilityChanged = false;
-            for (const [code, abilityKey] of Object.entries(ABILITY_KEY_BINDINGS)) {
-              const isHeld = keys.has(code);
-              const wasHeld = abilityWasHeld.get(code) ?? false;
-              abilityWasHeld.set(code, isHeld);
+            for (const abilityKey of ABILITY_KEYS) {
+              const codes = keyBindToCodes(bindingsRef.current[`power_${abilityKey}` as KeyBindAction]);
+              const isHeld = codes.some((c) => keys.has(c));
+              const wasHeld = abilityWasHeld.get(abilityKey) ?? false;
+              abilityWasHeld.set(abilityKey, isHeld);
               if (isHeld && !wasHeld) {
                 const activated = activateAbility(abilityHost, abilityKey, nowMs, abilityLevelsMaxed());
                 if (activated) {

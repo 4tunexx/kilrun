@@ -51,6 +51,7 @@ import {
   type TpsViewSettings,
 } from './tps/tps-view-settings';
 import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
+import { getKeyBindings } from '@/lib/key-bindings-config';
 import dynamic from 'next/dynamic';
 import {
   findWeaponAttachment,
@@ -579,6 +580,13 @@ export default function KilrunEngine({
     charactersRef.current = characters;
     const inputManager = new InputManager(hostElement, isMobile);
     joystickRef.current = inputManager.joystick;
+    // Admin-configured global scheme (Map Editor → Controls) — fetched async
+    // so match start never blocks on it; defaults apply until it resolves.
+    getKeyBindings()
+      .then((bindings) => {
+        if (!disposed) inputManager.setBindings(bindings);
+      })
+      .catch(() => {});
     const damageNumbers = new DamageNumberFx(hostElement);
     connectionRef.current?.onHitFx((msg) => damageNumbers.spawn(msg.x, msg.y, msg.z, msg.amount, msg.kind));
     preloadSoundboard();
@@ -1190,10 +1198,14 @@ export default function KilrunEngine({
           const localView = characters.get(localSessionId);
           localView?.triggerAttack(combat.attackStyle ?? 'attack');
           playSound(combat.kind === 'melee' || localWep?.weaponKind === 'melee' ? 'melee_punch' : 'weapon_fire');
-          const kickDeg = combatFeel.recoilKickDeg ?? 2;
+          // Weapon Editor's Recoil tab documents "0 = use Combat Editor
+          // global setting" for these two fields, but nothing ever actually
+          // read the per-weapon override — every weapon always used the
+          // map-wide combatFeel value regardless of what was set here.
+          const kickDeg = mapWeaponDef?.recoilKickDeg || combatFeel.recoilKickDeg || 2;
           recoilPitch += (kickDeg * Math.PI) / 180;
           shakeAmp = Math.max(shakeAmp, combatFeel.shakeOnFire ?? 0.015);
-          localView?.pulseMuzzle(combatFeel.weaponKickZ ?? 0.06);
+          localView?.pulseMuzzle(mapWeaponDef?.weaponKickZ || combatFeel.weaponKickZ || 0.06);
           // Prefer authored map weaponDef clip names, then attachment combat.
           if (mapWeaponDef?.fireClip) {
             localView?.playWeaponClip(mapWeaponDef.fireClip, false);
@@ -1221,10 +1233,12 @@ export default function KilrunEngine({
             canLocalFireVisual &&
             !reloading
           ) {
-            const kickDeg = (combatFeel.recoilKickDeg ?? 2) * 0.55;
+            const kickDeg = (mapWeaponDef?.recoilKickDeg || combatFeel.recoilKickDeg || 2) * 0.55;
             recoilPitch += (kickDeg * Math.PI) / 180;
             shakeAmp = Math.max(shakeAmp, (combatFeel.shakeOnFire ?? 0.015) * 0.7);
-            characters.get(localSessionId)?.pulseMuzzle((combatFeel.weaponKickZ ?? 0.06) * 0.7);
+            characters
+              .get(localSessionId)
+              ?.pulseMuzzle((mapWeaponDef?.weaponKickZ || combatFeel.weaponKickZ || 0.06) * 0.7);
           }
           // Camera-relative: W into look, A = left, D = right (screen space).
           // Look flat (sin,cos) in Three XZ → sim; screen-right = (−cos, sin).

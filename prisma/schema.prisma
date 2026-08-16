@@ -393,6 +393,10 @@ model SiteSettings {
   /// JSON: { backgroundUrl?, backgroundColor? } for the Power Editor / in-game
   /// skill tree canvas — see src/lib/power-tree-config.ts.
   powerTreeConfigJson String @default("{}")
+  /// JSON: Record<KeyBindAction, string> — global rebindable controls (movement,
+  /// actions, power keys), applies to every map/live match/Play Test alike.
+  /// See shared/key-bindings.ts + src/lib/key-bindings-config.ts.
+  keyBindingsConfigJson String @default("{}")
 }
 
 model GlobalChatMessage {

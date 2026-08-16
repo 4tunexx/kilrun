@@ -24,7 +24,12 @@ import { ChevronsUp, FlipVertical, Waves, type LucideIcon } from 'lucide-react';
 /** Renders a ring icon: a LucideIcon component directly, a "lucide:Name"
  * data string, or (only for pre-existing legacy power defs) emoji/image. */
 function RingGlyph({ icon }: { icon: string | LucideIcon }) {
-  if (typeof icon === 'function') {
+  if (typeof icon !== 'string') {
+    // lucide-react components are React.forwardRef objects (typeof 'object'),
+    // not functions — a plain `typeof icon === 'function'` check never
+    // matches them and falls through to rendering the raw component object
+    // as a child, which crashes with "Objects are not valid as a React
+    // child" (React error #31).
     const Icon = icon;
     return <Icon className="w-[18px] h-[18px]" />;
   }

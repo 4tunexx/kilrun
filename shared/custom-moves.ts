@@ -9,6 +9,8 @@
  * Play Test behave identically.
  */
 
+import { DEFAULT_KEY_BINDINGS } from './key-bindings';
+
 export interface CustomMoveDef {
   id: string;
   name: string;
@@ -23,8 +25,6 @@ export interface CustomMoveDef {
   groundedOnly: boolean;
   /** Vertical velocity applied on trigger (0 = no hop), grounded-only. */
   vzBoost: number;
-  /** Sound event key (Sound Board) played once on trigger, if any. */
-  soundEvent?: string;
   /** Icon shown on the HUD cooldown ring. */
   icon: string;
 }
@@ -46,7 +46,6 @@ export function defaultCustomMove(): CustomMoveDef {
     cooldownMs: 1500,
     groundedOnly: true,
     vzBoost: 0,
-    soundEvent: undefined,
     // "lucide:Name" — this platform renders lucide-react icons only, never
     // emoji. Kept as a plain string literal (not imported from
     // src/lib/move-icons.ts) since this file is shared with the server,
@@ -55,9 +54,24 @@ export function defaultCustomMove(): CustomMoveDef {
   };
 }
 
-/** Reserved single-char keys already bound elsewhere — used to warn authors,
- * not to hard-block (a map author may still know what they're doing). */
-export const RESERVED_MOVE_KEYS = new Set([
-  'w', 'a', 's', 'd', 'e', 'r', 'c', 'q', 'z', 'x', 'h', 'u', 't', 'v',
-  ' ', 'shift', 'control',
-]);
+/** Sound Board event key for a custom move's trigger sound — every move
+ * gets one automatically (no per-move opt-in/typing a matching key needed),
+ * mirroring how every custom move already auto-creates its own
+ * PowerDefinition ("custom_move_<id>", see player-model-studio.tsx's
+ * scheduleMovePowerSync). The Sound Board panel lists one row per move
+ * across every map under a "Custom Moves" category so an admin can bind a
+ * clip immediately — silent (no-op) until one is uploaded. */
+export function customMoveSoundKey(moveId: string): string {
+  return `custom_move_${moveId}`;
+}
+
+/** Reserved single-char keys already bound elsewhere (the global control
+ * scheme's defaults) — used to warn authors, not to hard-block (a map
+ * author may still know what they're doing). Derived from
+ * shared/key-bindings.ts's DEFAULT_KEY_BINDINGS so this can never silently
+ * drift out of sync with the actual bound keys again — it previously
+ * hand-duplicated that list and was missing 'b' (Berserk's key). Callers
+ * that have the live, admin-configured scheme in hand (not just defaults)
+ * should check against that instead — see player-model-studio.tsx.
+ */
+export const RESERVED_MOVE_KEYS = new Set(Object.values(DEFAULT_KEY_BINDINGS));

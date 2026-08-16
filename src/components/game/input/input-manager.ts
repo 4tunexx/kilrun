@@ -2,6 +2,7 @@ import { KeyboardHandler } from './keyboard';
 import { MouseHandler } from './mouse';
 import { DualJoystick } from './dual-joystick';
 import { Vector2 } from '../types';
+import { DEFAULT_KEY_BINDINGS, type KeyBindAction } from '@shared/key-bindings';
 
 /**
  * Owns every input subsystem for a single game session and normalizes them
@@ -10,6 +11,12 @@ import { Vector2 } from '../types';
  * the move vector from screen-space into world-space (accounting for the
  * isometric camera) before sending it to the server -- this class only
  * ever deals with raw input.
+ *
+ * Keyboard actions read from `bindings` (defaults to shared/key-bindings.ts's
+ * DEFAULT_KEY_BINDINGS until `setBindings` is called with the admin-configured
+ * global scheme — see kilrun-engine.tsx / map-play-preview.tsx hydration).
+ * Arrow keys and Control remain fixed, non-configurable alternates for
+ * movement/crouch (matches the pre-rebinding baseline UX).
  */
 export class InputManager {
   public keyboard: KeyboardHandler;
@@ -18,12 +25,20 @@ export class InputManager {
 
   private lastAimAngle = 0;
   private abilityWasDown = new Map<string, boolean>();
+  private bindings: Record<KeyBindAction, string> = DEFAULT_KEY_BINDINGS;
 
   constructor(element: HTMLElement, private isMobile: boolean) {
     this.keyboard = new KeyboardHandler();
     // Bind mouse to the canvas host so free-look + pointer-lock work without RMB
     this.mouse = new MouseHandler(isMobile ? window : element);
     this.joystick = new DualJoystick(element);
+  }
+
+  /** Applies the admin-configured global key scheme (fetched async at match/
+   *  Play Test start) — call once as soon as it resolves. Until then, the
+   *  hardcoded defaults above are used so input works immediately. */
+  public setBindings(bindings: Record<KeyBindAction, string>) {
+    this.bindings = bindings;
   }
 
   /** Tears down every input subsystem's listeners — call once when the game
@@ -39,7 +54,13 @@ export class InputManager {
 
   public getMoveVector(): Vector2 {
     if (this.isMobile) return this.joystick.getMoveVector();
-    return this.keyboard.getAxis();
+    let x = 0;
+    let y = 0;
+    if (this.keyboard.isPressed(this.bindings.moveLeft) || this.keyboard.isPressed('arrowleft')) x -= 1;
+    if (this.keyboard.isPressed(this.bindings.moveRight) || this.keyboard.isPressed('arrowright')) x += 1;
+    if (this.keyboard.isPressed(this.bindings.moveForward) || this.keyboard.isPressed('arrowup')) y -= 1;
+    if (this.keyboard.isPressed(this.bindings.moveBack) || this.keyboard.isPressed('arrowdown')) y += 1;
+    return { x, y };
   }
 
   /** `playerScreenPos` is only used on desktop, where aim = direction from the player's sprite to the cursor. */
@@ -64,12 +85,12 @@ export class InputManager {
   public isCrouchPressed(): boolean {
     return (
       this.keyboard.isPressed('control') ||
-      this.keyboard.isPressed('c')
+      this.keyboard.isPressed(this.bindings.crouch)
     );
   }
 
   public isInteractPressed(): boolean {
-    return this.keyboard.isPressed('e') || this.joystick.isActionHeld();
+    return this.keyboard.isPressed(this.bindings.interact) || this.joystick.isActionHeld();
   }
 
   public consumeInteractPulse(): boolean {
@@ -77,16 +98,16 @@ export class InputManager {
   }
 
   public isJumpPressed(): boolean {
-    return this.keyboard.isPressed(' ') || this.joystick.isJumpHeld();
+    return this.keyboard.isPressed(this.bindings.jump) || this.joystick.isJumpHeld();
   }
 
   public isSprintPressed(): boolean {
-    return this.keyboard.isPressed('shift') || this.joystick.isSprintHeld();
+    return this.keyboard.isPressed(this.bindings.sprint) || this.joystick.isSprintHeld();
   }
 
-  /** Back flip (V). Held state — server/prediction edge-detect it themselves. */
+  /** Back flip (default V). Held state — server/prediction edge-detect it themselves. */
   public isFlipPressed(): boolean {
-    return this.keyboard.isPressed('v');
+    return this.keyboard.isPressed(this.bindings.flip);
   }
 
   public isAttackPressed(): boolean {
@@ -97,11 +118,11 @@ export class InputManager {
 
   /**
    * Optional keyboard camera turn. E is reserved for Interact — do not yaw with E.
-   * Primary look is mouse; Q is an accessibility fallback only.
+   * Primary look is mouse; this is an accessibility fallback only.
    */
   public getCameraTurnIntent(): number {
     let turn = 0;
-    if (this.keyboard.isPressed('q')) turn -= 1;
+    if (this.keyboard.isPressed(this.bindings.cameraTurnLeft)) turn -= 1;
     return turn;
   }
 
@@ -123,9 +144,9 @@ export class InputManager {
     return this.mouse.isRightHeld();
   }
 
-  /** Reload (R). Edge-triggered via consumeReloadPulse preferred. */
+  /** Reload (default R). Edge-triggered via consumeReloadPulse preferred. */
   public isReloadPressed(): boolean {
-    return this.keyboard.isPressed('r');
+    return this.keyboard.isPressed(this.bindings.reload);
   }
 
   private reloadWasDown = false;
@@ -148,7 +169,7 @@ export class InputManager {
   public consumeAbilityPulse(
     ability: 'hook' | 'berserk' | 'bullet' | 'thunder' | 'visibility' | 'fly' | 'backflip'
   ): string | null {
-    const key = this.getAbilityKey(ability);
+    const key = this.bindings[`power_${ability}` as KeyBindAction];
     const down = this.keyboard.isPressed(key);
     const wasDown = this.abilityWasDown.get(ability) ?? false;
     this.abilityWasDown.set(ability, down);
@@ -158,26 +179,5 @@ export class InputManager {
     }
 
     return ability;
-  }
-
-  private getAbilityKey(
-    ability: 'hook' | 'berserk' | 'bullet' | 'thunder' | 'visibility' | 'fly' | 'backflip'
-  ): string {
-    switch (ability) {
-      case 'hook':
-        return 'h';
-      case 'berserk':
-        return 'b';
-      case 'bullet':
-        return 'u';
-      case 'thunder':
-        return 't';
-      case 'visibility':
-        return 'z';
-      case 'fly':
-        return 'x';
-      case 'backflip':
-        return 'q';
-    }
   }
 }

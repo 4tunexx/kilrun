@@ -616,7 +616,7 @@ function ModelTab({
             </button>
           )}
         </div>
-        {def.customModelUrl ? (
+        {def.customModelUrl && !CATALOG_WEAPONS.some((w) => w.modelUrl === def.customModelUrl) ? (
           <p className="text-[10px] text-emerald-300/80 truncate">
             Custom GLB loaded ({Math.round(def.customModelUrl.length / 1024)}kb)
           </p>
@@ -721,6 +721,15 @@ function HoldTab({
 }) {
   return (
     <div className="space-y-3">
+      <div className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-[10px] text-white/50 leading-snug">
+        <span className="text-amber-300 font-semibold">Preview-only, not wired to gameplay.</span>{' '}
+        These sliders move the mesh in this tab&apos;s own preview pane, but the actual in-game
+        weapon grip is driven entirely by{' '}
+        <span className="text-amber-300 font-semibold">
+          Player Model Studio → skin attachments
+        </span>{' '}
+        — nothing reads Position/Rotation/Scale below at runtime.
+      </div>
       <p className="text-[10px] text-white/40 leading-snug">
         Active hold position — where the weapon sits in the right hand during gameplay.
         The yellow sphere in the preview shows this point.
@@ -772,6 +781,14 @@ function BackTab({
 }) {
   return (
     <div className="space-y-3">
+      <div className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-[10px] text-white/50 leading-snug">
+        <span className="text-amber-300 font-semibold">Preview-only, not wired to gameplay.</span>{' '}
+        Same as the Hold tab — the actual in-game back-carry attachment is driven by{' '}
+        <span className="text-amber-300 font-semibold">
+          Player Model Studio → skin attachments
+        </span>
+        , not these sliders.
+      </div>
       <p className="text-[10px] text-white/40 leading-snug">
         Back-carry position — where the weapon is holstered on the player&apos;s back when not
         actively held. The blue sphere in the preview marks this point.
@@ -819,6 +836,14 @@ function CombatTab({
 }) {
   return (
     <div className="space-y-3">
+      <div className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-[10px] text-white/50 leading-snug">
+        <span className="text-amber-300 font-semibold">Only takes effect once.</span> These stats
+        seed the map&apos;s Buy Menu weapon entry the{' '}
+        <span className="text-amber-300 font-semibold">first time it&apos;s saved</span> — after
+        that, the Buy Menu item is the live source of truth and further edits here have no
+        in-game effect. To retune a weapon post-launch, edit it directly in{' '}
+        <span className="text-amber-300 font-semibold">Map Editor → Buy Menu</span>.
+      </div>
       <Section title="Weapon Type" accent="rose">
         <div className="grid grid-cols-3 gap-1.5">
           {(

@@ -1487,11 +1487,16 @@ export function ensureShopSettings(doc: MapDocument | null | undefined): MapShop
   const startingCredits = clampShopNum(raw?.startingCredits, 0, 999999, 500);
   const creditsPerKill = clampShopNum(raw?.creditsPerKill, 0, 9999, 50);
   const creditsPerWaveClear = clampShopNum(raw?.creditsPerWaveClear, 0, 9999, 100);
-  const powerUps = (
+  // Unlike `items`/`skins` below, this used to also strip disabled entries
+  // here — but ensureShopSettings() seeds BOTH runtime lookups (which
+  // re-filter by `.enabled` themselves, see shopPowerUpsForMode) AND
+  // map-shop-panel.tsx's editable state. Filtering here meant disabling a
+  // power-up and saving made it vanish from the edit UI permanently, with
+  // no checkbox left to re-enable it and no way to recreate it.
+  const powerUps =
     raw?.powerUps && Array.isArray(raw.powerUps) && raw.powerUps.length > 0
       ? raw.powerUps.map(sanitizeShopPowerUp).filter((p): p is MapShopPowerUp => !!p)
-      : defaultShopPowerUps()
-  ).filter((p) => p.enabled !== false);
+      : defaultShopPowerUps();
   const skins = (
     raw?.skins && Array.isArray(raw.skins)
       ? raw.skins.map((s, i) => sanitizeShopSkin(s, i)).filter((s): s is MapShopSkin => !!s)
@@ -2506,6 +2511,12 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
     id: generateId(),
     name: `${ent.name} Copy`,
     position: [ent.position[0] + 1, ent.position[1], ent.position[2] + 1],
+    // rotation/scale are the two most frequently gizmo-dragged fields —
+    // conspicuously missing from the aliasing fixes below despite riding
+    // through the same `...ent` spread; dragging a duplicate's gizmo was
+    // silently mutating the original's rotation/scale array in place.
+    rotation: [...ent.rotation] as [number, number, number],
+    scale: [...ent.scale] as [number, number, number],
     animation: ent.animation
       ? {
           ...ent.animation,

@@ -1491,7 +1491,12 @@ export async function updateSiteSettings(data: {
   matchRewardsConfigJson?: string;
   defaultTpsViewJson?: string;
 }) {
-  const staff = await requireStaff();
+  // Every caller of this action in the admin UI (Site Layout, Premium,
+  // Game Balance, Ranks, Inventory panels) is gated `isAdmin`-only in
+  // admin-view.tsx — this was previously requireStaff(), letting a
+  // moderator call the action directly to rewrite premium pricing or
+  // match-reward economy despite the UI treating it as admin-only.
+  const staff = await requireAdmin();
   await getSiteSettings();
 
   // Drop a cached PrismaClient that may predate schema fields (headerLogoUrl, etc.).
@@ -2085,7 +2090,10 @@ export async function adminUpsertBadge(input: {
  * Upserts missions, achievements, badges, shop items, and site settings.
  */
 export async function adminSeedProgression() {
-  await requireStaff();
+  // admin-dashboard-panel.tsx renders this button's card only for isAdmin,
+  // alongside adminImportSeedFile (which correctly requires role === 'admin')
+  // — this was requireStaff(), letting a moderator call it directly.
+  await requireAdmin();
   const {
     missionTemplates,
     achievements,

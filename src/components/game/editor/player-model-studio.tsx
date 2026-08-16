@@ -20,6 +20,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 import type {
   EditorEntity,
   PlayerAnimSlot,
@@ -51,13 +52,15 @@ import {
 } from './player-mesh-edits';
 import { loadAnimatedPrefab } from './model-scan';
 import { listClipBones, retargetClip } from './mixamo-import';
-import { defaultCustomMove, RESERVED_MOVE_KEYS, type CustomMoveDef } from '@shared/custom-moves';
+import { defaultCustomMove, type CustomMoveDef } from '@shared/custom-moves';
 import {
   MOVE_ICON_NAMES,
   MOVE_ICON_REGISTRY,
   getLucideIcon,
   toLucideIconString,
 } from '@/lib/move-icons';
+import { getKeyBindings } from '@/lib/key-bindings-config';
+import { DEFAULT_KEY_BINDINGS, findConflicts, type KeyBindAction } from '@shared/key-bindings';
 
 type StudioTab = 'model' | 'mesh' | 'bones' | 'record' | 'import' | 'anims' | 'moves';
 
@@ -101,8 +104,25 @@ export function PlayerModelStudio({
   // whichever resolved last silently overwrote previewRef.current, leaking
   // the other instance's renderer/canvas and its render-loop RAF forever.
   const reloadTokenRef = useRef(0);
+  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Live admin-configured global scheme (Map Editor → Controls), for the
+  // Moves tab's key-conflict check — falls back to DEFAULT_KEY_BINDINGS
+  // (same set RESERVED_MOVE_KEYS is derived from) until it resolves.
+  const [globalBindings, setGlobalBindings] =
+    useState<Record<KeyBindAction, string>>(DEFAULT_KEY_BINDINGS);
+  useEffect(() => {
+    let cancelled = false;
+    getKeyBindings()
+      .then((b) => {
+        if (!cancelled) setGlobalBindings(b);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [clipCount, setClipCount] = useState(0);
   const [previewSlot, setPreviewSlot] = useState<PlayerAnimSlot | 'clip' | null>(null);
   const [tab, setTab] = useState<StudioTab>('model');
@@ -1453,9 +1473,11 @@ export function PlayerModelStudio({
               <p className="text-[11px] text-white/40">No custom moves yet.</p>
             )}
             {customMoves.map((move) => {
-              const keyConflict =
-                RESERVED_MOVE_KEYS.has(move.key.toLowerCase()) ||
-                customMoves.some((m) => m.id !== move.id && m.key.toLowerCase() === move.key.toLowerCase());
+              const globalConflicts = findConflicts(globalBindings, move.key);
+              const otherMoveConflict = customMoves.some(
+                (m) => m.id !== move.id && m.key.toLowerCase() === move.key.toLowerCase()
+              );
+              const keyConflict = globalConflicts.length > 0 || otherMoveConflict;
               const update = (patch: Partial<CustomMoveDef>) => {
                 const nextMove = { ...move, ...patch };
                 onCustomMovesChange?.(customMoves.map((m) => (m.id === move.id ? nextMove : m)));
@@ -1523,7 +1545,29 @@ export function PlayerModelStudio({
                       Key
                       <input
                         value={move.key}
-                        onChange={(e) => update({ key: e.target.value.slice(-1).toLowerCase() })}
+                        onChange={(e) => {
+                          const nextKey = e.target.value.slice(-1).toLowerCase();
+                          update({ key: nextKey });
+                          const conflicts = findConflicts(globalBindings, nextKey);
+                          const otherMove = customMoves.find(
+                            (m) => m.id !== move.id && m.key.toLowerCase() === nextKey
+                          );
+                          if (conflicts.length > 0) {
+                            toast({
+                              title: 'Key already in use',
+                              description: `"${nextKey.toUpperCase()}" is bound to ${conflicts
+                                .map((c) => c.label)
+                                .join(', ')}. Free it up in Map Editor → Controls, or pick another key.`,
+                              variant: 'destructive',
+                            });
+                          } else if (otherMove) {
+                            toast({
+                              title: 'Key already in use',
+                              description: `"${nextKey.toUpperCase()}" is already used by "${otherMove.name}".`,
+                              variant: 'destructive',
+                            });
+                          }
+                        }}
                         maxLength={1}
                         className={`mt-0.5 w-full bg-black/40 border rounded px-2 py-1 text-sm uppercase text-center ${
                           keyConflict ? 'border-rose-400/60 text-rose-200' : 'border-white/10'
@@ -1603,20 +1647,19 @@ export function PlayerModelStudio({
                     Grounded only
                   </label>
 
-                  <label className="block text-[10px] text-white/50">
-                    Sound event (optional — Sound Board key)
-                    <input
-                      value={move.soundEvent ?? ''}
-                      onChange={(e) => update({ soundEvent: e.target.value || undefined })}
-                      placeholder="e.g. flip"
-                      className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-sm"
-                    />
-                  </label>
+                  <p className="text-[10px] text-white/40">
+                    🔊 Sound auto-registered as &quot;{move.name}&quot; in Map Editor → Sound
+                    Board → Custom Moves — upload a clip there, no key to type.
+                  </p>
 
                   {keyConflict && (
                     <p className="text-[10px] text-rose-300">
-                      Key &quot;{move.key.toUpperCase()}&quot; is already used by another move or a
-                      built-in control — pick a different one.
+                      Key &quot;{move.key.toUpperCase()}&quot; is already used by{' '}
+                      {globalConflicts.length > 0
+                        ? globalConflicts.map((c) => c.label).join(', ')
+                        : 'another custom move'}
+                      {' '}— pick a different one, or free it up in Map Editor →
+                      Controls.
                     </p>
                   )}
 

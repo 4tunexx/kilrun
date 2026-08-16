@@ -459,10 +459,14 @@ export function CombatEditor({
           {/* ── DEATHRUN ────────────────────────────────────────────── */}
           {tab === 'deathrun' && (
             <>
-              <InfoBox>
-                Deathrun-specific combat settings. Arms-only mode shows floating arms instead
-                of the full body in first person. Power-ups can be purchased in the shop.
-              </InfoBox>
+              <div className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2.5 text-[10px] text-white/50 leading-snug">
+                <span className="text-amber-300 font-semibold">Not yet wired to gameplay.</span>{' '}
+                Neither Arms-only mode nor the Power-up Pool is read anywhere in the live sim or
+                Play Test — toggling/editing them below saves to the map document but currently
+                has no in-game effect. For an actual power-up shop, use{' '}
+                <span className="text-amber-300 font-semibold">Map Editor → Buy Menu</span>{' '}
+                instead.
+              </div>
               <Section title="Arms Mode" accent="red" icon={<Target className="w-3.5 h-3.5" />}>
                 <Toggle
                   label="Arms-only mode"

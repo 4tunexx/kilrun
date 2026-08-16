@@ -48,7 +48,7 @@ import {
   type KilrunMode,
 } from '@/lib/game-modes';
 import { getMapGameMode } from '@/components/game/editor/map-document';
-import { listCloudMapDocuments, publishCloudMap, forkCloudMap } from '@/lib/game-map-actions';
+import { listCloudMapDocuments, publishCloudMap, forkCloudMap, deleteCloudMap } from '@/lib/game-map-actions';
 
 const MapEditor = dynamic(() => import('@/components/game/editor/map-editor'), {
   ssr: false,
@@ -522,8 +522,31 @@ export function AdminMapEditorPanel() {
                           size="sm"
                           variant="ghost"
                           className="h-7 text-xs text-red-400 hover:text-red-300"
-                          onClick={() => {
+                          onClick={async () => {
                             if (!confirm(`Delete “${m.name}”?`)) return;
+                            // Deleting only the local copy left the cloud
+                            // row (if this map was ever published) intact —
+                            // syncFromCloud() re-hydrates local storage from
+                            // cloud on every mode-open, so the "deleted" map
+                            // silently reappeared next visit. Find and
+                            // delete the matching cloud row too, if any.
+                            try {
+                              const rows = await listCloudMapDocuments(selectedMode);
+                              const cloudRow = rows.find(
+                                (r) => r.localId === m.id || r.id === m.id
+                              );
+                              if (cloudRow) await deleteCloudMap(cloudRow.id);
+                            } catch (e) {
+                              toast({
+                                title: 'Could not delete cloud copy',
+                                description:
+                                  e instanceof Error
+                                    ? e.message
+                                    : 'It may reappear next time cloud maps sync.',
+                                variant: 'destructive',
+                              });
+                              return;
+                            }
                             if (getActivePlayMapIdForMode(selectedMode) === m.id) {
                               setActivePlayMapIdForMode(selectedMode, null);
                             }

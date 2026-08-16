@@ -8,6 +8,7 @@ import { scrubDanglingReferences } from './map-document';
 import {
   DEFAULT_ENVIRONMENT,
   HAMMER_SOLID_MODEL,
+  cloneEntity,
   defaultAnimation,
   defaultHazard,
   defaultHealthFloor,
@@ -3141,9 +3142,17 @@ export function createEditorViewport(
           src.teleport?.targetEntityId && idMap.has(src.teleport.targetEntityId)
             ? { ...src.teleport, targetEntityId: idMap.get(src.teleport.targetEntityId) }
             : src.teleport;
+        // Base the copy on cloneEntity()'s full deep-clone (scale/rotation/
+        // hazard/motion/csgPads/playerSkins/etc.) instead of a bare `...src`
+        // spread — the previous version only rebuilt position/animation/
+        // teleport, leaving every other array/object field (scale, rotation,
+        // hazard, motion, csgPads, playerSkins, …) aliased to the original
+        // entity's own references, so editing a duplicate in place could
+        // silently corrupt the entity it was copied from.
+        const cloned = cloneEntity(src);
         copies.push({
-          ...src,
-          id: idMap.get(sid) ?? generateId(),
+          ...cloned,
+          id: idMap.get(sid) ?? cloned.id,
           name: `${src.name} Copy`,
           locked: false,
           groupId: newGroupId,

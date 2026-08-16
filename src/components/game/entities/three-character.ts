@@ -19,7 +19,8 @@ import type { SkinAttachment } from '@/lib/player-skins';
 import { PLAYER_RADIUS } from '@shared/sim-constants';
 import { BODY_COLOR_NONE } from '@/lib/body-colors';
 import { applyTeamTint } from '@/lib/premium-skin-config';
-import type { CustomMoveDef } from '@shared/custom-moves';
+import { customMoveSoundKey, type CustomMoveDef } from '@shared/custom-moves';
+import { playSound } from '../effects/soundboard';
 
 /**
  * Clip names like the Characters_7 pack's "Death_1_(idle)" contain the
@@ -143,6 +144,8 @@ export class ThreeCharacter {
   private weaponMixer: THREE.AnimationMixer | null = null;
   private weaponActions = new Map<string, THREE.AnimationAction>();
   private weaponClipNames = { fire: '', reload: '', idle: '', equip: '' };
+  /** Visibility power fade state — see the opacity toggle in update() below. */
+  private wasInvisibleForMaterial = false;
 
   constructor(_username: string, isLocal: boolean, avatar?: CharacterAvatarOptions) {
     this.isLocal = isLocal;
@@ -340,7 +343,12 @@ export class ThreeCharacter {
     this.play(fallback, false);
   }
 
-  /** Play a map-authored custom move's clip (full-body one-shot, like attack/flip). */
+  /** Play a map-authored custom move's clip (full-body one-shot, like attack/flip).
+   *  Called for every character (local + remote) as their server-authoritative
+   *  activeMoveId changes, so its sound trigger below covers everyone the
+   *  same way weapon-fire/hit sounds already do — unlike jump/land/flip/slide,
+   *  custom moves aren't client-predicted, so there's no earlier local-only
+   *  hook to play this from (see kilrun-engine.tsx). */
   private playCustomMove(id: string) {
     if (this.currentCustomMove === id) return;
     const action = this.customMoveActions.get(id);
@@ -351,6 +359,7 @@ export class ThreeCharacter {
     action.reset().fadeIn(this.blendSec).play();
     this.currentCustomMove = id;
     this.current = '';
+    playSound(customMoveSoundKey(id));
   }
 
   /**
@@ -724,6 +733,31 @@ export class ThreeCharacter {
 
     // Always show loaded mesh (die clip needs corpse visible)
     this.root.visible = this.loaded;
+
+    // Visibility power: the server syncs `ability.visibilityEndsAt` for
+    // every player (same field the HUD cooldown ring already reads), but
+    // until now nothing on the render side ever consumed it — the power
+    // deducted energy and started a cooldown but had zero observable effect
+    // on anyone, including the player who activated it. Fades this
+    // character's materials (matches Play Test's identical self-check
+    // fade, which explicitly noted there were no other players there to
+    // actually hide it from) — now applied uniformly for local AND remote
+    // characters, so it's finally visible to opponents too.
+    const invisibleNow = (player.ability?.visibilityEndsAt ?? 0) > Date.now();
+    if (invisibleNow !== this.wasInvisibleForMaterial) {
+      this.wasInvisibleForMaterial = invisibleNow;
+      this.root.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.material) return;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) {
+          const std = m as THREE.MeshStandardMaterial;
+          std.transparent = true;
+          std.opacity = invisibleNow ? 0.25 : 1;
+          std.needsUpdate = true;
+        }
+      });
+    }
 
     const wishFwd = moveWish?.fwd ?? 0;
     const wishStrafe = moveWish?.strafe ?? 0;

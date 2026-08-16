@@ -84,18 +84,33 @@ export function AdminUserDetailSheet({
     if (!open || !userId) return;
     let cancelled = false;
     setLoading(true);
-    Promise.all([adminGetUserDetail(userId), adminListCases(), adminListUserCaseGrants(userId)])
-      .then(([d, cases, grants]) => {
-        if (cancelled) return;
-        setDetail(d);
-        setCaseOptions(cases.filter((c) => c.isActive));
-        setCaseGrants(grants);
+    // adminGetUserDetail is staff-level, but adminListCases/
+    // adminListUserCaseGrants are admin-only — bundling them in one
+    // Promise.all meant a moderator opening ANY user's detail sheet got the
+    // whole fetch rejected (case calls throw "Admin only"), leaving
+    // `detail` null and the sheet stuck on "Loading…" forever. Fetch the
+    // crate-grant section independently so it degrades gracefully instead.
+    adminGetUserDetail(userId)
+      .then((d) => {
+        if (!cancelled) setDetail(d);
       })
       .catch(() => {
         if (!cancelled) setDetail(null);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    Promise.all([adminListCases(), adminListUserCaseGrants(userId)])
+      .then(([cases, grants]) => {
+        if (cancelled) return;
+        setCaseOptions(cases.filter((c) => c.isActive));
+        setCaseGrants(grants);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCaseOptions([]);
+          setCaseGrants([]);
+        }
       });
     return () => {
       cancelled = true;

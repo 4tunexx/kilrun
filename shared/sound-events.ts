@@ -11,7 +11,13 @@
  * bound to each event key — see src/lib/sound-definitions.ts.
  */
 
-export type SoundEventCategory = 'Movement' | 'Combat' | 'Powers' | 'Kill Streaks' | 'UI & Match';
+export type SoundEventCategory =
+  | 'Movement'
+  | 'Combat'
+  | 'Powers'
+  | 'Kill Streaks'
+  | 'UI & Match'
+  | 'Custom Moves';
 
 export interface SoundEventDef {
   key: string;

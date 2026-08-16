@@ -1,5 +1,5 @@
 import type { MapDocument, MapEnvironment } from './map-document';
-import { createEmptyMap, ensureEnvironment, getMapGameMode } from './map-document';
+import { createEmptyMap, ensureEnvironment, generateId, getMapGameMode } from './map-document';
 import type { KilrunMode } from '@/lib/game-modes';
 import { normalizeKilrunMode } from '@/lib/game-modes';
 
@@ -262,7 +262,11 @@ export function deleteMap(id: string): void {
 export function duplicateMap(id: string, newName?: string): string | null {
   const doc = loadMap(id);
   if (!doc) return null;
-  const newId = `map_${Date.now().toString(36)}`;
+  // Timestamp-only id — a fast double-click on "Duplicate" could produce
+  // the same id twice within one millisecond, and saveMap() would silently
+  // overwrite the first copy. generateId() adds a random component so this
+  // can't happen (prefab-storage.ts's savePrefab fixed the identical bug).
+  const newId = generateId('map');
   const now = new Date().toISOString();
   const copy: MapDocument = {
     ...doc,
@@ -279,7 +283,7 @@ export function createNewMap(
   name = 'Untitled Map',
   gameMode: KilrunMode = 'deathrun'
 ): { id: string; doc: MapDocument } {
-  const id = `map_${Date.now().toString(36)}`;
+  const id = generateId('map');
   const doc = createEmptyMap(name, gameMode);
   saveMap(id, doc);
   return { id, doc };

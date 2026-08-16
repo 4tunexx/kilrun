@@ -283,7 +283,13 @@ export async function adminToggleService(
   service: 'chat' | 'game',
   enabled: boolean
 ) {
-  await requireStaff();
+  // admin-dashboard-panel.tsx only renders this toggle for isAdmin — mirror
+  // adminRestartColyseus's explicit admin-only re-check below so a
+  // moderator can't call the action directly to kill chat or the whole game.
+  const actor = await requireStaff();
+  if (actor.role !== 'admin') {
+    throw new Error('Admin only');
+  }
   if (service === 'chat') {
     await prisma.siteSettings.update({
       where: { singletonKey: 'default' },

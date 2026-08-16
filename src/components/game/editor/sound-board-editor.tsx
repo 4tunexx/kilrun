@@ -17,9 +17,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { X, Volume2, Upload, Play, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { SOUND_EVENTS, getSoundEventCategories } from '@shared/sound-events';
+import { SOUND_EVENTS, type SoundEventDef, type SoundEventCategory } from '@shared/sound-events';
 import { getAudioContext, getProcessedBuffer, playProcessedBuffer, clearProcessedAudioCache, type SoundFxParams } from '@/lib/audio-fx';
 import { refreshSoundboard } from '@/components/game/effects/soundboard';
+import { getCustomMoveSoundEvents } from '@/lib/custom-move-sound-events';
 
 interface SoundEntry extends SoundFxParams {
   fileUrl: string;
@@ -62,6 +63,7 @@ function fxFromBound(bound: SoundEntry | undefined): FxDraft {
 export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; embedded?: boolean }) {
   const { toast } = useToast();
   const [sounds, setSounds] = useState<Record<string, SoundEntry>>({});
+  const [customMoveEvents, setCustomMoveEvents] = useState<SoundEventDef[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedKey, setSelectedKey] = useState<string>(SOUND_EVENTS[0].key);
   const [uploading, setUploading] = useState(false);
@@ -70,12 +72,21 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
+  // Every map-authored custom move auto-registers its own row here (no
+  // per-move opt-in needed) — see src/lib/custom-move-sound-events.ts.
+  const allEvents = [...SOUND_EVENTS, ...customMoveEvents];
+  const categories = Array.from(new Set(allEvents.map((e) => e.category))) as SoundEventCategory[];
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/sound-definitions', { cache: 'no-store' });
+      const [res, moveEvents] = await Promise.all([
+        fetch('/api/admin/sound-definitions', { cache: 'no-store' }),
+        getCustomMoveSoundEvents().catch(() => []),
+      ]);
       const data = await res.json();
       if (data?.ok) setSounds(data.sounds ?? {});
+      setCustomMoveEvents(moveEvents);
     } catch {
       toast({ title: 'Failed to load Sound Board', variant: 'destructive' });
     } finally {
@@ -87,9 +98,8 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
     load();
   }, [load]);
 
-  const selectedDef = SOUND_EVENTS.find((e) => e.key === selectedKey) ?? SOUND_EVENTS[0];
+  const selectedDef = allEvents.find((e) => e.key === selectedKey) ?? SOUND_EVENTS[0];
   const bound = sounds[selectedKey];
-  const categories = getSoundEventCategories();
 
   useEffect(() => {
     setVolumeDraft(bound?.volume ?? 1);
@@ -203,6 +213,7 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
   };
 
   const boundCount = Object.keys(sounds).filter((k) => sounds[k]?.fileUrl).length;
+  const totalEventCount = allEvents.length;
 
   const trimStartSec = fxDraft.trimStartMs / 1000;
   const trimEndSec = fxDraft.trimEndMs != null ? fxDraft.trimEndMs / 1000 : null;
@@ -220,7 +231,7 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
           <Volume2 className="w-4 h-4 text-sky-300" />
           <span className="text-sm font-black text-white tracking-tight">Sound Board</span>
           <span className="text-[10px] text-white/40 font-bold">
-            {boundCount} / {SOUND_EVENTS.length} events have sound
+            {boundCount} / {totalEventCount} events have sound
           </span>
           <span
             className="text-[10px] font-bold uppercase tracking-wide text-sky-300 border border-sky-400/40 bg-sky-500/10 rounded-full px-2 py-0.5"
@@ -249,7 +260,7 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
             categories.map((cat) => (
               <div key={cat} className="mb-3">
                 <p className="text-[10px] font-black uppercase tracking-wide text-white/35 px-2 mb-1">{cat}</p>
-                {SOUND_EVENTS.filter((e) => e.category === cat).map((e) => {
+                {allEvents.filter((e) => e.category === cat).map((e) => {
                   const has = Boolean(sounds[e.key]?.fileUrl);
                   const selected = e.key === selectedKey;
                   return (
