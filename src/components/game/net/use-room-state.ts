@@ -91,6 +91,22 @@ export function useRoomState(
         rendererCallbacksRef.current.onPlatformRemove?.(index);
       },
       onRoomChange: (r) => setRoom(r),
+      // Fires on initial join AND every reconnect. players.onAdd alone only
+      // replays who's currently in the room — a player who left during the
+      // disconnect gap never gets an onRemove for the stale room, so without
+      // this their character mesh (and playersRef entry) would stay frozen
+      // in the world for the rest of the match.
+      onRoomBound: (sessionIds) => {
+        const keep = new Set(sessionIds);
+        let removedAny = false;
+        for (const id of Array.from(playersRef.current.keys())) {
+          if (keep.has(id)) continue;
+          playersRef.current.delete(id);
+          removedAny = true;
+          rendererCallbacksRef.current.onPlayerRemove?.(id);
+        }
+        if (removedAny) setPlayerCount(playersRef.current.size);
+      },
       onConnectionState: (state) => {
         if (disposed) return;
         setConnectionState(state);

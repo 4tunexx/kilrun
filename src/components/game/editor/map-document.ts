@@ -2118,8 +2118,15 @@ export function isMarkerEntityKind(kind: EditorEntityKind): boolean {
   );
 }
 
+// Monotonic per-session counter appended to every generated id. Math.random()
+// alone (~41 bits) has non-zero collision odds over a long editing session,
+// and an id collision corrupts selection/transform targeting and
+// scrubDanglingReferences — the counter makes every id generated within this
+// browser session unique by construction, no matter how long the session runs.
+let idCounter = 0;
 export function generateId(prefix = 'ent'): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+  idCounter = (idCounter + 1) % Number.MAX_SAFE_INTEGER;
+  return `${prefix}_${Math.random().toString(36).slice(2, 8)}${idCounter.toString(36)}`;
 }
 
 export function snapToGrid(v: number, grid: number): number {

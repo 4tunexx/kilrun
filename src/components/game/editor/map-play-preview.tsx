@@ -10,6 +10,7 @@ import { PLAYER_RADIUS } from '@shared/sim-constants';
 import {
   HAMMER_SOLID_MODEL,
   ensureEnvironment,
+  entityExportsAsPlatform,
   isHammerSolidEntity,
   isInvisibleMarkerKind,
   suggestPlayerBindings,
@@ -19,6 +20,8 @@ import { AnimationDirector } from './animation-director';
 import {
   applyTextureToObject,
   disposeClonedMaterials,
+  disposeOwnedGeometry,
+  markOwnsGpuResources,
   plantLocalFeet,
   resolveEntityTextureRepeat,
   shouldHideEntityInPlay,
@@ -358,7 +361,10 @@ export function MapPlayPreview({
     const scene = new THREE.Scene();
     const env = ensureEnvironment(playDoc);
 
-    const camera = new THREE.PerspectiveCamera(initialTps.camera.fov, 1, 0.1, 300);
+    // near/far match createThreeWorld's live-engine camera (three-world.ts)
+    // so Play Test's close-clip and fog/far cutoff preview what live
+    // actually looks like instead of a slightly different render volume.
+    const camera = new THREE.PerspectiveCamera(initialTps.camera.fov, 1, 0.15, 220);
     const pads = mapDocToSimPlatforms(playDoc).map((p, i) => ({
       ...p,
       id: p.entityId || `pad_${i}`,
@@ -488,6 +494,7 @@ export function MapPlayPreview({
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
+    markOwnsGpuResources(floor);
     scene.add(floor);
 
     const envHandle = applyAuthoredEnvironment(scene, env, {
@@ -504,6 +511,10 @@ export function MapPlayPreview({
 
     const director = new AnimationDirector();
     const roots = new Map<string, THREE.Object3D>();
+    // TPS camera wall-avoidance raycast target list (see updateFollowCamera's
+    // `collidables` option) — built once after entity placement finishes
+    // below, filtered to genuinely solid entities only.
+    let cameraCollidables: THREE.Object3D[] = [];
     const motionVisual = new Map<
       string,
       {
@@ -514,6 +525,7 @@ export function MapPlayPreview({
       }
     >();
     const ghostMesh = createGhostMesh();
+    markOwnsGpuResources(ghostMesh);
     scene.add(ghostMesh);
     let wrSamples: GhostSample[] = [];
     const recordedSamples: GhostSample[] = [];
@@ -527,6 +539,10 @@ export function MapPlayPreview({
     let aimHeld = false;
     let aimHeldUi = false;
     let hpLocal = 100;
+    // Set every frame inside the powers block below, read by the void-fall
+    // check further down (out of that block's scope) so Fly's free-form
+    // descent doesn't trip the "fell off the map" handler.
+    let flyActiveNow = false;
     const lastDamageAt = new Map<string, number>();
 
     // Powers (visibility/fly/hook/berserk/bullet/thunder/backflip-dash) —
@@ -653,6 +669,7 @@ export function MapPlayPreview({
         fallback.position.y = 0.85;
         const wrap = new THREE.Group();
         wrap.add(fallback);
+        markOwnsGpuResources(wrap);
         const [px, py, pz] = simToThree(body.x, body.y, body.z);
         wrap.position.set(px, py, pz);
         scene.add(wrap);
@@ -689,6 +706,11 @@ export function MapPlayPreview({
           );
           planted.scale.set(...ent.scale);
           planted.userData.entityId = ent.id;
+          // Lets the camera wall-avoidance raycast below filter to only
+          // genuinely solid entities (entityExportsAsPlatform) once
+          // placement finishes, same convention as CustomMapOverlay's live
+          // equivalent.
+          planted.userData.editorEntity = ent;
           scene.add(planted);
           roots.set(ent.id, planted);
           const motion = ensurePlatformMotion(ent);
@@ -711,31 +733,50 @@ export function MapPlayPreview({
         if (isHammerSolidEntity(ent) || ent.model === HAMMER_SOLID_MODEL) {
           const size = ent.collisionSize ?? [2, 0.25, 2];
           const shape = (ent.primitive as HammerPrimitive) || 'box';
-          placeVisual(makeHammerSolidObject(shape, size, ent.color || '#64748b'));
+          const hammerVisual = makeHammerSolidObject(shape, size, ent.color || '#64748b');
+          markOwnsGpuResources(hammerVisual);
+          placeVisual(hammerVisual);
           continue;
         }
 
         const src = resolveModelSrc(ent.model, ent.customModelUrl);
         try {
           if (src) {
+            // NOT tagged __ownsGpuResources — geometry is shared with
+            // loadAnimatedPrefab's module-level cache, never safe to dispose.
             const { root, clips } = await loadAnimatedPrefab(src);
+            // Closing Play Test (or a rapid doc/map switch) mid-load lands
+            // here after teardown already ran — the avatar load above already
+            // guards this same race, this path didn't. Without it, this adds
+            // fresh geometry into a scene nothing will ever dispose again.
+            if (disposed) return;
             plantLocalFeet(root);
             placeVisual(root, clips);
             continue;
           }
 
           if (!shouldUsePlaceholder(ent, 'missing-model')) continue;
-          placeVisual(placeholderForEntity(ent));
+          const placeholder = placeholderForEntity(ent);
+          markOwnsGpuResources(placeholder);
+          placeVisual(placeholder);
         } catch (err) {
           console.warn('[PlayPreview] skip', ent.name, err);
           if (!shouldUsePlaceholder(ent, 'load-failed')) continue;
           try {
-            placeVisual(placeholderForEntity(ent));
+            const placeholder = placeholderForEntity(ent);
+            markOwnsGpuResources(placeholder);
+            placeVisual(placeholder);
           } catch {
             /* ignore */
           }
         }
       }
+
+      cameraCollidables = [];
+      roots.forEach((root) => {
+        const ent = root.userData.editorEntity as MapDocument['entities'][number] | undefined;
+        if (ent && entityExportsAsPlatform(ent)) cameraCollidables.push(root);
+      });
 
       if (!disposed) {
         worldReady = true;
@@ -761,6 +802,15 @@ export function MapPlayPreview({
     if (!embedded) host.requestPointerLock?.().catch(() => {});
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // Embedded mode (TpsViewStudio) renders this next to native <input
+      // type="range"> sliders — without this, arrow-keying a slider also
+      // moved the player, and Escape force-closed the preview out from under
+      // whatever else on the page had focus. Only guards keydown (new
+      // actions); keyup below always clears so a key held before the input
+      // gained focus can't get stuck "down" once it's released.
+      const active = document.activeElement as HTMLElement | null;
+      const tag = active?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.isContentEditable) return;
       keys.add(e.code);
       if (keyBindToCodes(bindingsRef.current.interact).includes(e.code)) interactPulse = true;
       if (e.code === 'KeyF' || e.code === 'Mouse0') attackPulse = true;
@@ -1006,7 +1056,8 @@ export function MapPlayPreview({
             body.y = abilityHost.y;
             body.vz = abilityHost.vz;
             body.energy = abilityHost.energy;
-            if (isFlyActive(abilityHost, nowMs)) {
+            flyActiveNow = isFlyActive(abilityHost, nowMs);
+            if (flyActiveNow) {
               body.isGrounded = false;
               body.vz = 0;
               body.z += (jumpPressed ? 1.4 : crouch ? -1.4 : 0) * dt;
@@ -1075,7 +1126,16 @@ export function MapPlayPreview({
             }
           }
         }
-        if (body.z < -4) {
+        // Void/hazard/teleport checks used to run unconditionally every
+        // tick regardless of worldReady/hpLocal/finishedLocal — a player who
+        // finished while standing in an active hazard zone could still be
+        // dropped to 0 HP afterward, and the HUD only shows "FINISH" while
+        // hp > 0, so "YOU DIED" silently overwrote a legitimate finish. Gated
+        // with the same condition as the movement/ability step above so
+        // nothing here can fire once the run is over (or before it started,
+        // or while dead).
+        if (worldReady && hpLocal > 0 && !finishedLocal) {
+        if (body.z < -4 && !flyActiveNow) {
           playSound('void_fall');
           if (checkpoint) {
             body.x = checkpoint.x;
@@ -1177,9 +1237,13 @@ export function MapPlayPreview({
             playSound('teleport');
           }
         }
+        }
       }
 
-      if (now - lastDebugAt > 150) {
+      // Gated behind the same dev-only flag as addCollisionPadMeshes above —
+      // this telemetry (raw z/grounded/support-alignment) was rendering
+      // unconditionally for every Play Test session regardless of the flag.
+      if (SHOW_COLLISION_DEBUG && now - lastDebugAt > 150) {
         lastDebugAt = now;
         // Show the pad actually holding the player up (scratch.supportPadId),
         // not just whatever's nearest by XY distance — a nearby-but-unrelated
@@ -1269,8 +1333,9 @@ export function MapPlayPreview({
                   ? 0.42
                   : liveTps.camera.shoulder + Math.sign(liveTps.camera.shoulder) * 0.35,
               followSharpness: liveTps.camera.followSharpness + 8,
+              collidables: cameraCollidables,
             }
-          : liveTps.camera
+          : { ...liveTps.camera, collidables: cameraCollidables }
       );
 
       const colliding = new Set<string>();
@@ -1424,15 +1489,28 @@ export function MapPlayPreview({
       envHandle.dispose();
       director.clear();
       // Every entity mesh here mixes uniquely-created geometry (hammer
-      // solids, placeholders, the fallback capsule) with cache-derived GLB
-      // parts (loadAnimatedPrefab / loadPlayerAvatar — geometry shared with
-      // a module-level cache, see disposeClonedMaterials's doc comment).
-      // renderer.dispose() alone only frees renderer-owned GPU state, not
-      // per-object geometry/material/texture buffers — without this, every
-      // Play Test open/close leaked the whole loaded scene's materials.
-      if (playerRoot) disposeClonedMaterials(playerRoot);
+      // solids, placeholders, the fallback capsule, floor, ghost) with
+      // cache-derived GLB parts (loadAnimatedPrefab / loadPlayerAvatar —
+      // geometry shared with a module-level cache, see
+      // disposeClonedMaterials's doc comment). renderer.dispose() alone only
+      // frees renderer-owned GPU state, not per-object geometry/material/
+      // texture buffers — without disposeClonedMaterials, every Play Test
+      // open/close leaked the whole loaded scene's materials, and without
+      // disposeOwnedGeometry it additionally leaked every uniquely-built
+      // mesh's vertex/index buffers (GLB-cached geometry is deliberately
+      // left alone — see disposeOwnedGeometry's doc comment).
+      if (playerRoot) {
+        disposeClonedMaterials(playerRoot);
+        disposeOwnedGeometry(playerRoot);
+      }
       disposeClonedMaterials(ghostMesh);
-      roots.forEach((root) => disposeClonedMaterials(root));
+      disposeOwnedGeometry(ghostMesh);
+      disposeClonedMaterials(floor);
+      disposeOwnedGeometry(floor);
+      roots.forEach((root) => {
+        disposeClonedMaterials(root);
+        disposeOwnedGeometry(root);
+      });
       renderer.dispose();
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
     };

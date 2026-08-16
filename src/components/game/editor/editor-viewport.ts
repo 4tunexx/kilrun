@@ -1189,6 +1189,14 @@ export function createEditorViewport(
   scene.add(transformHelper);
 
   const roots = new Map<string, THREE.Object3D>();
+  // Per-entity in-flight guard: docGeneration only catches a setDoc() (undo/
+  // redo/reopen) racing an in-progress syncEntity(); it does nothing for two
+  // syncEntity() calls issued for the SAME entity id without an intervening
+  // setDoc() (e.g. rapid double-click through catalog thumbnails). Without
+  // this, both awaits resolve, both set roots/scene.add — the earlier root
+  // becomes an untracked orphan (disposeRoot can never find it again), a
+  // permanent duplicate-mesh + geometry/material leak.
+  const syncTokens = new Map<string, number>();
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   let downX = 0;
@@ -1377,6 +1385,8 @@ export function createEditorViewport(
 
   async function syncEntity(ent: EditorEntity) {
     const gen = docGeneration;
+    const myToken = (syncTokens.get(ent.id) ?? 0) + 1;
+    syncTokens.set(ent.id, myToken);
     let root = roots.get(ent.id);
 
     // Platform player avatar is settings-only — never show / pick it on the map.
@@ -1427,13 +1437,15 @@ export function createEditorViewport(
       } else if (!wantsMarker && (ent.model || ent.customModelUrl)) {
         try {
           const loaded = await loadModel(ent.model, ent.customModelUrl);
-          // A newer setDoc() (rapid undo/redo, reopening a map) may have
-          // already superseded this call while the load above was pending —
-          // bail before touching roots/scene/doc. loaded.root's geometry is
-          // shared with loadAnimatedPrefab's module-level cache (never
-          // added to the scene here), so simply dropping the reference is
-          // enough — no dispose needed.
-          if (gen !== docGeneration) return;
+          // A newer setDoc() (rapid undo/redo, reopening a map) OR a second
+          // syncEntity() call for this same entity (e.g. rapid double-click
+          // through catalog thumbnails) may have already superseded this
+          // call while the load above was pending — bail before touching
+          // roots/scene/doc. loaded.root's geometry is shared with
+          // loadAnimatedPrefab's module-level cache (never added to the
+          // scene here), so simply dropping the reference is enough — no
+          // dispose needed.
+          if (gen !== docGeneration || syncTokens.get(ent.id) !== myToken) return;
           // Wrap + plant feet so entity.position.y is the stand surface (no gap/clip)
           root = new THREE.Group();
           plantLocalFeet(loaded.root);
@@ -1500,6 +1512,10 @@ export function createEditorViewport(
             director.playDefault(ent);
           }
         } catch {
+          // Same supersede check as the success path above — a rejected
+          // load must not resurrect roots/scene for an id that's since moved
+          // on to a newer syncEntity() call (or been superseded by a setDoc).
+          if (gen !== docGeneration || syncTokens.get(ent.id) !== myToken) return;
           root = new THREE.Mesh(
             new THREE.BoxGeometry(1, 1, 1),
             new THREE.MeshStandardMaterial({ color: 0xff00ff })
@@ -1610,6 +1626,14 @@ export function createEditorViewport(
       gizmoGroup.remove(c);
       if (c instanceof THREE.Mesh || c instanceof THREE.Line) {
         c.geometry?.dispose?.();
+        // Every hazard/solid wire-box and animation-wire Line below builds a
+        // fresh Material each refresh — disposing only geometry (as before)
+        // leaked one Material per gizmo every syncEntity()/select() call,
+        // i.e. on essentially every editor interaction. Mirrors
+        // clearSelectionOutlines()'s identical geometry+material disposal.
+        const material = c.material;
+        if (Array.isArray(material)) material.forEach((m) => m.dispose());
+        else material?.dispose?.();
       }
     }
     const selectedSet = new Set(

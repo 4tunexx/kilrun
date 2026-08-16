@@ -10,13 +10,13 @@ import type { ChatMessage, NetObstacleState, NetPlatformState, NetPlayerState, P
 import { InputManager } from './input/input-manager';
 import type { DualJoystick } from './input/dual-joystick';
 import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
+import type { FollowCameraOpts } from './renderer/three-world';
 import { SprintParticles } from './effects/sprint-particles';
 import { DamageNumberFx } from './effects/damage-numbers';
 import { playSound, playLoopedSound, stopLoopedSound, preloadSoundboard } from './effects/soundboard';
 import { ThreeCharacter } from './entities/three-character';
 import { ThreeMap } from './entities/three-map';
 import { CustomMapOverlay } from './entities/custom-map-overlay';
-import { toThree } from './renderer/coords';
 import {
   detectTouchDevice,
   CAMERA_YAW_KEY_SPEED,
@@ -161,6 +161,8 @@ export default function KilrunEngine({
   const joystickRef = useRef<DualJoystick | null>(null);
   const pausedRef = useRef(false);
   const gameMenuOpenRef = useRef(false);
+  const inputManagerRef = useRef<InputManager | null>(null);
+  const mouseFreeRef = useRef(false);
   const roomName: GameRoomName =
     roomNameOverride ??
     (mode === 'competitive'
@@ -216,6 +218,7 @@ export default function KilrunEngine({
   const [paused, setPaused] = useState(false);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
   const [scoreboardOpen, setScoreboardOpen] = useState(false);
+  const [mouseFree, setMouseFree] = useState(false);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   useEffect(() => {
     gameMenuOpenRef.current = gameMenuOpen;
@@ -474,6 +477,11 @@ export default function KilrunEngine({
     pausedRef.current = paused || editorOpen;
     if (paused || editorOpen || gameMenuOpen || scoreboardOpen) {
       if (document.pointerLockElement) document.exitPointerLock?.();
+      // Don't let a Tab-freed cursor stay suspended once we leave gameplay —
+      // menus already own the cursor, and resuming should re-lock normally.
+      mouseFreeRef.current = false;
+      setMouseFree(false);
+      inputManagerRef.current?.mouse.setLockSuspended(false);
     }
   }, [paused, editorOpen, gameMenuOpen, scoreboardOpen]);
 
@@ -534,16 +542,17 @@ export default function KilrunEngine({
     return () => window.removeEventListener('keydown', onKey);
   }, [editorOpen, paused, isAdmin]);
 
-  // Scoreboard: classic FPS hold-Tab pattern (show while held, hide on release).
+  // Scoreboard: hold backtick (show while held, hide on release). Moved off
+  // Tab so Tab can be the free-mouse toggle players expect.
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab') return;
+      if (e.code !== 'Backquote') return;
       if (editorOpen || paused || gameMenuOpen) return;
       e.preventDefault();
       setScoreboardOpen(true);
     };
     const onUp = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab') return;
+      if (e.code !== 'Backquote') return;
       e.preventDefault();
       setScoreboardOpen(false);
     };
@@ -553,6 +562,27 @@ export default function KilrunEngine({
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
     };
+  }, [editorOpen, paused, gameMenuOpen]);
+
+  // Tab: quick tap toggles a free mouse cursor (release/re-request pointer
+  // lock) without opening the pause menu, so players can e.g. glance at chat.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || e.repeat) return;
+      if (editorOpen || paused || gameMenuOpen) return;
+      e.preventDefault();
+      const freed = !mouseFreeRef.current;
+      mouseFreeRef.current = freed;
+      setMouseFree(freed);
+      inputManagerRef.current?.mouse.setLockSuspended(freed);
+      if (freed) {
+        if (document.pointerLockElement) document.exitPointerLock?.();
+      } else {
+        hostRef.current?.requestPointerLock?.().catch(() => {});
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [editorOpen, paused, gameMenuOpen]);
 
   useEffect(() => {
@@ -576,10 +606,29 @@ export default function KilrunEngine({
       atmosphere: !hasCustomMap,
     });
     const overlay = new CustomMapOverlay(world.scene);
+    // TPS camera wall-avoidance raycast target list (see updateFollowCamera's
+    // `collidables` option) — map.root always covers the built-in/hardcoded
+    // map case (its meshes are simply hidden, and hidden objects are skipped
+    // by THREE.Raycaster, when a custom map is active); overlay's solid
+    // entities are appended once loading finishes below.
+    let cameraCollidables: THREE.Object3D[] = [map.root];
     const characters = new Map<string, ThreeCharacter>();
     charactersRef.current = characters;
     const inputManager = new InputManager(hostElement, isMobile);
+    inputManagerRef.current = inputManager;
     joystickRef.current = inputManager.joystick;
+    // Shared by the per-frame predicted stepPlatformer call and the
+    // throttled network-send input message so both always agree on which
+    // custom move keys are held right now.
+    const computeCustomMoveKeysHeld = (): string[] => {
+      const defs = customDocRef.current?.customMoves;
+      if (!defs || defs.length === 0) return [];
+      const held: string[] = [];
+      for (const m of defs) {
+        if (inputManager.keyboard.isPressed(m.key)) held.push(m.id);
+      }
+      return held;
+    };
     // Admin-configured global scheme (Map Editor → Controls) — fetched async
     // so match start never blocks on it; defaults apply until it resolves.
     getKeyBindings()
@@ -607,10 +656,16 @@ export default function KilrunEngine({
       envHandle = applyAuthoredEnvironment(world.scene, env, {
         lights: { ambient: world.ambient, sun: world.sun, hemi: world.hemi },
         floorMesh: envFloor,
+        // Same cap as editor Play Test (map-play-preview.tsx) so the live
+        // level reads identically instead of drowning in thicker fog.
+        maxFogDensity: env.floor === 'void' ? undefined : 0.014,
       });
       // Match editor cavern default lights a bit warmer when map uses authored env.
       world.ambient.color.set(0xffffff);
-      void overlay.load(playDoc);
+      void overlay.load(playDoc).then(() => {
+        if (disposed) return;
+        cameraCollidables = [map.root, ...overlay.getCollidableRoots()];
+      });
       {
         const localDeathrunId = getActivePlayMapIdForMode('deathrun');
         const localDeathrun = localDeathrunId ? loadMapPlayable(localDeathrunId) : null;
@@ -659,6 +714,10 @@ export default function KilrunEngine({
     // mesh, NOT the raw (20 Hz) server snapshot, so the world doesn't stutter.
     const smoothCamTarget = new THREE.Vector3(WORLD_HEIGHT / 2, 1, SPAWN_X);
     let hasSmoothCamTarget = false;
+    // Reused every frame instead of allocating a fresh object each time —
+    // both are read synchronously by their consumers and never retained.
+    const renderPlayerScratch = {} as NetPlayerState;
+    const aimCamScratch = {} as FollowCameraOpts;
 
     // --- Local-player client-side prediction (movement only) ---
     // Mirrors the map editor's fully-local `stepPlatformer` sim so the local
@@ -704,6 +763,13 @@ export default function KilrunEngine({
           wallJumpHorizVel: cs.wallJumpHorizVel,
           wallJumpVertVel: cs.wallJumpVertVel,
           wallSlideGravMult: cs.wallSlideGravMult,
+          // Without this, stepPlatformer's whole custom-move block is a no-op
+          // client-side (it's gated on physOpts.customMoves.length) — Play
+          // Test previews Custom Moves smoothly since it always passes this,
+          // but live only applied them after server reconciliation, so any
+          // map using Custom Moves stuttered/rubber-banded for the local
+          // player despite looking fine in the exact tool meant to preview it.
+          customMoves: playDoc.customMoves,
         };
       }
     } catch (err) {
@@ -786,9 +852,10 @@ export default function KilrunEngine({
         platformsRef.current.forEach((p, i) => void map.upsertPlatform(i, p));
         obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o));
       }
-      const live = new Set(playersRef.current.keys());
+      // playersRef.current is already a Map — no need to copy its keys into
+      // a throwaway Set just to check membership.
       characters.forEach((view, id) => {
-        if (!live.has(id)) {
+        if (!playersRef.current.has(id)) {
           view.destroy();
           characters.delete(id);
         }
@@ -879,6 +946,7 @@ export default function KilrunEngine({
                   meleeActive: performance.now() < meleeUntil,
                   flipPressed: inputManager.isFlipPressed(),
                   cameraYaw,
+                  customMoveKeysHeld: computeCustomMoveKeysHeld(),
                 },
                 dt,
                 predictedPads,
@@ -997,9 +1065,15 @@ export default function KilrunEngine({
         {
           const modelUrl = player.weaponModelUrl || '';
           const skinId = player.weaponSkinId || '';
-          const syncKey = `${modelUrl}|${skinId}|${player.weaponId || ''}`;
-          if (syncKey !== view.syncedWeaponKey && (modelUrl || skinId)) {
-            view.syncedWeaponKey = syncKey;
+          const weaponId = player.weaponId || '';
+          const weaponChanged =
+            modelUrl !== view.syncedWeaponModelUrl ||
+            skinId !== view.syncedWeaponSkinId ||
+            weaponId !== view.syncedWeaponId;
+          if (weaponChanged && (modelUrl || skinId)) {
+            view.syncedWeaponModelUrl = modelUrl;
+            view.syncedWeaponSkinId = skinId;
+            view.syncedWeaponId = weaponId;
             const shopMode = mode === 'competitive' ? 'competitive' : 'horde';
             const skinTex = skinId
               ? shopSkinsForMode(customDocRef.current, shopMode).find((s) => s.id === skinId)
@@ -1039,8 +1113,7 @@ export default function KilrunEngine({
         // ThreeCharacter's existing server-snapshot smoothing path unchanged.
         const renderPlayer: NetPlayerState =
           isLocal && predictedBody
-            ? {
-                ...player,
+            ? Object.assign(renderPlayerScratch, player, {
                 x: predictedBody.x,
                 y: predictedBody.y,
                 z: predictedBody.z,
@@ -1048,7 +1121,7 @@ export default function KilrunEngine({
                 isGrounded: predictedBody.isGrounded,
                 isSliding: predictedScratch.slideMs > 0,
                 isFlipping: predictedScratch.flipMs > 0,
-              }
+              })
             : player;
         view.update(
           renderPlayer,
@@ -1092,9 +1165,9 @@ export default function KilrunEngine({
       }
 
       if (localState) {
-        const [tx, ty, tz] = toThree(localState.x, localState.y, localState.z ?? 0);
-        targetPos.set(tx, ty, tz);
-        overlayPlayerPos.set(tx, ty, tz);
+        // Inlined toThree() swizzle to avoid a throwaway array every frame.
+        targetPos.set(localState.y, localState.z ?? 0, localState.x);
+        overlayPlayerPos.copy(targetPos);
         const doc = customDocRef.current;
         if (doc) {
           overlay.update(dt, overlayPlayerPos, interactPulse, doc.entities);
@@ -1122,8 +1195,7 @@ export default function KilrunEngine({
         const shakeX = (Math.random() - 0.5) * 2 * shakeAmp;
         const shakeY = (Math.random() - 0.5) * 2 * shakeAmp;
         const aimCam = aimHeld
-          ? {
-              ...cam,
+          ? Object.assign(aimCamScratch, cam, {
               boomDistance: Math.max(
                 zoomFov > 0 ? 1.6 : 2.2,
                 cam.boomDistance * (zoomFov > 0 ? 0.45 : 0.72)
@@ -1137,8 +1209,9 @@ export default function KilrunEngine({
                 zoomFov > 0
                   ? THREE.MathUtils.lerp(cam.fov, zoomFov, 0.92)
                   : cam.fov,
-            }
-          : cam;
+              collidables: cameraCollidables,
+            })
+          : Object.assign(aimCamScratch, cam, { collidables: cameraCollidables });
         const camFollow = hasSmoothCamTarget ? smoothCamTarget : targetPos;
         updateFollowCamera(
           world.camera,
@@ -1217,11 +1290,20 @@ export default function KilrunEngine({
           }
         }
         wasShootEdge = shootNow;
-        // auto = hold-to-fire · semi/bolt = one shot per click edge
-        if (isAuto) {
-          shootHeld = shootHeld || shootNow;
+        // auto = hold-to-fire · semi/bolt = one shot per click edge. Only
+        // latch while localState exists — the reset below is gated on
+        // localState too, so without this guard, holding/clicking fire
+        // during any gap where localState is briefly undefined (pre-first
+        // snapshot at spawn, mid-match dropout) would accumulate a shot that
+        // fires as soon as localState reappears, regardless of input by then.
+        if (localState) {
+          if (isAuto) {
+            shootHeld = shootHeld || shootNow;
+          } else {
+            shootHeld = shootHeld || edge;
+          }
         } else {
-          shootHeld = shootHeld || edge;
+          shootHeld = false;
         }
         sendAccumulatorMs += dtMs;
         if (sendAccumulatorMs >= NETWORK_SEND_INTERVAL_MS && localState) {
@@ -1264,9 +1346,7 @@ export default function KilrunEngine({
             interactPressed: inputManager.isInteractPressed(),
             meleeActive: performance.now() < meleeUntil,
             flipPressed: inputManager.isFlipPressed(),
-            customMoveKeysHeld: (customDocRef.current?.customMoves ?? [])
-              .filter((m) => inputManager.keyboard.isPressed(m.key))
-              .map((m) => m.id),
+            customMoveKeysHeld: computeCustomMoveKeysHeld(),
           };
           connectionRef.current?.sendInput(message);
           shootHeld = false;
@@ -1297,6 +1377,7 @@ export default function KilrunEngine({
       }
       world.destroy();
       joystickRef.current = null;
+      inputManagerRef.current = null;
       inputManager.destroy();
     };
     // Wait for Active cloud map so live play uses the same document as editor Play Test.
@@ -1330,7 +1411,7 @@ export default function KilrunEngine({
     <div
       ref={rootRef}
       className={`fixed inset-0 z-[200] bg-[#0a1220] overflow-hidden touch-none select-none ${
-        paused || editorOpen ? 'cursor-default' : 'cursor-none'
+        paused || editorOpen || mouseFree ? 'cursor-default' : 'cursor-none'
       }`}
     >
       <MobilePlayGate containerRef={rootRef}>
@@ -1496,7 +1577,9 @@ export default function KilrunEngine({
                     textureUrl: equippedSkin?.textureUrl || preset.textureUrl,
                   });
                   if (view) {
-                    view.syncedWeaponKey = `${preset.modelUrl}|${skinId || ''}|${preset.id}`;
+                    view.syncedWeaponModelUrl = preset.modelUrl;
+                    view.syncedWeaponSkinId = skinId || '';
+                    view.syncedWeaponId = preset.id;
                   }
                 }
               }}

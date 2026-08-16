@@ -81,6 +81,14 @@ export interface RoomCallbacks {
   onPlatformRemove?: (index: number) => void;
   onRoomChange?: (room: NetRoomState) => void;
   /**
+   * Fired every time a room is (re)bound — initial join AND every automatic
+   * reconnect — with the full set of session ids the new room actually has.
+   * A reconnect's `players.onAdd` only replays currently-present players; a
+   * player who left during the disconnect gap never gets an onRemove for the
+   * old room, so callers should prune anything not in this list.
+   */
+  onRoomBound?: (sessionIds: string[]) => void;
+  /**
    * Fired whenever the underlying WebSocket connection state changes.
    * 'reconnecting' means the socket dropped and GameConnection is attempting
    * to recover automatically; 'lost' means all reconnect attempts failed and
@@ -179,6 +187,12 @@ export class GameConnection {
   } | null = null;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Re-registered onto every new Room in bindRoom() — onChat/onHitFx used to
+  // bind directly to `this.room` at call time, so a reconnect (which swaps in
+  // a brand-new Room instance) silently orphaned them: chat and hit-fx popups
+  // just stopped after any network blip, with no visible error.
+  private chatCallback: ((msg: ChatMessage) => void) | null = null;
+  private hitFxCallback: ((msg: HitFxMessage) => void) | null = null;
 
   constructor(endpoint: string = resolveGameServerUrl()) {
     this.client = new Client(endpoint);
@@ -391,6 +405,8 @@ export class GameConnection {
       if (this.disposed) return;
       console.warn('[kilrun] game room error', code);
     });
+    if (this.chatCallback) this.room.onMessage('chat', this.chatCallback);
+    if (this.hitFxCallback) this.room.onMessage('hitFx', this.hitFxCallback);
     const state = this.room.state as never;
     const $ = getStateCallbacks(this.room) as <T>(instance: T) => never;
     const proxy = $(state) as unknown as {
@@ -487,6 +503,15 @@ export class GameConnection {
       proxy.listen(field, emitRoomChange);
     });
     emitRoomChange();
+
+    // See onRoomBound doc comment: tell the caller exactly who's in the room
+    // right now so it can drop any session that left during a reconnect gap
+    // (players.onAdd alone never fires a removal for those).
+    const playersMap = (this.room.state as unknown as { players?: Map<string, unknown> })
+      .players;
+    if (playersMap && typeof playersMap.keys === 'function') {
+      callbacks.onRoomBound?.(Array.from(playersMap.keys()));
+    }
   }
 
   /**
@@ -565,14 +590,18 @@ export class GameConnection {
     this.safeSend('practiceSetRole', { role });
   }
 
-  /** Subscribe to broadcast in-match chat. Room teardown clears listeners itself. */
+  /** Subscribe to broadcast in-match chat. Re-attached to every room bindRoom()
+   *  binds (including reconnects), so it survives a dropped socket. */
   public onChat(callback: (msg: ChatMessage) => void): void {
+    this.chatCallback = callback;
     this.room?.onMessage('chat', callback);
   }
 
   /** Subscribe to this client's own hit-landed events (damage-number popups).
-   * Only ever sent to the attacker, never broadcast. */
+   * Only ever sent to the attacker, never broadcast. Re-attached on reconnect
+   * like onChat above. */
   public onHitFx(callback: (msg: HitFxMessage) => void): void {
+    this.hitFxCallback = callback;
     this.room?.onMessage('hitFx', callback);
   }
 

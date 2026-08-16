@@ -268,12 +268,24 @@ export class AnimationDirector {
           continue;
         case 'proximity':
           shouldActive = inRange;
-          if (inRange && ent.kind === 'action') {
-            this.fireSignal(ent.id);
-            if (anim.signalChannel) this.fireSignal(anim.signalChannel);
-            for (const tid of anim.activatesEntityIds ?? []) {
-              this.activated.add(tid);
-              this.fireSignal(tid);
+          if (ent.kind === 'action') {
+            if (inRange) {
+              this.fireSignal(ent.id);
+              if (anim.signalChannel) this.fireSignal(anim.signalChannel);
+              for (const tid of anim.activatesEntityIds ?? []) {
+                this.activated.add(tid);
+                this.fireSignal(tid);
+              }
+            } else {
+              // Proximity is meant to be live (pressure-plate style), unlike
+              // interact/collide's deliberate permanent latch — without this,
+              // anything listening via a 'signal' trigger to this zone's id
+              // or signalChannel stayed active forever after the player's
+              // very first visit. activatesEntityIds targets keep their
+              // permanent activated-latch (shared semantics with buttons),
+              // only this zone's own signal(s) clear on exit.
+              this.clearSignal(ent.id);
+              if (anim.signalChannel) this.clearSignal(anim.signalChannel);
             }
           }
           break;

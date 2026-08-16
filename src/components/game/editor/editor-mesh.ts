@@ -54,6 +54,35 @@ export function disposeClonedMaterials(root: THREE.Object3D) {
   });
 }
 
+/**
+ * Dispose geometry only for nodes explicitly tagged
+ * `userData.__ownsGpuResources` at creation — the mirror image of
+ * disposeClonedMaterials for a tree that mixes freshly-built geometry (own,
+ * safe to fully dispose) with cache-derived GLB parts (shared with
+ * loadAnimatedPrefab/loadPlayerAvatar's module-level cache, NEVER safe to
+ * dispose geometry for — see disposeObject3D's doc comment above). Geometry
+ * only, not material: callers already run disposeClonedMaterials over the
+ * same tree for material/texture cleanup, and double-disposing a Material is
+ * needless. Mirrors ThreeMap's private disposeOwnResources; exported here so
+ * any caller building its own mix of unique + cached geometry can reuse the
+ * same tag convention instead of leaking the unique half.
+ */
+export function disposeOwnedGeometry(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    if (!obj.userData?.__ownsGpuResources) return;
+    (obj as THREE.Mesh).geometry?.dispose();
+  });
+}
+
+/** Tags every node in a tree as owning its own GPU resources (fresh,
+ *  uniquely-created geometry/material — never shared with a loader cache),
+ *  so disposeOwnedGeometry knows it's safe to fully dispose. */
+export function markOwnsGpuResources(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    obj.userData.__ownsGpuResources = true;
+  });
+}
+
 /** Shift mesh so local AABB feet sit on y=0 and XZ is centered on the pivot. */
 export function plantLocalFeet(obj: THREE.Object3D) {
   obj.updateMatrixWorld(true);
@@ -138,13 +167,27 @@ export function applyTextureToObject(
         for (let i = 0; i < mats.length; i++) {
           const m = mats[i];
           if (m && 'map' in m) {
+            // Only dispose the material/texture we're replacing if WE made it
+            // (tagged below) on a prior call — the very first call here may
+            // still be looking at a loaded model's shared cached original
+            // material, which must never be disposed (see disposeObject3D's
+            // doc comment). Every call after the first re-textures a clone we
+            // already own, so this now actually frees it instead of leaking
+            // one Material+Texture per re-texture (syncEntity calls this on
+            // every entity sync, including every prop edit and undo/redo).
+            const replacingOwnClone = m.userData?.__kilrunTextureClone === true;
             const cloned = m.clone();
             const localTex = tex.clone();
             localTex.needsUpdate = true;
             (cloned as THREE.MeshStandardMaterial).map = localTex;
             (cloned as THREE.MeshStandardMaterial).needsUpdate = true;
+            cloned.userData.__kilrunTextureClone = true;
             if (Array.isArray(o.material)) o.material[i] = cloned;
             else o.material = cloned;
+            if (replacingOwnClone) {
+              (m as THREE.MeshStandardMaterial).map?.dispose();
+              m.dispose();
+            }
           }
         }
       }

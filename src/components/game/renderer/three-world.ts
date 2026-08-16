@@ -102,10 +102,22 @@ const _desired = new THREE.Vector3();
 const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _lookAt = new THREE.Vector3();
+const _rayDir = new THREE.Vector3();
+const _camRay = new THREE.Raycaster();
 
 export type FollowCameraOpts = Partial<TpsCameraSettings> & {
   /** Override boom length without full settings object. */
   zoomDistance?: number;
+  /**
+   * Solid level geometry (walls/platforms) to raycast the boom against so it
+   * pulls in instead of clipping through — e.g. a player backed into a
+   * corner used to put the camera on the far side of the wall. Omit (the
+   * default) for zero behavior/perf change: no raycast runs at all. Pass
+   * only genuinely solid meshes — see CustomMapOverlay.getCollidableRoots()
+   * for why NOT to pass every visible mesh in the scene (lights/buttons/
+   * hazard decals would falsely pull the camera in near pure decoration).
+   */
+  collidables?: THREE.Object3D[];
 };
 
 /**
@@ -175,6 +187,27 @@ export function updateFollowCamera(
     .copy(_pivot)
     .addScaledVector(_forward, -dist)
     .addScaledVector(_right, shoulder);
+
+  // Wall avoidance: pull the boom in along the same pivot->desired line
+  // instead of letting solid geometry poke through it. Ray direction already
+  // encodes the shoulder offset (it's pivot -> desired, not pivot -> -forward),
+  // so a pulled-in camera keeps the same over-the-shoulder angle, just closer.
+  if (opts.collidables && opts.collidables.length) {
+    _rayDir.copy(_desired).sub(_pivot);
+    const fullDist = _rayDir.length();
+    if (fullDist > 1e-4) {
+      _rayDir.multiplyScalar(1 / fullDist);
+      _camRay.set(_pivot, _rayDir);
+      _camRay.near = 0;
+      _camRay.far = fullDist;
+      const hits = _camRay.intersectObjects(opts.collidables, true);
+      if (hits.length && hits[0].distance < fullDist) {
+        const margin = 0.35;
+        const pulledDist = Math.max(0.5, hits[0].distance - margin);
+        _desired.copy(_pivot).addScaledVector(_rayDir, pulledDist);
+      }
+    }
+  }
 
   if (camera.position.distanceToSquared(_desired) > 400) {
     camera.position.copy(_desired);

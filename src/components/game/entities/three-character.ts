@@ -3,13 +3,13 @@ import type { NetPlayerState } from '../net/types';
 import type { EditorEntity, PlayerAnimBindings, PlayerAnimSlot } from '../editor/map-document';
 import { suggestPlayerBindings } from '../editor/map-document';
 import { loadPlayerAvatar, fitAvatarLikeEditor } from '../editor/player-avatar';
-import { toThree } from '../renderer/coords';
 import {
   computeLocomotionFacingYaw,
   stepBodyYaw,
 } from '../tps/locomotion-facing';
 import {
   applySkinAttachments,
+  clearSkinAttachments,
   tickSkinAttachments,
   type WeaponSwayOpts,
 } from '../editor/skin-attachments';
@@ -135,8 +135,11 @@ export class ThreeCharacter {
   private isLocal = false;
   private bodyColorIndex = BODY_COLOR_NONE;
   private hasPremiumFullBody = false;
-  /** Last remote sync key: `${modelUrl}|${skinId}` */
-  public syncedWeaponKey = '';
+  /** Last remote weapon sync fields, compared individually every frame so
+   *  the hot path avoids building a fresh template-literal string per player. */
+  public syncedWeaponModelUrl = '';
+  public syncedWeaponSkinId = '';
+  public syncedWeaponId = '';
   private muzzleLight: THREE.PointLight | null = null;
   private muzzleUntil = 0;
   private weaponKick = 0;
@@ -638,8 +641,9 @@ export class ThreeCharacter {
   ) {
     if (this.disposed) return;
 
-    const [tx, ty, tz] = toThree(player.x, player.y, player.z ?? 0);
-    this.targetPos.set(tx, ty, tz);
+    // Inlined toThree() swizzle (sim x,y,z -> Three lateral,up,forward) to
+    // avoid allocating a throwaway array every character, every frame.
+    this.targetPos.set(player.y, player.z ?? 0, player.x);
 
     if (!this.hasTarget) {
       this.displayPos.copy(this.targetPos);
@@ -852,6 +856,11 @@ export class ThreeCharacter {
     this.weaponActions.clear();
     this.actions.clear();
     this.customMoveActions.clear();
+    // Equipped skin/weapon attachments live under avatarScene and own cloned
+    // materials + textures (see clearSkinAttachments's doc comment) — never
+    // freed on teardown before this, leaking one full material+texture set
+    // per departed/reconnected player for the rest of the session.
+    if (this.avatarScene) clearSkinAttachments(this.avatarScene);
     this.root.removeFromParent();
   }
 }

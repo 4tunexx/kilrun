@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import type { EditorEntity, MapDocument } from '../editor/map-document';
-import { HAMMER_SOLID_MODEL, isHammerSolidEntity, isInvisibleMarkerKind } from '../editor/map-document';
+import {
+  entityExportsAsPlatform,
+  HAMMER_SOLID_MODEL,
+  isHammerSolidEntity,
+  isInvisibleMarkerKind,
+} from '../editor/map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from '../editor/model-scan';
 import { AnimationDirector } from '../editor/animation-director';
 import { applyTextureToObject, plantLocalFeet, resolveEntityTextureRepeat } from '../editor/editor-mesh';
@@ -85,6 +90,8 @@ export class CustomMapOverlay {
     string,
     { offset: [number, number, number]; periodMs: number; phaseMs: number }
   >();
+  // Reused every update() call instead of allocating a fresh Set per frame.
+  private collidingSet = new Set<string>();
   private disposed = false;
   // Bumped on every load() call so a still-in-flight `await loadAnimatedPrefab`
   // from a superseded call (rapid map switch / re-invoked load) can detect
@@ -235,7 +242,8 @@ export class CustomMapOverlay {
       this.director.update(dt);
       return;
     }
-    const colliding = new Set<string>();
+    const colliding = this.collidingSet;
+    colliding.clear();
     this.entityRoots.forEach((root, id) => {
       if (playerThreePos.distanceTo(root.position) < 1.35) colliding.add(id);
     });
@@ -259,6 +267,26 @@ export class CustomMapOverlay {
       }
       return playerThreePos.distanceTo(root.position) < Math.max(1.2, Math.abs(e.scale[0]) * 0.9);
     });
+  }
+
+  /**
+   * Solid entity roots only — filtered with the exact same
+   * entityExportsAsPlatform() predicate the server uses to decide what
+   * actually blocks player movement. For the TPS camera's wall-avoidance
+   * raycast (updateFollowCamera's `collidables` option): raycasting against
+   * every visible root here (lights, buttons, hazard decals, jump pads —
+   * all real Meshes) would pull the camera in whenever it merely passed near
+   * a decoration that doesn't actually block anything. Every entity root
+   * already carries `userData.editorEntity` (set at creation in load()
+   * above), so no separate bookkeeping is needed here.
+   */
+  getCollidableRoots(): THREE.Object3D[] {
+    const out: THREE.Object3D[] = [];
+    this.entityRoots.forEach((root) => {
+      const ent = root.userData.editorEntity as EditorEntity | undefined;
+      if (ent && entityExportsAsPlatform(ent)) out.push(root);
+    });
+    return out;
   }
 
   clear() {
