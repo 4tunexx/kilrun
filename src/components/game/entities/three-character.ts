@@ -662,12 +662,11 @@ export class ThreeCharacter {
 
   private findWeaponHolder(): THREE.Object3D | null {
     if (!this.avatarScene) return null;
-    let holder: THREE.Object3D | null = null;
+    const hits: THREE.Object3D[] = [];
     this.avatarScene.traverse((o) => {
-      if (holder) return;
-      if (o.userData?.isWeaponSkin) holder = o;
+      if (o.userData?.isWeaponSkin) hits.push(o);
     });
-    return holder;
+    return hits[0] ?? null;
   }
 
   private applyWeaponCarryPose(drawn: boolean) {

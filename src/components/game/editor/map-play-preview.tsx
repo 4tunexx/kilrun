@@ -134,10 +134,11 @@ function applyWeaponSlotPose(
   rotation: [number, number, number],
   scale: [number, number, number]
 ) {
-  let holder: THREE.Object3D | null = null;
+  const hits: THREE.Object3D[] = [];
   root.traverse((o) => {
-    if (!holder && o.userData?.isWeaponSkin) holder = o;
+    if (o.userData?.isWeaponSkin) hits.push(o);
   });
+  const holder = hits[0];
   if (!holder) return;
   holder.position.set(...position);
   const mesh =
