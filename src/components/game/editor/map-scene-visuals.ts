@@ -26,6 +26,7 @@ export function applyEntityOpacity(root: THREE.Object3D, opacity: number | undef
   const o = Math.min(1, Math.max(0, opacity));
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !child.material) return;
+    if (child.name === '__glow_halo__') return;
     const mats = Array.isArray(child.material) ? child.material : [child.material];
     for (const m of mats) {
       if (!m || !('opacity' in m)) continue;
@@ -37,8 +38,45 @@ export function applyEntityOpacity(root: THREE.Object3D, opacity: number | undef
   });
 }
 
+const GLOW_HALO_NAME = '__glow_halo__';
+const GLOW_LIGHT_NAME = '__glow_point_light__';
+
+function clampGlow(n: number, lo: number, hi: number) {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+/** Surface emissive from Brightness slider. Linear — no cliff past 1.0. */
+export function glowSurfaceEmissive(brightness?: number): number {
+  const v = typeof brightness === 'number' && Number.isFinite(brightness) ? brightness : 1;
+  return clampGlow(v, 0.05, 3) * 0.42;
+}
+
+/** Halo amount from Glow Intensity slider (0 = mesh only, 1 = full bloom). */
+export function glowBloomAmount(bloom?: number): number {
+  const v = typeof bloom === 'number' && Number.isFinite(bloom) ? bloom : 0.35;
+  return clampGlow(v, 0, 1);
+}
+
+function stripGlowHalos(root: THREE.Object3D) {
+  const remove: THREE.Object3D[] = [];
+  root.traverse((child) => {
+    if (child.name === GLOW_HALO_NAME) remove.push(child);
+  });
+  for (const halo of remove) {
+    halo.removeFromParent();
+    if (halo instanceof THREE.Mesh) {
+      halo.geometry.dispose();
+      const mat = halo.material;
+      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+      else mat.dispose();
+    }
+  }
+}
+
 /**
- * Apply glowing emissive materials and optional surrounding point light to any entity root.
+ * Make a surface self-lit (emissive). Soft bleed comes from the bloom pass
+ * in the editor / Play Test / live renderer — extra mesh copies always look
+ * like glass boxes on doorways.
  */
 export function applyEntityGlow(
   root: THREE.Object3D,
@@ -48,10 +86,14 @@ export function applyEntityGlow(
   const isGlowing = glow?.enabled === true;
   const glowHex = glow?.color || fallbackColor || '#00f0ff';
   const glowColor = new THREE.Color(glowHex);
-  const baseIntensity = glow?.intensity ?? 1.5;
+  const surface = glowSurfaceEmissive(glow?.intensity);
+  const bloomAmt = isGlowing ? glowBloomAmount(glow?.bloom) : 0;
+
+  stripGlowHalos(root);
 
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !child.material) return;
+    if (child.name === GLOW_HALO_NAME) return;
     const mats = Array.isArray(child.material) ? child.material : [child.material];
     for (const m of mats) {
       if (!m || !('emissive' in m)) continue;
@@ -59,11 +101,27 @@ export function applyEntityGlow(
       if (!mat.userData.__origEmissive) {
         mat.userData.__origEmissive = mat.emissive.clone();
         mat.userData.__origEmissiveIntensity = mat.emissiveIntensity;
+        if ('color' in mat && mat.color) mat.userData.__origColor = mat.color.clone();
+        if ('roughness' in mat) mat.userData.__origRoughness = mat.roughness;
+        mat.userData.__origToneMapped = mat.toneMapped;
       }
       if (isGlowing) {
+        child.userData.bloom = bloomAmt > 0.01;
+        child.userData.bloomStrength = bloomAmt;
+        child.userData.bloomColor = glowHex;
         mat.emissive.copy(glowColor);
-        mat.emissiveIntensity = baseIntensity;
+        mat.emissiveIntensity = surface;
+        mat.toneMapped = true;
+        if ('color' in mat && mat.color) {
+          const orig = mat.userData.__origColor as THREE.Color | undefined;
+          if (orig) mat.color.copy(orig).lerp(glowColor, 0.28);
+          else mat.color.copy(glowColor).multiplyScalar(0.65);
+        }
+        if ('roughness' in mat) mat.roughness = Math.min(mat.roughness, 0.45);
       } else {
+        child.userData.bloom = false;
+        child.userData.bloomStrength = 0;
+        child.userData.bloomColor = undefined;
         if (mat.userData.__origEmissive) {
           mat.emissive.copy(mat.userData.__origEmissive);
           mat.emissiveIntensity = mat.userData.__origEmissiveIntensity ?? 0;
@@ -71,13 +129,21 @@ export function applyEntityGlow(
           mat.emissive.set(0x000000);
           mat.emissiveIntensity = 0;
         }
+        if (mat.userData.__origColor) mat.color.copy(mat.userData.__origColor);
+        if (typeof mat.userData.__origRoughness === 'number') {
+          mat.roughness = mat.userData.__origRoughness;
+        }
+        if (typeof mat.userData.__origToneMapped === 'boolean') {
+          mat.toneMapped = mat.userData.__origToneMapped;
+        } else {
+          mat.toneMapped = true;
+        }
       }
       mat.needsUpdate = true;
     }
   });
 
-  // Cast dynamic point light into scene if requested
-  const existingLight = root.getObjectByName('__glow_point_light__') as THREE.PointLight | null;
+  const existingLight = root.getObjectByName(GLOW_LIGHT_NAME) as THREE.PointLight | null;
   if (isGlowing && glow?.castLight) {
     const lightDist = glow.lightDistance ?? 6;
     const lightInt = glow.lightIntensity ?? 1.0;
@@ -87,7 +153,7 @@ export function applyEntityGlow(
       existingLight.intensity = lightInt;
     } else {
       const pLight = new THREE.PointLight(glowColor, lightInt, lightDist);
-      pLight.name = '__glow_point_light__';
+      pLight.name = GLOW_LIGHT_NAME;
       pLight.position.set(0, 0.5, 0);
       root.add(pLight);
     }
@@ -140,9 +206,13 @@ export function tickEntityGlow(
     }
   }
 
-  const currentIntensity = (glow.intensity ?? 1.5) * factor;
+  const currentIntensity = glowSurfaceEmissive(glow.intensity) * factor;
+  const bloomAmt = glowBloomAmount(glow.bloom) * factor;
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !child.material) return;
+    if (child.name === GLOW_HALO_NAME) return;
+    child.userData.bloom = bloomAmt > 0.01;
+    child.userData.bloomStrength = bloomAmt;
     const mats = Array.isArray(child.material) ? child.material : [child.material];
     for (const m of mats) {
       if (!m || !('emissiveIntensity' in m)) continue;
@@ -150,7 +220,7 @@ export function tickEntityGlow(
     }
   });
 
-  const pLight = root.getObjectByName('__glow_point_light__') as THREE.PointLight | null;
+  const pLight = root.getObjectByName(GLOW_LIGHT_NAME) as THREE.PointLight | null;
   if (pLight) {
     pLight.intensity = (glow.lightIntensity ?? 1.0) * factor;
   }

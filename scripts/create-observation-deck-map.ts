@@ -371,6 +371,20 @@ async function main() {
   const documentJson = JSON.stringify(doc);
   console.log(`documentJson size: ${documentJson.length} bytes`);
 
+  const existing = await prisma.gameMap.findMany({
+    where: { name: 'Observation Deck', mode: 'deathrun' },
+    select: { id: true, isActive: true, localId: true },
+  });
+  const force = process.argv.includes('--force');
+  if (existing.length && !force) {
+    console.log(
+      `Observation Deck already exists (${existing.length} row(s): ${existing
+        .map((r) => r.id)
+        .join(', ')}). Not inserting another copy — that is why deleting it in the editor kept bringing it back (cloud sync re-hydrates leftovers). Re-run with --force to insert anyway.`
+    );
+    return;
+  }
+
   const created = await prisma.gameMap.create({
     data: {
       name: 'Observation Deck',

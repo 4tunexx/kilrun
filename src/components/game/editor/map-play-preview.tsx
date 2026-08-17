@@ -14,6 +14,7 @@ import {
   isHammerSolidEntity,
   isInvisibleMarkerKind,
   suggestPlayerBindings,
+  sanitizePlayerBindings,
 } from './map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
 import { AnimationDirector } from './animation-director';
@@ -70,6 +71,7 @@ import { loadPlayerAvatar, getMapPlayerAvatar, fitAvatarLikeEditor, avatarAuthor
 import { applyTeamTint } from '@/lib/premium-skin-config';
 import { BODY_COLOR_RED, BODY_COLOR_BLUE } from '@/lib/body-colors';
 import { updateFollowCamera } from '../renderer/three-world';
+import { createBloomComposer } from '../renderer/bloom-composer';
 import { applySkinAttachments, tickSkinAttachments } from './skin-attachments';
 import {
   findWeaponAttachment,
@@ -461,6 +463,8 @@ export function MapPlayPreview({
     host.appendChild(renderer.domElement);
     Object.assign(renderer.domElement.style, { width: '100%', height: '100%', display: 'block' });
 
+    const bloom = createBloomComposer(renderer, scene, camera);
+
     const ambient = new THREE.AmbientLight(0xffffff, env.ambientIntensity ?? 0.55);
     scene.add(ambient);
     const sun = new THREE.DirectionalLight(0xfff2d6, env.sunIntensity ?? 1.15);
@@ -605,6 +609,7 @@ export function MapPlayPreview({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h, false);
+      bloom.setSize(w, h);
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -643,6 +648,8 @@ export function MapPlayPreview({
         director.register(playerId, root, loaded.animations);
         if (!avatarBindings || Object.keys(avatarBindings).length === 0) {
           avatarBindings = suggestPlayerBindings(loaded.clipNames);
+        } else {
+          avatarBindings = sanitizePlayerBindings(avatarBindings, loaded.clipNames);
         }
         if (avatarEntity) {
           if (!avatarEntity.playerAnims || Object.keys(avatarEntity.playerAnims).length === 0) {
@@ -1510,7 +1517,7 @@ export function MapPlayPreview({
         });
       }
 
-      renderer.render(scene, camera);
+      bloom.render();
     };
     raf = requestAnimationFrame(tick);
 
@@ -1554,6 +1561,7 @@ export function MapPlayPreview({
         disposeClonedMaterials(root);
         disposeOwnedGeometry(root);
       });
+      bloom.dispose();
       renderer.dispose();
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
     };

@@ -339,6 +339,60 @@ describe('stepPlatformer (Foundry feel)', () => {
     expect(crouchSlideScratch.slideMs).toBeGreaterThan(0);
   });
 
+  it('keeps slide going while the key is held and cancels on jump', () => {
+    const physOpts = {
+      slideEnabled: true,
+      slideMult: 2.2,
+      slideDurationMs: 400,
+      slideCooldownMs: 1000,
+    };
+    const body = groundedBody();
+    const scratch = createSimScratch();
+    const sprintFwd = {
+      moveX: 1,
+      moveY: 0,
+      jumpPressed: false,
+      sprint: true,
+      crouch: false,
+      slidePressed: false,
+    };
+    stepPlatformer(body, sprintFwd, 1 / 30, [floor], scratch, bounds, physOpts);
+    stepPlatformer(
+      body,
+      { ...sprintFwd, slidePressed: true },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds,
+      physOpts
+    );
+    expect(scratch.slideMs).toBeGreaterThan(0);
+    for (let i = 0; i < 30; i++) {
+      stepPlatformer(
+        body,
+        { ...sprintFwd, slidePressed: true },
+        1 / 30,
+        [floor],
+        scratch,
+        bounds,
+        physOpts
+      );
+    }
+    expect(scratch.slideMs).toBeGreaterThan(0);
+
+    stepPlatformer(
+      body,
+      { ...sprintFwd, slidePressed: true, jumpPressed: true },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds,
+      physOpts
+    );
+    expect(scratch.slideMs).toBe(0);
+    expect(body.vz).toBeGreaterThan(0);
+  });
+
   it('jumps when jump key (Space) is pressed', () => {
     const body = groundedBody();
     const scratch = createSimScratch();

@@ -39,7 +39,11 @@ import {
   MELEE_MOVE_MULT,
   PLAYER_HEIGHT,
   PLAYER_RADIUS,
+  SLIDE_COOLDOWN_MS,
+  SLIDE_DURATION_MS,
   SLIDE_ENERGY_COST,
+  SLIDE_HOLD_COAST_MS,
+  SLIDE_HOLD_SNAP_AFTER_MS,
   SPRINT_MULTIPLIER,
   WALL_JUMP_HORIZ_VEL,
   WALL_JUMP_LOCKOUT_MS,
@@ -122,6 +126,8 @@ export interface SimScratch {
   slideMs: number;
   /** Remaining ms before a new slide can start. */
   slideCooldownMs: number;
+  /** How long the current slide has been held (for tap vs hold coast). */
+  slideHeldMs: number;
   /** Edge-detects the crouch button so holding it doesn't retrigger every tick. */
   wasCrouchHeld: boolean;
   /** Edge-detects the dedicated slide key (see SimInput.slidePressed). */
@@ -221,6 +227,7 @@ export function createSimScratch(): SimScratch {
     supportPadId: null,
     slideMs: 0,
     slideCooldownMs: 0,
+    slideHeldMs: 0,
     wasCrouchHeld: false,
     wasSlideKeyHeld: false,
     flipMs: 0,
@@ -506,14 +513,25 @@ export function stepPlatformer(
   // mid-slide keeps the boosted velX/velY the player already had.
   const SLIDE_ENABLED = physOpts?.slideEnabled ?? true;
   const SLIDE_MULT = physOpts?.slideMult ?? 2.2;
-  const SLIDE_DURATION_MS = physOpts?.slideDurationMs ?? 600;
-  const SLIDE_COOLDOWN_MS = physOpts?.slideCooldownMs ?? 1000;
+  const slideDurationMs = physOpts?.slideDurationMs ?? SLIDE_DURATION_MS;
+  const slideCooldownMs = physOpts?.slideCooldownMs ?? SLIDE_COOLDOWN_MS;
   const crouchKeyEdge = !!input.crouch && !scratch.wasCrouchHeld;
   scratch.wasCrouchHeld = !!input.crouch;
   const slideKeyEdge = !!input.slidePressed && !scratch.wasSlideKeyHeld;
   scratch.wasSlideKeyHeld = !!input.slidePressed;
   const slideTriggered = slideKeyEdge || (crouchKeyEdge && input.sprint);
-  if (
+  const holdingSlide = !!(input.slidePressed || input.crouch);
+  const slideCancel =
+    scratch.slideMs > 0 &&
+    (input.jumpPressed ||
+      ((input.flipPressed ?? false) && !scratch.wasFlipHeld) ||
+      wishMag < 0.15 ||
+      scratch.exhausted);
+  if (slideCancel) {
+    scratch.slideMs = 0;
+    scratch.slideHeldMs = 0;
+    scratch.slideCooldownMs = slideCooldownMs;
+  } else if (
     SLIDE_ENABLED &&
     slideTriggered &&
     grounded &&
@@ -523,14 +541,24 @@ export function stepPlatformer(
     scratch.slideCooldownMs <= 0 &&
     body.energy >= SLIDE_ENERGY_COST
   ) {
-    scratch.slideMs = SLIDE_DURATION_MS;
+    scratch.slideMs = slideDurationMs;
+    scratch.slideHeldMs = 0;
     body.energy = Math.max(0, body.energy - SLIDE_ENERGY_COST);
   }
   if (scratch.slideMs > 0) {
     maxSpeed = MAX_GROUND_SPEED * SLIDE_MULT;
-    scratch.slideMs = Math.max(0, scratch.slideMs - dt * 1000);
-    if (scratch.slideMs <= 0) scratch.slideCooldownMs = SLIDE_COOLDOWN_MS;
+    if (holdingSlide) {
+      scratch.slideHeldMs += dt * 1000;
+    } else {
+      if (scratch.slideHeldMs > SLIDE_HOLD_SNAP_AFTER_MS) {
+        scratch.slideMs = Math.min(scratch.slideMs, SLIDE_HOLD_COAST_MS);
+      }
+      scratch.slideHeldMs = 0;
+      scratch.slideMs = Math.max(0, scratch.slideMs - dt * 1000);
+      if (scratch.slideMs <= 0) scratch.slideCooldownMs = slideCooldownMs;
+    }
   } else if (scratch.slideCooldownMs > 0) {
+    scratch.slideHeldMs = 0;
     scratch.slideCooldownMs = Math.max(0, scratch.slideCooldownMs - dt * 1000);
   }
 

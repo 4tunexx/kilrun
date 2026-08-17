@@ -61,6 +61,14 @@ export const JUMP_ENERGY_COST = 4;
 /** Flat cost taken once when a slide successfully starts (on top of the
  * ongoing sprint drain already running while sliding). */
 export const SLIDE_ENERGY_COST = 12;
+/** Tap-slide coast time. Holding slide/crouch keeps the slide going until
+ * jump, flip, stop, or stamina dump cancels it. */
+export const SLIDE_DURATION_MS = 1800;
+export const SLIDE_COOLDOWN_MS = 800;
+/** After a real hold, coast this long on release so the clip can blend out. */
+export const SLIDE_HOLD_COAST_MS = 420;
+/** Holds shorter than this are treated as taps (full duration, no coast snap). */
+export const SLIDE_HOLD_SNAP_AFTER_MS = 180;
 export const FLIP_ENERGY_COST = 20;
 export const FLIP_DURATION_MS = 700;
 export const FLIP_COOLDOWN_MS = 1500;

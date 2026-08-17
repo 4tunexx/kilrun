@@ -6954,25 +6954,46 @@ export function MapEditor({
                             </div>
                           </div>
 
-                          {/* Glow Intensity */}
+                          {/* Surface brightness vs halo — two sliders, linear mapping */}
                           <div className="space-y-1">
                             <div className="flex justify-between text-[11px] text-white/60">
-                              <span>Brightness / Intensity</span>
-                              <span className="font-mono text-cyan-300">{(glow.intensity ?? 1.5).toFixed(1)}x</span>
+                              <span>Brightness</span>
+                              <span className="font-mono text-cyan-300">{(glow.intensity ?? 1).toFixed(2)}x</span>
                             </div>
                             <input
                               type="range"
                               min={0.1}
-                              max={5.0}
-                              step={0.1}
+                              max={3}
+                              step={0.05}
                               className="w-full accent-cyan-400"
-                              value={glow.intensity ?? 1.5}
+                              value={glow.intensity ?? 1}
                               onChange={(e) =>
                                 patchSelected({
                                   glow: { ...glow, intensity: Number(e.target.value) },
                                 })
                               }
                             />
+                            <p className="text-[10px] text-white/35">How bright the object surface is.</p>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[11px] text-white/60">
+                              <span>Glow Intensity</span>
+                              <span className="font-mono text-cyan-300">{(glow.bloom ?? 0.35).toFixed(2)}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={1}
+                              step={0.05}
+                              className="w-full accent-cyan-400"
+                              value={glow.bloom ?? 0.35}
+                              onChange={(e) =>
+                                patchSelected({
+                                  glow: { ...glow, bloom: Number(e.target.value) },
+                                })
+                              }
+                            />
+                            <p className="text-[10px] text-white/35">Halo around the object. 0 = no bloom.</p>
                           </div>
 
                           {/* Animation / Pulse Mode */}
@@ -7027,6 +7048,9 @@ export function MapEditor({
                           <div className="pt-1 border-t border-white/10 space-y-2">
                             <label className="flex items-center justify-between text-[11px] text-white/70 cursor-pointer">
                               <span>Cast Surrounding Light</span>
+                              <span className="text-[10px] text-white/40 font-normal ml-1">
+                                (lights the floor / walls)
+                              </span>
                               <input
                                 type="checkbox"
                                 className="rounded border-white/20 bg-black/40 text-cyan-500 focus:ring-0"

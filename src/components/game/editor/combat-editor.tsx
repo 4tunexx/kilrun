@@ -346,20 +346,20 @@ export function CombatEditor({
           {tab === 'slide' && (
             <>
               <InfoBox>
-                Slide: crouch while sprinting to enter a low-drag ground slide. Great for
-                momentum-based movement in Horde or Competitive maps.
+                Slide: hold G (or crouch while sprinting) to stay in the slide. Release to
+                coast out, or cancel with jump, backflip, stopping, or emptying energy.
               </InfoBox>
               <Section title="Slide" accent="violet" icon={<Wind className="w-3.5 h-3.5" />}>
-                <Toggle label="Enable slide" hint="Crouch while sprinting triggers slide" value={settings.slideEnabled} accentTrue="violet" onChange={(v) => patch({ slideEnabled: v })} />
+                <Toggle label="Enable slide" hint="Slide key, or crouch while sprinting" value={settings.slideEnabled} accentTrue="violet" onChange={(v) => patch({ slideEnabled: v })} />
                 {settings.slideEnabled && (
                   <>
                     <Slider label="Slide speed mult" hint="Multiplier over walk speed" value={settings.slideMult} min={1} max={5} step={0.1} defaultValue={D.slideMult} onChange={(v) => patch({ slideMult: v })} />
-                    <Slider label="Slide duration" value={settings.slideDurationMs} min={100} max={2000} step={50} unit="ms" defaultValue={D.slideDurationMs} onChange={(v) => patch({ slideDurationMs: v })} />
+                    <Slider label="Tap duration" hint="Coast time after a tap. Hold the key to keep sliding." value={settings.slideDurationMs} min={200} max={4000} step={50} unit="ms" defaultValue={D.slideDurationMs} onChange={(v) => patch({ slideDurationMs: v })} />
                     <Slider label="Slide cooldown" value={settings.slideCooldownMs} min={200} max={5000} step={100} unit="ms" defaultValue={D.slideCooldownMs} onChange={(v) => patch({ slideCooldownMs: v })} />
                   </>
                 )}
               </Section>
-              <PhysicsNote text="Slide preserves momentum from sprint. Camera dips slightly during slide. Slide-jump (jump while sliding) is always enabled when slide is on." />
+              <PhysicsNote text="Hold slide to keep going; jump / flip / stop cancels it. Slide-jump keeps the boosted speed into the air." />
             </>
           )}
 

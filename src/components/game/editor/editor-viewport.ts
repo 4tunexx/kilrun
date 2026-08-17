@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { createBloomComposer } from '../renderer/bloom-composer';
 import type { EditorEntity, EditorLayer, MapDocument, MapEnvironment } from './map-document';
 import { scrubDanglingReferences } from './map-document';
 import {
@@ -499,6 +500,7 @@ export function createEditorViewport(
   scene.add(sun);
   const hemiLight = new THREE.HemisphereLight(0x88aacc, 0x334455, 0.45);
   scene.add(hemiLight);
+  const bloom = createBloomComposer(renderer, scene, camera);
   let skyTexture: THREE.Texture | null = null;
   let editorPerf: EditorPerfMode = { ...DEFAULT_EDITOR_PERF_MODE };
 
@@ -1210,6 +1212,7 @@ export function createEditorViewport(
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h, false);
+    bloom.setSize(w, h);
   };
   setSize();
   const ro = new ResizeObserver(setSize);
@@ -2876,7 +2879,7 @@ export function createEditorViewport(
     if (viewLayout === 'single') {
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, w, h);
-      renderer.render(scene, camera);
+      bloom.render();
     } else if (viewLayout === 'split') {
       // Main perspective (left) + top ortho (right) — shared scene.
       renderer.setScissorTest(true);
@@ -3944,6 +3947,7 @@ export function createEditorViewport(
       transform.dispose();
       orbit.dispose();
       try {
+        bloom.dispose();
         renderer.dispose();
         renderer.forceContextLoss();
       } catch {

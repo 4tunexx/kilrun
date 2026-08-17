@@ -86,12 +86,12 @@ export class AnimationDirector {
     const curName = this.current.get(entityId);
     if (curName === clipName) return;
     if (curName) {
-      actionMap.get(curName)?.fadeOut(0.15);
+      actionMap.get(curName)?.fadeOut(0.2);
     }
     next.reset();
     next.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
     next.clampWhenFinished = !loop;
-    next.fadeIn(0.15).play();
+    next.fadeIn(0.2).play();
     this.current.set(entityId, clipName);
   }
 

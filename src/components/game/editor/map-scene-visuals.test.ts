@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyEntityGlow,
   applyEntityOpacity,
   makeGameplayFallback,
   resolveFogColor,
@@ -54,6 +55,37 @@ describe('map-scene-visuals', () => {
     const mat = mesh.material as THREE.MeshStandardMaterial;
     expect(mat.opacity).toBe(0.4);
     expect(mat.transparent).toBe(true);
+  });
+
+  it('marks glow materials emissive without extra shell meshes', () => {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshStandardMaterial({ color: 0xffffff })
+    );
+    applyEntityGlow(mesh, {
+      enabled: true,
+      color: '#00f0ff',
+      intensity: 1,
+      bloom: 0.4,
+      pulse: 'none',
+    });
+    const mat = mesh.material as THREE.MeshStandardMaterial;
+    expect(mat.emissive.getHexString()).toBe('00f0ff');
+    expect(mat.emissiveIntensity).toBeCloseTo(0.42);
+    expect(mat.toneMapped).toBe(true);
+    expect(mesh.userData.bloom).toBe(true);
+    expect(mesh.userData.bloomStrength).toBeCloseTo(0.4);
+    expect(mesh.children.some((c) => c.name === '__glow_halo__')).toBe(false);
+
+    applyEntityGlow(mesh, {
+      enabled: true,
+      color: '#00f0ff',
+      intensity: 1.1,
+      bloom: 0,
+      pulse: 'none',
+    });
+    expect((mesh.material as THREE.MeshStandardMaterial).emissiveIntensity).toBeCloseTo(0.462);
+    expect(mesh.userData.bloom).toBe(false);
   });
 
   it('provides gameplay fallbacks for marker kinds that vanish without models', () => {

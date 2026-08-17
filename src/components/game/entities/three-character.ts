@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { NetPlayerState } from '../net/types';
 import type { EditorEntity, PlayerAnimBindings, PlayerAnimSlot } from '../editor/map-document';
-import { suggestPlayerBindings } from '../editor/map-document';
+import { PLAYER_ANIM_MATCH, pickBestClipName, sanitizePlayerBindings, suggestPlayerBindings } from '../editor/map-document';
 import { loadPlayerAvatar, fitAvatarLikeEditor } from '../editor/player-avatar';
 import {
   computeLocomotionFacingYaw,
@@ -23,16 +23,6 @@ import { customMoveSoundKey, type CustomMoveDef } from '@shared/custom-moves';
 import { playSound } from '../effects/soundboard';
 
 /**
- * Clip names like the Characters_7 pack's "Death_1_(idle)" contain the
- * substring "idle" — a naive `.includes('idle')` match picks that death pose
- * as the standing-idle clip whenever it appears before the real "Idle" clip
- * in the array (exactly what happens for any mode/map whose player entity
- * has no explicitly authored `playerAnims`, e.g. Competitive). Skip
- * death/dead-labeled clips for every slot except the actual 'die' lookup.
- */
-const DEATH_CLIP_MARKERS = ['death', 'dead'];
-
-/**
  * Pack rig (Rigify DEF-*) bones that make up the upper body: chest and above,
  * shoulders, arms, hands, fingers. Excludes hips/lower-spine and legs so a
  * filtered clip can play on a second mixer layered over full-body locomotion
@@ -50,18 +40,18 @@ function filterClipToUpperBody(clip: THREE.AnimationClip): THREE.AnimationClip {
   return new THREE.AnimationClip(`${clip.name || 'clip'}__upper`, clip.duration, tracks);
 }
 
-function pickClip(clips: THREE.AnimationClip[], patterns: string[]): THREE.AnimationClip | null {
-  const lower = clips.map((c) => ({ clip: c, name: c.name.toLowerCase() }));
-  const searchingDeath = patterns.some((p) => DEATH_CLIP_MARKERS.includes(p) || p === 'die');
-  for (const pattern of patterns) {
-    const hit = lower.find(
-      (c) =>
-        c.name.includes(pattern) &&
-        (searchingDeath || !DEATH_CLIP_MARKERS.some((marker) => c.name.includes(marker)))
-    );
-    if (hit) return hit.clip;
-  }
-  return null;
+function pickClip(
+  clips: THREE.AnimationClip[],
+  slot: PlayerAnimSlot
+): THREE.AnimationClip | null {
+  const spec = PLAYER_ANIM_MATCH[slot];
+  const name = pickBestClipName(
+    clips.map((c) => c.name || '(unnamed)'),
+    spec.keys,
+    { exclude: spec.exclude, allowDeath: slot === 'die' }
+  );
+  if (!name) return null;
+  return clips.find((c) => (c.name || '(unnamed)') === name) ?? null;
 }
 
 /** Hide collision / preview meshes so only one visible skinned body remains. */
@@ -124,7 +114,7 @@ export class ThreeCharacter {
   private upperMixer: THREE.AnimationMixer | null = null;
   private upperActions = new Map<string, THREE.AnimationAction>();
   private currentUpper = '';
-  private blendSec = 0.12;
+  private blendSec = 0.18;
   /** Map-authored custom moves — bound at load, played by CustomMoveDef.id. */
   private customMoveDefs: CustomMoveDef[] = [];
   private customMoveActions = new Map<string, THREE.AnimationAction>();
@@ -234,41 +224,63 @@ export class ThreeCharacter {
       this.mixer = new THREE.AnimationMixer(scene);
       const byName = new Map(animations.map((c) => [c.name || '(unnamed)', c]));
 
-      const authored =
+      const authoredRaw =
         entity?.playerAnims && Object.keys(entity.playerAnims).length > 0
           ? entity.playerAnims
           : suggestPlayerBindings(clipNames);
+      const authored = sanitizePlayerBindings(authoredRaw, clipNames);
       this.bindings = authored;
 
-      const bindSlot = (slot: PlayerAnimSlot, fallbackPatterns: string[], loop = true) => {
+      const boundClipUuids = new Set<string>();
+      const looksLikeIdleWalkRun = (name: string) =>
+        name === authored.idle || name === authored.walk || name === authored.run;
+
+      const bindSlot = (slot: PlayerAnimSlot, loop = true, optional = false) => {
         if (!this.mixer) return;
-        const clipName = authored[slot];
+        let clipName = authored[slot];
+        // Stale auto-bind stuffed Idle into slide/land/flip — that shares one
+        // mixer action with locomotion and hitch-restarts Run after the burst.
+        if (
+          clipName &&
+          (slot === 'slide' || slot === 'flip' || slot === 'land' || slot === 'crouch') &&
+          looksLikeIdleWalkRun(clipName)
+        ) {
+          clipName = undefined;
+        }
+        if (slot === 'slide' && clipName && !/slid/i.test(clipName)) clipName = undefined;
+        if (slot === 'flip' && clipName && !/flip/i.test(clipName)) clipName = undefined;
         let clip = clipName ? byName.get(clipName) : undefined;
-        if (!clip) clip = pickClip(animations, fallbackPatterns) ?? undefined;
-        if (!clip && animations[0]) clip = animations[0];
+        if (!clip) clip = pickClip(animations, slot) ?? undefined;
+        if (!clip && !optional && animations[0]) clip = animations[0];
         if (!clip) return;
-        const action = this.mixer.clipAction(clip);
+        let clipToUse = clip;
+        if (boundClipUuids.has(clip.uuid)) {
+          clipToUse = clip.clone();
+          clipToUse.name = `${clip.name}__${slot}`;
+        }
+        boundClipUuids.add(clip.uuid);
+        const action = this.mixer.clipAction(clipToUse);
         action.enabled = true;
         action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
         action.clampWhenFinished = !loop;
         this.actions.set(slot, action);
       };
 
-      bindSlot('idle', ['idle', 'stand', 'breath']);
-      bindSlot('walk', ['walk', 'walking']);
-      bindSlot('run', ['run', 'sprint', 'running']);
-      bindSlot('jump', ['jump', 'hop'], false);
-      bindSlot('fall', ['fall', 'air', 'falling']);
-      bindSlot('land', ['land', 'landing'], false);
-      bindSlot('crouch', ['crouch', 'sneak', 'duck']);
-      bindSlot('slide', ['slide', 'sliding', 'slid']);
-      bindSlot('flip', ['flip', 'backflip', 'back_flip', 'back flip'], false);
-      bindSlot('strafe_left', ['left', 'strafe']);
-      bindSlot('strafe_right', ['right', 'strafe']);
-      bindSlot('back', ['back', 'backward']);
-      bindSlot('attack', ['attack', 'slash', 'swing', 'shoot', 'fire', 'punch', 'hit'], false);
-      bindSlot('punch', ['punch', 'hit', 'jab', 'melee'], false);
-      bindSlot('die', ['die', 'death', 'dead'], false);
+      bindSlot('idle');
+      bindSlot('walk');
+      bindSlot('run');
+      bindSlot('jump', false);
+      bindSlot('fall');
+      bindSlot('land', false, true);
+      bindSlot('crouch', true, true);
+      bindSlot('slide', true, true);
+      bindSlot('flip', false, true);
+      bindSlot('strafe_left', true, true);
+      bindSlot('strafe_right', true, true);
+      bindSlot('back', true, true);
+      bindSlot('attack', false, true);
+      bindSlot('punch', false, true);
+      bindSlot('die', false, true);
 
       this.upperMixer = new THREE.AnimationMixer(scene);
       const bindUpperSlot = (slot: 'reload' | 'aim' | 'equip', loop: boolean) => {
@@ -328,11 +340,15 @@ export class ThreeCharacter {
     if (name === this.current) return;
     const next = this.actions.get(name)!;
     const prev = this.actions.get(this.current);
-    if (prev) prev.fadeOut(this.blendSec);
     next.reset();
     next.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
     next.clampWhenFinished = !loop;
-    next.fadeIn(this.blendSec).play();
+    const blend =
+      this.current === 'slide' || this.current === 'flip' || name === 'slide' || name === 'flip'
+        ? Math.max(this.blendSec, 0.22)
+        : this.blendSec;
+    if (prev) prev.fadeOut(blend);
+    next.fadeIn(blend).play();
     this.current = name;
   }
 

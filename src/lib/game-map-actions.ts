@@ -320,6 +320,37 @@ export async function deleteCloudMap(mapId: string, force = false): Promise<{ ok
 }
 
 /**
+ * Remove every cloud copy of a map (same local id, mongo id, or name in this
+ * mode). Needed because a map can exist as several GameMap rows — e.g. the
+ * Observation Deck seed script inserts with no localId, then the editor
+ * publishes another row with a localId. Deleting only one left the other
+ * for hydrateCloudMapsIntoLocal to restore on the next mode-open.
+ */
+export async function deleteCloudMapsMatching(input: {
+  mode: string;
+  localId: string;
+  name: string;
+}): Promise<{ deleted: number; names: string[] }> {
+  await requireStaff();
+  const mode = normalizeKilrunMode(input.mode);
+  const localId = input.localId.trim();
+  const name = input.name.trim();
+  const or: Array<{ localId: string } | { id: string } | { name: string }> = [];
+  if (localId) or.push({ localId });
+  if (/^[a-f0-9]{24}$/i.test(localId)) or.push({ id: localId });
+  if (name) or.push({ name });
+  if (!or.length) return { deleted: 0, names: [] };
+
+  const rows = await prisma.gameMap.findMany({ where: { mode, OR: or } });
+  if (!rows.length) return { deleted: 0, names: [] };
+
+  await prisma.gameMap.deleteMany({
+    where: { id: { in: rows.map((r) => r.id) } },
+  });
+  return { deleted: rows.length, names: [...new Set(rows.map((r) => r.name))] };
+}
+
+/**
  * Duplicate a cloud map into a new editable cloud row (co-edit precursor).
  * Returns the new map id; client can hydrate locally via listCloudMapDocuments.
  */

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { TpsCameraSettings } from '../tps/tps-view-settings';
 import { DEFAULT_TPS_VIEW } from '../tps/tps-view-settings';
 import { disposeRendererHard } from './dispose-renderer';
+import { createBloomComposer } from './bloom-composer';
 
 export interface ThreeWorld {
   renderer: THREE.WebGLRenderer;
@@ -63,6 +64,7 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
   scene.add(ambient);
 
   const clock = new THREE.Clock();
+  const bloom = createBloomComposer(renderer, scene, camera);
 
   const setSize = (w: number, h: number) => {
     const width = Math.max(1, w);
@@ -70,6 +72,7 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     renderer.setSize(width, height, false);
+    bloom.setSize(width, height);
   };
 
   setSize(host.clientWidth, host.clientHeight);
@@ -85,9 +88,10 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
     sun,
     hemi,
     setSize,
-    render: () => renderer.render(scene, camera),
+    render: () => bloom.render(),
     destroy: () => {
       window.removeEventListener('resize', onResize);
+      bloom.dispose();
       disposeRendererHard(renderer);
       if (renderer.domElement.parentElement === host) {
         host.removeChild(renderer.domElement);

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { getEntityWarnings, scrubDanglingReferences } from './map-document';
+import {
+  getEntityWarnings,
+  sanitizePlayerBindings,
+  scrubDanglingReferences,
+  suggestPlayerBindings,
+} from './map-document';
 import type { EditorEntity } from './map-document';
 
 function stub(id: string, over: Partial<EditorEntity> = {}): EditorEntity {
@@ -172,5 +177,57 @@ describe('getEntityWarnings', () => {
       },
     });
     expect(getEntityWarnings(button, [button, door])).toEqual([]);
+  });
+});
+
+const PACK_CLIPS = [
+  'A_Poses',
+  'Attack_hand_1_(left)',
+  'Attack_hand_2_(right)',
+  'Attack_heavy_hand_(right)',
+  'Damage_body',
+  'Death_1_(idle)',
+  'Idle',
+  'Jump idle end',
+  'Jump idle middle',
+  'Jump idle start',
+  'Jump run end',
+  'Jump run middle',
+  'Jump run start',
+  'Run Boost',
+  'Run',
+  'Walk',
+  'Win',
+];
+
+describe('suggestPlayerBindings', () => {
+  it('binds pack Idle/Walk/Run instead of Jump * or Death * substring hits', () => {
+    const b = suggestPlayerBindings(PACK_CLIPS);
+    expect(b.idle).toBe('Idle');
+    expect(b.walk).toBe('Walk');
+    expect(b.run).toBe('Run');
+    expect(b.jump).toBe('Jump run start');
+    expect(b.slide).toBeUndefined();
+    expect(b.flip).toBeUndefined();
+    expect(b.strafe_left).toBeUndefined();
+  });
+
+  it('does not bind back to a backflip clip', () => {
+    const b = suggestPlayerBindings([...PACK_CLIPS, 'Backflip', 'Slide']);
+    expect(b.flip).toBe('Backflip');
+    expect(b.slide).toBe('Slide');
+    expect(b.back).not.toBe('Backflip');
+    expect(b.run).toBe('Run');
+  });
+
+  it('sanitizes stale Jump-run bindings stuffed into the run slot', () => {
+    const b = sanitizePlayerBindings(
+      { idle: 'Jump idle end', run: 'Jump run end', slide: 'Idle', flip: 'Walk' },
+      PACK_CLIPS
+    );
+    expect(b.idle).toBe('Idle');
+    expect(b.run).toBe('Run');
+    expect(b.slide).toBeUndefined();
+    expect(b.flip).toBeUndefined();
   });
 });

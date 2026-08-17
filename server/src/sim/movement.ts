@@ -20,6 +20,10 @@ import {
   JUMP_ENERGY_COST,
   JUMP_PAD_BOOST,
   SLIDE_ENERGY_COST,
+  SLIDE_DURATION_MS,
+  SLIDE_COOLDOWN_MS,
+  SLIDE_HOLD_COAST_MS,
+  SLIDE_HOLD_SNAP_AFTER_MS,
   JUMP_VELOCITY,
   LAND_SNAP_FAST,
   LAND_SNAP_SLOW,
@@ -169,6 +173,8 @@ export interface PlayerSimScratch {
   slideMs: number;
   /** Remaining ms before a new slide can start. */
   slideCooldownMs: number;
+  /** How long the current slide has been held (for tap vs hold coast). */
+  slideHeldMs: number;
   /** Edge-detects the crouch button so holding it doesn't retrigger every tick. */
   wasCrouchHeld: boolean;
   /** Edge-detects the dedicated slide key (see PlayerInput.slidePressed). */
@@ -204,6 +210,7 @@ export function createSimScratch(): PlayerSimScratch {
     supportPlatformId: null,
     slideMs: 0,
     slideCooldownMs: 0,
+    slideHeldMs: 0,
     wasCrouchHeld: false,
     wasSlideKeyHeld: false,
     flipMs: 0,
@@ -381,14 +388,26 @@ export function applyMovement(
   // already had (momentum carries into the air).
   const effSlideEnabled = physOpts?.slideEnabled ?? true;
   const effSlideMult = physOpts?.slideMult ?? 2.2;
-  const effSlideDurationMs = physOpts?.slideDurationMs ?? 600;
-  const effSlideCooldownMs = physOpts?.slideCooldownMs ?? 1000;
+  const effSlideDurationMs = physOpts?.slideDurationMs ?? SLIDE_DURATION_MS;
+  const effSlideCooldownMs = physOpts?.slideCooldownMs ?? SLIDE_COOLDOWN_MS;
   const crouchKeyEdge = !!input.crouch && !scratch.wasCrouchHeld;
   scratch.wasCrouchHeld = !!input.crouch;
   const slideKeyEdge = !!input.slidePressed && !scratch.wasSlideKeyHeld;
   scratch.wasSlideKeyHeld = !!input.slidePressed;
   const slideTriggered = slideKeyEdge || (crouchKeyEdge && input.sprint);
-  if (
+  const holdingSlide = !!(input.slidePressed || input.crouch);
+  const slideCancel =
+    scratch.slideMs > 0 &&
+    (input.jumpPressed ||
+      ((input.flipPressed ?? false) && !scratch.wasFlipHeld) ||
+      wishMag < 0.15 ||
+      scratch.exhausted);
+  if (slideCancel) {
+    scratch.slideMs = 0;
+    scratch.slideHeldMs = 0;
+    scratch.slideCooldownMs = effSlideCooldownMs;
+    player.slideCooldownEndsAt = Date.now() + effSlideCooldownMs;
+  } else if (
     effSlideEnabled &&
     slideTriggered &&
     grounded &&
@@ -399,17 +418,27 @@ export function applyMovement(
     player.energy >= SLIDE_ENERGY_COST
   ) {
     scratch.slideMs = effSlideDurationMs;
+    scratch.slideHeldMs = 0;
     player.energy = Math.max(0, player.energy - SLIDE_ENERGY_COST);
   }
   player.isSliding = scratch.slideMs > 0;
   if (scratch.slideMs > 0) {
     maxSpeed = baseMax * effSlideMult;
-    scratch.slideMs = Math.max(0, scratch.slideMs - dtSeconds * 1000);
-    if (scratch.slideMs <= 0) {
-      scratch.slideCooldownMs = effSlideCooldownMs;
-      player.slideCooldownEndsAt = Date.now() + effSlideCooldownMs;
+    if (holdingSlide) {
+      scratch.slideHeldMs += dtSeconds * 1000;
+    } else {
+      if (scratch.slideHeldMs > SLIDE_HOLD_SNAP_AFTER_MS) {
+        scratch.slideMs = Math.min(scratch.slideMs, SLIDE_HOLD_COAST_MS);
+      }
+      scratch.slideHeldMs = 0;
+      scratch.slideMs = Math.max(0, scratch.slideMs - dtSeconds * 1000);
+      if (scratch.slideMs <= 0) {
+        scratch.slideCooldownMs = effSlideCooldownMs;
+        player.slideCooldownEndsAt = Date.now() + effSlideCooldownMs;
+      }
     }
   } else if (scratch.slideCooldownMs > 0) {
+    scratch.slideHeldMs = 0;
     scratch.slideCooldownMs = Math.max(0, scratch.slideCooldownMs - dtSeconds * 1000);
   }
 

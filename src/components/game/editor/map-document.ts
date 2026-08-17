@@ -290,7 +290,7 @@ export const PLAYER_ANIM_SLOTS: { id: PlayerAnimSlot; label: string; hint?: stri
   { id: 'fall', label: 'Fall / Air', hint: 'In air, not jumping up' },
   { id: 'land', label: 'Land', hint: 'Touching down after a fall' },
   { id: 'crouch', label: 'Crouch', hint: 'Ctrl / C held' },
-  { id: 'slide', label: 'Slide', hint: 'Crouch while sprinting (CombatSettings slideEnabled)' },
+  { id: 'slide', label: 'Slide', hint: 'Slide key / crouch while sprinting' },
   { id: 'flip', label: 'Back Flip', hint: 'V key — grounded acrobatic hop, costs energy' },
   { id: 'strafe_left', label: 'Strafe Left (A)' },
   { id: 'strafe_right', label: 'Strafe Right (D)' },
@@ -347,42 +347,148 @@ export interface PlayerAuthoredClip {
   tracks: PlayerAuthoredTrack[];
 }
 
+const DEATH_CLIP_MARKERS = ['death', 'dead'];
+
+/** Per-slot fuzzy match keys + names to skip so "Jump run end" cannot steal Run. */
+export const PLAYER_ANIM_MATCH: Record<
+  PlayerAnimSlot,
+  { keys: string[]; exclude?: string[] }
+> = {
+  idle: {
+    keys: ['idle', 'stand', 'breath'],
+    exclude: ['jump', 'dance', 'win', 'attack', 'damage', 'fight'],
+  },
+  walk: { keys: ['walk', 'walking'], exclude: ['jump', 'attack', 'dance'] },
+  run: {
+    keys: ['run', 'sprint', 'running'],
+    exclude: ['jump', 'boost', 'slide', 'start', 'end', 'middle'],
+  },
+  jump: { keys: ['jump', 'hop', 'leap'], exclude: ['end', 'middle'] },
+  fall: { keys: ['fall', 'falling', 'air'], exclude: ['idle', 'attack'] },
+  land: { keys: ['land', 'landing'] },
+  crouch: { keys: ['crouch', 'sneak', 'duck'] },
+  slide: { keys: ['slide', 'sliding', 'slid'], exclude: ['strafe'] },
+  flip: { keys: ['flip', 'backflip', 'back_flip', 'back flip'] },
+  strafe_left: {
+    keys: ['strafe_l', 'strafe left', 'left'],
+    exclude: ['attack', 'hand', 'punch', 'damage'],
+  },
+  strafe_right: {
+    keys: ['strafe_r', 'strafe right', 'right'],
+    exclude: ['attack', 'hand', 'punch', 'damage', 'heavy'],
+  },
+  back: { keys: ['back', 'backward', 'reverse'], exclude: ['flip'] },
+  attack: { keys: ['attack', 'slash', 'swing', 'shoot', 'fire'] },
+  punch: { keys: ['punch', 'jab', 'melee', 'hit'] },
+  die: { keys: ['die', 'death', 'dead', 'elim'] },
+  reload: { keys: ['reload'] },
+  aim: { keys: ['aim', 'ads'] },
+  equip: { keys: ['equip', 'draw'] },
+};
+
+/**
+ * Score-based clip picker. Prefers exact / whole-word hits and skips excluded
+ * substrings so pack names like "Jump run end" do not bind as the Run slot.
+ */
+export function pickBestClipName(
+  clips: string[],
+  keys: string[],
+  opts?: { exclude?: string[]; allowDeath?: boolean }
+): string | undefined {
+  if (!clips.length || !keys.length) return undefined;
+  const exclude = (opts?.exclude ?? []).map((e) => e.toLowerCase());
+  const keysLower = keys.map((k) => k.toLowerCase()).filter(Boolean);
+  const allowDeath =
+    opts?.allowDeath ?? keysLower.some((k) => DEATH_CLIP_MARKERS.includes(k) || k === 'die');
+
+  let bestName: string | undefined;
+  let bestScore = -1;
+
+  for (const raw of clips) {
+    const l = raw.toLowerCase();
+    if (!allowDeath && DEATH_CLIP_MARKERS.some((m) => l.includes(m))) continue;
+    if (exclude.some((e) => l.includes(e))) continue;
+
+    for (let i = 0; i < keysLower.length; i++) {
+      const key = keysLower[i]!;
+      let score = -1;
+      if (l === key) {
+        score = 10000 - i;
+      } else {
+        const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const word = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`);
+        if (word.test(l)) score = 8000 - i * 10 - l.length;
+        else if (l.includes(key)) score = 1000 - i * 10 - l.length;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestName = raw;
+      }
+    }
+  }
+  return bestName;
+}
+
 /** Fuzzy-match clip names into locomotion / life slots. */
 export function suggestPlayerBindings(clips: string[]): PlayerAnimBindings {
   if (!clips.length) return {};
-  const lower = clips.map((c) => ({ c, l: c.toLowerCase() }));
-  // Pack clips like "Death_1_(idle)" contain "idle" as a substring and can
-  // sit before the real "Idle" clip — without this exclusion every other
-  // slot (idle/walk/run/...) can accidentally bind to a death pose. Only the
-  // 'die' lookup itself should ever match a death/dead-labeled clip.
-  const DEATH_MARKERS = ['death', 'dead'];
-  const find = (...keys: string[]) => {
-    const searchingDeath = keys.some((k) => DEATH_MARKERS.includes(k) || k === 'die');
-    return lower.find(
-      (x) =>
-        (searchingDeath || !DEATH_MARKERS.some((marker) => x.l.includes(marker))) &&
-        keys.some((k) => x.l.includes(k))
-    )?.c;
+  const pick = (slot: PlayerAnimSlot) => {
+    const spec = PLAYER_ANIM_MATCH[slot];
+    return pickBestClipName(clips, spec.keys, {
+      exclude: spec.exclude,
+      allowDeath: slot === 'die',
+    });
   };
-  const idle = find('idle', 'stand', 'breath') ?? clips[0];
-  const walk = find('walk', 'walking') ?? find('run') ?? clips[1] ?? clips[0];
+  const idle = pick('idle') ?? clips[0];
+  const walk = pick('walk') ?? pick('run') ?? clips[1] ?? clips[0];
+  const jump = pick('jump') ?? idle;
   return {
     idle,
     walk,
-    run: find('run', 'sprint', 'running') ?? walk,
-    jump: find('jump', 'hop', 'leap') ?? idle,
-    fall: find('fall', 'air', 'falling') ?? find('jump') ?? idle,
-    land: find('land', 'landing') ?? idle,
-    crouch: find('crouch', 'sneak', 'duck') ?? idle,
-    slide: find('slide', 'sliding', 'slid') ?? find('crouch', 'sneak', 'duck') ?? idle,
-    flip: find('flip', 'backflip', 'back_flip', 'back flip'),
-    strafe_left: find('left', 'strafe_l', 'strafe left') ?? walk,
-    strafe_right: find('right', 'strafe_r', 'strafe right') ?? walk,
-    back: find('back', 'backward', 'reverse') ?? walk,
-    attack: find('attack', 'slash', 'swing', 'shoot', 'fire', 'punch', 'hit') ?? idle,
-    punch: find('punch', 'hit', 'jab', 'melee') ?? find('attack', 'slash') ?? idle,
-    die: find('die', 'death', 'dead', 'elim') ?? idle,
+    run: pick('run') ?? walk,
+    jump,
+    fall: pick('fall') ?? jump,
+    land: pick('land'),
+    crouch: pick('crouch'),
+    // Never fall back to idle/crouch — sharing that clip with the mixer
+    // (and LoopOnce land/flip) is what made sprint hitch after slide/flip.
+    slide: pick('slide'),
+    flip: pick('flip'),
+    strafe_left: pick('strafe_left'),
+    strafe_right: pick('strafe_right'),
+    back: pick('back'),
+    attack: pick('attack') ?? pick('punch') ?? idle,
+    punch: pick('punch') ?? pick('attack') ?? idle,
+    die: pick('die') ?? idle,
   };
+}
+
+/** Fix stale auto-binds (Jump run end as Run, Idle stuffed into Slide, etc.). */
+export function sanitizePlayerBindings(
+  bindings: PlayerAnimBindings,
+  clipNames: string[]
+): PlayerAnimBindings {
+  const suggested = suggestPlayerBindings(clipNames);
+  const next: PlayerAnimBindings = { ...bindings };
+  (['idle', 'walk', 'run', 'jump'] as const).forEach((slot) => {
+    const name = next[slot];
+    const spec = PLAYER_ANIM_MATCH[slot];
+    if (!name) {
+      if (suggested[slot]) next[slot] = suggested[slot];
+      return;
+    }
+    const l = name.toLowerCase();
+    if (spec.exclude?.some((e) => l.includes(e)) && suggested[slot]) {
+      next[slot] = suggested[slot];
+    }
+  });
+  if (next.slide && !/slid/i.test(next.slide)) delete next.slide;
+  if (next.flip && !/flip/i.test(next.flip)) delete next.flip;
+  if (next.back && /flip/i.test(next.back)) {
+    if (suggested.back) next.back = suggested.back;
+    else delete next.back;
+  }
+  return next;
 }
 
 /** First player avatar entity on the map (if any). */
@@ -643,8 +749,10 @@ export interface EntityGlow {
   enabled: boolean;
   /** Emissive glow color (hex, e.g. '#00f0ff') */
   color?: string;
-  /** Emissive intensity multiplier (0.1 - 5.0+, default 1.5) */
+  /** Surface brightness (0.1–3, default 1). How lit the mesh itself looks. */
   intensity?: number;
+  /** Halo / bloom amount (0–1, default 0.35). Bleed around the mesh, independent of brightness. */
+  bloom?: number;
   /** Dynamic pulse animation mode */
   pulse?: GlowPulseMode;
   /** Pulse speed in Hz (cycles per second, default 1.0) */
@@ -663,7 +771,8 @@ export function defaultEntityGlow(color = '#00f0ff'): EntityGlow {
   return {
     enabled: false,
     color,
-    intensity: 1.5,
+    intensity: 1.0,
+    bloom: 0.35,
     pulse: 'none',
     pulseSpeed: 1.0,
     pulseMin: 0.25,
@@ -1102,8 +1211,8 @@ export const DEFAULT_COMBAT_SETTINGS: CombatSettings = {
   jumpCutMult: 0.5,
   slideEnabled: true,
   slideMult: 2.2,
-  slideDurationMs: 600,
-  slideCooldownMs: 1000,
+  slideDurationMs: 1800,
+  slideCooldownMs: 800,
   wallJumpEnabled: false,
   wallJumpHorizVel: 5,
   wallJumpVertVel: 9,
