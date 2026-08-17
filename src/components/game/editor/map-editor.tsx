@@ -54,6 +54,9 @@ import {
   MousePointer2,
   Paintbrush,
   Magnet,
+  FlipHorizontal,
+  FlipVertical,
+  RotateCw,
   PaintBucket,
   Settings2,
   Hammer,
@@ -137,11 +140,14 @@ import {
 import {
   defaultSizeForHammer,
   HAMMER_PRIMITIVES,
+  hollowHammerCollisionPads,
   loadStickyHammerShape,
   saveStickyHammerShape,
 } from './hammer-shapes';
 import { TextureAtlasPicker } from './texture-atlas-picker';
+import { PLAY_TEST_MESH_BAKE_OPTS } from './play-test-bake';
 import { worldScaleToUvRepeat } from './editor-mesh';
+import type { SelectionTransformOp } from './selection-transform';
 import { KILRUN_MODE_INFO } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
 import {
@@ -218,6 +224,7 @@ import {
 } from './prefab-storage';
 import { setLastPrefabScale } from './prefab-defaults';
 import { formatValidationSummary, validateMapForPublish } from './map-validate';
+import { MAX_MESH_COLLISION_PADS } from './mesh-voxelize';
 import { isCsgDeleteResult, isCsgEligible, subtractEntities, unionEntities } from './csg-tools';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
@@ -359,7 +366,7 @@ export function MapEditor({
   /** "Play Test (Live)" — real KilrunEngine game client (HUD/chat/admin/skill
    * menu) against a private practice room, instead of the lightweight local
    * MapPlayPreview renderer. Requires the Colyseus game server (server/)
-   * running locally. Deathrun only for now. */
+   * running locally. Horde starts immediately; Deathrun/Competitive pick a role. */
   const [playTestLive, setPlayTestLive] = useState(false);
   /** Which start function the role-prompt's confirm buttons should call. */
   const [playTestPromptTarget, setPlayTestPromptTarget] = useState<'preview' | 'live'>('preview');
@@ -440,6 +447,9 @@ export function MapEditor({
   const [bakingMeshId, setBakingMeshId] = useState<string | null>(null);
   const [bakingAllMesh, setBakingAllMesh] = useState(false);
   const snapMagnetBtnRef = useRef<HTMLButtonElement>(null);
+  const rotateMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const [rotateMenuOpen, setRotateMenuOpen] = useState(false);
+  const [rotateMenuAnchorRect, setRotateMenuAnchorRect] = useState<DOMRect | null>(null);
   const prefabSnapBtnRef = useRef<HTMLButtonElement>(null);
   /** Entities frozen via per-object Stop in the editor viewport (editor-only, not saved to the map). */
   const [stoppedAnimIds, setStoppedAnimIds] = useState<Set<string>>(new Set());
@@ -510,7 +520,12 @@ export function MapEditor({
   const historyTimer = useRef<number | null>(null);
   const scheduleHistory = () => {
     if (skipHistory.current) return;
-    if (!historyAnchor.current) historyAnchor.current = structuredClone(docRef.current);
+    if (!historyAnchor.current) {
+      historyAnchor.current = structuredClone(docRef.current);
+      redoStack.current = [];
+      setCanRedo(false);
+      setCanUndo(true);
+    }
     if (historyTimer.current) window.clearTimeout(historyTimer.current);
     historyTimer.current = window.setTimeout(() => {
       if (historyAnchor.current) {
@@ -524,7 +539,31 @@ export function MapEditor({
     }, 400);
   };
 
+  const flushHistory = () => {
+    if (historyTimer.current) {
+      window.clearTimeout(historyTimer.current);
+      historyTimer.current = null;
+    }
+    if (historyAnchor.current) {
+      undoStack.current.push(historyAnchor.current);
+      if (undoStack.current.length > 60) undoStack.current.shift();
+      historyAnchor.current = null;
+      redoStack.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+    }
+  };
+
+  const pullViewportDoc = () => {
+    const live = apiRef.current?.getDoc();
+    if (!live) return;
+    const merged = { ...live, environment: ensureEnvironment(live) };
+    docRef.current = merged;
+    setDoc(merged);
+  };
+
   const undo = () => {
+    flushHistory();
     const prev = undoStack.current.pop();
     if (!prev) return;
     const current = structuredClone(apiRef.current?.getDoc() ?? docRef.current);
@@ -539,6 +578,7 @@ export function MapEditor({
   };
 
   const redo = () => {
+    flushHistory();
     const next = redoStack.current.pop();
     if (!next) return;
     const current = structuredClone(apiRef.current?.getDoc() ?? docRef.current);
@@ -960,13 +1000,13 @@ export function MapEditor({
   // Autosave every 30s while dirty — creator engine must not lose work
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (playTest) return;
+      if (playTest || playTestLive) return;
       if (snapshotMapDoc(workingDoc()) === lastSavedRef.current) return;
       persist({ quiet: true });
     }, 30_000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapId, playTest]);
+  }, [mapId, playTest, playTestLive]);
 
   useEffect(() => {
     apiRef.current?.setBrush(brush);
@@ -1078,9 +1118,18 @@ export function MapEditor({
       // Placement / edit shortcuts off while free-flying
       if (freeFly) return;
 
-      if (e.key === 'w' || e.key === 'W') setMode('translate');
-      if (e.key === 'e' || e.key === 'E') setMode('rotate');
-      if (e.key === 'r' || e.key === 'R') setMode('scale');
+      if (e.key === 'w' || e.key === 'W') {
+        setEditTool('select');
+        setMode('translate');
+      }
+      if (e.key === 'e' || e.key === 'E') {
+        setEditTool('select');
+        setMode('rotate');
+      }
+      if (e.key === 'r' || e.key === 'R') {
+        setEditTool('select');
+        setMode('scale');
+      }
       if (e.key === 'v' || e.key === 'V') {
         setEditTool('select');
         apiRef.current?.clearPendingPlace();
@@ -1176,10 +1225,7 @@ export function MapEditor({
     scheduleHistory();
     setDirty(true);
     apiRef.current?.updateSelected(patch);
-    setDoc((d) => ({
-      ...d,
-      entities: d.entities.map((e) => (e.id === selectedId ? { ...e, ...patch } : e)),
-    }));
+    pullViewportDoc();
     if (patch.scale && selected?.model) {
       setLastPrefabScale(selected.model, patch.scale as [number, number, number]);
     }
@@ -1190,13 +1236,28 @@ export function MapEditor({
     const base = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
     if (!base.length) return;
     scheduleHistory();
-    setDoc((d) => {
-      const ids = new Set(expandIdsWithGroups(d.entities, base));
-      const entities = d.entities.map((e) => (ids.has(e.id) ? { ...e, ...patch } : e));
-      const next = { ...d, entities };
-      apiRef.current?.setDoc(next);
-      return next;
-    });
+    const live = apiRef.current?.getDoc() ?? docRef.current;
+    const ids = new Set(expandIdsWithGroups(live.entities, base));
+    const next = {
+      ...live,
+      entities: live.entities.map((e) => (ids.has(e.id) ? { ...e, ...patch } : e)),
+      environment: ensureEnvironment(live),
+    };
+    apiRef.current?.setDoc(next);
+    docRef.current = next;
+    setDoc(next);
+    setDirty(true);
+  };
+
+  const mutateLiveDoc = (fn: (d: MapDocument) => MapDocument) => {
+    scheduleHistory();
+    setDirty(true);
+    const live = structuredClone(apiRef.current?.getDoc() ?? docRef.current);
+    const mutated = fn(live);
+    const next = { ...mutated, environment: ensureEnvironment(mutated) };
+    apiRef.current?.setDoc(next);
+    docRef.current = next;
+    setDoc(next);
   };
 
   const groupSelection = () => {
@@ -1217,19 +1278,18 @@ export function MapEditor({
   const ungroupSelection = () => {
     const base = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
     if (!base.length) return;
-    scheduleHistory();
-    setDoc((d) => {
+    mutateLiveDoc((d) => {
       const ids = new Set(expandIdsWithGroups(d.entities, base));
       const anyGrouped = d.entities.some((e) => ids.has(e.id) && e.groupId);
       if (!anyGrouped) return d;
-      const entities = d.entities.map((e) => {
-        if (!ids.has(e.id) || !e.groupId) return e;
-        const { groupId: _removed, ...rest } = e;
-        return rest;
-      });
-      const next = { ...d, entities };
-      apiRef.current?.setDoc(next);
-      return next;
+      return {
+        ...d,
+        entities: d.entities.map((e) => {
+          if (!ids.has(e.id) || !e.groupId) return e;
+          const { groupId: _removed, ...rest } = e;
+          return rest;
+        }),
+      };
     });
     toast({ title: 'Ungrouped', description: 'Objects are independent again.' });
   };
@@ -1262,9 +1322,8 @@ export function MapEditor({
         toast({ title: 'Subtract failed', description: result.error, variant: 'destructive' });
         return;
       }
-      scheduleHistory();
       const deleted = isCsgDeleteResult(result);
-      setDoc((d) => {
+      mutateLiveDoc((d) => {
         let entities = d.entities.filter((e) => e.id !== cutter.id);
         entities = deleted
           ? entities.filter((e) => e.id !== base.id)
@@ -1287,9 +1346,7 @@ export function MapEditor({
                   }
                 : e
             );
-        const next = { ...d, entities };
-        apiRef.current?.setDoc(next);
-        return next;
+        return { ...d, entities };
       });
       const nextSelected = deleted ? null : base.id;
       setSelectedIds([]);
@@ -1346,8 +1403,7 @@ export function MapEditor({
         return;
       }
       const newId = generateId('csg');
-      scheduleHistory();
-      setDoc((d) => {
+      mutateLiveDoc((d) => {
         const entities = d.entities.filter((e) => !selectedIds.includes(e.id));
         const merged: EditorEntity = {
           id: newId,
@@ -1365,9 +1421,7 @@ export function MapEditor({
           solid: true,
           collideMaterial: 'solid',
         };
-        const next = { ...d, entities: [...entities, merged] };
-        apiRef.current?.setDoc(next);
-        return next;
+        return { ...d, entities: [...entities, merged] };
       });
       setSelectedIds([]);
       setSelectedId(newId);
@@ -1403,15 +1457,10 @@ export function MapEditor({
   }, [doc.entities, selectionIds]);
 
   const patchEntityById = (id: string, patch: Partial<EditorEntity>) => {
-    scheduleHistory();
-    setDirty(true);
-    setDoc((d) => {
-      const entities = d.entities.map((e) => (e.id === id ? { ...e, ...patch } : e));
-      const next = { ...d, entities };
-      docRef.current = next;
-      apiRef.current?.setDoc(next);
-      return next;
-    });
+    mutateLiveDoc((d) => ({
+      ...d,
+      entities: d.entities.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    }));
     if (id === selectedId) {
       apiRef.current?.updateSelected(patch);
     }
@@ -1426,14 +1475,9 @@ export function MapEditor({
   const applyDocLayers = (
     layersOrFn: typeof doc.layers | ((prev: typeof doc.layers) => typeof doc.layers)
   ) => {
-    scheduleHistory();
-    setDirty(true);
-    setDoc((d) => {
+    mutateLiveDoc((d) => {
       const layers = typeof layersOrFn === 'function' ? layersOrFn(d.layers) : layersOrFn;
-      const next = { ...d, layers };
-      docRef.current = next;
-      apiRef.current?.setDoc(next);
-      return next;
+      return { ...d, layers };
     });
   };
 
@@ -1457,15 +1501,10 @@ export function MapEditor({
   const moveSelectionToLayer = (layerId: string) => {
     const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
     if (!ids.length) return;
-    scheduleHistory();
-    setDoc((d) => {
-      const entities = d.entities.map((e) =>
-        ids.includes(e.id) ? { ...e, layerId } : e
-      );
-      const next = { ...d, entities };
-      apiRef.current?.setDoc(next);
-      return next;
-    });
+    mutateLiveDoc((d) => ({
+      ...d,
+      entities: d.entities.map((e) => (ids.includes(e.id) ? { ...e, layerId } : e)),
+    }));
   };
 
   const addBuildLevel = () => {
@@ -1483,6 +1522,40 @@ export function MapEditor({
       return [...layers, layer];
     });
     setActiveLayerId(layer.id);
+  };
+
+  const deleteBuildLevel = (id: string) => {
+    const layers = docRef.current.layers ?? [];
+    if (layers.length <= 1) {
+      toast({
+        title: 'Keep at least one level',
+        description: 'A map always needs a Floor / Level 0 to paint onto.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const sorted = [...layers].sort((a, b) => a.order - b.order);
+    const idx = sorted.findIndex((l) => l.id === id);
+    if (idx < 0) return;
+    const fallback = sorted[idx - 1] ?? sorted[idx + 1];
+    if (!fallback) return;
+    const count = docRef.current.entities.filter((e) => e.layerId === id).length;
+    const label = sorted[idx].name || `Level ${idx}`;
+    if (
+      count > 0 &&
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        `Delete “${label}”? ${count} object${count === 1 ? '' : 's'} will move to “${fallback.name}”.`
+      )
+    ) {
+      return;
+    }
+    mutateLiveDoc((d) => ({
+      ...d,
+      layers: d.layers.filter((l) => l.id !== id),
+      entities: d.entities.map((e) => (e.layerId === id ? { ...e, layerId: fallback.id } : e)),
+    }));
+    if (activeLayerId === id) setActiveLayerId(fallback.id);
   };
 
   const armPlaceSpawn = (
@@ -1583,14 +1656,7 @@ export function MapEditor({
   };
 
   const saveShopSettings = (settings: MapShopSettings) => {
-    scheduleHistory();
-    setDirty(true);
-    setDoc((d) => {
-      const next = { ...d, shopSettings: settings };
-      docRef.current = next;
-      apiRef.current?.setDoc(next);
-      return next;
-    });
+    mutateLiveDoc((d) => ({ ...d, shopSettings: settings }));
     toast({
       title: 'Buy menu saved',
       description: `${settings.items.filter((i) => i.enabled).length} weapons · Horde & Competitive.`,
@@ -1598,53 +1664,28 @@ export function MapEditor({
   };
 
   const saveCustomMoves = (moves: import('./map-document').CustomMoveDef[]) => {
-    scheduleHistory();
-    setDirty(true);
-    setDoc((d) => {
-      const next = { ...d, customMoves: moves };
-      docRef.current = next;
-      apiRef.current?.setDoc(next);
-      return next;
-    });
+    mutateLiveDoc((d) => ({ ...d, customMoves: moves }));
   };
 
   const saveWeaponDef = (def: Partial<import('./map-document').MapWeaponDef>) => {
-    scheduleHistory();
-    setDirty(true);
-    setDoc((d) => {
-      const next = { ...d, weaponDef: { ...d.weaponDef, ...def } };
-      docRef.current = next;
-      apiRef.current?.setDoc(next);
-      return next;
-    });
+    mutateLiveDoc((d) => ({ ...d, weaponDef: { ...d.weaponDef, ...def } }));
     toast({ title: 'Weapon saved', description: 'Weapon definition saved to map.' });
   };
 
   const saveCombatSettings = (settings: Partial<import('./map-document').CombatSettings>) => {
-    scheduleHistory();
-    setDirty(true);
-    setDoc((d) => {
-      const next = { ...d, combatSettings: { ...d.combatSettings, ...settings } };
-      docRef.current = next;
-      apiRef.current?.setDoc(next);
-      return next;
-    });
+    mutateLiveDoc((d) => ({ ...d, combatSettings: { ...d.combatSettings, ...settings } }));
     toast({ title: 'Combat settings saved', description: 'Physics and combat applied to map.' });
   };
 
   const applySkinsToPlayer = (attachments: SkinAttachment[]) => {
     const player = findPlayerEntity(docRef.current);
     if (!player) return;
-    scheduleHistory();
-    setDoc((d) => {
+    mutateLiveDoc((d) => {
       const playerSkins = attachments.length > 0 ? attachments : undefined;
-      const entities = d.entities.map((e) =>
-        e.id === player.id ? { ...e, playerSkins } : e
-      );
-      const next = { ...d, entities };
-      docRef.current = next;
-      apiRef.current?.setDoc(next);
-      return next;
+      return {
+        ...d,
+        entities: d.entities.map((e) => (e.id === player.id ? { ...e, playerSkins } : e)),
+      };
     });
     toast({
       title: attachments.length > 0 ? 'Skins applied to player avatar' : 'Skins removed from player avatar',
@@ -1658,9 +1699,9 @@ export function MapEditor({
       : null);
 
   const wireTrapToButton = (trapId: string, buttonId: string) => {
-    scheduleHistory();
-    setDoc((d) => {
-      const entities = d.entities.map((e) => {
+    mutateLiveDoc((d) => ({
+      ...d,
+      entities: d.entities.map((e) => {
         if (e.id !== trapId) return e;
         const anim = ensureAnimation(e);
         return {
@@ -1672,22 +1713,13 @@ export function MapEditor({
             listenToEntityId: buttonId,
           },
         };
-      });
-      const next = { ...d, entities };
-      apiRef.current?.setDoc(next);
-      return next;
-    });
+      }),
+    }));
   };
 
   const patchEnv = (partial: Partial<typeof env>) => {
     const next = { ...env, ...partial };
-    scheduleHistory();
-    setDirty(true);
-    setDoc((d) => {
-      const updated = { ...d, environment: next };
-      docRef.current = updated;
-      return updated;
-    });
+    mutateLiveDoc((d) => ({ ...d, environment: next }));
     apiRef.current?.applyEnvironment(next);
   };
 
@@ -1715,14 +1747,7 @@ export function MapEditor({
 
   const saveTpsToMap = (settings: TpsViewSettings) => {
     const clean = sanitizeTpsView(settings);
-    scheduleHistory();
-    setDoc((d) => {
-      const next = { ...d, tpsView: clean };
-      docRef.current = next;
-      apiRef.current?.setDoc(next);
-      return next;
-    });
-    setDirty(true);
+    mutateLiveDoc((d) => ({ ...d, tpsView: clean }));
     toast({
       title: '3rd View saved to map',
       description:
@@ -1747,7 +1772,7 @@ export function MapEditor({
     // before a voxelizer accuracy fix (see mesh-voxelize.ts) always gets
     // re-fit at the current resolution instead of keeping its old, possibly
     // gappy, cached boxes forever.
-    await bakeAllSolidMeshCollision({ silent: true, force: true });
+    await bakeAllSolidMeshCollision(PLAY_TEST_MESH_BAKE_OPTS);
     // Do NOT auto-insert Player Avatar into the map — Play Test uses default
     // mannequin / existing avatar, and invents Start on a floor if needed.
     persist();
@@ -1813,14 +1838,14 @@ export function MapEditor({
 
   /** "Play Test (Live)" — same pre-play snapshot/pause/persist as startPlay,
    * but launches the real KilrunEngine against a private practice room
-   * instead of the local MapPlayPreview renderer. Deathrun only. */
+   * instead of the local MapPlayPreview renderer. */
   const startPlayLive = async () => {
     if (freeFly) apiRef.current?.setFreeFly(false);
     cameraBeforePlayRef.current = apiRef.current?.getCameraState() ?? null;
     apiRef.current?.setPaused(true);
     // Same auto-bake as startPlay — the live server reads whatever collision
     // is persisted, so it must be up to date before persist() runs.
-    await bakeAllSolidMeshCollision({ silent: true });
+    await bakeAllSolidMeshCollision(PLAY_TEST_MESH_BAKE_OPTS);
     persist();
     setPlayTestLive(true);
   };
@@ -2083,7 +2108,11 @@ export function MapEditor({
           className="ml-2 bg-black/40 border border-white/10 rounded px-2 py-1 text-sm w-40 sm:w-56 shrink-0"
           value={doc.name}
           onChange={(e) => {
-            setDoc((d) => ({ ...d, name: e.target.value }));
+            const name = e.target.value;
+            const live = apiRef.current?.getDoc() ?? docRef.current;
+            const next = { ...live, name };
+            docRef.current = next;
+            setDoc(next);
             setDirty(true);
           }}
         />
@@ -2144,20 +2173,23 @@ export function MapEditor({
         >
           <Play className="w-4 h-4 mr-1" /> Play Test
         </Button>
-        {gameMode === 'deathrun' && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="ml-2 border-amber-500/60 text-amber-300 hover:bg-amber-500/10 shrink-0"
-            title="Real game client — HUD, chat, admin panel, skill menu. Requires the game server (server/) running locally."
-            onClick={() => {
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-2 border-amber-500/60 text-amber-300 hover:bg-amber-500/10 shrink-0"
+          title="Real game client — HUD, chat, admin panel, skill menu. Requires the game server (server/) running locally."
+          onClick={() => {
+            if (gameMode === 'deathrun' || gameMode === 'competitive') {
               setPlayTestPromptTarget('live');
               setPlayTestRolePrompt(true);
-            }}
-          >
-            <Play className="w-4 h-4 mr-1" /> Play Test (Live)
-          </Button>
-        )}
+            } else {
+              setPlayTestRole(undefined);
+              startPlayLive();
+            }
+          }}
+        >
+          <Play className="w-4 h-4 mr-1" /> Play Test (Live)
+        </Button>
         <Button
           size="sm"
           variant="secondary"
@@ -2933,6 +2965,19 @@ export function MapEditor({
                         title="Solo — hide every other level"
                       >
                         <Focus className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteBuildLevel(layer.id)}
+                        disabled={sortedLayers.length <= 1}
+                        className="w-9 h-8 rounded-md flex items-center justify-center border border-white/10 text-white/35 hover:bg-rose-500/15 hover:text-rose-200 hover:border-rose-400/30 disabled:opacity-30 disabled:hover:bg-transparent"
+                        title={
+                          sortedLayers.length <= 1
+                            ? 'Keep at least one level'
+                            : 'Delete this level (objects move to the previous level)'
+                        }
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
@@ -3973,19 +4018,13 @@ export function MapEditor({
                   {(() => {
                     const s = ensureDeathrunSettings(doc);
                     const patch = (partial: Partial<typeof s>) => {
-                      scheduleHistory();
-                      setDoc((d) => {
-                        const next = {
-                          ...d,
-                          modeSettings: {
-                            ...d.modeSettings,
-                            deathrun: { ...ensureDeathrunSettings(d), ...partial },
-                          },
-                        };
-                        docRef.current = next;
-                        apiRef.current?.setDoc(next);
-                        return next;
-                      });
+                      mutateLiveDoc((d) => ({
+                        ...d,
+                        modeSettings: {
+                          ...d.modeSettings,
+                          deathrun: { ...ensureDeathrunSettings(d), ...partial },
+                        },
+                      }));
                     };
                     return (
                       <>
@@ -4045,19 +4084,13 @@ export function MapEditor({
                   {(() => {
                     const s = ensureHordeSettings(doc);
                     const patch = (partial: Partial<typeof s>) => {
-                      scheduleHistory();
-                      setDoc((d) => {
-                        const next = {
-                          ...d,
-                          modeSettings: {
-                            ...d.modeSettings,
-                            horde: { ...ensureHordeSettings(d), ...partial },
-                          },
-                        };
-                        docRef.current = next;
-                        apiRef.current?.setDoc(next);
-                        return next;
-                      });
+                      mutateLiveDoc((d) => ({
+                        ...d,
+                        modeSettings: {
+                          ...d.modeSettings,
+                          horde: { ...ensureHordeSettings(d), ...partial },
+                        },
+                      }));
                     };
                     return (
                       <>
@@ -4129,19 +4162,13 @@ export function MapEditor({
                   {(() => {
                     const s = ensureCompetitiveSettings(doc);
                     const patch = (partial: Partial<typeof s>) => {
-                      scheduleHistory();
-                      setDoc((d) => {
-                        const next = {
-                          ...d,
-                          modeSettings: {
-                            ...d.modeSettings,
-                            competitive: { ...ensureCompetitiveSettings(d), ...partial },
-                          },
-                        };
-                        docRef.current = next;
-                        apiRef.current?.setDoc(next);
-                        return next;
-                      });
+                      mutateLiveDoc((d) => ({
+                        ...d,
+                        modeSettings: {
+                          ...d.modeSettings,
+                          competitive: { ...ensureCompetitiveSettings(d), ...partial },
+                        },
+                      }));
                     };
                     return (
                       <>
@@ -4508,13 +4535,56 @@ export function MapEditor({
               <span className="text-[9px] font-bold">SIDE</span>
             </ToolBtn>
             <div className="w-px h-6 bg-white/15 mx-1" />
-            <ToolBtn active={mode === 'translate'} onClick={() => setMode('translate')} title="Move (W)">
+            <ToolBtn
+              active={mode === 'translate'}
+              onClick={() => {
+                setEditTool('select');
+                setMode('translate');
+              }}
+              title="Move (W) — switch to Select so the gizmo can drag"
+            >
               <Move3d className="w-4 h-4" />
             </ToolBtn>
-            <ToolBtn active={mode === 'rotate'} onClick={() => setMode('rotate')} title="Rotate (E)">
-              <RotateCcw className="w-4 h-4" />
-            </ToolBtn>
-            <ToolBtn active={mode === 'scale'} onClick={() => setMode('scale')} title="Scale (R)">
+            <div className="relative">
+              <ToolBtn
+                btnRef={rotateMenuBtnRef}
+                active={mode === 'rotate' || rotateMenuOpen}
+                onClick={() => {
+                  setEditTool('select');
+                  setMode('rotate');
+                  setRotateMenuAnchorRect(rotateMenuBtnRef.current?.getBoundingClientRect() ?? null);
+                  setRotateMenuOpen((v) => !v);
+                }}
+                title="Rotate (E) — click for 90° / flip presets (works on groups)"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </ToolBtn>
+              {rotateMenuOpen && (
+                <RotatePresetPicker
+                  anchorRect={rotateMenuAnchorRect}
+                  onPick={(op) => {
+                    const ok = apiRef.current?.transformSelection(op);
+                    setRotateMenuOpen(false);
+                    toast({
+                      title: ok ? 'Rotated' : 'Select an object first',
+                      description: ok
+                        ? 'Applied to the whole selection / group.'
+                        : 'Click an unlocked object, then use Rotate again.',
+                      ...(ok ? {} : { variant: 'destructive' as const }),
+                    });
+                  }}
+                  onClose={() => setRotateMenuOpen(false)}
+                />
+              )}
+            </div>
+            <ToolBtn
+              active={mode === 'scale'}
+              onClick={() => {
+                setEditTool('select');
+                setMode('scale');
+              }}
+              title="Scale (R) — switch to Select so the gizmo can drag"
+            >
               <Maximize2 className="w-4 h-4" />
             </ToolBtn>
             <div className="w-px h-6 bg-white/15 mx-1" />
@@ -4530,10 +4600,18 @@ export function MapEditor({
                 active={snapFaceMenuOpen}
                 onClick={() => {
                   // 2+ selected: join them face-to-face (pick which side).
-                  // 0/1 selected: drop the selection onto the floor/surface below it.
+                  // 1 selected: attach to the nearest neighbor if close, else floor.
                   if (selectedIds.length >= 2) {
                     setSnapFaceAnchorRect(snapMagnetBtnRef.current?.getBoundingClientRect() ?? null);
                     setSnapFaceMenuOpen((v) => !v);
+                    return;
+                  }
+                  const attached = apiRef.current?.snapSelectionToNearestNeighbor();
+                  if (attached) {
+                    toast({
+                      title: 'Attached',
+                      description: 'Clicked onto the nearest object’s closest face.',
+                    });
                     return;
                   }
                   const ok = apiRef.current?.snapSelectedToFloor(
@@ -4542,14 +4620,14 @@ export function MapEditor({
                   toast({
                     title: ok ? 'Snapped to floor' : 'Select an object first',
                     description: ok
-                      ? 'Object sits on the floor / surface under it (not below 0).'
+                      ? 'Nothing close enough to attach — sat on the floor / surface under it.'
                       : undefined,
                   });
                 }}
                 title={
                   selectedIds.length >= 2
                     ? 'Snap (magnet) — choose which side to join'
-                    : 'Snap selection to floor top — select 2+ objects to join them side-to-side instead'
+                    : 'Attach to the nearest object (or the floor if nothing is close)'
                 }
               >
                 <Magnet className="w-4 h-4 text-emerald-300" />
@@ -4606,8 +4684,13 @@ export function MapEditor({
                   key={g}
                   type="button"
                   onClick={() => {
-                    setDoc((d) => ({ ...d, gridSize: g }));
+                    scheduleHistory();
+                    const live = apiRef.current?.getDoc() ?? docRef.current;
+                    const next = { ...live, gridSize: g };
+                    docRef.current = next;
+                    setDoc(next);
                     apiRef.current?.setGridSize(g);
+                    setDirty(true);
                   }}
                   className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${
                     doc.gridSize === g
@@ -4628,8 +4711,13 @@ export function MapEditor({
                 className="w-12 bg-black/50 border border-white/10 rounded px-1 py-0.5 text-[10px] ml-0.5"
                 onChange={(e) => {
                   const n = Math.max(0.1, Math.min(16, Number(e.target.value) || 1));
-                  setDoc((d) => ({ ...d, gridSize: n }));
+                  scheduleHistory();
+                  const live = apiRef.current?.getDoc() ?? docRef.current;
+                  const next = { ...live, gridSize: n };
+                  docRef.current = next;
+                  setDoc(next);
                   apiRef.current?.setGridSize(n);
+                  setDirty(true);
                 }}
                 title="Custom grid size"
               />
@@ -5072,6 +5160,7 @@ export function MapEditor({
                           model: HAMMER_SOLID_MODEL,
                           collisionSize: size,
                           solid: true,
+                          meshCollisionPads: hollowHammerCollisionPads(shape, size),
                         });
                       }}
                     >
@@ -5409,6 +5498,10 @@ export function MapEditor({
                                 selected.meshCollisionPads.length === 1 ? '' : 'es'
                               }.`
                             : ''}
+                          {selected.meshCollisionPads &&
+                          selected.meshCollisionPads.length >= MAX_MESH_COLLISION_PADS
+                            ? ` At the ${MAX_MESH_COLLISION_PADS}-box cap — leftover volume is merged/dropped, so thin openings can fill in. Simplify the mesh or split the prop.`
+                            : ''}
                         </p>
                         <div className="flex gap-1.5">
                           <Button
@@ -5499,7 +5592,12 @@ export function MapEditor({
                                   ...(selected.collisionSize ?? [2, 0.25, 2]),
                                 ] as [number, number, number];
                                 next[i] = Math.max(0.1, Number(e.target.value) || 0.1);
-                                patchSelected({ collisionSize: next, scale: [1, 1, 1] });
+                                const shape = (selected.primitive as HammerPrimitive) || 'box';
+                                patchSelected({
+                                  collisionSize: next,
+                                  scale: [1, 1, 1],
+                                  meshCollisionPads: hollowHammerCollisionPads(shape, next),
+                                });
                               }}
                             />
                           </label>
@@ -7315,7 +7413,8 @@ export function MapEditor({
                     onClick={() => {
                       setPlayTestRole('team_a');
                       setPlayTestRolePrompt(false);
-                      startPlay();
+                      if (playTestPromptTarget === 'live') startPlayLive();
+                      else startPlay();
                     }}
                   >
                     Team A
@@ -7326,7 +7425,8 @@ export function MapEditor({
                     onClick={() => {
                       setPlayTestRole('team_b');
                       setPlayTestRolePrompt(false);
-                      startPlay();
+                      if (playTestPromptTarget === 'live') startPlayLive();
+                      else startPlay();
                     }}
                   >
                     Team B
@@ -7443,7 +7543,8 @@ export function MapEditor({
           <PlayTestEngine
             doc={apiRef.current?.getDoc() ?? doc}
             onClose={exitPlayTestLive}
-            playTestRole={playTestRole === 'trapper' ? 'trapper' : 'runner'}
+            playTestRole={playTestRole}
+            mode={gameMode}
           />
         </div>
       )}
@@ -7573,6 +7674,144 @@ function SnapFacePicker({
             <span className="text-[10px] leading-none">Bottom</span>
           </button>
           <div />
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
+function RotatePresetPicker({
+  anchorRect,
+  onPick,
+  onClose,
+}: {
+  anchorRect: DOMRect | null;
+  onPick: (op: SelectionTransformOp) => void;
+  onClose: () => void;
+}) {
+  const btnCls =
+    'flex flex-col items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-white/85 hover:bg-cyan-500/20 hover:border-cyan-400/40 hover:text-cyan-100 active:scale-95 transition-colors';
+  const width = 288;
+  const left = anchorRect
+    ? Math.min(
+        Math.max(8, anchorRect.left + anchorRect.width / 2 - width / 2),
+        window.innerWidth - width - 8
+      )
+    : 8;
+  const bottom = anchorRect ? Math.max(8, window.innerHeight - anchorRect.top + 8) : 8;
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[9998]" onClick={onClose} />
+      <div
+        className="fixed z-[9999] w-72 rounded-xl border border-white/15 bg-slate-900/95 backdrop-blur p-3 shadow-2xl"
+        style={{ left, bottom }}
+      >
+        <p className="text-[10px] uppercase tracking-widest text-white/50 mb-1 text-center">
+          Easy rotate
+        </p>
+        <p className="text-[10px] text-white/40 mb-2.5 text-center leading-relaxed">
+          Turns the whole selection around its center — groups stay together. Drag the rings in
+          the viewport for free rotate.
+        </p>
+        <p className="text-[9px] uppercase tracking-widest text-white/35 mb-1.5">Yaw (turn)</p>
+        <div className="grid grid-cols-4 gap-1.5 mb-2.5">
+          {([0, 90, 180, 270] as const).map((deg) => (
+            <button
+              key={deg}
+              type="button"
+              className={btnCls}
+              onClick={() => onPick({ type: 'setYaw', deg })}
+              title={`Face ${deg}°`}
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span className="text-[10px] leading-none">{deg}°</span>
+            </button>
+          ))}
+        </div>
+        <p className="text-[9px] uppercase tracking-widest text-white/35 mb-1.5">Nudge 90°</p>
+        <div className="grid grid-cols-3 gap-1.5 mb-2.5">
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick({ type: 'rotateDelta', deg: [0, -90, 0] })}
+            title="Yaw −90°"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="text-[10px] leading-none">Left</span>
+          </button>
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick({ type: 'rotateDelta', deg: [0, 90, 0] })}
+            title="Yaw +90°"
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+            <span className="text-[10px] leading-none">Right</span>
+          </button>
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick({ type: 'rotateDelta', deg: [0, 180, 0] })}
+            title="Yaw 180°"
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+            <span className="text-[10px] leading-none">180</span>
+          </button>
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick({ type: 'rotateDelta', deg: [90, 0, 0] })}
+            title="Pitch +90° (tilt)"
+          >
+            <span className="text-[10px] leading-none">Pitch +</span>
+          </button>
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick({ type: 'rotateDelta', deg: [-90, 0, 0] })}
+            title="Pitch −90°"
+          >
+            <span className="text-[10px] leading-none">Pitch −</span>
+          </button>
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick({ type: 'rotateDelta', deg: [0, 0, 90] })}
+            title="Roll +90°"
+          >
+            <span className="text-[10px] leading-none">Roll</span>
+          </button>
+        </div>
+        <p className="text-[9px] uppercase tracking-widest text-white/35 mb-1.5">Flip</p>
+        <div className="grid grid-cols-3 gap-1.5">
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick({ type: 'flip', axis: 'y' })}
+            title="Flip horizontal (180° around up)"
+          >
+            <FlipHorizontal className="w-3.5 h-3.5" />
+            <span className="text-[10px] leading-none">Horiz</span>
+          </button>
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick({ type: 'flip', axis: 'x' })}
+            title="Flip vertical (180° around right)"
+          >
+            <FlipVertical className="w-3.5 h-3.5" />
+            <span className="text-[10px] leading-none">Vert</span>
+          </button>
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick({ type: 'flip', axis: 'z' })}
+            title="Flip side (180° around forward)"
+          >
+            <FlipHorizontal className="w-3.5 h-3.5 rotate-90" />
+            <span className="text-[10px] leading-none">Side</span>
+          </button>
         </div>
       </div>
     </>,

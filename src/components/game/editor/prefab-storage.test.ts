@@ -813,4 +813,55 @@ describe('mapDoc spawn / finish / hazards / bounds', () => {
     expect(cleaned.entities).toHaveLength(1);
     expect(cleaned.entities[0].id).toBe('real');
   });
+
+  it('exports checkpoint markers as top-only checkpoint pads', () => {
+    const doc = baseDoc([
+      {
+        id: 'cp1',
+        name: 'Checkpoint',
+        kind: 'checkpoint',
+        layerId: 'l1',
+        position: [2, 1, 4],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads).toHaveLength(1);
+    expect(pads[0].kind).toBe('checkpoint');
+    expect(pads[0].topOnly).toBe(true);
+    expect(pads[0].entityId).toBe('cp1');
+  });
+
+  it('exports a Y-axis spinner with a sweep AABB covering the spin plane', () => {
+    const doc = baseDoc([
+      {
+        id: 'spin1',
+        name: 'Blade',
+        kind: 'spinner',
+        layerId: 'l1',
+        position: [0, 1, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        spinHazard: {
+          enabled: true,
+          speed: 1.5,
+          axis: 'y',
+          shape: 'bar',
+          size: [4, 0.2, 0.3],
+          damageOnTouch: true,
+          damage: 25,
+          intervalMs: 400,
+        },
+      },
+    ]);
+    const hazards = mapDocToSimHazards(doc);
+    expect(hazards).toHaveLength(1);
+    expect(hazards[0].spinSpeed).toBe(1.5);
+    expect(hazards[0].spinAxis).toBe('y');
+    expect(hazards[0].alwaysActive).toBe(true);
+    // size W=4, D=0.3 → sim width uses W * scaleZ, depth uses D * scaleX; sweep maxes both.
+    expect(hazards[0].width).toBeCloseTo(4, 5);
+    expect(hazards[0].depth).toBeCloseTo(4, 5);
+  });
 });

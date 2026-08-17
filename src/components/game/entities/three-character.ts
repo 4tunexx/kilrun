@@ -18,6 +18,7 @@ import { splitTrackName } from '../editor/mixamo-import';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { PLAYER_RADIUS } from '@shared/sim-constants';
 import { BODY_COLOR_NONE } from '@/lib/body-colors';
+import { applyArmsOnlyMeshVisibility } from './arms-only';
 import { applyTeamTint } from '@/lib/premium-skin-config';
 import { customMoveSoundKey, type CustomMoveDef } from '@shared/custom-moves';
 import { playSound } from '../effects/soundboard';
@@ -123,6 +124,7 @@ export class ThreeCharacter {
   private avatarScene: THREE.Object3D | null = null;
   private skinTime = 0;
   private isLocal = false;
+  private armsOnly = false;
   private bodyColorIndex = BODY_COLOR_NONE;
   private hasPremiumFullBody = false;
   /** Last remote weapon sync fields, compared individually every frame so
@@ -134,6 +136,17 @@ export class ThreeCharacter {
   private muzzleUntil = 0;
   private weaponKick = 0;
   private weaponKickTarget = 0;
+  private weaponHoldPose: {
+    position: [number, number, number];
+    rotation: [number, number, number];
+    scale: [number, number, number];
+  } | null = null;
+  private weaponBackPose: {
+    position: [number, number, number];
+    rotation: [number, number, number];
+    scale: [number, number, number];
+  } | null = null;
+  private weaponCarryDrawn: boolean | null = null;
   private weaponMixer: THREE.AnimationMixer | null = null;
   private weaponActions = new Map<string, THREE.AnimationAction>();
   private weaponClipNames = { fire: '', reload: '', idle: '', equip: '' };
@@ -150,6 +163,17 @@ export class ThreeCharacter {
     );
     this.root.visible = false;
     void this.load();
+  }
+
+  /** Local FPS-style view: hide torso/legs, keep arms + weapon. */
+  public setArmsOnly(on: boolean) {
+    if (this.armsOnly === on) return;
+    this.armsOnly = on;
+    this.applyArmsOnlyVisibility();
+  }
+
+  private applyArmsOnlyVisibility() {
+    applyArmsOnlyMeshVisibility(this.root, this.armsOnly);
   }
 
   private async load() {
@@ -184,6 +208,7 @@ export class ThreeCharacter {
       }
       const fitted = fitAvatarLikeEditor(scene, entity, isDefaultMannequin);
       pruneExtraMeshes(fitted);
+      this.applyArmsOnlyVisibility();
 
       // Ensure base skinned meshes start visible; applySkinAttachments may
       // hide them only for a successful body-slot mesh swap (not fullbody).
@@ -571,22 +596,43 @@ export class ThreeCharacter {
       reloadClip?: string;
       idleClip?: string;
       equipClip?: string;
+      holdPosition?: [number, number, number];
+      holdRotation?: [number, number, number];
+      holdScale?: [number, number, number];
+      backPosition?: [number, number, number];
+      backRotation?: [number, number, number];
+      backScale?: [number, number, number];
     }
   ) {
     if (this.disposed || !this.avatarScene) return;
     const prevWeapon = (this.avatarOpts.equippedSkins ?? []).find((s) => s.slot === 'weapon');
     // Match shop skin overrides VP texture; otherwise keep prior / VP texture.
     const textureUrl = combat?.textureUrl || prevWeapon?.textureUrl;
+    const hasHold = !!(combat?.holdPosition || combat?.holdRotation || combat?.holdScale);
+    const hasBack = !!(combat?.backPosition || combat?.backRotation || combat?.backScale);
+    this.weaponHoldPose = {
+      position: combat?.holdPosition ?? [0, 0, 0],
+      rotation: combat?.holdRotation ?? [0, 0, 0],
+      scale: combat?.holdScale ?? [1, 1, 1],
+    };
+    this.weaponBackPose = hasBack
+      ? {
+          position: combat?.backPosition ?? [0, 0, 0],
+          rotation: combat?.backRotation ?? [0, 0, 0],
+          scale: combat?.backScale ?? [1, 1, 1],
+        }
+      : null;
+    this.weaponCarryDrawn = null;
     const weaponAtt: SkinAttachment = {
       id: `shop-weapon-${Date.now()}`,
       slot: 'weapon',
       customModelUrl: modelUrl,
       textureUrl,
-      attachMode: 'bone',
+      attachMode: hasHold || hasBack ? 'body' : 'bone',
       bone: 'hand_r',
-      position: [0, 0, 0],
-      rotation: [0, 0, 0],
-      scale: [1, 1, 1],
+      position: combat?.holdPosition ?? [0, 0, 0],
+      rotation: combat?.holdRotation ?? [0, 0, 0],
+      scale: combat?.holdScale ?? [1, 1, 1],
       weapon: combat
         ? {
             kind: (combat.kind as 'melee' | 'hitscan' | 'cosmetic') || 'hitscan',
@@ -611,6 +657,36 @@ export class ThreeCharacter {
       idle: combat?.idleClip,
       equip: combat?.equipClip,
     });
+    this.applyWeaponCarryPose(true);
+  }
+
+  private findWeaponHolder(): THREE.Object3D | null {
+    if (!this.avatarScene) return null;
+    let holder: THREE.Object3D | null = null;
+    this.avatarScene.traverse((o) => {
+      if (holder) return;
+      if (o.userData?.isWeaponSkin) holder = o;
+    });
+    return holder;
+  }
+
+  private applyWeaponCarryPose(drawn: boolean) {
+    const pose = drawn ? this.weaponHoldPose : this.weaponBackPose ?? this.weaponHoldPose;
+    if (!pose) return;
+    const holder = this.findWeaponHolder();
+    if (!holder) return;
+    holder.position.set(...pose.position);
+    const mesh =
+      holder.children[0] && !holder.children[0].userData?.isWeaponSkin
+        ? holder.children[0]
+        : holder;
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(pose.rotation[0]),
+      THREE.MathUtils.degToRad(pose.rotation[1]),
+      THREE.MathUtils.degToRad(pose.rotation[2])
+    );
+    mesh.scale.set(...pose.scale);
+    this.weaponCarryDrawn = drawn;
   }
 
   /** Paint an equipped weapon skin (texture) onto the current hand weapon mesh. */
@@ -746,6 +822,16 @@ export class ThreeCharacter {
       aimHeld ? 18 : this.speed > 1.2 ? 16 : 12
     );
     this.facing = this.root.rotation.y;
+
+    if (this.weaponBackPose) {
+      const reloading = (player.reloadEndsAt ?? 0) > Date.now();
+      const drawn =
+        !!aimHeld ||
+        reloading ||
+        performance.now() < this.attackUntil ||
+        this.weaponKickTarget > 0.002;
+      if (drawn !== this.weaponCarryDrawn) this.applyWeaponCarryPose(drawn);
+    }
 
     const justLanded = !this.wasGrounded && player.isGrounded;
     this.wasGrounded = player.isGrounded;

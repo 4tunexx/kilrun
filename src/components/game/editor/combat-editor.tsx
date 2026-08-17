@@ -135,12 +135,14 @@ function Toggle({
   value,
   accentTrue = 'emerald',
   onChange,
+  disabled,
 }: {
   label: string;
   hint?: string;
   value: boolean;
   accentTrue?: 'emerald' | 'violet' | 'sky' | 'amber' | 'rose' | string;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   const onClass =
     accentTrue === 'violet'
@@ -153,12 +155,14 @@ function Toggle({
             ? 'bg-rose-500'
             : 'bg-emerald-500';
   return (
-    <label className="flex items-start gap-2 cursor-pointer">
+    <label className={`flex items-start gap-2 ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
       <div
-        onClick={() => onChange(!value)}
-        className={`w-8 h-4 rounded-full mt-0.5 shrink-0 relative transition-colors cursor-pointer ${
-          value ? onClass : 'bg-white/15'
-        }`}
+        onClick={() => {
+          if (!disabled) onChange(!value);
+        }}
+        className={`w-8 h-4 rounded-full mt-0.5 shrink-0 relative transition-colors ${
+          disabled ? 'cursor-not-allowed' : 'cursor-pointer'
+        } ${value ? onClass : 'bg-white/15'}`}
       >
         <div
           className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${
@@ -459,18 +463,16 @@ export function CombatEditor({
           {/* ── DEATHRUN ────────────────────────────────────────────── */}
           {tab === 'deathrun' && (
             <>
-              <div className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2.5 text-[10px] text-white/50 leading-snug">
-                <span className="text-amber-300 font-semibold">Not yet wired to gameplay.</span>{' '}
-                Neither Arms-only mode nor the Power-up Pool is read anywhere in the live sim or
-                Play Test — toggling/editing them below saves to the map document but currently
-                has no in-game effect. For an actual power-up shop, use{' '}
-                <span className="text-amber-300 font-semibold">Map Editor → Buy Menu</span>{' '}
-                instead.
-              </div>
+              <InfoBox>
+                Arms-only hides the local body (arms + weapon stay visible). Power-up Pool
+                filters the Deathrun warmup shop to those IDs — leave blank for no shop.
+                Heal / Shield / Energy / Speed / Super Jump are the effects the live sim
+                applies. For Horde/Competitive loadouts, use Map Editor → Buy Menu.
+              </InfoBox>
               <Section title="Arms Mode" accent="red" icon={<Target className="w-3.5 h-3.5" />}>
                 <Toggle
                   label="Arms-only mode"
-                  hint="Show floating arms + weapon only (no full body visible)"
+                  hint="Show floating arms + weapon only (no full body visible) in Play Test and live matches"
                   value={settings.armsOnlyMode}
                   accentTrue="red"
                   onChange={(v) => patch({ armsOnlyMode: v })}
@@ -478,14 +480,14 @@ export function CombatEditor({
               </Section>
               <Section title="Power-up Pool" accent="red">
                 <p className="text-[10px] text-white/45 leading-snug mb-1.5">
-                  Comma-separated power-up IDs available for purchase in the deathrun shop.
-                  Leave blank for no shop.
+                  Comma-separated power-up IDs available during Deathrun warmup. Leave blank
+                  for no shop.
                 </p>
                 <input
                   type="text"
                   value={settings.powerUpPool}
                   onChange={(e) => patch({ powerUpPool: e.target.value })}
-                  placeholder="speed_boost, double_jump, shield, …"
+                  placeholder="speed_boost, shield, heal, super_jump"
                   className="w-full rounded-lg bg-black/40 border border-white/10 px-2.5 py-1.5 text-[11px] text-white/80"
                 />
                 <div className="grid grid-cols-2 gap-1 mt-2">

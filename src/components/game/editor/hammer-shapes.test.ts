@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   defaultSizeForHammer,
+  hammerArchCollisionPads,
+  hollowHammerCollisionPads,
   isHammerPrimitive,
   makeHammerGeometry,
   HAMMER_PRIMITIVES,
 } from './hammer-shapes';
 import type { MapDocument } from './map-document';
-import { mapDocMonsterSpawns, mapDocPushPayloads, mapDocToSimHazards } from './prefab-storage';
+import { HAMMER_SOLID_MODEL } from './map-document';
+import { mapDocMonsterSpawns, mapDocPushPayloads, mapDocToSimHazards, mapDocToSimPlatforms } from './prefab-storage';
 
 function baseDoc(entities: MapDocument['entities']): MapDocument {
   return {
@@ -32,6 +35,41 @@ describe('hammer shapes', () => {
       expect(geo).toBeTruthy();
       geo.dispose();
     }
+  });
+
+  it('arch collision is three boxes with a walkable gap, not one solid AABB', () => {
+    const size = defaultSizeForHammer('arch');
+    const pads = hammerArchCollisionPads(size);
+    expect(pads).toHaveLength(3);
+    const leftRight = pads[0].cx + pads[0].hx;
+    const rightLeft = pads[1].cx - pads[1].hx;
+    expect(rightLeft - leftRight).toBeGreaterThan(0.3);
+    expect(hollowHammerCollisionPads('box', [2, 1, 2])).toBeUndefined();
+  });
+
+  it('exports an arch as multiple sim platforms so the opening is walkable', () => {
+    const size = defaultSizeForHammer('arch');
+    const pads = hollowHammerCollisionPads('arch', size)!;
+    const sim = mapDocToSimPlatforms(
+      baseDoc([
+        {
+          id: 'a1',
+          name: 'Arch',
+          kind: 'prop',
+          layerId: 'l1',
+          position: [0, 0, 0],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+          model: HAMMER_SOLID_MODEL,
+          primitive: 'arch',
+          solid: true,
+          collideMaterial: 'solid',
+          collisionSize: size,
+          meshCollisionPads: pads,
+        },
+      ])
+    );
+    expect(sim.length).toBe(3);
   });
 });
 

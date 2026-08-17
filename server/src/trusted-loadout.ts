@@ -19,6 +19,8 @@ export async function fetchTrustedLoadout(userId: string): Promise<{
     jumpMultiplier?: number;
     maxEnergyBonus?: number;
     punchDamageMultiplier?: number;
+    reloadSpeedMultiplier?: number;
+    fallDamageReduction?: number;
   };
   abilityLevels?: Record<string, number>;
 } | null> {
@@ -45,6 +47,8 @@ export async function fetchTrustedLoadout(userId: string): Promise<{
         jumpMultiplier?: number;
         maxEnergyBonus?: number;
         punchDamageMultiplier?: number;
+        reloadSpeedMultiplier?: number;
+        fallDamageReduction?: number;
       };
       abilityLevels?: Record<string, number>;
     };

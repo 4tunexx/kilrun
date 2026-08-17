@@ -9,6 +9,8 @@ import {
   ENERGY_EXHAUSTED_SPEED_MULT,
   ENERGY_EXHAUSTED_THRESHOLD,
   ENERGY_REGEN_RATE,
+  FALL_DAMAGE_PER_MS,
+  FALL_DAMAGE_SPEED,
   FLIP_COOLDOWN_MS,
   FLIP_DURATION_MS,
   FLIP_ENERGY_COST,
@@ -190,6 +192,10 @@ export interface PlayerSimScratch {
   flipLockoutMs: number;
   /** Edge-detects each custom move's key (CustomMoveDef.id -> was held last tick). */
   customMoveWasHeld: Map<string, boolean>;
+  /** Most negative vz while airborne this flight (fall damage). */
+  minAirVz: number;
+  /** HP to apply after this tick's landing (0 if none). */
+  fallDamageThisTick: number;
 }
 
 export function createSimScratch(): PlayerSimScratch {
@@ -218,6 +224,8 @@ export function createSimScratch(): PlayerSimScratch {
     wasFlipHeld: false,
     flipLockoutMs: 0,
     customMoveWasHeld: new Map(),
+    minAirVz: 0,
+    fallDamageThisTick: 0,
   };
 }
 
@@ -330,6 +338,7 @@ export function applyMovement(
     if (player.energy >= ENERGY_EXHAUSTED_THRESHOLD) scratch.exhausted = false;
   }
   if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;
+  if ((player.ability.slowUntil || 0) > Date.now()) maxSpeed *= 0.5;
 
   const wasGroundedLastTick = player.isGrounded;
 
@@ -612,7 +621,21 @@ export function applyMovement(
       scratch.jumpBufferMs = 0;
       scratch.jumpCount = 1;
     } else if (scratch.jumpCount === 0 || scratch.jumpCount === 2) {
-      scratch.jumpBufferMs = effJumpBufferMs;
+      if (
+        !grounded &&
+        (player.ability.extraAirJumps || 0) > 0 &&
+        player.energy >= JUMP_ENERGY_COST * 0.2
+      ) {
+        player.ability.extraAirJumps -= 1;
+        player.vz = effDoubleJumpVel;
+        player.isGrounded = false;
+        grounded = false;
+        scratch.coyoteMs = 0;
+        scratch.jumpCount = 2;
+        player.energy = Math.max(0, player.energy - JUMP_ENERGY_COST);
+      } else {
+        scratch.jumpBufferMs = effJumpBufferMs;
+      }
     } else if (
       scratch.jumpCount === 1 &&
       effDoubleJumpEnabled &&
@@ -857,6 +880,18 @@ export function applyMovement(
     scratch.supportPlatformId = grounded?.platform.id ?? null;
   } else {
     scratch.supportPlatformId = null;
+  }
+
+  scratch.fallDamageThisTick = 0;
+  if (!player.isGrounded) {
+    scratch.minAirVz = wasGroundedLastTick ? player.vz : Math.min(scratch.minAirVz, player.vz);
+  } else if (!wasGroundedLastTick) {
+    if (scratch.minAirVz < -FALL_DAMAGE_SPEED) {
+      const excess = -scratch.minAirVz - FALL_DAMAGE_SPEED;
+      const red = Math.min(0.9, Math.max(0, player.ability.fallDamageReduction || 0));
+      scratch.fallDamageThisTick = excess * FALL_DAMAGE_PER_MS * (1 - red);
+    }
+    scratch.minAirVz = 0;
   }
 }
 

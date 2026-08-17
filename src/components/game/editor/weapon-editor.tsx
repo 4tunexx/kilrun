@@ -350,13 +350,14 @@ export function WeaponEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-position weapon mesh when hold position/rotation/scale changes
+  // Re-position weapon mesh when hold/back pose or the active tab changes
   useEffect(() => {
     const wg = weaponGroupRef.current;
     if (!wg) return;
-    const [px, py, pz] = def.holdPosition;
-    const [rx, ry, rz] = def.holdRotation;
-    const [sx, sy, sz] = def.holdScale;
+    const useBack = tab === 'back';
+    const [px, py, pz] = useBack ? def.backPosition : def.holdPosition;
+    const [rx, ry, rz] = useBack ? def.backRotation : def.holdRotation;
+    const [sx, sy, sz] = useBack ? def.backScale : def.holdScale;
     wg.position.set(px, py, pz);
     wg.rotation.set(
       THREE.MathUtils.degToRad(rx),
@@ -364,7 +365,15 @@ export function WeaponEditor({
       THREE.MathUtils.degToRad(rz)
     );
     wg.scale.set(sx, sy, sz);
-  }, [def.holdPosition, def.holdRotation, def.holdScale]);
+  }, [
+    tab,
+    def.holdPosition,
+    def.holdRotation,
+    def.holdScale,
+    def.backPosition,
+    def.backRotation,
+    def.backScale,
+  ]);
 
   // Reload weapon mesh when model changes
   useEffect(() => {
@@ -722,13 +731,9 @@ function HoldTab({
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-[10px] text-white/50 leading-snug">
-        <span className="text-amber-300 font-semibold">Preview-only, not wired to gameplay.</span>{' '}
-        These sliders move the mesh in this tab&apos;s own preview pane, but the actual in-game
-        weapon grip is driven entirely by{' '}
-        <span className="text-amber-300 font-semibold">
-          Player Model Studio → skin attachments
-        </span>{' '}
-        — nothing reads Position/Rotation/Scale below at runtime.
+        <span className="text-emerald-300 font-semibold">Applied in Play Test and live matches.</span>{' '}
+        Hold Position / Rotation / Scale are the in-hand pose (character space). Player Model
+        Studio weapon attachments still apply on top when a skin is equipped.
       </div>
       <p className="text-[10px] text-white/40 leading-snug">
         Active hold position — where the weapon sits in the right hand during gameplay.
@@ -782,12 +787,9 @@ function BackTab({
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-amber-400/20 bg-amber-500/5 px-3 py-2 text-[10px] text-white/50 leading-snug">
-        <span className="text-amber-300 font-semibold">Preview-only, not wired to gameplay.</span>{' '}
-        Same as the Hold tab — the actual in-game back-carry attachment is driven by{' '}
-        <span className="text-amber-300 font-semibold">
-          Player Model Studio → skin attachments
-        </span>
-        , not these sliders.
+        <span className="text-emerald-300 font-semibold">Previewed on the mannequin while this tab is open.</span>{' '}
+        Back-carry is the holster pose used in Play Test and live matches when you are not aiming,
+        attacking, or reloading.
       </div>
       <p className="text-[10px] text-white/40 leading-snug">
         Back-carry position — where the weapon is holstered on the player&apos;s back when not

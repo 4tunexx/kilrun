@@ -84,6 +84,11 @@ export const FLIP_PUSH_SPEED = FLIP_PUSH_DISTANCE / (FLIP_DURATION_MS / 1000);
 
 export const JUMP_PAD_BOOST = 14;
 
+/** Fall faster than this (m/s, downward) starts dealing landing damage. */
+export const FALL_DAMAGE_SPEED = 14;
+/** HP per (m/s) beyond FALL_DAMAGE_SPEED. */
+export const FALL_DAMAGE_PER_MS = 8;
+
 export const HITSCAN_RANGE = 14;
 export const HITSCAN_DAMAGE = 25;
 export const SHOOT_COOLDOWN_MS = 350;

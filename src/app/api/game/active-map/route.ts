@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { normalizeKilrunMode } from '@/lib/game-modes';
 import type { MapDocument } from '@/components/game/editor/map-document';
+import { ensureShopSettings } from '@/components/game/editor/map-document';
 import {
   mapDocHealthFloors,
   mapDocMonsterSpawns,
@@ -77,6 +78,8 @@ export async function GET(req: NextRequest) {
       worldBounds: mapDocToWorldBounds(prepared, platforms, finishes),
       modeSettings: prepared.modeSettings as Record<string, unknown> | undefined,
       combatSettings: prepared.combatSettings as Record<string, unknown> | undefined,
+      shopSettings: ensureShopSettings(prepared) as unknown as Record<string, unknown>,
+      customMoves: prepared.customMoves as unknown as Record<string, unknown>[] | undefined,
     };
 
     return NextResponse.json({

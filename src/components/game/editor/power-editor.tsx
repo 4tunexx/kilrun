@@ -65,14 +65,19 @@ function PowerIcon({ icon, className }: { icon: string; className?: string }) {
  * surfaces share a visual language. */
 const HEX_CLIP = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
 
-const STAT_OPTIONS: { value: StatBonusStat; label: string; suggestedMode: 'additive' | 'multiplicative' }[] = [
-  { value: 'maxHealth', label: 'Max Health', suggestedMode: 'additive' },
-  { value: 'maxEnergy', label: 'Max Energy', suggestedMode: 'additive' },
-  { value: 'speed', label: 'Move Speed', suggestedMode: 'multiplicative' },
-  { value: 'jump', label: 'Jump Height', suggestedMode: 'multiplicative' },
-  { value: 'punchDamage', label: 'Punch Damage', suggestedMode: 'multiplicative' },
-  { value: 'reloadSpeed', label: 'Reload Speed (not yet wired in sim)', suggestedMode: 'multiplicative' },
-  { value: 'fallDamageReduction', label: 'Fall Damage Reduction (not yet wired in sim)', suggestedMode: 'multiplicative' },
+const STAT_OPTIONS: {
+  value: StatBonusStat;
+  label: string;
+  suggestedMode: 'additive' | 'multiplicative';
+  wired?: boolean;
+}[] = [
+  { value: 'maxHealth', label: 'Max Health', suggestedMode: 'additive', wired: true },
+  { value: 'maxEnergy', label: 'Max Energy', suggestedMode: 'additive', wired: true },
+  { value: 'speed', label: 'Move Speed', suggestedMode: 'multiplicative', wired: true },
+  { value: 'jump', label: 'Jump Height', suggestedMode: 'multiplicative', wired: true },
+  { value: 'punchDamage', label: 'Punch Damage', suggestedMode: 'multiplicative', wired: true },
+  { value: 'reloadSpeed', label: 'Reload Speed', suggestedMode: 'multiplicative', wired: true },
+  { value: 'fallDamageReduction', label: 'Fall Damage Reduction', suggestedMode: 'multiplicative', wired: true },
 ];
 
 const BUFF_KIND_OPTIONS: { value: TimedBuffKind; label: string }[] = [
@@ -925,7 +930,7 @@ function StatBonusEditor({
             onChange={(e) => setBonus(i, { stat: e.target.value as StatBonusStat })}
           >
             {STAT_OPTIONS.map((s) => (
-              <option key={s.value} value={s.value}>
+              <option key={s.value} value={s.value} disabled={s.wired === false}>
                 {s.label}
               </option>
             ))}

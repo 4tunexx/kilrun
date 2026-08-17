@@ -22,9 +22,7 @@ function validateDeathrunMap(doc: MapDocument): MapValidationIssue[] {
   const issues: MapValidationIssue[] = [];
   const ents = doc.entities ?? [];
 
-  const starts = ents.filter(
-    (e) => e.kind === 'start' || e.kind === 'spawn_runner' || e.kind === 'player'
-  );
+  const starts = ents.filter((e) => e.kind === 'start' || e.kind === 'spawn_runner');
   const finishes = ents.filter((e) => e.kind === 'finish');
   const trappers = ents.filter((e) => e.kind === 'spawn_trapper');
   const solids = ents.filter(entityExportsAsPlatform);
@@ -80,9 +78,7 @@ function validateDeathrunMap(doc: MapDocument): MapValidationIssue[] {
 function validateHordeMap(doc: MapDocument): MapValidationIssue[] {
   const issues: MapValidationIssue[] = [];
   const ents = doc.entities ?? [];
-  const starts = ents.filter(
-    (e) => e.kind === 'start' || e.kind === 'spawn_runner' || e.kind === 'player'
-  );
+  const starts = ents.filter((e) => e.kind === 'start' || e.kind === 'spawn_runner');
   const monsters = ents.filter((e) => e.kind === 'spawn_monster');
   const solids = ents.filter(entityExportsAsPlatform);
   const health = ents.filter((e) => e.kind === 'health_floor');

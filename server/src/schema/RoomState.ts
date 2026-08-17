@@ -20,6 +20,13 @@ export class AbilityLoadoutState extends Schema {
   @type('number') jumpMult = 1;
   @type('number') maxEnergyBonus = 0;
   @type('number') punchDamageMult = 1;
+  @type('number') reloadSpeedMult = 1;
+  /** 0–1 fraction of fall damage ignored. */
+  @type('number') fallDamageReduction = 0;
+  /** Extra mid-air jumps remaining (Deathrun double_jump power-up). */
+  @type('number') extraAirJumps = 0;
+  /** Until this timestamp, this player is slowed (Deathrun slow_trapper). */
+  @type('number') slowUntil = 0;
   @type('string') levelsJson = '{}';
   @type('number') visibilityEndsAt = 0;
   @type('number') flyEndsAt = 0;
@@ -232,6 +239,8 @@ export class ObstacleState extends Schema {
   @type('number') y = 0;
   @type('number') z = 0;
   @type('number') width = 1;
+  /** Sim Y half-extent counterpart. 0 = same as width (legacy circular traps). */
+  @type('number') depth = 0;
   @type('number') height = 1;
   @type('number') intervalMs = 2000;
   @type('number') activeMs = 1000;
@@ -242,6 +251,8 @@ export class ObstacleState extends Schema {
   @type('boolean') alwaysActive = false;
   /** When true, only buttons arm this obstacle (no auto pulse). */
   @type('boolean') buttonControlled = false;
+  /** One-shot kill on overlap (editor Instant kill). */
+  @type('boolean') instantKill = false;
   /** Horde custom monster: GLB to render instead of the generic kind-based prefab. */
   @type('string') modelUrl = '';
   /** Horde custom monster: catalog model id (used when modelUrl is a custom upload). */

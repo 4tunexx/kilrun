@@ -39,6 +39,12 @@ import {
   ensureEnvironment,
 } from './map-document';
 import { bakeMeshCollisionForEntity } from './mesh-voxelize';
+import {
+  applySelectionTransformOp,
+  nearestObbFaceAttach,
+  type SelectionTransformOp,
+  type SnapObb,
+} from './selection-transform';
 import { PLAYER_RADIUS } from '@shared/sim-constants';
 import { getLastPrefabScale, setLastPrefabScale } from './prefab-defaults';
 import {
@@ -48,10 +54,14 @@ import {
   plantLocalFeet,
   resolveEntityTextureRepeat,
   worldScaleToUvRepeat,
+  disposeClonedMaterials,
+  disposeOwnedGeometry,
+  markOwnsGpuResources,
 } from './editor-mesh';
-import { applyEntityOpacity, applyEntityGlow, tickEntityGlow, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
+import { applyEntityOpacity, applyEntityGlow, tickEntityGlow, tickSpinHazardVisual, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
 import {
   defaultSizeForHammer,
+  hollowHammerCollisionPads,
   isHammerPrimitive,
   loadStickyHammerShape,
   makeHammerSolidObject,
@@ -265,6 +275,10 @@ export interface EditorViewportApi {
   ) => boolean;
   /** Drop selection onto the floor / supporting surface under each pivot. */
   snapSelectedToFloor: (idsOverride?: string[]) => boolean;
+  /** Click the current selection flush onto the nearest neighbor face (if close). */
+  snapSelectionToNearestNeighbor: () => boolean;
+  /** Rotate / flip the current selection (and groups) around its pivot. */
+  transformSelection: (op: SelectionTransformOp) => boolean;
   /**
    * "Bake mesh collision" for a catalog/library prop — voxel-approximates
    * its real mesh into a compact box list (mesh-voxelize.ts) so a concave
@@ -735,6 +749,15 @@ export function createEditorViewport(
 
   const transform = new TransformControls(camera, renderer.domElement);
   transform.setMode('translate');
+  // Three.js rotate gizmos include a camera-facing filled yellow disc (E) and
+  // a gray disc (XYZE). Hovering them — or the infinite axis helper lines in
+  // move mode — paints the whole viewport yellow. Keep only X/Y/Z rings/arrows.
+  (transform as unknown as { showE: boolean; showXYZE: boolean; showXYZ: boolean }).showE = false;
+  (transform as unknown as { showE: boolean; showXYZE: boolean; showXYZ: boolean }).showXYZE = false;
+  // Center octahedron hover yellow-highlights every axis. Free-move still
+  // works via the XY / XZ / YZ plane squares between the arrows.
+  (transform as unknown as { showE: boolean; showXYZE: boolean; showXYZ: boolean }).showXYZ = false;
+  transform.size = 0.75;
   const lastPrimaryPos = new THREE.Vector3();
   const lastPrimaryScale = new THREE.Vector3(1, 1, 1);
 
@@ -829,7 +852,7 @@ export function createEditorViewport(
       transform.setScaleSnap(null);
     } else {
       transform.setTranslationSnap(null);
-      transform.setRotationSnap(0);
+      transform.setRotationSnap(null);
       transform.setScaleSnap(null);
     }
   };
@@ -908,6 +931,7 @@ export function createEditorViewport(
       }
     } else if (proxyActive) {
       // Re-seat proxy at the new group center with identity pose for the next drag.
+      if (transform.mode === 'translate') snapDragToNearestNeighbor();
       const ids = selectionTransformIds();
       const pivot = computeSelectionPivot(ids);
       groupProxy.position.copy(pivot);
@@ -922,6 +946,7 @@ export function createEditorViewport(
       // the drag. Doing it every frame fought the user's live rotation/move
       // and made ramps appear to resize or reshape mid-drag.
       finalizeSingleDrag();
+      if (transform.mode === 'translate') snapDragToNearestNeighbor();
       if (transform.mode === 'scale') {
         const ent = doc.entities.find((x) => x.id === selectedId);
         if (ent?.model) setLastPrefabScale(ent.model, ent.scale);
@@ -979,6 +1004,117 @@ export function createEditorViewport(
     handlers.onDocChange(doc);
     refreshSelectionOutlines();
   }
+
+  /** After a move-gizmo drag, click the selection onto the nearest neighbor
+   *  if a face is within ~one grid cell — uses each piece's OBB so rotated
+   *  solids click on the real face, not the world AABB. */
+  function snapDragToNearestNeighbor(): boolean {
+    const movingIds = selectionTransformIds();
+    if (!movingIds.length) return false;
+    const skip = new Set(movingIds);
+    const anchors: SnapObb[] = [];
+    for (const e of doc.entities) {
+      if (skip.has(e.id)) continue;
+      const root = roots.get(e.id);
+      if (!root?.visible) continue;
+      if (isInvisibleMarkerKind(e.kind) || isPlatformPlayerKind(e.kind)) continue;
+      const obb = snapObbForEntity(e);
+      if (obb) anchors.push(obb);
+    }
+    if (!anchors.length) return false;
+    const moving =
+      movingIds.length === 1
+        ? snapObbForEntity(doc.entities.find((x) => x.id === movingIds[0])!)
+        : (() => {
+            const box = worldBoxForIds(movingIds);
+            return box ? { ...aabbFromBox(box) } : null;
+          })();
+    if (!moving) return false;
+    const maxDist = Math.max(gridSize * 1.35, 0.65);
+    const hit = nearestObbFaceAttach(moving, anchors, maxDist);
+    if (!hit) return false;
+    const dx = hit.c[0] - moving.c[0];
+    const dy = hit.c[1] - moving.c[1];
+    const dz = hit.c[2] - moving.c[2];
+    if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-5) return false;
+    for (const id of movingIds) {
+      const root = roots.get(id);
+      const ent = doc.entities.find((x) => x.id === id);
+      if (!root || !ent) continue;
+      root.position.x += dx;
+      root.position.y += dy;
+      root.position.z += dz;
+      ent.position = [root.position.x, root.position.y, root.position.z];
+    }
+    lastPrimaryPos.copy(roots.get(movingIds[0])?.position ?? lastPrimaryPos);
+    handlers.onDocChange(doc);
+    refreshSelectionOutlines();
+    return true;
+  }
+
+  /** Local (unrotated) half-extents + entity rotation — matches magnet OBB. */
+  function snapObbForEntity(e: EditorEntity): SnapObb | null {
+    const root = roots.get(e.id);
+    if (!root?.visible) return null;
+    const quat = root.quaternion.clone();
+    const saved = quat.clone();
+    root.quaternion.identity();
+    root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(root);
+    root.quaternion.copy(saved);
+    root.updateMatrixWorld(true);
+    if (box.isEmpty()) {
+      const aabbBox = worldBoxForIds([e.id]);
+      return aabbBox ? { ...aabbFromBox(aabbBox), rotDeg: [...e.rotation] as [number, number, number] } : null;
+    }
+    const half = box.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+    const localPivot = box.getCenter(new THREE.Vector3());
+    const center = root.position.clone().add(localPivot.applyQuaternion(quat));
+    return {
+      c: [center.x, center.y, center.z],
+      h: [Math.max(0.05, half.x), Math.max(0.05, half.y), Math.max(0.05, half.z)],
+      rotDeg: [
+        THREE.MathUtils.radToDeg(root.rotation.x),
+        THREE.MathUtils.radToDeg(root.rotation.y),
+        THREE.MathUtils.radToDeg(root.rotation.z),
+      ],
+    };
+  }
+
+  function worldBoxForIds(ids: string[]): THREE.Box3 | null {
+    const box = new THREE.Box3();
+    let any = false;
+    for (const id of ids) {
+      const root = roots.get(id);
+      if (!root?.visible) continue;
+      root.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(root);
+      if (b.isEmpty()) continue;
+      if (!any) {
+        box.copy(b);
+        any = true;
+      } else {
+        box.union(b);
+      }
+    }
+    return any ? box : null;
+  }
+
+  function aabbFromBox(box: THREE.Box3): { c: [number, number, number]; h: [number, number, number] } {
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+    return {
+      c: [center.x, center.y, center.z],
+      h: [
+        Math.max(0.05, size.x / 2),
+        Math.max(0.05, size.y / 2),
+        Math.max(0.05, size.z / 2),
+      ],
+    };
+  }
+
   transform.addEventListener('objectChange', () => {
     // —— Multi-select / group: transform proxy drives every member as one ——
     if (proxyActive && (transform as unknown as { object?: THREE.Object3D }).object === groupProxy) {
@@ -1189,6 +1325,17 @@ export function createEditorViewport(
       ? (transform as unknown as { getHelper: () => THREE.Object3D }).getHelper()
       : (transform as unknown as THREE.Object3D);
   scene.add(transformHelper);
+  // After TransformControls rebuilds handle visibility, hide the hover discs
+  // and the 1e6-long axis helper lines that otherwise fill the screen yellow.
+  const origHelperUpdate = transformHelper.updateMatrixWorld.bind(transformHelper);
+  transformHelper.updateMatrixWorld = (force?: boolean) => {
+    origHelperUpdate(force);
+    transformHelper.traverse((child) => {
+      const tagged = child as THREE.Object3D & { tag?: string };
+      if (tagged.tag === 'helper') child.visible = false;
+      if (child.name === 'E' || child.name === 'XYZE' || child.name === 'XYZ') child.visible = false;
+    });
+  };
 
   const roots = new Map<string, THREE.Object3D>();
   // Per-entity in-flight guard: docGeneration only catches a setDoc() (undo/
@@ -1225,10 +1372,14 @@ export function createEditorViewport(
     const src = resolveModelSrc(name, customUrl);
     if (!src) {
       return {
-        root: new THREE.Mesh(
-          new THREE.BoxGeometry(1, 1, 1),
-          new THREE.MeshStandardMaterial({ color: 0x888888 })
-        ),
+        root: (() => {
+          const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 1, 1),
+            new THREE.MeshStandardMaterial({ color: 0x888888 })
+          );
+          markOwnsGpuResources(mesh);
+          return mesh;
+        })(),
         clips: [],
         clipNames: [],
       };
@@ -1353,6 +1504,7 @@ export function createEditorViewport(
     const size = ent.collisionSize ?? defaultSizeForHammer((ent.primitive as HammerPrimitive) || 'box');
     const shape = (ent.primitive as HammerPrimitive) || 'box';
     const obj = makeHammerSolidObject(shape, size, ent.color || '#64748b');
+    markOwnsGpuResources(obj);
     return obj;
   }
 
@@ -1523,6 +1675,7 @@ export function createEditorViewport(
             new THREE.BoxGeometry(1, 1, 1),
             new THREE.MeshStandardMaterial({ color: 0xff00ff })
           );
+          markOwnsGpuResources(root);
         }
       } else if (
         wantsMarker ||
@@ -1570,6 +1723,7 @@ export function createEditorViewport(
               ? 'start'
               : ent.kind;
         root = makeSpawnMarker(markerKind, ent.color ?? fallbackColor);
+        markOwnsGpuResources(root);
       } else if (ent.kind === 'button') {
         root = new THREE.Mesh(
           new THREE.CylinderGeometry(0.45, 0.5, 0.2, 16),
@@ -1577,9 +1731,11 @@ export function createEditorViewport(
         );
         root.position.y = 0.1;
         root.userData.isEditorMarker = true;
+        markOwnsGpuResources(root);
       } else if (ent.kind === 'light') {
         root = makeLightBulb(ent);
         root.userData.isEditorMarker = true;
+        markOwnsGpuResources(root);
       } else if (
         ent.kind === 'spinner' ||
         ent.kind === 'push_rail' ||
@@ -1587,17 +1743,20 @@ export function createEditorViewport(
       ) {
         root = makeGameplayFallback(ent) ?? new THREE.Group();
         root.userData.isEditorMarker = true;
+        markOwnsGpuResources(root);
       } else if (ent.kind === 'player') {
         root = new THREE.Mesh(
           new THREE.CapsuleGeometry(PLAYER_RADIUS, 0.9, 4, 8),
           new THREE.MeshStandardMaterial({ color: 0x38bdf8 })
         );
         root.position.y = 0.9;
+        markOwnsGpuResources(root);
       } else {
         root = new THREE.Mesh(
           new THREE.BoxGeometry(1, 1, 1),
           new THREE.MeshStandardMaterial({ color: 0x888888 })
         );
+        markOwnsGpuResources(root);
       }
       root.userData.entityId = ent.id;
       roots.set(ent.id, root);
@@ -1741,8 +1900,18 @@ export function createEditorViewport(
     refreshSelectionOutlines();
   }
 
+  function placingToolActive() {
+    return (
+      editTool === 'bucket' ||
+      editTool === 'paint' ||
+      editTool === 'hammer' ||
+      editTool === 'brush' ||
+      bucketPainting
+    );
+  }
+
   function attachSelectionGizmo() {
-    if (!selectedId || freeFly || editTool === 'bucket' || editTool === 'paint' || bucketPainting) {
+    if (!selectedId || freeFly || placingToolActive()) {
       proxyActive = false;
       transform.detach();
       return;
@@ -1789,15 +1958,8 @@ export function createEditorViewport(
     director.unregister(id);
     entityClips.delete(id);
     obj.removeFromParent();
-    obj.traverse((child) => {
-      const mesh = child as THREE.Mesh;
-      if (mesh.geometry) mesh.geometry.dispose();
-      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-      if (!mat) return;
-      for (const m of Array.isArray(mat) ? mat : [mat]) {
-        m.dispose();
-      }
-    });
+    disposeClonedMaterials(obj);
+    disposeOwnedGeometry(obj);
     roots.delete(id);
   }
 
@@ -2000,6 +2162,7 @@ export function createEditorViewport(
             ? 'solid'
             : undefined,
       collisionSize: isHammer ? hammerSize : foot ?? undefined,
+      meshCollisionPads: isHammer ? hollowHammerCollisionPads(shape, hammerSize) : undefined,
       textureWorldScale: isHammer ? 1 : undefined,
       textureRepeat: isHammer
         ? worldScaleToUvRepeat(entityWorldSize(hammerSize, [1, 1, 1]), 1)
@@ -2052,13 +2215,8 @@ export function createEditorViewport(
       measureMode ||
       bucketPainting;
     orbit.enabled = !lockCam;
-    transform.enabled =
-      editTool !== 'bucket' &&
-      editTool !== 'paint' &&
-      !freeFly &&
-      !measureMode &&
-      !bucketPainting;
-    if (editTool === 'bucket' || editTool === 'paint' || bucketPainting) {
+    transform.enabled = !placingToolActive() && !freeFly && !measureMode;
+    if (placingToolActive()) {
       transform.detach();
     }
     updateCursor();
@@ -2802,6 +2960,8 @@ export function createEditorViewport(
         const r = roots.get(ent.id);
         if (r) tickEntityGlow(r, ent.glow, nowMs);
       }
+      const spinRoot = roots.get(ent.id);
+      if (spinRoot) tickSpinHazardVisual(spinRoot, ent, dt);
     }
 
     if (freeFly) {
@@ -2999,18 +3159,7 @@ export function createEditorViewport(
         }
       }
       applyToolCameraLock();
-      if (
-        tool !== 'bucket' &&
-        tool !== 'paint' &&
-        selectedId &&
-        roots.has(selectedId) &&
-        !freeFly
-      ) {
-        const selEnt = doc.entities.find((e) => e.id === selectedId);
-        if (!layerMeta(selEnt?.layerId ?? '')?.locked && !selEnt?.locked) {
-          transform.attach(roots.get(selectedId)!);
-        }
-      }
+      attachSelectionGizmo();
     },
     getEditTool: () => editTool,
     setHammerShape: (shape) => {
@@ -3616,6 +3765,40 @@ export function createEditorViewport(
       refreshGizmos();
       return true;
     },
+    snapSelectionToNearestNeighbor: () => snapDragToNearestNeighbor(),
+    transformSelection: (op) => {
+      const ids = selectionTransformIds();
+      if (!ids.length) return false;
+      const pivotVec = computeSelectionPivot(ids);
+      const pivot: [number, number, number] = [pivotVec.x, pivotVec.y, pivotVec.z];
+      const applyPose = (eId: string, root: THREE.Object3D) => {
+        const e = doc.entities.find((x) => x.id === eId);
+        if (!e) return;
+        e.position = [root.position.x, root.position.y, root.position.z];
+        e.rotation = [
+          THREE.MathUtils.radToDeg(root.rotation.x),
+          THREE.MathUtils.radToDeg(root.rotation.y),
+          THREE.MathUtils.radToDeg(root.rotation.z),
+        ];
+      };
+      for (const id of ids) {
+        const e = doc.entities.find((x) => x.id === id);
+        const root = roots.get(id);
+        if (!e || !root) continue;
+        const next = applySelectionTransformOp(e.position, e.rotation, pivot, op);
+        root.position.set(...next.position);
+        root.rotation.set(
+          THREE.MathUtils.degToRad(next.rotation[0]),
+          THREE.MathUtils.degToRad(next.rotation[1]),
+          THREE.MathUtils.degToRad(next.rotation[2])
+        );
+        applyPose(id, root);
+      }
+      handlers.onDocChange(doc);
+      attachSelectionGizmo();
+      refreshGizmos();
+      return true;
+    },
     bakeMeshCollision: async (id) => {
       const e = doc.entities.find((x) => x.id === id);
       if (!e) return { ok: false, error: 'Object not found.' };
@@ -3771,6 +3954,13 @@ export function createEditorViewport(
           if (patch.kind === 'spinner' && !next.spinHazard) next.spinHazard = defaultSpinHazard();
           if (patch.kind === 'push_rail' && !next.pushRail) next.pushRail = defaultPushRail();
           if (patch.kind === 'push_block' && !next.pushBlock) next.pushBlock = defaultPushBlock();
+          if (hammerGeomChanged) {
+            const shape = ((next.primitive as HammerPrimitive) || 'box') as HammerPrimitive;
+            const size =
+              (next.collisionSize as [number, number, number] | undefined) ??
+              defaultSizeForHammer(shape);
+            next.meshCollisionPads = hollowHammerCollisionPads(shape, size);
+          }
           return next;
         }),
       };

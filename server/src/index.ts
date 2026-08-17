@@ -8,7 +8,9 @@ import { monitor } from '@colyseus/monitor';
 import { DeathrunRoom } from './rooms/DeathrunRoom.js';
 import { DeathrunPracticeRoom } from './rooms/DeathrunPracticeRoom.js';
 import { HordeRoom } from './rooms/HordeRoom.js';
+import { HordePracticeRoom } from './rooms/HordePracticeRoom.js';
 import { CompetitiveRoom } from './rooms/CompetitiveRoom.js';
+import { CompetitivePracticeRoom } from './rooms/CompetitivePracticeRoom.js';
 import { isJoinTokenRequired } from './join-token.js';
 
 /** The 3 room classes all expose this same admin control surface (kept as
@@ -340,7 +342,9 @@ gameServer.define('deathrun', DeathrunRoom);
 // never appears in normal matchmaking (setPrivate) and never grants XP/VP.
 gameServer.define('deathrun_practice', DeathrunPracticeRoom);
 gameServer.define('horde', HordeRoom);
+gameServer.define('horde_practice', HordePracticeRoom);
 gameServer.define('competitive', CompetitiveRoom);
+gameServer.define('competitive_practice', CompetitivePracticeRoom);
 gameServer
   .define('competitive_ranked', CompetitiveRoom)
   .filterBy(['rankKey']);

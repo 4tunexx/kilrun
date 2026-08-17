@@ -692,3 +692,19 @@ export function shouldUseGameplayFallback(
   }
   return false;
 }
+
+/** Rotate a spinner (or prop with spinHazard) around its authored axis. */
+export function tickSpinHazardVisual(root: THREE.Object3D, ent: EditorEntity, dt: number) {
+  if (ent.kind !== 'spinner' && !ent.spinHazard?.enabled) return;
+  const spin = ensureSpinHazard(ent);
+  if (spin.enabled === false || Math.abs(spin.speed) < 1e-6) return;
+  let target: THREE.Object3D | undefined;
+  root.traverse((o) => {
+    if (!target && o.userData?.spinHazard) target = o;
+  });
+  const obj = target ?? root.children[0] ?? root;
+  const rad = spin.speed * Math.PI * 2 * dt;
+  if (spin.axis === 'x') obj.rotateX(rad);
+  else if (spin.axis === 'z') obj.rotateZ(rad);
+  else obj.rotateY(rad);
+}

@@ -254,6 +254,8 @@ export interface SimHazardBlueprint {
   y: number;
   z: number;
   width: number;
+  /** Sim Y extent (Three X). When omitted, width is used. */
+  depth?: number;
   height: number;
   damage: number;
   intervalMs: number;
@@ -826,11 +828,10 @@ function localPadsToSimPads(e: EditorEntity, pads: CsgLocalPad[]): SimPlatformBl
 }
 
 function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
-  // Belt-and-suspenders: spawn cones / checkpoints / other invisible gizmo
-  // markers must NEVER produce collision, full stop — not conditional on
-  // which upstream filter path (entityExportsAsPlatform vs. the legacy
-  // no-explicit-platforms fallback) let this entity through to here.
-  if (isInvisibleMarkerKind(e.kind)) return [];
+  // Spawn cones / action gizmos must never produce collision. Checkpoints
+  // are the exception: they stay invisible in overlay but export a thin
+  // top-only pad so Deathrun / Play Test can save a respawn.
+  if (isInvisibleMarkerKind(e.kind) && e.kind !== 'checkpoint') return [];
   if (resolveCollideMaterial(e) === 'walkthrough') return [];
   if (e.csgOp && e.csgPads) return localPadsToSimPads(e, e.csgPads);
   // "Bake mesh collision" result on a catalog prop (see mesh-voxelize.ts) —
@@ -931,18 +932,33 @@ export function mapDocToSimHazards(doc: MapDocument): SimHazardBlueprint[] {
         const spin = ensureSpinHazard(e);
         const [tx, ty, tz] = e.position;
         const [sw, sh, sd] = spin.size;
-        const width = Math.max(1.2, sw * Math.abs(e.scale[0]));
-        const depth = Math.max(1.2, sd * Math.abs(e.scale[2]));
-        const height = Math.max(1.0, sh * Math.abs(e.scale[1]));
+        let width = Math.max(0.4, sw * Math.abs(e.scale[2]));
+        let depth = Math.max(0.4, sd * Math.abs(e.scale[0]));
+        let height = Math.max(0.4, sh * Math.abs(e.scale[1]));
+        // Sweep AABB of the spin plane so a rotating bar still hits at every angle.
+        if (spin.axis === 'x') {
+          const r = Math.max(depth, height);
+          depth = r;
+          height = r;
+        } else if (spin.axis === 'z') {
+          const r = Math.max(width, height);
+          width = r;
+          height = r;
+        } else {
+          const r = Math.max(width, depth);
+          width = r;
+          depth = r;
+        }
         return {
           id: e.id,
           kind: 'saw' as const,
           x: tz,
           y: tx,
           z: ty,
-          width: Math.max(width, depth),
+          width,
+          depth,
           height,
-          damage: spin.instantKill ? 999 : Math.max(1, spin.damage),
+          damage: spin.instantKill ? 9999 : Math.max(1, spin.damage),
           intervalMs: Math.max(100, spin.intervalMs),
           activeMs: 999999,
           alwaysActive: true,
@@ -954,9 +970,9 @@ export function mapDocToSimHazards(doc: MapDocument): SimHazardBlueprint[] {
       }
       const hz = ensureHazard(e);
       const [tx, ty, tz] = e.position;
-      const width = Math.max(1.2, Math.abs(e.scale[0]) * 2);
-      const depth = Math.max(1.2, Math.abs(e.scale[2]) * 2);
-      const height = Math.max(1.2, Math.abs(e.scale[1]) * 2);
+      const width = Math.max(0.4, Math.abs(e.scale[2]) * 2);
+      const depth = Math.max(0.4, Math.abs(e.scale[0]) * 2);
+      const height = Math.max(0.4, Math.abs(e.scale[1]) * 2);
       const mode = hz.mode ?? (e.kind === 'trap' ? 'timed' : 'always');
       return {
         id: e.id,
@@ -964,9 +980,10 @@ export function mapDocToSimHazards(doc: MapDocument): SimHazardBlueprint[] {
         x: tz,
         y: tx,
         z: ty,
-        width: Math.max(width, depth),
+        width,
+        depth,
         height,
-        damage: hz.instantKill ? 999 : Math.max(1, hz.damage),
+        damage: hz.instantKill ? 9999 : Math.max(1, hz.damage),
         intervalMs: Math.max(100, hz.intervalMs),
         activeMs: Math.max(100, hz.activeMs ?? (mode === 'timed' ? 900 : 1500)),
         alwaysActive: mode === 'always',

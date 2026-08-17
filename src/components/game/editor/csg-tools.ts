@@ -14,8 +14,9 @@
  *  - Subtract only computes exact carved collision when both the base and
  *    the cutter are axis-aligned Box primitives sharing the same yaw — the
  *    classic "AABB minus AABB" split into up to 6 boxes. Any other shape
- *    combination still gets the real visual cut, but collision falls back
- *    to the base's original uncut box with a `csgWarning` surfaced in the UI.
+ *    combination still gets the real visual cut; collision is voxel-fitted
+ *    to that cut mesh (same path as Solid prop bake). If voxelize finds no
+ *    volume, it falls back to the uncut base box with a `csgWarning`.
  */
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
@@ -26,6 +27,7 @@ import { isHammerSolidEntity, HAMMER_SOLID_MODEL } from './map-document';
 import type { HammerPrimitive } from './hammer-shapes';
 import { hammerPrimitiveMeta, makeHammerGeometry } from './hammer-shapes';
 import { loadGltf } from '../renderer/asset-loader';
+import { voxelizeGeometryToPads } from './mesh-voxelize';
 
 const YAW_TOLERANCE_DEG = 1;
 const TILT_TOLERANCE_DEG = 1;
@@ -317,12 +319,18 @@ export async function subtractEntities(base: EditorEntity, cutter: EditorEntity)
     if (exactPads.length === 0) return { deleted: true };
     csgPads = exactPads.map((p) => rebasePad(p, baseCenter, baseYaw, anchor));
   } else {
-    // Approximate: keep the base's full original box so nothing becomes an
-    // invisible wall — visual is cut, collision is not (flagged for the author).
-    warning =
-      'Collision approximated as the uncut base — exact carve collision needs both objects as Box primitives with matching rotation.';
-    const [hx, hy, hz] = boxWorldHalfExtents(base);
-    csgPads = [rebasePad({ cx: 0, cy: 0, cz: 0, hx, hy, hz }, baseCenter, baseYaw, anchor)];
+    // Fit collision to the cut mesh so doorways/openings are walkable.
+    // Voxelize needs a closed volume; if it finds nothing, keep the uncut
+    // base box and warn the author.
+    const fitted = voxelizeGeometryToPads(resultBrush.geometry.clone());
+    if (fitted.length) {
+      csgPads = fitted;
+    } else {
+      warning =
+        'Collision approximated as the uncut base — mesh-fit bake found no solid volume. Try Box−Box with matching rotation, or Bake mesh collision on the result.';
+      const [hx, hy, hz] = boxWorldHalfExtents(base);
+      csgPads = [rebasePad({ cx: 0, cy: 0, cz: 0, hx, hy, hz }, baseCenter, baseYaw, anchor)];
+    }
   }
 
   const glb = await exportBrushAsGlbDataUrl(resultBrush);

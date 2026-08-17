@@ -1,8 +1,9 @@
 /**
  * Hammer++ solid primitives — box pads plus cylinders, arches, spikes, etc.
- * Collision still exports as an AABB from collisionSize (mesh-aligned bounds).
+ * Most shapes export as an AABB from collisionSize. Arch uses pillar+lintel pads.
  */
 import * as THREE from 'three';
+import type { CsgLocalPad } from './map-document';
 
 export type HammerPrimitive =
   | 'box'
@@ -45,6 +46,30 @@ export function hammerPrimitiveMeta(id: HammerPrimitive | string | undefined) {
 
 export function defaultSizeForHammer(shape: HammerPrimitive): [number, number, number] {
   return [...hammerPrimitiveMeta(shape).defaultSize] as [number, number, number];
+}
+
+/** Multi-box collision matching the visual arch (pillars + lintel, open doorway). */
+export function hammerArchCollisionPads(size: [number, number, number]): CsgLocalPad[] {
+  const [w, h, d] = size;
+  const pillarW = Math.max(0.2, w * 0.18);
+  const lintelH = Math.max(0.2, h * 0.22);
+  const hxP = pillarW / 2;
+  const hy = h / 2;
+  const hz = Math.max(0.05, d / 2);
+  return [
+    { cx: -w * 0.5 + hxP, cy: hy, cz: 0, hx: hxP, hy, hz },
+    { cx: w * 0.5 - hxP, cy: hy, cz: 0, hx: hxP, hy, hz },
+    { cx: 0, cy: h - lintelH * 0.5, cz: 0, hx: w / 2, hy: lintelH / 2, hz },
+  ];
+}
+
+/** Pads for Hammer shapes whose visual is hollow; undefined = use the AABB. */
+export function hollowHammerCollisionPads(
+  shape: HammerPrimitive,
+  size: [number, number, number]
+): CsgLocalPad[] | undefined {
+  if (shape === 'arch') return hammerArchCollisionPads(size);
+  return undefined;
 }
 
 const HAMMER_SHAPE_STORAGE_KEY = 'kilrun.hammerShape';
@@ -116,10 +141,9 @@ export function makeHammerGeometry(
       return geo;
     }
     case 'arch': {
-      // Outer box with a cutout approximated as a torus half + pillars.
-      // For collision we still use the full AABB; visual is an archway.
-      const groupGeo = new THREE.BoxGeometry(w, h, d);
-      return groupGeo;
+      // Visual is built in makeHammerSolidObject (pillars + lintel + torus).
+      // Collision pads come from hammerArchCollisionPads — not this box.
+      return new THREE.BoxGeometry(w, h, d);
     }
     case 'box':
     default:

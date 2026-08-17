@@ -47,6 +47,8 @@ describe('splitTrackName', () => {
 describe('guessTargetBone', () => {
   it('maps standard Mixamo bone names via the static table', () => {
     expect(guessTargetBone('mixamorig:LeftArm', PACK_BONES)).toBe('DEF-upper_arm.L');
+    expect(guessTargetBone('mixamorig:LeftUpperArm', PACK_BONES)).toBe('DEF-upper_arm.L');
+    expect(guessTargetBone('mixamorig:RightCalf', PACK_BONES)).toBe('DEF-shin.R');
     expect(guessTargetBone('mixamorig:RightUpLeg', PACK_BONES)).toBe('DEF-thigh.R');
     expect(guessTargetBone('mixamorig:Hips', PACK_BONES)).toBe('DEF-spine');
   });

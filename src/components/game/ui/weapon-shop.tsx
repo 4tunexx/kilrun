@@ -254,7 +254,7 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({
   onBuySkin,
 }) => {
   if (buySecondsLeft <= 0) return null;
-  const list = items && items.length > 0 ? items : WEAPON_PRESETS;
+  const list = items === undefined ? WEAPON_PRESETS : items;
 
   return (
     <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[135] w-full max-w-xl px-3 pointer-events-auto">

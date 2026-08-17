@@ -1,6 +1,7 @@
 import { Client, Room } from 'colyseus';
-import { PlayerState, RoomState } from '../schema/RoomState.js';
+import { PlayerState, PlatformState, RoomState } from '../schema/RoomState.js';
 import type { CustomMoveDef } from '../../../shared/custom-moves.js';
+import { PadSpatialIndex } from '../../../shared/platform-spatial.js';
 import {
   createFromBlueprints,
   createObstaclesFromBlueprints,
@@ -167,6 +168,17 @@ export class DeathrunRoom extends Room<RoomState> {
   private simScratch = new Map<string, PlayerSimScratch>();
   private obstacleTimers: number[] = [];
   private lastObstacleHitAt = new Map<string, number>();
+  private padIndex = new PadSpatialIndex<PlatformState>();
+  /** Shop pool for deathrun warmup (empty = no buy menu). */
+  private shopPowerUps: Array<{
+    id: string;
+    effect?: string;
+    shopPrice?: number;
+    enabled?: boolean;
+    modes?: string[];
+  }> = [];
+  private startingCredits = 0;
+  protected minPlayersToStart = MIN_PLAYERS_TO_START;
   private lastShotAt = new Map<string, number>();
   /** Edge-detects shootPressed for semi/bolt fire modes — see the trapper
    *  fire check below. Without this, holding the trigger fired a
@@ -258,6 +270,7 @@ export class DeathrunRoom extends Room<RoomState> {
         },
       ])
     );
+    this.padIndex.rebuild(this.state.platforms);
     this.obstacleTimers = [];
     this.state.courseStartX = SPAWN_X;
     this.state.courseFinishX = FINISH_X;
@@ -288,6 +301,49 @@ export class DeathrunRoom extends Room<RoomState> {
       const player = this.state.players.get(client.sessionId);
       if (!player || !player.isAlive) return;
       tryStartReload(player, Date.now());
+    });
+
+    this.onMessage('buyPowerUp', (client, data: { powerUpId?: string }) => {
+      if (this.state.phase !== 'countdown' || this.shopPowerUps.length === 0) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const id = typeof data?.powerUpId === 'string' ? data.powerUpId : '';
+      const hit = this.shopPowerUps.find((p) => p.id === id && p.enabled !== false);
+      if (!hit) return;
+      if (Array.isArray(hit.modes) && hit.modes.length && !hit.modes.includes('deathrun')) return;
+      const price = Math.max(0, Number(hit.shopPrice) || 0);
+      if (price > 0 && player.credits < price) return;
+      if (price > 0) player.credits = Math.max(0, player.credits - price);
+      const effect = String(hit.effect || hit.id);
+      const now = Date.now();
+      if (effect === 'heal') {
+        player.health = Math.min(getMaxHealth(player), player.health + 50);
+      } else if (effect === 'shield') {
+        player.shieldHp = Math.min(100, (player.shieldHp || 0) + 50);
+      } else if (effect === 'energy' || effect === 'speed_boost' || effect === 'speed') {
+        player.energy = getMaxEnergyFor(player);
+        if (effect === 'speed' || effect === 'speed_boost') {
+          player.shieldHp = Math.min(100, (player.shieldHp || 0) + 15);
+        }
+      } else if (effect === 'super_jump') {
+        player.energy = getMaxEnergyFor(player);
+        player.ability.jumpMult = Math.max(player.ability.jumpMult || 1, 1.35);
+        player.shieldHp = Math.min(100, (player.shieldHp || 0) + 15);
+      } else if (effect === 'invisibility' || effect === 'invisible') {
+        player.ability.visibilityEndsAt = now + 5000;
+        player.isInvisible = true;
+      } else if (effect === 'double_jump') {
+        player.ability.extraAirJumps = (player.ability.extraAirJumps || 0) + 1;
+      } else if (effect === 'checkpoint') {
+        player.hasCheckpoint = true;
+        player.checkpointX = player.x;
+        player.checkpointY = player.y;
+        player.checkpointZ = player.z;
+      } else if (effect === 'slow_trapper' || effect === 'slow_trap') {
+        for (const p of this.state.players.values()) {
+          if (p.role === 'trapper') p.ability.slowUntil = now + 5000;
+        }
+      }
     });
 
     this.onMessage(
@@ -490,6 +546,7 @@ export class DeathrunRoom extends Room<RoomState> {
       modeSettings?: Record<string, unknown>;
       combatSettings?: Record<string, unknown>;
       customMoves?: Record<string, unknown>[];
+      shopSettings?: Record<string, unknown>;
     },
     source = 'client',
     force = false
@@ -508,6 +565,7 @@ export class DeathrunRoom extends Room<RoomState> {
 
     while (this.state.platforms.length > 0) this.state.platforms.pop();
     this.state.platforms.push(...createFromBlueprints(platforms));
+    this.padIndex.rebuild(this.state.platforms);
 
     while (this.state.obstacles.length > 0) this.state.obstacles.pop();
     const hazards = Array.isArray(data?.obstacles) ? data.obstacles : [];
@@ -574,8 +632,37 @@ export class DeathrunRoom extends Room<RoomState> {
         wallSlideGravMult: typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
         customMoves: Array.isArray(data?.customMoves)
           ? (data.customMoves as unknown as CustomMoveDef[])
-          : undefined,
+          : this.combatPhysOpts?.customMoves,
       };
+    }
+
+    const shopRaw = data.shopSettings as
+      | {
+          powerUps?: unknown[];
+          startingCredits?: number;
+        }
+      | undefined;
+    const poolRaw = typeof data.combatSettings?.powerUpPool === 'string' ? data.combatSettings.powerUpPool : '';
+    const poolIds = poolRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const poolAlias: Record<string, string> = { speed_boost: 'speed', slow_trap: 'slow_trapper' };
+    if (shopRaw === undefined) {
+      // Active-map refetch used to omit shopSettings; don't wipe a pool the
+      // client already pushed via loadCustomMap.
+    } else if (shopRaw?.powerUps && Array.isArray(shopRaw.powerUps) && poolIds.length > 0) {
+      const wanted = new Set(poolIds.map((id) => poolAlias[id] ?? id));
+      this.shopPowerUps = shopRaw.powerUps.filter((it) => {
+        if (!it || typeof it !== 'object') return false;
+        const id = (it as { id?: unknown }).id;
+        return typeof id === 'string' && wanted.has(id);
+      }) as typeof this.shopPowerUps;
+    } else {
+      this.shopPowerUps = [];
+    }
+    if (typeof shopRaw?.startingCredits === 'number' && Number.isFinite(shopRaw.startingCredits)) {
+      this.startingCredits = Math.max(0, shopRaw.startingCredits);
     }
 
     this.customFinishes = Array.isArray(data?.finishes) ? data.finishes : [];
@@ -822,7 +909,7 @@ export class DeathrunRoom extends Room<RoomState> {
   }
 
   private tickLobby() {
-    if (this.state.players.size >= MIN_PLAYERS_TO_START) {
+    if (this.state.players.size >= this.minPlayersToStart) {
       this.state.phase = 'countdown';
       this.state.countdownMs = this.lobbyCountdownMs;
     }
@@ -830,7 +917,9 @@ export class DeathrunRoom extends Room<RoomState> {
 
   private tickCountdown(dtMs: number) {
     this.state.countdownMs -= dtMs;
+    this.state.buyPhaseMs = this.shopPowerUps.length > 0 ? Math.max(0, this.state.countdownMs) : 0;
     if (this.state.countdownMs <= 0) {
+      this.state.buyPhaseMs = 0;
       this.startRound();
     }
   }
@@ -838,6 +927,9 @@ export class DeathrunRoom extends Room<RoomState> {
   private resetPlayerOnSpawn(player: PlayerState, laneIndex: number) {
     player.health = getMaxHealth(player);
     player.energy = getMaxEnergyFor(player);
+    if (this.shopPowerUps.length > 0 && this.startingCredits > 0) {
+      player.credits = Math.max(player.credits, this.startingCredits);
+    }
     player.isAlive = true;
     player.hasFinished = false;
     this.applySpawnPosition(player, laneIndex);
@@ -927,6 +1019,7 @@ export class DeathrunRoom extends Room<RoomState> {
       this.platformMotion,
       this.matchElapsedMs
     );
+    this.padIndex.rebuild(this.state.platforms);
     this.tickObstacles(dtMs);
     this.tickPlayers(dtMs, platformDeltas);
 
@@ -1011,19 +1104,22 @@ export class DeathrunRoom extends Room<RoomState> {
         player,
         input,
         dtSeconds,
-        this.state.platforms,
+        this.padIndex.nearby(player.x, player.y),
         scratch,
         this.worldBounds,
         this.combatPhysOpts
       );
+      if (scratch.fallDamageThisTick > 0) this.damagePlayer(player, scratch.fallDamageThisTick);
 
       finishReloadIfDue(player, now);
 
-      if (player.role === 'runner' && player.isAlive && !player.hasFinished) {
-        player.distance = Math.max(
-          player.distance,
-          Math.floor(Math.max(0, player.x - this.state.courseStartX))
-        );
+      if (player.isAlive && !player.hasFinished) {
+        if (player.role === 'runner') {
+          player.distance = Math.max(
+            player.distance,
+            Math.floor(Math.max(0, player.x - this.state.courseStartX))
+          );
+        }
         for (const obstacle of this.state.obstacles) {
           if (!isPlayerHitByObstacle(player, obstacle)) continue;
           const hitKey = `${sessionId}:${obstacle.id}`;
@@ -1034,8 +1130,11 @@ export class DeathrunRoom extends Room<RoomState> {
               : OBSTACLE_HIT_COOLDOWN_MS;
           if (now - lastHit < cooldown) continue;
           this.lastObstacleHitAt.set(hitKey, now);
-          const amount =
-            obstacle.damage > 0 ? obstacle.damage : OBSTACLE_DAMAGE;
+          const amount = obstacle.instantKill
+            ? Math.max(player.health, 9999)
+            : obstacle.damage > 0
+              ? obstacle.damage
+              : OBSTACLE_DAMAGE;
           this.damagePlayer(player, amount);
         }
 
@@ -1239,8 +1338,15 @@ export class DeathrunRoom extends Room<RoomState> {
     if (isBerserkActive(player, Date.now())) {
       return;
     }
+    let dmg = amount;
+    if (player.shieldHp > 0) {
+      const absorbed = Math.min(player.shieldHp, dmg);
+      player.shieldHp -= absorbed;
+      dmg -= absorbed;
+    }
+    if (dmg <= 0) return;
     const wasAlive = player.isAlive && player.health > 0;
-    player.health = Math.max(0, player.health - amount);
+    player.health = Math.max(0, player.health - dmg);
     if (player.health <= 0) {
       if (wasAlive) {
         player.deaths = (player.deaths || 0) + 1;

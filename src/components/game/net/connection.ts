@@ -64,7 +64,9 @@ export type GameRoomName =
   | 'deathrun'
   | 'deathrun_practice'
   | 'horde'
+  | 'horde_practice'
   | 'competitive'
+  | 'competitive_practice'
   | 'competitive_ranked';
 
 
@@ -695,6 +697,7 @@ export class GameConnection {
       y: number;
       z: number;
       width: number;
+      depth?: number;
       height: number;
       intervalMs?: number;
       activeMs?: number;

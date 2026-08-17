@@ -14,6 +14,10 @@ export interface NetAbilityLoadoutState {
   jumpMult?: number;
   maxEnergyBonus?: number;
   punchDamageMult?: number;
+  reloadSpeedMult?: number;
+  fallDamageReduction?: number;
+  extraAirJumps?: number;
+  slowUntil?: number;
   visibilityEndsAt?: number;
   flyEndsAt?: number;
   hookEndsAt?: number;
@@ -151,6 +155,7 @@ export interface NetObstacleState {
   z: number;
   width: number;
   height: number;
+  depth?: number;
   intervalMs: number;
   activeMs: number;
   active: boolean;
@@ -158,6 +163,7 @@ export interface NetObstacleState {
   alwaysActive?: boolean;
   /** When true, hazard only arms while a linked button is held. */
   buttonControlled?: boolean;
+  instantKill?: boolean;
   /** Horde custom monster: GLB to render instead of the generic kind-based prefab. */
   modelUrl?: string;
   /** Horde custom monster: catalog model id (used when modelUrl is a custom upload). */

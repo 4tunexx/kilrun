@@ -67,6 +67,7 @@ type WeaponPlayerFields = {
   reserveAmmo?: number;
   weaponReloadMs?: number;
   reloadEndsAt?: number;
+  ability?: { reloadSpeedMult?: number };
 };
 
 export function applySanitizedWeaponToPlayer(
@@ -132,7 +133,10 @@ export function tryStartReload(player: WeaponPlayerFields, now: number): boolean
   if ((player.reloadEndsAt ?? 0) > now) return false;
   if ((player.ammoInMag ?? 0) >= mag) return false;
   if ((player.reserveAmmo ?? 0) <= 0) return false;
-  const ms = Math.max(200, player.weaponReloadMs ?? 1600);
+  const ms = Math.max(
+    200,
+    Math.floor((player.weaponReloadMs ?? 1600) / Math.max(0.25, player.ability?.reloadSpeedMult ?? 1))
+  );
   player.reloadEndsAt = now + ms;
   return true;
 }

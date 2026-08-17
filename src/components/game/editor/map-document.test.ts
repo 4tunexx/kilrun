@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getEntityWarnings,
   sanitizePlayerBindings,
+  sanitizeShopPowerUp,
   scrubDanglingReferences,
   suggestPlayerBindings,
 } from './map-document';
@@ -229,5 +230,38 @@ describe('suggestPlayerBindings', () => {
     expect(b.run).toBe('Run');
     expect(b.slide).toBeUndefined();
     expect(b.flip).toBeUndefined();
+  });
+});
+
+describe('sanitizeShopPowerUp', () => {
+  it('keeps Deathrun effects instead of coercing them to heal', () => {
+    for (const effect of [
+      'invisibility',
+      'double_jump',
+      'checkpoint',
+      'slow_trapper',
+    ] as const) {
+      const out = sanitizeShopPowerUp({
+        id: effect,
+        label: effect,
+        shopPrice: 100,
+        effect,
+        enabled: true,
+        modes: ['deathrun'],
+      });
+      expect(out?.effect).toBe(effect);
+    }
+  });
+
+  it('falls back to heal for unknown effects', () => {
+    const out = sanitizeShopPowerUp({
+      id: 'mystery',
+      label: 'Mystery',
+      shopPrice: 1,
+      effect: 'mystery',
+      enabled: true,
+      modes: ['horde'],
+    });
+    expect(out?.effect).toBe('heal');
   });
 });

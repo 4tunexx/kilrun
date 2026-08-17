@@ -1,6 +1,7 @@
 import { Client, Room } from 'colyseus';
-import { PlayerState, RoomState } from '../schema/RoomState.js';
+import { PlayerState, PlatformState, RoomState } from '../schema/RoomState.js';
 import type { CustomMoveDef } from '../../../shared/custom-moves.js';
+import { PadSpatialIndex } from '../../../shared/platform-spatial.js';
 import {
   createFromBlueprints,
   createObstaclesFromBlueprints,
@@ -208,6 +209,8 @@ export class CompetitiveRoom extends Room<RoomState> {
 
   private latestInputs = new Map<string, PlayerInput>();
   private simScratch = new Map<string, PlayerSimScratch>();
+  private padIndex = new PadSpatialIndex<PlatformState>();
+  protected minPlayersToStart = COMPETITIVE_MIN_PLAYERS_TO_START;
   private lastObstacleHitAt = new Map<string, number>();
   private lastShotAt = new Map<string, number>();
   /** Edge-detects shootPressed for semi/bolt fire modes — see the fire loop
@@ -341,6 +344,7 @@ export class CompetitiveRoom extends Room<RoomState> {
         { x: 0, y: 0, z: 0, width: 18, depth: 22, kind: 'solid', height: 0.25, topOnly: true },
       ])
     );
+    this.padIndex.rebuild(this.state.platforms);
     // Default arena is centered at origin — Deathrun's [0,W]×[0,H] clamp would
     // shove team spawns into a corner. Custom maps override via loadCustomMap.
     this.worldBounds = { minX: -12, maxX: 12, minY: -12, maxY: 12 };
@@ -727,6 +731,7 @@ export class CompetitiveRoom extends Room<RoomState> {
 
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(platforms));
+      this.padIndex.rebuild(this.state.platforms);
       this.platformMotion.clear();
       this.matchElapsedMs = 0;
 
@@ -840,6 +845,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       const data = active.payload;
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(pads));
+      this.padIndex.rebuild(this.state.platforms);
       this.platformMotion.clear();
       this.matchElapsedMs = 0;
       while (this.state.obstacles.length > 0) this.state.obstacles.pop();
@@ -1104,7 +1110,7 @@ export class CompetitiveRoom extends Room<RoomState> {
           !this.openedToAll &&
           this.rankKey !== 'open'
             ? this.minSameRank
-            : COMPETITIVE_MIN_PLAYERS_TO_START;
+            : this.minPlayersToStart;
         if (this.state.players.size >= minToStart) {
           this.state.phase = 'countdown';
           this.state.countdownMs = this.lobbyCountdownMs;
@@ -1236,6 +1242,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       this.platformMotion,
       this.matchElapsedMs
     );
+    this.padIndex.rebuild(this.state.platforms);
     this.tickButtonArming(dtMs);
     this.tickPlayers(dtMs, platformDeltas);
     this.tickPushPayloads(dtMs / 1000);
@@ -1549,7 +1556,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     return sum / enemies.length;
   }
 
-  private async reportRewards(matchWinner: 'team_a' | 'team_b') {
+  protected async reportRewards(matchWinner: 'team_a' | 'team_b') {
     const matchId = this.state.matchId || `${this.roomId}-${Date.now()}`;
     this.state.matchId = matchId;
     const ranked = this.state.modeTag === 'competitive_ranked';
@@ -1716,7 +1723,8 @@ export class CompetitiveRoom extends Room<RoomState> {
 
       applyPlatformCarry(player, scratch.supportPlatformId, platformDeltas);
       tickActiveAbilityTimers(player, now);
-      applyMovement(player, input, dtSeconds, this.state.platforms, scratch, this.worldBounds, this.combatPhysOpts);
+      applyMovement(player, input, dtSeconds, this.padIndex.nearby(player.x, player.y), scratch, this.worldBounds, this.combatPhysOpts);
+      if (scratch.fallDamageThisTick > 0) this.damagePlayer(player, scratch.fallDamageThisTick);
       finishReloadIfDue(player, now);
 
       if (input.interactPressed) this.tryPressButtons(player, sessionId, now);
@@ -1733,7 +1741,11 @@ export class CompetitiveRoom extends Room<RoomState> {
             : OBSTACLE_HIT_COOLDOWN_MS;
         if (now - lastHit < cooldown) continue;
         this.lastObstacleHitAt.set(hitKey, now);
-        const amount = obstacle.damage > 0 ? obstacle.damage : OBSTACLE_DAMAGE;
+        const amount = obstacle.instantKill
+          ? Math.max(player.health, 9999)
+          : obstacle.damage > 0
+            ? obstacle.damage
+            : OBSTACLE_DAMAGE;
         this.damagePlayer(player, amount);
       }
 

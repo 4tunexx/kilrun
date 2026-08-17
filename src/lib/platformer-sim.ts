@@ -16,6 +16,8 @@ import {
   ENERGY_EXHAUSTED_SPEED_MULT,
   ENERGY_EXHAUSTED_THRESHOLD,
   ENERGY_REGEN_RATE,
+  FALL_DAMAGE_PER_MS,
+  FALL_DAMAGE_SPEED,
   FLIP_COOLDOWN_MS,
   FLIP_DURATION_MS,
   FLIP_ENERGY_COST,
@@ -52,6 +54,7 @@ import {
   WALL_SLIDE_GRAV_MULT,
 } from '@shared/sim-constants';
 import type { CustomMoveDef } from '@shared/custom-moves';
+import { PadSpatialIndex } from '@shared/platform-spatial';
 
 export interface SimPad {
   x: number;
@@ -88,6 +91,13 @@ export interface SimPad {
   motionAmpX?: number;
   motionAmpY?: number;
   motionAmpZ?: number;
+  /** Wired Solid door — skipped by collision while `open`. */
+  doorControlled?: boolean;
+  open?: boolean;
+}
+
+function padBlocksMovement(pad: SimPad): boolean {
+  return !(pad.doorControlled && pad.open);
 }
 
 export interface SimBounds {
@@ -148,6 +158,14 @@ export interface SimScratch {
   customMoveActiveId: string;
   customMoveActiveUntil: number;
   customMoveCooldownEndsAt: Map<string, number>;
+  /** Remaining shop/power extra air jumps (consumed like server ability.extraAirJumps). */
+  extraAirJumps: number;
+  /** Lowest vz while airborne this flight (for landing fall damage). */
+  minAirVz: number;
+  /** HP to subtract after this step when a hard landing is detected. */
+  fallDamageThisTick: number;
+  /** Epoch ms — while in the future, maxSpeed is halved (slow trapper). */
+  slowUntil: number;
 }
 
 export interface SimInput {
@@ -207,6 +225,8 @@ export interface SimPhysicsOpts {
   wallSlideGravMult?: number;
   /** Map-authored custom moves (Player Model Studio → Moves tab). */
   customMoves?: CustomMoveDef[];
+  /** 0–0.9, same clamp as server ability.fallDamageReduction. */
+  fallDamageReduction?: number;
 }
 
 export function createSimScratch(): SimScratch {
@@ -238,6 +258,10 @@ export function createSimScratch(): SimScratch {
     customMoveActiveId: '',
     customMoveActiveUntil: 0,
     customMoveCooldownEndsAt: new Map(),
+    extraAirJumps: 0,
+    minAirVz: 0,
+    fallDamageThisTick: 0,
+    slowUntil: 0,
   };
 }
 
@@ -284,6 +308,7 @@ function findSupport(
   let bestBelow: { pad: SimPad; topZ: number } | null = null;
   let bestClimb: { pad: SimPad; topZ: number } | null = null;
   for (const pad of pads) {
+    if (!padBlocksMovement(pad)) continue;
     const halfW = pad.width / 2;
     const halfD = pad.depth / 2;
     const yaw = pad.rotYaw || 0;
@@ -333,6 +358,7 @@ function tryLedgeAssist(
   pads: SimPad[]
 ): { x: number; y: number } | null {
   for (const pad of pads) {
+    if (!padBlocksMovement(pad)) continue;
     const topZ = pad.z;
     if (z < topZ - LAND_SNAP_SLOW || z > topZ + 0.55) continue;
     const halfW = pad.width / 2;
@@ -356,6 +382,7 @@ function resolveSolids(body: SimBody, pads: SimPad[]) {
   let wallNormalX = 0;
   let wallNormalY = 0;
   for (const pad of pads) {
+    if (!padBlocksMovement(pad)) continue;
     // Walk-over pads (floors, stair/ramp treads, jump pads, ice/conveyor/
     // sand) never block sideways — that's what makes them walkable at all.
     if (pad.topOnly) continue;
@@ -428,6 +455,17 @@ function clamp(v: number, a: number, b: number) {
   return Math.min(b, Math.max(a, v));
 }
 
+const SPATIAL_PAD_THRESHOLD = 40;
+let padSpatialCache: { pads: SimPad[]; index: PadSpatialIndex<SimPad> } | null = null;
+
+function padsNear(pads: SimPad[], x: number, y: number): SimPad[] {
+  if (pads.length < SPATIAL_PAD_THRESHOLD) return pads;
+  if (!padSpatialCache || padSpatialCache.pads !== pads) {
+    padSpatialCache = { pads, index: new PadSpatialIndex<SimPad>().rebuild(pads) };
+  }
+  return padSpatialCache.index.nearby(x, y);
+}
+
 export function stepPlatformer(
   body: SimBody,
   input: SimInput,
@@ -451,6 +489,8 @@ export function stepPlatformer(
   const CROUCH_MULT = physOpts?.crouchMult ?? BASE_CROUCH_MULT;
   const doubleJumpEnabled = physOpts?.doubleJumpEnabled ?? true;
 
+  const near = padsNear(pads, body.x, body.y);
+
   let wishX = input.moveX;
   let wishY = input.moveY;
   const wishMag = Math.hypot(wishX, wishY);
@@ -473,20 +513,21 @@ export function stepPlatformer(
     if (body.energy >= ENERGY_EXHAUSTED_THRESHOLD) scratch.exhausted = false;
   }
   if (scratch.exhausted) maxSpeed *= ENERGY_EXHAUSTED_SPEED_MULT;
+  if ((scratch.slowUntil || 0) > Date.now()) maxSpeed *= 0.5;
 
   const wasGroundedLastTick = body.isGrounded;
   let support = findSupport(
     body.x,
     body.y,
     body.z,
-    pads,
+    near,
     wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_SNAP_SLOW
   );
   if (!support && wasGroundedLastTick && body.vz >= -0.5) {
-    support = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+    support = findSupport(body.x, body.y, body.z, near, LAND_STEP_CLIMB);
   }
   if (!support) {
-    const nudged = tryLedgeAssist(body.x, body.y, body.z, pads);
+    const nudged = tryLedgeAssist(body.x, body.y, body.z, near);
     if (nudged) {
       body.x = nudged.x;
       body.y = nudged.y;
@@ -494,11 +535,11 @@ export function stepPlatformer(
         body.x,
         body.y,
         body.z,
-        pads,
+        near,
         wasGroundedLastTick ? LAND_STEP_DESCEND : LAND_SNAP_SLOW
       );
       if (!support && wasGroundedLastTick && body.vz >= -0.5) {
-        support = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+        support = findSupport(body.x, body.y, body.z, near, LAND_STEP_CLIMB);
       }
     }
   }
@@ -686,7 +727,21 @@ export function stepPlatformer(
       scratch.jumpBufferMs = 0;
       scratch.jumpCount = 1;
     } else if (scratch.jumpCount === 0 || scratch.jumpCount === 2) {
-      scratch.jumpBufferMs = JUMP_BUFFER_MS;
+      if (
+        !grounded &&
+        (scratch.extraAirJumps || 0) > 0 &&
+        body.energy >= JUMP_ENERGY * 0.2
+      ) {
+        scratch.extraAirJumps -= 1;
+        body.vz = DOUBLE_JUMP_VELOCITY;
+        body.isGrounded = false;
+        grounded = false;
+        scratch.coyoteMs = 0;
+        scratch.jumpCount = 2;
+        body.energy = Math.max(0, body.energy - JUMP_ENERGY);
+      } else {
+        scratch.jumpBufferMs = JUMP_BUFFER_MS;
+      }
     } else if (
       scratch.jumpCount === 1 &&
       doubleJumpEnabled &&
@@ -760,7 +815,7 @@ export function stepPlatformer(
   body.y = clamp(body.y + scratch.velY * dt, bounds.minY + PLAYER_RADIUS, bounds.maxY - PLAYER_RADIUS);
   const beforePushX = body.x;
   const beforePushY = body.y;
-  const pushed = resolveSolids(body, pads);
+  const pushed = resolveSolids(body, near);
   body.x = clamp(pushed.x, bounds.minX + PLAYER_RADIUS, bounds.maxX - PLAYER_RADIUS);
   body.y = clamp(pushed.y, bounds.minY + PLAYER_RADIUS, bounds.maxY - PLAYER_RADIUS);
   if (Math.abs(body.x - beforePushX) > 1e-5) scratch.velX = 0;
@@ -771,9 +826,9 @@ export function stepPlatformer(
   // Same-frame re-stick after XY move so feet follow the next ramp cell now,
   // not one tick late (that lag was a big part of the bumpy-road feel).
   if (body.isGrounded) {
-    let post = findSupport(body.x, body.y, body.z, pads, LAND_STEP_DESCEND);
+    let post = findSupport(body.x, body.y, body.z, near, LAND_STEP_DESCEND);
     if (!post) {
-      post = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+      post = findSupport(body.x, body.y, body.z, near, LAND_STEP_CLIMB);
     }
     if (post) {
       support = post;
@@ -802,18 +857,18 @@ export function stepPlatformer(
 
     const baseSnap = body.vz < -4 ? LAND_SNAP_FAST : LAND_SNAP_SLOW;
     const softSnap = body.vz > -2 ? Math.max(baseSnap, LAND_STEP_CLIMB) : baseSnap;
-    let land = findSupport(body.x, body.y, body.z, pads, softSnap);
+    let land = findSupport(body.x, body.y, body.z, near, softSnap);
     if (!land && body.vz >= -0.5) {
-      land = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+      land = findSupport(body.x, body.y, body.z, near, LAND_STEP_CLIMB);
     }
     if (!land) {
-      const nudged = tryLedgeAssist(body.x, body.y, body.z, pads);
+      const nudged = tryLedgeAssist(body.x, body.y, body.z, near);
       if (nudged) {
         body.x = nudged.x;
         body.y = nudged.y;
-        land = findSupport(body.x, body.y, body.z, pads, softSnap);
+        land = findSupport(body.x, body.y, body.z, near, softSnap);
         if (!land && body.vz >= -0.5) {
-          land = findSupport(body.x, body.y, body.z, pads, LAND_STEP_CLIMB);
+          land = findSupport(body.x, body.y, body.z, near, LAND_STEP_CLIMB);
         }
       }
     }
@@ -842,10 +897,22 @@ export function stepPlatformer(
   }
 
   if (body.isGrounded) {
-    const under = findSupport(body.x, body.y, body.z, pads, LAND_STEP_DESCEND);
+    const under = findSupport(body.x, body.y, body.z, near, LAND_STEP_DESCEND);
     scratch.supportPadId = under?.pad.id ?? under?.pad.entityId ?? null;
   } else {
     scratch.supportPadId = null;
+  }
+
+  scratch.fallDamageThisTick = 0;
+  if (!body.isGrounded) {
+    scratch.minAirVz = wasGroundedLastTick ? body.vz : Math.min(scratch.minAirVz, body.vz);
+  } else if (!wasGroundedLastTick) {
+    if (scratch.minAirVz < -FALL_DAMAGE_SPEED) {
+      const excess = -scratch.minAirVz - FALL_DAMAGE_SPEED;
+      const red = Math.min(0.9, Math.max(0, physOpts?.fallDamageReduction || 0));
+      scratch.fallDamageThisTick = excess * FALL_DAMAGE_PER_MS * (1 - red);
+    }
+    scratch.minAirVz = 0;
   }
 
   return body;

@@ -452,11 +452,7 @@ export default function KilrunEngine({
         modeSettings: doc.modeSettings as Record<string, unknown> | undefined,
         combatSettings: doc.combatSettings as Record<string, unknown> | undefined,
         customMoves: doc.customMoves as unknown as Record<string, unknown>[] | undefined,
-        ...(mode === 'horde' || mode === 'competitive'
-          ? {
-              shopSettings: ensureShopSettings(doc) as unknown as Record<string, unknown>,
-            }
-          : {}),
+        shopSettings: ensureShopSettings(doc) as unknown as Record<string, unknown>,
       });
       if (practiceRole) {
         connectionRef.current.sendPracticeSetRole(practiceRole);
@@ -705,6 +701,8 @@ export default function KilrunEngine({
     let wasSprintingForSound = false;
     let wasSlidingForSound = false;
     let wasFlippingForSound = false;
+    let wasCrouchingForSound = false;
+    let lastFootstepAt = 0;
     /** Sprint/slide screen FX intensity, eased toward 0/1 each frame. */
     let sprintFx = 0;
     const sprintParticles = new SprintParticles(world.camera);
@@ -935,6 +933,9 @@ export default function KilrunEngine({
               const sin = Math.sin(cameraYaw);
               const moveX = wishFwd * cos + wishStrafe * sin;
               const moveY = wishFwd * sin - wishStrafe * cos;
+              const prevJumpCount = predictedScratch.jumpCount;
+              const prevWallLock = predictedScratch.wallJumpLockoutMs;
+              const prevExhausted = predictedScratch.exhausted;
               stepPlatformer(
                 predictedBody,
                 {
@@ -955,6 +956,12 @@ export default function KilrunEngine({
                 predictedBounds,
                 predictedPhysOpts
               );
+              if (predictedScratch.wallJumpLockoutMs > 0 && prevWallLock <= 0) {
+                playSound('wall_jump');
+              } else if (predictedScratch.jumpCount === 2 && prevJumpCount < 2) {
+                playSound('double_jump');
+              }
+              if (predictedScratch.exhausted && !prevExhausted) playSound('energy_exhausted');
             }
             // Reconcile toward the latest authoritative snapshot — soft pull
             // for small errors, hard snap only for large desyncs (teleport/
@@ -1006,6 +1013,18 @@ export default function KilrunEngine({
         const flipping = predictedScratch.flipMs > 0;
         if (flipping && !wasFlippingForSound) playSound('flip');
         wasFlippingForSound = flipping;
+        const crouchNow = !frozen && inputManager.isCrouchPressed();
+        if (crouchNow && !wasCrouchingForSound) playSound('crouch');
+        wasCrouchingForSound = crouchNow;
+        if (
+          !frozen &&
+          (predictedBody?.isGrounded ?? localState?.isGrounded) &&
+          (wishFwd !== 0 || wishStrafe !== 0) &&
+          performance.now() - lastFootstepAt > (sprinting ? 280 : 420)
+        ) {
+          lastFootstepAt = performance.now();
+          playSound('footstep');
+        }
         const targetFx = sliding ? 1 : sprinting ? Math.min(1, horizSpeed / 9) : 0;
         const rate = targetFx > sprintFx ? 7 : 3.2;
         sprintFx += (targetFx - sprintFx) * Math.min(1, dt * rate);
@@ -1096,12 +1115,17 @@ export default function KilrunEngine({
                 range: player.weaponRange,
                 cooldownMs: player.weaponCooldownMs,
                 coneRadians: player.weaponConeRadians,
-                // Match buy-menu skin overrides VP cosmetic texture.
                 textureUrl: skinTex || vpTex,
                 fireClip: mapWep?.fireClip,
                 reloadClip: mapWep?.reloadClip,
                 idleClip: mapWep?.idleClip,
                 equipClip: mapWep?.equipClip,
+                holdPosition: mapWep?.holdPosition,
+                holdRotation: mapWep?.holdRotation,
+                holdScale: mapWep?.holdScale,
+                backPosition: mapWep?.backPosition,
+                backRotation: mapWep?.backRotation,
+                backScale: mapWep?.backScale,
               });
             } else if (skinTex) {
               void view.applyWeaponSkinTexture(skinTex);
@@ -1146,9 +1170,12 @@ export default function KilrunEngine({
           if (Number.isFinite(pl.yawOffsetDeg) && pl.yawOffsetDeg !== 0) {
             view.root.rotation.y += (pl.yawOffsetDeg * Math.PI) / 180;
           }
-          if (pl.hideWhenClose && cam.boomDistance < pl.hideDistance) {
+          const armsOnly =
+            !!customDocRef.current && ensureCombatSettings(customDocRef.current).armsOnlyMode;
+          if (pl.hideWhenClose && cam.boomDistance < pl.hideDistance && !armsOnly) {
             view.root.visible = false;
           }
+          view.setArmsOnly(armsOnly);
         }
       });
       map.update(dt);
@@ -1514,7 +1541,7 @@ export default function KilrunEngine({
             />
           </>
         )}
-        {(mode === 'competitive' || mode === 'horde') &&
+        {(mode === 'competitive' || mode === 'horde' || mode === 'deathrun') &&
           (room.buyPhaseMs ?? 0) > 0 &&
           !paused &&
           !editorOpen && (
@@ -1524,23 +1551,31 @@ export default function KilrunEngine({
               currentWeaponKind={localPlayer?.weaponKind}
               currentSkinId={localPlayer?.weaponSkinId}
               credits={localPlayer?.credits ?? 0}
-              items={mapShopItemsToPresets(
-                shopItemsForMode(
-                  customDocRef.current,
-                  mode === 'competitive' ? 'competitive' : 'horde'
-                ),
-                shopMetricCounts
-              )}
-              skins={mapShopSkinsToPresets(
-                shopSkinsForMode(
-                  customDocRef.current,
-                  mode === 'competitive' ? 'competitive' : 'horde'
-                )
-              )}
+              items={
+                mode === 'deathrun'
+                  ? []
+                  : mapShopItemsToPresets(
+                      shopItemsForMode(
+                        customDocRef.current,
+                        mode === 'competitive' ? 'competitive' : 'horde'
+                      ),
+                      shopMetricCounts
+                    )
+              }
+              skins={
+                mode === 'deathrun'
+                  ? []
+                  : mapShopSkinsToPresets(
+                      shopSkinsForMode(
+                        customDocRef.current,
+                        mode === 'competitive' ? 'competitive' : 'horde'
+                      )
+                    )
+              }
               powerUps={mapPowerUpsToPresets(
                 shopPowerUpsForMode(
                   customDocRef.current,
-                  mode === 'competitive' ? 'competitive' : 'horde'
+                  mode === 'competitive' ? 'competitive' : mode === 'horde' ? 'horde' : 'deathrun'
                 )
               )}
               onBuy={(preset: WeaponPreset) => {
@@ -1575,8 +1610,13 @@ export default function KilrunEngine({
                     range: preset.range,
                     cooldownMs: preset.cooldownMs,
                     coneRadians: preset.coneRadians,
-                    // Equipped weapon skin wins over the weapon's default texture.
                     textureUrl: equippedSkin?.textureUrl || preset.textureUrl,
+                    holdPosition: customDocRef.current?.weaponDef?.holdPosition,
+                    holdRotation: customDocRef.current?.weaponDef?.holdRotation,
+                    holdScale: customDocRef.current?.weaponDef?.holdScale,
+                    backPosition: customDocRef.current?.weaponDef?.backPosition,
+                    backRotation: customDocRef.current?.weaponDef?.backRotation,
+                    backScale: customDocRef.current?.weaponDef?.backScale,
                   });
                   if (view) {
                     view.syncedWeaponModelUrl = preset.modelUrl;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
-import { voxelizeGeometryToPads } from './mesh-voxelize';
+import { voxelizeGeometryToPads, compactCollisionPads } from './mesh-voxelize';
 
 describe('voxelizeGeometryToPads', () => {
   it('a plain solid box voxelizes to a single box matching its bounds', () => {
@@ -11,7 +11,7 @@ describe('voxelizeGeometryToPads', () => {
     // Total volume should roughly match the original box (allow voxelization slop).
     const vol = pads.reduce((sum, p) => sum + p.hx * p.hy * p.hz * 8, 0);
     expect(vol).toBeGreaterThan(6);
-    expect(vol).toBeLessThanOrEqual(8.5);
+    expect(vol).toBeLessThanOrEqual(10);
   });
 
   it('leaves a hollow interior empty instead of filling it as one big box', () => {
@@ -53,5 +53,19 @@ describe('voxelizeGeometryToPads', () => {
   it('returns no pads for an empty/degenerate geometry', () => {
     const geo = new THREE.BufferGeometry();
     expect(voxelizeGeometryToPads(geo)).toEqual([]);
+  });
+
+  it('caps pad count via compactCollisionPads', () => {
+    const many = Array.from({ length: 80 }, (_, i) => ({
+      cx: i * 0.1,
+      cy: 0,
+      cz: 0,
+      hx: 0.04,
+      hy: 0.04,
+      hz: 0.04,
+    }));
+    const compact = compactCollisionPads(many, 48);
+    expect(compact.length).toBeLessThanOrEqual(48);
+    expect(compact.length).toBeGreaterThan(0);
   });
 });

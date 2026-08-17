@@ -1,25 +1,10 @@
 import { ObstacleState, PlayerState } from '../schema/RoomState.js';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from './constants.js';
+import { isPlayerOverlappingObstacle } from '../../../shared/obstacle-hit.js';
 
 /** Circle (player XY) vs AABB hazard, only while active and overlapping in height. */
 export function isPlayerHitByObstacle(player: PlayerState, obstacle: ObstacleState): boolean {
-  if (!obstacle.active) return false;
-
-  const halfWidth = obstacle.width / 2;
-  const halfHeight = obstacle.height / 2;
-  const closestX = clamp(player.x, obstacle.x - halfWidth, obstacle.x + halfWidth);
-  const closestY = clamp(player.y, obstacle.y - halfHeight, obstacle.y + halfHeight);
-
-  const dx = player.x - closestX;
-  const dy = player.y - closestY;
-  if (dx * dx + dy * dy >= PLAYER_RADIUS * PLAYER_RADIUS) return false;
-
-  // Vertical overlap: player capsule [z, z+PLAYER_HEIGHT] vs hazard band around obstacle.z
-  const playerBottom = player.z;
-  const playerTop = player.z + PLAYER_HEIGHT;
-  const hazBottom = obstacle.z - 0.2;
-  const hazTop = obstacle.z + Math.max(obstacle.height, 1.2);
-  return playerTop >= hazBottom && playerBottom <= hazTop;
+  return isPlayerOverlappingObstacle(player, obstacle, PLAYER_RADIUS, PLAYER_HEIGHT);
 }
 
 /**

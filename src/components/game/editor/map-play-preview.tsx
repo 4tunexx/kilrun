@@ -5,8 +5,9 @@ import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
 import type { MapDocument } from './map-document';
-import { ensureCombatSettings, ensurePlatformMotion } from './map-document';
-import { PLAYER_RADIUS } from '@shared/sim-constants';
+import { ensureCombatSettings, ensurePlatformMotion, DEFAULT_WEAPON_DEF } from './map-document';
+import { PLAYER_HEIGHT, PLAYER_RADIUS } from '@shared/sim-constants';
+import { isPlayerOverlappingObstacle } from '@shared/obstacle-hit';
 import {
   HAMMER_SOLID_MODEL,
   ensureEnvironment,
@@ -32,6 +33,7 @@ import {
   applyEntityOpacity,
   applyEntityGlow,
   tickEntityGlow,
+  tickSpinHazardVisual,
   makeAuthoredLight,
   makeGameplayFallback,
   shouldUseGameplayFallback,
@@ -58,6 +60,8 @@ import {
 import type { GhostSample } from '@/lib/ghost-actions';
 import {
   mapDocSpawnPoints,
+  mapDocToSimActions,
+  mapDocToSimButtons,
   mapDocToSimFinishes,
   mapDocToSimHazards,
   mapDocToSimPlatforms,
@@ -73,6 +77,7 @@ import { BODY_COLOR_RED, BODY_COLOR_BLUE } from '@/lib/body-colors';
 import { updateFollowCamera } from '../renderer/three-world';
 import { createBloomComposer } from '../renderer/bloom-composer';
 import { applySkinAttachments, tickSkinAttachments } from './skin-attachments';
+import { applyArmsOnlyMeshVisibility } from '../entities/arms-only';
 import {
   findWeaponAttachment,
   resolveWeaponCombat,
@@ -122,6 +127,30 @@ import {
 } from '../tps/locomotion-facing';
 
 const SHOW_COLLISION_DEBUG = false;
+
+function applyWeaponSlotPose(
+  root: THREE.Object3D,
+  position: [number, number, number],
+  rotation: [number, number, number],
+  scale: [number, number, number]
+) {
+  let holder: THREE.Object3D | null = null;
+  root.traverse((o) => {
+    if (!holder && o.userData?.isWeaponSkin) holder = o;
+  });
+  if (!holder) return;
+  holder.position.set(...position);
+  const mesh =
+    holder.children[0] && !holder.children[0].userData?.isWeaponSkin
+      ? holder.children[0]
+      : holder;
+  mesh.rotation.set(
+    THREE.MathUtils.degToRad(rotation[0]),
+    THREE.MathUtils.degToRad(rotation[1]),
+    THREE.MathUtils.degToRad(rotation[2])
+  );
+  mesh.scale.set(...scale);
+}
 
 function addCollisionPadMeshes(scene: THREE.Scene, pads: SimPad[]) {
   const group = new THREE.Group();
@@ -184,6 +213,7 @@ function snapBodyToPads(body: SimBody, pads: SimPad[]) {
   let best: SimPad | null = null;
   let bestDist = Infinity;
   for (const pad of pads) {
+    if (pad.doorControlled && pad.open) continue;
     const dx = body.x - pad.x;
     const dy = body.y - pad.y;
     const planar = Math.hypot(dx, dy);
@@ -375,22 +405,27 @@ export function MapPlayPreview({
       homeX: p.x,
       homeY: p.y,
       homeZ: p.z,
+      open: false,
     }));
-    // console.table renders as a visible grid immediately — no clicking to
-    // expand a collapsed array reference before the numbers are readable.
-    // eslint-disable-next-line no-console
-    console.table(
-      pads.map((p) => ({
-        id: p.id,
-        kind: p.kind,
-        x: +p.x.toFixed(2),
-        y: +p.y.toFixed(2),
-        z: +p.z.toFixed(2),
-        width: +p.width.toFixed(2),
-        depth: +p.depth.toFixed(2),
-        height: +(p.height ?? 0).toFixed(2),
-      }))
-    );
+    const buttons = mapDocToSimButtons(playDoc);
+    const actions = mapDocToSimActions(playDoc);
+    const lastZonePressAt = new Map<string, number>();
+    const armedUntil = new Map<string, number>();
+    if (SHOW_COLLISION_DEBUG) {
+      // eslint-disable-next-line no-console
+      console.table(
+        pads.map((p) => ({
+          id: p.id,
+          kind: p.kind,
+          x: +p.x.toFixed(2),
+          y: +p.y.toFixed(2),
+          z: +p.z.toFixed(2),
+          width: +p.width.toFixed(2),
+          depth: +p.depth.toFixed(2),
+          height: +(p.height ?? 0).toFixed(2),
+        }))
+      );
+    }
     const finishes = mapDocToSimFinishes(playDoc);
     const hazards = mapDocToSimHazards(playDoc);
     const teleports = mapDocToSimTeleports(playDoc);
@@ -595,6 +630,10 @@ export function MapPlayPreview({
     let wasGrounded = true;
     let wasSprintingForSound = false;
     let wasFlippingForSound = false;
+    let wasSlidingForSound = false;
+    let wasCrouchingForSound = false;
+    let wasAliveForSound = true;
+    let lastFootstepAt = 0;
     let wasInvisibleForMaterial = false;
     let lastCustomMoveId = '';
     let landUntil = 0;
@@ -617,8 +656,20 @@ export function MapPlayPreview({
 
     const loadAll = async () => {
       try {
-        const previewAttachments =
-          previewSkins && avatarEntity?.playerSkins?.length ? avatarEntity.playerSkins : [];
+        const previewAttachments = (
+          previewSkins && avatarEntity?.playerSkins?.length ? avatarEntity.playerSkins : []
+        ).map((a) => {
+          const def = playDoc.weaponDef;
+          if (!def || a.slot !== 'weapon') return a;
+          const merged = { ...DEFAULT_WEAPON_DEF, ...def };
+          return {
+            ...a,
+            attachMode: 'body' as const,
+            position: merged.holdPosition,
+            rotation: merged.holdRotation,
+            scale: merged.holdScale,
+          };
+        });
         // Always keep the default pack player as the base. Body / fullbody /
         // clothing skins layer via applySkinAttachments — fullbody must never
         // replace the whole avatar (it stays over the default model).
@@ -637,6 +688,9 @@ export function MapPlayPreview({
         );
         // Same 1.75m planted fit used by player and skin studios.
         const root = fitAvatarLikeEditor(loaded.scene, avatarEntity, loaded.isDefaultMannequin);
+        if (ensureCombatSettings(playDoc).armsOnlyMode) {
+          applyArmsOnlyMeshVisibility(root, true);
+        }
         const [px, py, pz] = simToThree(body.x, body.y, body.z);
         root.position.set(px, py, pz);
         root.userData.entityId = avatarEntity?.id ?? '__play_avatar__';
@@ -780,6 +834,17 @@ export function MapPlayPreview({
             /* ignore */
           }
         }
+      }
+
+      for (const ent of playDoc.entities) {
+        if (ent.visible === false || ent.kind !== 'action') continue;
+        const ghost = new THREE.Group();
+        ghost.visible = false;
+        ghost.position.set(...ent.position);
+        ghost.userData.entityId = ent.id;
+        scene.add(ghost);
+        roots.set(ent.id, ghost);
+        director.register(ent.id, ghost, []);
       }
 
       cameraCollidables = [];
@@ -939,6 +1004,8 @@ export function MapPlayPreview({
           const r = roots.get(ent.id);
           if (r) tickEntityGlow(r, ent.glow, now);
         }
+        const spinRoot = roots.get(ent.id);
+        if (spinRoot) tickSpinHazardVisual(spinRoot, ent, frameDt);
       }
 
       const moveStick = joy?.getMoveVector() ?? { x: 0, y: 0 };
@@ -985,6 +1052,19 @@ export function MapPlayPreview({
       const flippingNow = scratch.flipMs > 0;
       if (flippingNow && !wasFlippingForSound) playSound('flip');
       wasFlippingForSound = flippingNow;
+      if (crouch && !wasCrouchingForSound) playSound('crouch');
+      wasCrouchingForSound = crouch;
+      const slidingNow = scratch.slideMs > 0;
+      if (slidingNow && !wasSlidingForSound) playSound('slide');
+      wasSlidingForSound = slidingNow;
+      if (
+        body.isGrounded &&
+        (wishFwd !== 0 || wishStrafe !== 0) &&
+        now - lastFootstepAt > (sprintingNow ? 280 : 420)
+      ) {
+        lastFootstepAt = now;
+        playSound('footstep');
+      }
       if (scratch.customMoveActiveId && scratch.customMoveActiveId !== lastCustomMoveId) {
         playSound(customMoveSoundKey(scratch.customMoveActiveId));
       }
@@ -1017,6 +1097,52 @@ export function MapPlayPreview({
 
         if (worldReady && hpLocal > 0 && !finishedLocal) {
           matchElapsedMs += dt * 1000;
+
+          const interactNow =
+            interactPulse ||
+            keyBindToCodes(bindingsRef.current.interact).some((c) => keys.has(c)) ||
+            !!joy?.isActionHeld();
+          const inActivationRadius = (
+            zone: { x: number; y: number; z: number; radius: number }
+          ) => {
+            const dx = body.x - zone.x;
+            const dy = body.y - zone.y;
+            const dz = body.z - zone.z;
+            return Math.hypot(dx, dy) <= zone.radius + PLAYER_RADIUS && Math.abs(dz) <= 2.2;
+          };
+          const activateZone = (
+            zone: { id: string; cooldownMs: number; holdMs: number; activatesObstacleIds: string[] },
+            cooldownKey: string
+          ) => {
+            const last = lastZonePressAt.get(cooldownKey) ?? 0;
+            if (matchElapsedMs - last < zone.cooldownMs) return;
+            lastZonePressAt.set(cooldownKey, matchElapsedMs);
+            const hold = zone.holdMs > 0 ? zone.holdMs : 1500;
+            for (const oid of zone.activatesObstacleIds) {
+              armedUntil.set(oid, matchElapsedMs + hold);
+              director.fireSignal(oid);
+            }
+            playSound('button_press');
+          };
+          for (const [oid, until] of Array.from(armedUntil.entries())) {
+            if (matchElapsedMs >= until) {
+              armedUntil.delete(oid);
+              director.clearSignal(oid);
+            }
+          }
+          for (const btn of buttons) {
+            if (inActivationRadius(btn)) activateZone(btn, `button:${btn.id}`);
+          }
+          for (const action of actions) {
+            if (action.trigger === 'interact' && !interactNow) continue;
+            if (!inActivationRadius(action)) continue;
+            activateZone(action, `action:${action.id}`);
+          }
+          for (const pad of pads) {
+            if (pad.doorControlled && pad.entityId) {
+              pad.open = (armedUntil.get(pad.entityId) ?? 0) > matchElapsedMs;
+            }
+          }
 
           const platformDeltas: { id: string; dx: number; dy: number; dz: number }[] = [];
           for (const pad of pads) {
@@ -1054,6 +1180,9 @@ export function MapPlayPreview({
             }
           }
 
+          const prevJumpCount = scratch.jumpCount;
+          const prevWallLock = scratch.wallJumpLockoutMs;
+          const prevExhausted = scratch.exhausted;
           stepPlatformer(
             body,
             {
@@ -1074,6 +1203,14 @@ export function MapPlayPreview({
             bounds,
             physOptsRef.current
           );
+          if (scratch.wallJumpLockoutMs > 0 && prevWallLock <= 0) playSound('wall_jump');
+          else if (scratch.jumpCount === 2 && prevJumpCount < 2) playSound('double_jump');
+          if (scratch.exhausted && !prevExhausted) playSound('energy_exhausted');
+
+          if (scratch.fallDamageThisTick > 0) {
+            hpLocal = Math.max(0, hpLocal - scratch.fallDamageThisTick);
+            setHp(hpLocal);
+          }
 
           // Powers — sync the local ability host from the sim body, process
           // activations, tick timers, then write position/vz changes (hook
@@ -1235,16 +1372,26 @@ export function MapPlayPreview({
           // same latch used for the trap's own activeClip animation). This
           // was previously skipped unconditionally, so button-armed traps
           // animated on trigger but never actually hurt the player.
-          if (h.buttonControlled && !director.isActivated(h.id)) continue;
+          if (h.buttonControlled && (armedUntil.get(h.id) ?? 0) <= matchElapsedMs) continue;
           const pulsing = !h.alwaysActive && !h.buttonControlled && (hazardActive.get(h.id) ?? false);
           if (!h.alwaysActive && !h.buttonControlled && !pulsing) continue;
-          const halfW = h.width / 2 + 0.35;
-          const halfD = h.width / 2 + 0.35;
-          const halfH = h.height / 2;
+          const active =
+            h.alwaysActive || h.buttonControlled || pulsing;
           if (
-            Math.abs(body.x - h.x) > halfW ||
-            Math.abs(body.y - h.y) > halfD ||
-            Math.abs(body.z - h.z) > halfH + 0.4
+            !isPlayerOverlappingObstacle(
+              body,
+              {
+                x: h.x,
+                y: h.y,
+                z: h.z,
+                width: h.width,
+                depth: h.depth,
+                height: h.height,
+                active,
+              },
+              PLAYER_RADIUS,
+              PLAYER_HEIGHT
+            )
           ) {
             continue;
           }
@@ -1434,6 +1581,8 @@ export function MapPlayPreview({
         else if (wasGrounded && !body.isGrounded && body.vz > 0.5) playSound('jump');
         wasGrounded = body.isGrounded;
         if (justLanded) landUntil = performance.now() + 280;
+        if (hpLocal <= 0 && wasAliveForSound) playSound('player_death');
+        wasAliveForSound = hpLocal > 0;
 
         const weaponAtt = findWeaponAttachment(previewSkins ? avatarEntity?.playerSkins : undefined);
         const combat = resolveWeaponCombat(weaponAtt);
@@ -1451,6 +1600,7 @@ export function MapPlayPreview({
           if (now - lastAttackAt >= effectiveCooldownMs) {
             lastAttackAt = now;
             attackThisFrame = true;
+            playSound(combat.kind === 'melee' ? 'melee_punch' : 'weapon_fire');
             if (combat.kind === 'melee') meleeUntil = now + 500;
             if (combat.kind !== 'cosmetic') {
               // Foundry: melee_direction = direction_to(camera aim point)
@@ -1478,6 +1628,19 @@ export function MapPlayPreview({
               });
             }
           }
+        }
+
+        const wepDef = playDoc.weaponDef
+          ? { ...DEFAULT_WEAPON_DEF, ...playDoc.weaponDef }
+          : null;
+        if (wepDef) {
+          const drawn = aimNow || attackThisFrame || now < meleeUntil;
+          applyWeaponSlotPose(
+            playerRoot,
+            drawn ? wepDef.holdPosition : wepDef.backPosition,
+            drawn ? wepDef.holdRotation : wepDef.backRotation,
+            drawn ? wepDef.holdScale : wepDef.backScale
+          );
         }
 
         director.updatePlayer(playerId, avatarBindings ?? avatarEntity?.playerAnims, {

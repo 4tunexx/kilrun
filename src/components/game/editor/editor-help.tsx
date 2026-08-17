@@ -17,7 +17,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'welcome',
     title: 'Welcome to the Map Editor',
-    body: 'Admin creator tool for Kilrun courses — floors by level, props, spawns, skins, prefabs. Play Test, then Set as MAIN so matches load your map.',
+    body: 'Admin creator tool for Kilrun maps — floors by level, props, spawns, skins, prefabs. Play Test locally or Play Test (Live) in a private room, then Set as MAIN for Deathrun, Horde, or Competitive.',
     tip: 'Tip: Save often (autosave runs too). Hide UI for a clear canvas; Level strip switches Floor → Props.',
   },
   {
@@ -30,7 +30,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'transform',
     title: 'Move, rotate, scale',
-    body: 'Use Select (V) then click an object. W (move), E (rotate), R (scale), or the bottom toolbar. Hold Shift while dragging to snap move/rotate/scale to the exact grid (edges align). Properties → Scale one side grows only the pulled face. Numbers in Properties are exact. G toggles grid snap; enable Y snap to also snap height without Shift.',
+    body: 'Use Select (V) then click an object. W (move), E (rotate), R (scale) switch to Select and show the gizmo. Drag any move handle (including the center) near another piece and release — it clicks onto the nearest face. Magnet does the same, or pick a side when 2+ are selected. Click Rotate for 90° / flip presets. Hold Shift while dragging to snap to the exact grid.',
     tip: 'F focuses the camera on your selection. Delete removes it. Ctrl+Z undoes.',
   },
   {
@@ -43,7 +43,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'spawns',
     title: 'Spawns, Player & Buttons',
-    body: 'Green START flag = runner spawn marker (click once to place; Select/Esc cancels). Player Model (left nav) = platform-wide avatar look & animations — it does NOT place anything on the map. Red = Trapper spawn. Yellow button = Interact (E) / Use.',
+    body: 'Green START flag = default / runner spawn (click once to place; Select/Esc cancels). Competitive also needs Team A / Team B spawns. Horde uses monster spawns + wave anchors. Player Model (left nav) = avatar look & animations — it is not a spawn. Yellow button = walk-on activator (live match); Action markers can use Interact (E), proximity, or collide.',
     tip: 'Place floors with Solid on, then START on that floor, then open Player Model (left rail) for the avatar. Hammer solids only need Material + size in Properties.',
   },
   {
@@ -61,7 +61,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'traps',
     title: 'Buttons & traps',
-    body: 'Place a Trap, then a Button. On the button, choose “Activates trap / door”. Players press E on the button to open/activate that trap. Death zones damage on touch (see Properties).',
+    body: 'Place a Trap, then a Button or Action. Wire Activates trap / door (or Listen To on the door). Buttons arm on proximity in a live match; Action Interact needs E / Use. Death zones and Spinners damage on touch.',
   },
   {
     id: 'weapons-powers',
@@ -73,7 +73,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: 'play',
     title: 'Play Test & publish',
-    body: 'Play Test is 3rd-person TPS (like Fortnite): you see your body, crosshair at screen center is aim, left stick moves / WASD, right stick / mouse looks. Needs a Start spawn on a Solid floor.',
+    body: 'Play Test is 3rd-person TPS: you see your body, crosshair is aim, WASD / left stick moves, mouse / right stick looks. Needs a Start (or role spawn) on a Solid floor. Use Play Test (Live) to exercise shop, teams, and net sim for the current mode.',
     tip: 'Finish with a clear end pad and test falling into the void. Open HELP anytime for the full guide.',
     tab: 'help',
   },
@@ -84,7 +84,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     id: 'overview',
     title: 'Overview',
     paragraphs: [
-      'Admin map editor: build 3D courses with Kenney / custom GLBs, lighting, animation triggers, prefabs, and skins — then Play Test and Set as MAIN for a mode.',
+      'Admin map editor: build 3D courses with Kenney / custom GLBs, lighting, animation triggers, prefabs, and skins — then Play Test and Set as MAIN for Deathrun, Horde, or Competitive.',
       'Maps save in this browser (Save / Export JSON). Autosave runs every 30s while you have unsaved changes. Import JSON to move a map between admin machines.',
       'Build solid: use Levels (Floor 0 → Props 1), lock finished levels, validate before MAIN, keep embeds small, and Play Test before you ship.',
     ],
@@ -96,7 +96,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
       'Orbit: drag with left mouse (short click places in Brush mode; long drag orbits). Scroll to zoom.',
       'Tools: Select (V) picks objects without placing. Brush (B) paints the active model from Assets. In Brush, click the same model on its cell to select it; Alt+click stacks on top. Alt+drag = box select.',
       'Free Fly: click the Fly button (top toolbar) — WASD move, mouse look, Space up, C down. Placement disabled while flying. Click Fly (now labeled Edit) again to exit.',
-      'W / E / R = translate / rotate / scale. Hold Shift = exact grid snap (move by cell, rotate 90°, scale to cell sizes, edges align). Properties: Visible / Lock / Group / Ungroup (works on multi-select). G = grid snap toggle. F = focus selection. Alt+drag = box select. Measure tool = click two ground points.',
+      'W / E / R = translate / rotate / scale (also switches to Select so the gizmo can drag). Click Rotate on the toolbar for 90° turns and horizontal / vertical flips — groups rotate as one. Hold Shift = exact grid snap (move by cell, rotate 90°, scale to cell sizes, edges align). Properties: Visible / Lock / Group / Ungroup (works on multi-select). G = grid snap toggle. F = focus selection. Alt+drag = box select. Measure tool = click two ground points.',
       'Ctrl+D duplicate +X, Ctrl+Shift+D +Z. Ctrl+Z / Ctrl+Y undo/redo. Ctrl+S save. Red wire boxes = death zones; yellow lines = button→trap links.',
       'Texture copy/paste: with the Paint tool active, right-click any textured solid to copy its exact texture, tile density, offset, and rotation, then left-click another solid to paste it — it lines up seam-free, matching the source exactly (no re-tiling or re-aligning by hand). A "Copied" chip appears in the Textures tab confirming what is loaded; Clear reverts to the plain paint brush.',
     ],
@@ -105,7 +105,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     id: 'building',
     title: 'Building a course',
     paragraphs: [
-      '1) Lay floor-square / floor-small-square on Floor (level 0) and keep Solid checked. 2) Place green START on that floor (this is where Play Test puts you). 3) Open Player Model to pick your avatar — the Player entity is look/animations only, not spawn. 4) Add Finish, traps, Trapper spawn. 5) Play Test (3rd person). 6) Save and Set Active Match Map.',
+      '1) Lay floor pieces on Floor (level 0) and keep Solid checked. 2) Place START on that floor (Play Test spawn). Competitive: also Team A / Team B. Horde: monster spawns + wave anchors. 3) Player Model is look/animations only, not spawn. 4) Add Finish, traps, Checkpoints, doors/buttons. 5) Play Test, then Play Test (Live) for the mode. 6) Save and Set as MAIN for that mode.',
       'If Play Test looks empty: you probably only placed a Player figurine with no Start, or floors are not Solid. Use Layers / Level strip; snap size 1 for modular floors.',
     ],
   },
@@ -131,9 +131,9 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     id: 'traps',
     title: 'Buttons, traps & death zones',
     paragraphs: [
-      'Trap workflow: place a Trap (toolbar bolt icon), size/rotate it, upload an animated GLB if needed, set Default + Active clips. Place a Button, open Properties → Activates trap / door, pick that trap. In Play Test press E near the button.',
-      'Death zones: place a Death Zone (skull) or enable “Damages player on touch” on any prop. Set Instant kill or Damage + Interval. Play Test shows an HP bar.',
-      'Match: buttons/traps animate on the client overlay. Instant-kill / damage to the live server sim is still evolutionary — floors always load as collision when you Set Active Match Map.',
+      'Trap workflow: place a Trap, size/rotate it, set Default + Active clips if animated. Place a Button or Action, Properties → Activates trap / door. Live match: buttons arm on walk-in; Action Interact needs E. Local Play Test now opens wired Solid doors the same way.',
+      'Death zones: place a Death Zone (skull) or enable “Damages player on touch”. Spinners rotate visually and damage using a sweep of their spin plane. Play Test shows an HP bar.',
+      'Match: buttons/traps/doors/actions run on the live match server (same volumes as local Play Test). Floors always load as collision when you Set as MAIN. Play Test (Live) uses a private practice room for Deathrun, Horde, and Competitive (Team A/B).',
     ],
   },
   {
@@ -148,11 +148,11 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
   },
   {
     id: 'match',
-    title: 'Playing in Deathrun',
+    title: 'Publishing a match map',
     paragraphs: [
       'Green wire pads on solids are collision helpers (not multi-select). They only show on the selected object unless you turn on the toolbar toggle titled "Show all solid/collision pads".',
-      'Set as Active Match Map stores which JSON Deathrun should use. Floor pieces convert to collision platforms; runner spawn becomes start.',
-      'Decorative props, traps, and buttons appear from your map overlay on the client. Restart / rejoin the match after publishing so the server reloads platforms.',
+      'Set as MAIN stores which JSON that mode should load. Floor pieces convert to collision platforms; Start / role spawns become starts. Checkpoints export as respawn pads. Shop settings and custom moves travel with the map on active-map fetch.',
+      'Decorative props, traps, buttons, and spinners appear from your map overlay on the client. Restart / rejoin after publishing so the server reloads platforms.',
     ],
   },
 ];

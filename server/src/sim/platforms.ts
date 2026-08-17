@@ -50,6 +50,8 @@ export interface ObstacleBlueprint {
   y: number;
   z: number;
   width: number;
+  /** Sim Y extent. When omitted, `width` is used for both axes. */
+  depth?: number;
   height: number;
   intervalMs?: number;
   activeMs?: number;
@@ -127,10 +129,12 @@ export function createObstaclesFromBlueprints(blueprints: ObstacleBlueprint[]): 
     obstacle.y = bp.y;
     obstacle.z = bp.z;
     obstacle.width = bp.width;
+    obstacle.depth = bp.depth && bp.depth > 0 ? bp.depth : bp.width;
     obstacle.height = bp.height;
     obstacle.intervalMs = bp.intervalMs ?? 500;
     obstacle.activeMs = bp.activeMs ?? 999999;
-    obstacle.damage = bp.instantKill ? 999 : bp.damage ?? 25;
+    obstacle.instantKill = !!bp.instantKill;
+    obstacle.damage = bp.instantKill ? 9999 : bp.damage ?? 25;
     obstacle.buttonControlled = !!bp.buttonControlled;
     obstacle.alwaysActive = bp.buttonControlled ? false : bp.alwaysActive !== false;
     obstacle.active = obstacle.alwaysActive;

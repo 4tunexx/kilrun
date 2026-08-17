@@ -32,19 +32,31 @@ const MIXAMO_TO_DEF: Record<string, string> = {
 
   leftshoulder: 'DEF-shoulder.L',
   leftarm: 'DEF-upper_arm.L',
+  leftupperarm: 'DEF-upper_arm.L',
   leftforearm: 'DEF-forearm.L',
+  leftlowerarm: 'DEF-forearm.L',
   lefthand: 'DEF-hand.L',
   rightshoulder: 'DEF-shoulder.R',
   rightarm: 'DEF-upper_arm.R',
+  rightupperarm: 'DEF-upper_arm.R',
   rightforearm: 'DEF-forearm.R',
+  rightlowerarm: 'DEF-forearm.R',
   righthand: 'DEF-hand.R',
 
   leftupleg: 'DEF-thigh.L',
+  leftupperleg: 'DEF-thigh.L',
+  leftthigh: 'DEF-thigh.L',
   leftleg: 'DEF-shin.L',
+  leftcalf: 'DEF-shin.L',
+  leftlowerleg: 'DEF-shin.L',
   leftfoot: 'DEF-foot.L',
   lefttoebase: 'DEF-toe.L',
   rightupleg: 'DEF-thigh.R',
+  rightupperleg: 'DEF-thigh.R',
+  rightthigh: 'DEF-thigh.R',
   rightleg: 'DEF-shin.R',
+  rightcalf: 'DEF-shin.R',
+  rightlowerleg: 'DEF-shin.R',
   rightfoot: 'DEF-foot.R',
   righttoebase: 'DEF-toe.R',
 
@@ -110,8 +122,13 @@ export function guessTargetBone(sourceBoneName: string, targetBoneNames: string[
   const exact = normalizedTargets.find((n) => n.key === key);
   if (exact) return exact.t;
 
-  const partial = normalizedTargets.find((n) => n.key.includes(key) || key.includes(n.key));
-  return partial?.t ?? null;
+  // Substring fallback is last-resort and must be unique + long enough so
+  // "arm" does not steal "forearm" / "upperarm".
+  if (key.length < 6) return null;
+  const partials = normalizedTargets.filter(
+    (n) => n.key.length >= 6 && (n.key.includes(key) || key.includes(n.key))
+  );
+  return partials.length === 1 ? partials[0].t : null;
 }
 
 export interface ClipBoneUsage {

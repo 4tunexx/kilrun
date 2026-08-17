@@ -639,7 +639,7 @@ export interface EntityLight {
 /** Rotating damaging material (spinner entity or prop with spinHazard enabled). */
 export interface EntitySpinHazard {
   enabled: boolean;
-  /** Revolutions per second (visual + damage volume stays AABB for now). */
+  /** Revolutions per second (visual). Damage uses a sweep AABB of the spin plane. */
   speed: number;
   /** Local axis to spin around. */
   axis: 'y' | 'x' | 'z';
@@ -1358,7 +1358,16 @@ export interface MapShopPowerUp {
   description?: string;
   shopPrice: number;
   /** Built-in effect id. */
-  effect: 'heal' | 'shield' | 'speed' | 'energy' | 'super_jump';
+  effect:
+    | 'heal'
+    | 'shield'
+    | 'speed'
+    | 'energy'
+    | 'super_jump'
+    | 'invisibility'
+    | 'double_jump'
+    | 'checkpoint'
+    | 'slow_trapper';
   enabled: boolean;
   modes: Array<'horde' | 'competitive' | 'deathrun'>;
 }
@@ -1490,7 +1499,52 @@ export function defaultShopPowerUps(): MapShopPowerUp[] {
       shopPrice: 200,
       effect: 'speed',
       enabled: true,
-      modes: ['horde', 'competitive'],
+      modes: ['horde', 'competitive', 'deathrun'],
+    },
+    {
+      id: 'super_jump',
+      label: 'Super Jump',
+      description: 'Jump boost + small shield',
+      shopPrice: 200,
+      effect: 'super_jump',
+      enabled: true,
+      modes: ['deathrun'],
+    },
+    {
+      id: 'invisibility',
+      label: 'Invisible',
+      description: 'Hide from the trapper for 5s',
+      shopPrice: 175,
+      effect: 'invisibility',
+      enabled: true,
+      modes: ['deathrun'],
+    },
+    {
+      id: 'double_jump',
+      label: 'Extra Jump',
+      description: 'Grants one extra air jump',
+      shopPrice: 150,
+      effect: 'double_jump',
+      enabled: true,
+      modes: ['deathrun'],
+    },
+    {
+      id: 'checkpoint',
+      label: 'Checkpoint',
+      description: 'Save respawn at your current spot',
+      shopPrice: 100,
+      effect: 'checkpoint',
+      enabled: true,
+      modes: ['deathrun'],
+    },
+    {
+      id: 'slow_trapper',
+      label: 'Slow Trap',
+      description: 'Slow the trapper for 5s',
+      shopPrice: 175,
+      effect: 'slow_trapper',
+      enabled: true,
+      modes: ['deathrun'],
     },
   ];
 }
@@ -1587,6 +1641,10 @@ export function sanitizeShopPowerUp(raw: unknown): MapShopPowerUp | null {
     effectRaw === 'speed' ||
     effectRaw === 'energy' ||
     effectRaw === 'super_jump' ||
+    effectRaw === 'invisibility' ||
+    effectRaw === 'double_jump' ||
+    effectRaw === 'checkpoint' ||
+    effectRaw === 'slow_trapper' ||
     effectRaw === 'heal'
       ? effectRaw
       : 'heal';
@@ -1706,13 +1764,28 @@ export function shopItemsForMode(
   );
 }
 
+export function parsePowerUpPool(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  const alias: Record<string, string> = { speed_boost: 'speed', slow_trap: 'slow_trapper' };
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((id) => alias[id] ?? id);
+}
+
 export function shopPowerUpsForMode(
   doc: MapDocument | null | undefined,
   mode: 'horde' | 'competitive' | 'deathrun'
 ): MapShopPowerUp[] {
-  return (ensureShopSettings(doc).powerUps ?? defaultShopPowerUps()).filter(
+  const list = (ensureShopSettings(doc).powerUps ?? defaultShopPowerUps()).filter(
     (p) => p.enabled && p.modes.includes(mode)
   );
+  if (mode !== 'deathrun') return list;
+  const pool = parsePowerUpPool(doc ? ensureCombatSettings(doc).powerUpPool : '');
+  if (!pool.length) return [];
+  const wanted = new Set(pool);
+  return list.filter((p) => wanted.has(p.id));
 }
 
 export function shopSkinsForMode(
@@ -2044,7 +2117,10 @@ export function scrubDanglingReferences(
 /** Whether this entity should export as a standable / jump-pad platform. */
 export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   if (ent.visible === false) return false;
-  if (isInvisibleMarkerKind(ent.kind)) return false;
+  // Checkpoints are editor-only gizmos (INVISIBLE_MARKER_KINDS) but MUST
+  // export as standable pads — DeathrunRoom / Play Test save respawn on
+  // pad.kind === 'checkpoint'.
+  if (isInvisibleMarkerKind(ent.kind) && ent.kind !== 'checkpoint') return false;
   if (
     ent.kind === 'light' ||
     ent.kind === 'button' ||

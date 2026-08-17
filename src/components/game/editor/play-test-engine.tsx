@@ -3,29 +3,31 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import KilrunEngine from '../kilrun-engine';
 import { mintMyGameJoinToken, getSessionUser } from '@/lib/actions';
+import type { KilrunMode } from '@/lib/game-modes';
 import type { MapDocument } from './map-document';
 import { prepareDocForPlayTest } from './prefab-storage';
+import type { GameRoomName } from '../net/connection';
+
+const PRACTICE_ROOM: Record<KilrunMode, GameRoomName> = {
+  deathrun: 'deathrun_practice',
+  horde: 'horde_practice',
+  competitive: 'competitive_practice',
+};
 
 /**
- * Map editor "Play Test" — renders the REAL live game client (KilrunEngine),
- * not a simplified preview renderer. Same HUD, chat, admin panel, skill /
- * progression menu as an actual match, running your in-editor draft map
- * against a private, solo, no-rewards Deathrun room ('deathrun_practice')
- * so testing never touches real matchmaking, real players, or grants real
- * XP/VP.
- *
- * Deathrun-only for now; Horde/Competitive still use the lighter
- * `MapPlayPreview` renderer until a practice room exists for those modes too.
+ * Map editor "Play Test (Live)" — real KilrunEngine against a private
+ * solo practice room for the map's mode (no matchmaking / rewards).
  */
 export function PlayTestEngine({
   doc,
   onClose,
   playTestRole,
+  mode = 'deathrun',
 }: {
   doc: MapDocument;
   onClose: () => void;
-  /** Deathrun only — forces the solo player's role after connecting. */
-  playTestRole?: 'runner' | 'trapper';
+  playTestRole?: 'runner' | 'trapper' | 'team_a' | 'team_b';
+  mode?: KilrunMode;
 }) {
   const [joinToken, setJoinToken] = useState<string | undefined>(undefined);
   const [sessionUser, setSessionUser] = useState<{
@@ -71,8 +73,11 @@ export function PlayTestEngine({
       avatarUrl: sessionUser?.avatarUrl,
       ...(joinToken ? { token: joinToken } : {}),
       isAdmin: sessionUser?.isAdmin ?? false,
+      ...(mode === 'competitive' && (playTestRole === 'team_a' || playTestRole === 'team_b')
+        ? { teamRequest: playTestRole as 'team_a' | 'team_b' }
+        : {}),
     }),
-    [sessionUser, joinToken]
+    [sessionUser, joinToken, mode, playTestRole]
   );
 
   if (!ready || !sessionUser) {
@@ -85,13 +90,17 @@ export function PlayTestEngine({
 
   return (
     <KilrunEngine
-      mode="deathrun"
-      roomNameOverride="deathrun_practice"
+      mode={mode}
+      roomNameOverride={PRACTICE_ROOM[mode]}
       draftDoc={draftDoc}
       joinOptions={joinOptions}
       onExit={onClose}
       isAdmin={sessionUser.isAdmin}
-      practiceRole={playTestRole}
+      practiceRole={
+        mode === 'deathrun' && (playTestRole === 'runner' || playTestRole === 'trapper')
+          ? playTestRole
+          : undefined
+      }
     />
   );
 }

@@ -44,6 +44,7 @@ export function activateAbility(player: PlayerState, abilityKey: string | null |
 
 export function tickActiveAbilityTimers(player: PlayerState, now: number): void {
   tickActiveAbilityTimersGeneric(player, now);
+  player.isInvisible = isInvisibleActiveGeneric(player, now);
 }
 
 export function isUnlimitedAmmoActive(player: PlayerState, now: number): boolean {

@@ -26,7 +26,13 @@ export interface VoxelizeOptions {
   /** Voxel count along the mesh's longest bounding-box axis. Higher = more
    * accurate silhouette but more boxes (and slower). */
   resolution?: number;
+  /** Hard cap on exported boxes (live sim scans every pad). Extra detail is
+   * merged / re-baked at a coarser resolution instead of exploding pad count. */
+  maxPads?: number;
 }
+
+/** Default cap per Solid — enough for an arch/doorway, cheap on the server. */
+export const MAX_MESH_COLLISION_PADS = 48;
 
 /** A non-axis-aligned direction avoids degenerate axis-aligned ray hits
  * (grazing exactly along a box face/edge) that break the parity count. */
@@ -113,20 +119,49 @@ function mergeOccupancyToBoxes(
   return boxes;
 }
 
-/** Voxelize local (pre-entity-transform) geometry into a compact box list. */
-export function voxelizeGeometryToPads(
+/** Merge AABB pads that almost form a larger box (little empty volume). */
+export function compactCollisionPads(pads: CsgLocalPad[], maxPads: number): CsgLocalPad[] {
+  if (pads.length <= maxPads) return pads;
+  const list = pads.map((p) => ({ ...p }));
+  const vol = (p: CsgLocalPad) => p.hx * p.hy * p.hz * 8;
+  let merged = true;
+  while (merged && list.length > maxPads) {
+    merged = false;
+    outer: for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i];
+        const b = list[j];
+        const minX = Math.min(a.cx - a.hx, b.cx - b.hx);
+        const maxX = Math.max(a.cx + a.hx, b.cx + b.hx);
+        const minY = Math.min(a.cy - a.hy, b.cy - b.hy);
+        const maxY = Math.max(a.cy + a.hy, b.cy + b.hy);
+        const minZ = Math.min(a.cz - a.hz, b.cz - b.hz);
+        const maxZ = Math.max(a.cz + a.hz, b.cz + b.hz);
+        const unionVol = (maxX - minX) * (maxY - minY) * (maxZ - minZ);
+        if (unionVol > (vol(a) + vol(b)) * 1.2) continue;
+        list[i] = {
+          cx: (minX + maxX) / 2,
+          cy: (minY + maxY) / 2,
+          cz: (minZ + maxZ) / 2,
+          hx: (maxX - minX) / 2,
+          hy: (maxY - minY) / 2,
+          hz: (maxZ - minZ) / 2,
+        };
+        list.splice(j, 1);
+        merged = true;
+        break outer;
+      }
+    }
+  }
+  if (list.length <= maxPads) return list;
+  list.sort((a, b) => vol(b) - vol(a));
+  return list.slice(0, maxPads);
+}
+
+function voxelizeAtResolution(
   geometry: THREE.BufferGeometry,
-  opts?: VoxelizeOptions
+  resolution: number
 ): CsgLocalPad[] {
-  // 8 samples along the longest axis was too coarse for anything beyond a
-  // plain box — a door frame's pillar/lintel junction, for instance, could
-  // land a whole cell short of the real silhouette and leave a real hole a
-  // player falls/walks through. That gets worse the more a placed instance
-  // is non-uniformly scaled, since any local-space imprecision is amplified
-  // by the scale factor in world space. Doubling the default resolution
-  // trades bake time (still sub-second) for an approximation close enough
-  // that it doesn't matter.
-  const resolution = Math.max(2, Math.min(32, opts?.resolution ?? 16));
   geometry.computeBoundingBox();
   const box = geometry.boundingBox;
   if (!box || box.isEmpty()) return [];
@@ -193,6 +228,21 @@ export function voxelizeGeometryToPads(
     });
   }
   return pads;
+}
+
+/** Voxelize local (pre-entity-transform) geometry into a compact box list. */
+export function voxelizeGeometryToPads(
+  geometry: THREE.BufferGeometry,
+  opts?: VoxelizeOptions
+): CsgLocalPad[] {
+  const maxPads = Math.max(4, opts?.maxPads ?? MAX_MESH_COLLISION_PADS);
+  let resolution = Math.max(2, Math.min(32, opts?.resolution ?? 16));
+  let pads = voxelizeAtResolution(geometry, resolution);
+  while (pads.length > maxPads && resolution > 6) {
+    resolution = Math.max(6, Math.floor(resolution * 0.7));
+    pads = voxelizeAtResolution(geometry, resolution);
+  }
+  return compactCollisionPads(pads, maxPads);
 }
 
 /** Local (pre-entity-transform) merged geometry loaded from this entity's

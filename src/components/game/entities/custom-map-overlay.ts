@@ -13,6 +13,7 @@ import {
   applyEntityOpacity,
   applyEntityGlow,
   tickEntityGlow,
+  tickSpinHazardVisual,
   makeAuthoredLight,
   makeGameplayFallback,
   shouldUseGameplayFallback,
@@ -248,6 +249,8 @@ export class CustomMapOverlay {
         const root = this.entityRoots.get(ent.id);
         if (root) tickEntityGlow(root, ent.glow, nowMs);
       }
+      const spinRoot = this.entityRoots.get(ent.id);
+      if (spinRoot) tickSpinHazardVisual(spinRoot, ent, dt);
     }
     if (!playerThreePos) {
       this.director.update(dt);

@@ -19,6 +19,8 @@ export interface TrustedAbilityStatBonuses {
   jumpMultiplier?: number;
   maxEnergyBonus?: number;
   punchDamageMultiplier?: number;
+  reloadSpeedMultiplier?: number;
+  fallDamageReduction?: number;
 }
 
 function clampFinite(value: unknown, fallback: number, min: number, max: number): number {
@@ -46,4 +48,6 @@ export function applyAbilityStatsToPlayer(
   player.ability.jumpMult = clampFinite(bonuses?.jumpMultiplier, 1, 0.1, 10);
   player.ability.maxEnergyBonus = clampFinite(bonuses?.maxEnergyBonus, 0, 0, 5000);
   player.ability.punchDamageMult = clampFinite(bonuses?.punchDamageMultiplier, 1, 0.1, 20);
+  player.ability.reloadSpeedMult = clampFinite(bonuses?.reloadSpeedMultiplier, 1, 0.25, 5);
+  player.ability.fallDamageReduction = clampFinite(bonuses?.fallDamageReduction, 0, 0, 0.9);
 }

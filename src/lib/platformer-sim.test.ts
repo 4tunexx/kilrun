@@ -422,4 +422,133 @@ describe('stepPlatformer (Foundry feel)', () => {
     expect(scratch.velX).toBeCloseTo(5, 5);
     expect(body.x).toBeCloseTo(5 / 30, 2);
   });
+
+  it('deals landing fall damage above FALL_DAMAGE_SPEED, reduced by fallDamageReduction', () => {
+    const body = groundedBody({ z: 0.15, vz: -20, isGrounded: false });
+    const scratch = createSimScratch();
+    scratch.coyoteMs = 0;
+    scratch.jumpCount = 1;
+    scratch.minAirVz = -20;
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds
+    );
+    expect(body.isGrounded).toBe(true);
+    // excess = 20 - 14 = 6; 6 * 8 = 48
+    expect(scratch.fallDamageThisTick).toBeCloseTo(48, 5);
+
+    const body2 = groundedBody({ z: 0.15, vz: -20, isGrounded: false });
+    const scratch2 = createSimScratch();
+    scratch2.coyoteMs = 0;
+    scratch2.jumpCount = 1;
+    scratch2.minAirVz = -20;
+    stepPlatformer(
+      body2,
+      { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+      1 / 30,
+      [floor],
+      scratch2,
+      bounds,
+      { fallDamageReduction: 0.5 }
+    );
+    expect(scratch2.fallDamageThisTick).toBeCloseTo(24, 5);
+  });
+
+  it('consumes extraAirJumps after the normal double jump', () => {
+    const body = groundedBody();
+    const scratch = createSimScratch();
+    scratch.extraAirJumps = 1;
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false },
+      1 / 30,
+      [floor],
+      scratch,
+      bounds
+    );
+    expect(scratch.jumpCount).toBe(1);
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+      1 / 60,
+      [floor],
+      scratch,
+      bounds
+    );
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false },
+      1 / 60,
+      [floor],
+      scratch,
+      bounds
+    );
+    expect(scratch.jumpCount).toBe(2);
+    expect(scratch.extraAirJumps).toBe(1);
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+      1 / 60,
+      [floor],
+      scratch,
+      bounds
+    );
+    stepPlatformer(
+      body,
+      { moveX: 0, moveY: 0, jumpPressed: true, sprint: false, crouch: false },
+      1 / 60,
+      [floor],
+      scratch,
+      bounds
+    );
+    expect(scratch.jumpCount).toBe(2);
+    expect(scratch.extraAirJumps).toBe(0);
+    expect(body.vz).toBeCloseTo(8 - 20 / 60, 5);
+  });
+
+  it('lets the player walk through an open doorControlled pad', () => {
+    const door: SimPad = {
+      x: 1.2,
+      y: 0,
+      z: 1.1,
+      width: 0.35,
+      depth: 3,
+      height: 2.2,
+      kind: 'solid',
+      doorControlled: true,
+      open: false,
+    };
+    const closed = groundedBody({ x: 0, y: 0, z: 0 });
+    const scratchClosed = createSimScratch();
+    for (let i = 0; i < 20; i++) {
+      stepPlatformer(
+        closed,
+        { moveX: 1, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+        1 / 30,
+        [floor, door],
+        scratchClosed,
+        bounds
+      );
+    }
+    expect(closed.x).toBeLessThan(1.0);
+
+    door.open = true;
+    const opened = groundedBody({ x: 0, y: 0, z: 0 });
+    const scratchOpen = createSimScratch();
+    for (let i = 0; i < 20; i++) {
+      stepPlatformer(
+        opened,
+        { moveX: 1, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+        1 / 30,
+        [floor, door],
+        scratchOpen,
+        bounds
+      );
+    }
+    expect(opened.x).toBeGreaterThan(1.2);
+  });
 });
