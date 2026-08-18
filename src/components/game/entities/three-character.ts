@@ -468,12 +468,11 @@ export class ThreeCharacter {
     this.weaponMixer = null;
     this.weaponActions.clear();
     if (!this.avatarScene) return;
-    let holderFound: THREE.Object3D | null = null;
+    const hits: THREE.Object3D[] = [];
     this.avatarScene.traverse((o) => {
-      if (holderFound) return;
-      if (o.userData?.isWeaponSkin) holderFound = o;
+      if (o.userData?.isWeaponSkin) hits.push(o);
     });
-    const holder = holderFound as THREE.Object3D | null;
+    const holder = hits[0];
     if (!holder) return;
     const found: THREE.AnimationClip[] = [];
     const pushClips = (o: THREE.Object3D) => {
