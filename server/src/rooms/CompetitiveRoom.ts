@@ -859,7 +859,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       const teamB = data.teamBSpawns as { x: number; y: number; z: number }[] | undefined;
       if (Array.isArray(teamA) && teamA.length) this.teamASpawns = teamA.map((s) => ({ ...s }));
       if (Array.isArray(teamB) && teamB.length) this.teamBSpawns = teamB.map((s) => ({ ...s }));
-      const payloads = data.pushPayloads as typeof this.pushPayloads | undefined;
+      const payloads = data.pushPayloads as PushPayloadSim[] | undefined;
       this.pushPayloads = Array.isArray(payloads)
         ? payloads.map((p) => ({
             ...p,

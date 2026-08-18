@@ -823,17 +823,17 @@ export class HordeRoom extends Room<RoomState> {
         );
       }
       if (Array.isArray(data.monsterSpawns)) {
-        this.monsterSpawnPoints = data.monsterSpawns as typeof this.monsterSpawnPoints;
+        this.monsterSpawnPoints = data.monsterSpawns as MonsterSpawnBlueprint[];
       }
       this.waveAnchors = Array.isArray(data.waveAnchors)
-        ? (data.waveAnchors as typeof this.waveAnchors)
+        ? (data.waveAnchors as { waveNumber: number; difficultyMultiplier: number }[])
         : [];
       this.healthFloors = Array.isArray(data.healthFloors)
-        ? (data.healthFloors as typeof this.healthFloors)
+        ? (data.healthFloors as PadZone[])
         : [];
-      this.redZones = Array.isArray(data.redZones) ? (data.redZones as typeof this.redZones) : [];
+      this.redZones = Array.isArray(data.redZones) ? (data.redZones as PadZone[]) : [];
       this.revivePads = Array.isArray(data.revivePads)
-        ? (data.revivePads as typeof this.revivePads)
+        ? (data.revivePads as PadZone[])
         : [];
       this.customButtons = Array.isArray(data.buttons) ? (data.buttons as ButtonZone[]) : [];
       this.customActions = Array.isArray(data.actions) ? (data.actions as ActionZone[]) : [];
@@ -842,7 +842,7 @@ export class HordeRoom extends Room<RoomState> {
         : [];
       this.buttonArmRemaining.clear();
       if (data.worldBounds) {
-        this.worldBounds = { ...(data.worldBounds as typeof this.worldBounds) };
+        this.worldBounds = { ...(data.worldBounds as WorldBounds) };
       }
       const cs = data.combatSettings as Record<string, unknown> | undefined;
       if (cs && typeof cs === 'object') {

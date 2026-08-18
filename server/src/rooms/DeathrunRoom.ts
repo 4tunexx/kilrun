@@ -657,7 +657,13 @@ export class DeathrunRoom extends Room<RoomState> {
         if (!it || typeof it !== 'object') return false;
         const id = (it as { id?: unknown }).id;
         return typeof id === 'string' && wanted.has(id);
-      }) as typeof this.shopPowerUps;
+      }) as Array<{
+        id: string;
+        effect?: string;
+        shopPrice?: number;
+        enabled?: boolean;
+        modes?: string[];
+      }>;
     } else {
       this.shopPowerUps = [];
     }
