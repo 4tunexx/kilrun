@@ -163,6 +163,76 @@ export function nearestObbFaceAttach(
   return best;
 }
 
+/** The 8 corners of an oriented box, in world space. */
+export function obbCorners(box: SnapObb): Vec3[] {
+  const [ex, ey, ez] = obbAxes(box.rotDeg);
+  const out: Vec3[] = [];
+  for (const sx of [-1, 1] as const) {
+    for (const sy of [-1, 1] as const) {
+      for (const sz of [-1, 1] as const) {
+        const p = new THREE.Vector3(...box.c)
+          .addScaledVector(ex, sx * box.h[0])
+          .addScaledVector(ey, sy * box.h[1])
+          .addScaledVector(ez, sz * box.h[2]);
+        out.push([p.x, p.y, p.z]);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Midpoints of the 12 edges of an oriented box.
+ *
+ * Edge snapping works off midpoints rather than true edge-to-edge closest
+ * points: it gives one unambiguous target per edge, which is what you want when
+ * lining up a beam with the middle of a wall's top edge.
+ */
+export function obbEdgeMidpoints(box: SnapObb): Vec3[] {
+  const axes = obbAxes(box.rotDeg);
+  const out: Vec3[] = [];
+  // For each axis, the 4 edges running parallel to it sit at the 4 sign
+  // combinations of the other two axes, centered along this one.
+  for (let a = 0; a < 3; a++) {
+    const [b, c] = a === 0 ? [1, 2] : a === 1 ? [0, 2] : [0, 1];
+    for (const sb of [-1, 1] as const) {
+      for (const sc of [-1, 1] as const) {
+        const p = new THREE.Vector3(...box.c)
+          .addScaledVector(axes[b], sb * box.h[b])
+          .addScaledVector(axes[c], sc * box.h[c]);
+        out.push([p.x, p.y, p.z]);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Translation that brings the closest point in `movingPoints` onto the closest
+ * point in `anchorPoints`, or null if nothing is within `maxDist`.
+ *
+ * Returned as a delta rather than an absolute position so the caller can apply
+ * it rigidly to a whole multi-selection.
+ */
+export function nearestPointSnap(
+  movingPoints: Vec3[],
+  anchorPoints: Vec3[],
+  maxDist: number
+): { delta: Vec3; dist: number } | null {
+  let best: { delta: Vec3; dist: number } | null = null;
+  for (const m of movingPoints) {
+    for (const a of anchorPoints) {
+      const dx = a[0] - m[0];
+      const dy = a[1] - m[1];
+      const dz = a[2] - m[2];
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist > maxDist) continue;
+      if (!best || dist < best.dist) best = { delta: [dx, dy, dz], dist };
+    }
+  }
+  return best;
+}
+
 /**
  * If `moving` is close enough to any anchor, return a new center that sits
  * flush on the nearest face (side or stack). Other axes stay put so you can

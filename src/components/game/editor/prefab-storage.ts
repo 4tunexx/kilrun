@@ -1457,36 +1457,3 @@ export function mapDocRevivePads(doc: MapDocument) {
       })
     );
 }
-
-/** @deprecated Prefer stairEntityToSimPads — visual bake creates undeletable clutter. */
-export function bakeStairsToPads(stairs: EditorEntity, steps = 6): EditorEntity[] {
-  const n = Math.max(3, Math.min(16, Math.round(steps)));
-  const [sx, sy, sz] = stairs.position;
-  const yaw = ((stairs.rotation?.[1] ?? 0) * Math.PI) / 180;
-  const run = Math.max(2, Math.abs(stairs.scale[2]) * 2);
-  const rise = Math.max(1, Math.abs(stairs.scale[1]) * 2);
-  const width = Math.max(1.2, Math.abs(stairs.scale[0]) * 2);
-  const stepRun = run / n;
-  const stepRise = rise / n;
-  const pads: EditorEntity[] = [];
-  for (let i = 0; i < n; i++) {
-    const t = (i + 0.5) / n;
-    const along = (t - 0.5) * run;
-    const px = sx + Math.sin(yaw) * along;
-    const pz = sz + Math.cos(yaw) * along;
-    const py = sy + (i + 1) * stepRise * 0.5;
-    pads.push({
-      id: generateId(),
-      name: `${stairs.name} Step ${i + 1}`,
-      kind: 'prop',
-      model: 'floor-square',
-      layerId: stairs.layerId,
-      position: [px, py, pz],
-      rotation: [0, stairs.rotation?.[1] ?? 0, 0],
-      scale: [width / 2, 0.15, Math.max(0.35, stepRun * 0.55)],
-      solid: true,
-      color: '#5b7c99',
-    });
-  }
-  return pads;
-}

@@ -45,13 +45,14 @@ import { detectTouchDevice } from '../utils/constants';
 import { playSound, playLoopedSound, stopLoopedSound, preloadSoundboard } from '../effects/soundboard';
 import {
   createSimScratch,
+  invalidatePadSpatialCache,
   simToThree,
   stepPlatformer,
   type SimBody,
   type SimPad,
   type SimPhysicsOpts,
 } from '@/lib/platformer-sim';
-import { hasMovingAmp, movingPlatformPos, movingPlatformU } from '@shared/moving-platform';
+import { advanceMovingPads, applyPadCarry, movingPlatformU } from '@shared/moving-platform';
 import {
   applyGhostPose,
   createGhostMesh,
@@ -1145,41 +1146,9 @@ export function MapPlayPreview({
             }
           }
 
-          const platformDeltas: { id: string; dx: number; dy: number; dz: number }[] = [];
-          for (const pad of pads) {
-            const ampX = pad.motionAmpX ?? 0;
-            const ampY = pad.motionAmpY ?? 0;
-            const ampZ = pad.motionAmpZ ?? 0;
-            if (!hasMovingAmp({ ampX, ampY, ampZ })) continue;
-            const home = {
-              homeX: pad.homeX ?? pad.x,
-              homeY: pad.homeY ?? pad.y,
-              homeZ: pad.homeZ ?? pad.z,
-              ampX,
-              ampY,
-              ampZ,
-              periodMs: pad.motionPeriodMs || 4000,
-              phaseMs: pad.motionPhaseMs || 0,
-            };
-            const next = movingPlatformPos(home, matchElapsedMs);
-            const dx = next.x - pad.x;
-            const dy = next.y - pad.y;
-            const dz = next.z - pad.z;
-            pad.x = next.x;
-            pad.y = next.y;
-            pad.z = next.z;
-            if (pad.id && (Math.abs(dx) > 1e-8 || Math.abs(dy) > 1e-8 || Math.abs(dz) > 1e-8)) {
-              platformDeltas.push({ id: pad.id, dx, dy, dz });
-            }
-          }
-          if (body.isGrounded && scratch.supportPadId && platformDeltas.length) {
-            const d = platformDeltas.find((x) => x.id === scratch.supportPadId);
-            if (d) {
-              body.x += d.dx;
-              body.y += d.dy;
-              body.z += d.dz;
-            }
-          }
+          const platformDeltas = advanceMovingPads(pads, matchElapsedMs);
+          if (platformDeltas.length) invalidatePadSpatialCache();
+          applyPadCarry(body, scratch.supportPadId, platformDeltas);
 
           const prevJumpCount = scratch.jumpCount;
           const prevWallLock = scratch.wallJumpLockoutMs;

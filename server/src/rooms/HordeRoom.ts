@@ -1255,6 +1255,7 @@ export class HordeRoom extends Room<RoomState> {
       return;
     }
 
+    this.state.motionElapsedMs = this.matchElapsedMs;
     const platformDeltas = tickMovingPlatforms(
       this.state.platforms,
       this.platformMotion,

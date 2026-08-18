@@ -3,14 +3,12 @@
  * not a continuous tunnel floor.
  */
 import { ObstacleState, PlatformState } from '../schema/RoomState.js';
+import { PLAYER_HEIGHT, PLAYER_RADIUS, WORLD_HEIGHT, WORLD_WIDTH } from './constants.js';
 import {
-  COLLISION_SKIN,
-  LAND_STEP_CLIMB,
-  PLAYER_HEIGHT,
-  PLAYER_RADIUS,
-  WORLD_HEIGHT,
-  WORLD_WIDTH,
-} from './constants.js';
+  findSupportPad,
+  resolveSolidPads,
+  type CoreSolidResult,
+} from '../../../shared/sim-core.js';
 
 export interface PlatformBlueprint {
   x: number;
@@ -151,35 +149,11 @@ export interface PlatformHit {
   topZ: number;
 }
 
-/** World XY → pad-local XY (rotYaw around Z-up sim). */
-function toPadLocal(
-  x: number,
-  y: number,
-  cx: number,
-  cy: number,
-  rotYaw: number
-): { lx: number; ly: number } {
-  const dx = x - cx;
-  const dy = y - cy;
-  if (!rotYaw) return { lx: dx, ly: dy };
-  const c = Math.cos(-rotYaw);
-  const s = Math.sin(-rotYaw);
-  return { lx: dx * c - dy * s, ly: dx * s + dy * c };
-}
-
-function fromPadLocal(
-  lx: number,
-  ly: number,
-  cx: number,
-  cy: number,
-  rotYaw: number
-): { x: number; y: number } {
-  if (!rotYaw) return { x: cx + lx, y: cy + ly };
-  const c = Math.cos(rotYaw);
-  const s = Math.sin(rotYaw);
-  return { x: cx + lx * c - ly * s, y: cy + lx * s + ly * c };
-}
-
+/**
+ * Highest pad at/under the feet, else the lowest climbable overlapping step.
+ * Delegates to `shared/sim-core.ts` so the client predictor cannot disagree
+ * about standing height (notably on rotated ramps).
+ */
 export function findSupportPlatform(
   x: number,
   y: number,
@@ -188,30 +162,8 @@ export function findSupportPlatform(
   radius: number,
   maxSnapDown = 0.35
 ): PlatformHit | null {
-  // Prefer highest pad at/under feet; only climb onto a higher overlapping
-  // step when nothing underfoot remains (avoids ramp "highest wins" hops).
-  let bestBelow: PlatformHit | null = null;
-  let bestClimb: PlatformHit | null = null;
-  for (const platform of platforms) {
-    if (platform.doorControlled && platform.open) continue;
-    const halfW = platform.width / 2;
-    const halfD = platform.depth / 2;
-    const { lx, ly } = toPadLocal(x, y, platform.x, platform.y, platform.rotYaw || 0);
-    if (lx < -halfW - radius || lx > halfW + radius) continue;
-    if (ly < -halfD - radius || ly > halfD + radius) continue;
-    // True continuous ramp support: dz per unit of local x/y, so standing
-    // height is mathematically exact everywhere on the surface instead of
-    // snapped to the nearest of many small flat shelves (which reads as
-    // "walking up/down stairs" no matter how many shelves you add).
-    const topZ = platform.z + (platform.slopeGradX || 0) * lx + (platform.slopeGradY || 0) * ly;
-    if (z < topZ - maxSnapDown || z > topZ + 0.55) continue;
-    if (topZ <= z + 0.05) {
-      if (!bestBelow || topZ > bestBelow.topZ) bestBelow = { platform, topZ };
-    } else if (!bestClimb || topZ < bestClimb.topZ) {
-      bestClimb = { platform, topZ };
-    }
-  }
-  return bestBelow ?? bestClimb;
+  const hit = findSupportPad(x, y, z, platforms, radius, maxSnapDown);
+  return hit ? { platform: hit.pad, topZ: hit.topZ } : null;
 }
 
 /**
@@ -223,14 +175,7 @@ export function findSupportPlatform(
  * player is wedged between two walls in the same tick, whichever is
  * processed last wins, same tradeoff most simple AABB pushers make.
  */
-export interface SolidCollisionResult {
-  x: number;
-  y: number;
-  z: number;
-  touchingWall: boolean;
-  wallNormalX: number;
-  wallNormalY: number;
-}
+export type SolidCollisionResult = CoreSolidResult;
 
 export function resolveSolidCollisions(
   pos: { x: number; y: number; z: number },
@@ -239,80 +184,5 @@ export function resolveSolidCollisions(
   height = PLAYER_HEIGHT,
   isGrounded = false
 ): SolidCollisionResult {
-  let { x, y } = pos;
-  let z = pos.z;
-  let touchingWall = false;
-  let wallNormalX = 0;
-  let wallNormalY = 0;
-
-  for (const platform of platforms) {
-    if (platform.doorControlled && platform.open) continue;
-    // Walk-over pads (floors, stair/ramp treads, jump pads, ice/conveyor/
-    // sand) never block sideways — that's what makes them walkable at all.
-    if (platform.topOnly) continue;
-    const boxH = platform.height > 0 ? platform.height : 0.2;
-    const topZ = platform.z;
-    const bottomZ = topZ - boxH;
-
-    // Horizontal footprint test up front — used by both the auto-step and
-    // the wall-block branches below.
-    const halfW = platform.width / 2 + radius;
-    const halfD = platform.depth / 2 + radius;
-    const yaw = platform.rotYaw || 0;
-    const { lx, ly } = toPadLocal(x, y, platform.x, platform.y, yaw);
-    if (Math.abs(lx) >= halfW || Math.abs(ly) >= halfD) continue;
-
-    // Auto-step: a solid short enough to count as a curb/step (<=
-    // LAND_STEP_CLIMB, the same threshold the sim already uses for
-    // climbing/landing) AND whose top the player's feet are already within
-    // climbing range of gets walked straight up onto instead of forcing a
-    // jump — ordinary step-up behavior for a slab, a low crate, a knee-high
-    // block. Lifting z directly here (not just skipping the block and
-    // waiting for findSupportPlatform to notice) matters because that
-    // function prefers whatever's already "at/under feet" — when a floor
-    // platform extends underneath the step (a block sitting ON a floor,
-    // the normal case), it would keep tracking that lower floor forever and
-    // the player would slide straight through the step's body at floor
-    // height instead of climbing it. Gated on isGrounded so this only ever
-    // fires for grounded, walking-into-it contact — airborne jump arcs /
-    // landings are untouched. Mirrors the same duplicated logic in
-    // src/lib/platformer-sim.ts (Map Play Test).
-    if (isGrounded && boxH <= LAND_STEP_CLIMB && z >= topZ - LAND_STEP_CLIMB) {
-      if (z < topZ) z = topZ;
-      continue;
-    }
-
-    const playerBottom = z;
-    const playerTop = z + height;
-    // Vertical overlap with skin
-    if (playerTop <= bottomZ + COLLISION_SKIN || playerBottom >= topZ - COLLISION_SKIN) {
-      continue;
-    }
-
-    // Push out along the shallowest local axis, then rotate back to world.
-    const pushX = halfW - Math.abs(lx);
-    const pushY = halfD - Math.abs(ly);
-    touchingWall = true;
-    let outLx = lx;
-    let outLy = ly;
-    let nLx = 0;
-    let nLy = 0;
-    if (pushX < pushY) {
-      const sign = Math.sign(lx || 1);
-      outLx = sign * halfW;
-      nLx = sign;
-    } else {
-      const sign = Math.sign(ly || 1);
-      outLy = sign * halfD;
-      nLy = sign;
-    }
-    const world = fromPadLocal(outLx, outLy, platform.x, platform.y, yaw);
-    x = world.x;
-    y = world.y;
-    const nWorld = fromPadLocal(nLx, nLy, 0, 0, yaw);
-    wallNormalX = nWorld.x;
-    wallNormalY = nWorld.y;
-  }
-
-  return { x, y, z, touchingWall, wallNormalX, wallNormalY };
+  return resolveSolidPads(pos, platforms, radius, height, isGrounded);
 }

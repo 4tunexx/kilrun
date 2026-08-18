@@ -1019,6 +1019,7 @@ export class DeathrunRoom extends Room<RoomState> {
   private tickPlaying(dtMs: number) {
     this.state.matchTimeRemainingMs -= dtMs;
     this.matchElapsedMs += dtMs;
+    this.state.motionElapsedMs = this.matchElapsedMs;
 
     const platformDeltas = tickMovingPlatforms(
       this.state.platforms,

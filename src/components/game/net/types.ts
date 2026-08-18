@@ -201,6 +201,12 @@ export interface NetRoomState {
   adminMessage?: string;
   /** Increments each time adminMessage is set — detects a repeat of the same text. */
   adminMessageSeq?: number;
+  /**
+   * Server match clock driving moving-platform motion. Client prediction feeds
+   * this into shared/moving-platform.ts so predicted pads sit exactly where the
+   * authoritative ones do.
+   */
+  motionElapsedMs?: number;
 }
 
 export interface PlayerInputMessage {

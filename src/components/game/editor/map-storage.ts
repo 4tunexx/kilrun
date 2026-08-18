@@ -6,6 +6,7 @@ import { normalizeKilrunMode } from '@/lib/game-modes';
 const INDEX_KEY = 'kilrun.mapIndex.v1';
 const DOC_PREFIX = 'kilrun.mapDoc.v1.';
 const THUMB_PREFIX = 'kilrun.mapThumb.v1.';
+const CORRUPT_SUFFIX = '.corrupt';
 
 export interface MapListItem {
   id: string;
@@ -19,6 +20,9 @@ export interface MapListItem {
   hazardCount?: number;
   sizeBytes?: number;
   hasThumbnail?: boolean;
+  /** Set when the stored JSON could not be parsed. The raw text is kept for recovery. */
+  corrupt?: boolean;
+  corruptError?: string;
 }
 
 export interface MapStats {
@@ -108,9 +112,16 @@ export function listMaps(filterMode?: KilrunMode): MapListItem[] {
         hasThumbnail: !!localStorage.getItem(THUMB_PREFIX + item.id),
       };
     }
-    const doc = loadMap(item.id);
-    if (!doc) return item;
-    return indexEntryFromDoc(item.id, doc, JSON.stringify(doc));
+    const detailed = loadMapDetailed(item.id);
+    if (!detailed.ok) {
+      return {
+        ...item,
+        corrupt: true,
+        corruptError: detailed.error,
+        hasThumbnail: !!localStorage.getItem(THUMB_PREFIX + item.id),
+      };
+    }
+    return indexEntryFromDoc(item.id, detailed.doc, JSON.stringify(detailed.doc));
   });
   const sorted = enriched.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   if (!filterMode) return sorted;
@@ -180,11 +191,39 @@ function normalizeMapDocument(doc: MapDocument): MapDocument {
 }
 
 export function loadMap(id: string): MapDocument | null {
+  const result = loadMapDetailed(id);
+  return result.ok ? result.doc : null;
+}
+
+export type LoadMapResult =
+  | { ok: true; doc: MapDocument }
+  | { ok: false; error: string; raw: string | null };
+
+/** Load a map and, on parse failure, keep the raw text so the entry can be recovered. */
+export function loadMapDetailed(id: string): LoadMapResult {
+  let raw: string | null = null;
   try {
-    const raw = localStorage.getItem(DOC_PREFIX + id);
-    if (!raw) return null;
+    raw = localStorage.getItem(DOC_PREFIX + id);
+    if (!raw) return { ok: false, error: 'Map not found', raw: null };
     const doc = JSON.parse(raw) as MapDocument;
-    return normalizeMapDocument(doc);
+    return { ok: true, doc: normalizeMapDocument(doc) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Invalid map data';
+    if (raw) {
+      try {
+        localStorage.setItem(DOC_PREFIX + id + CORRUPT_SUFFIX, raw);
+      } catch {
+        /* quota */
+      }
+    }
+    return { ok: false, error: message, raw };
+  }
+}
+
+export function getCorruptMapRaw(id: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(DOC_PREFIX + id + CORRUPT_SUFFIX);
   } catch {
     return null;
   }

@@ -152,6 +152,20 @@ export class AnimationDirector {
     return this.allStopped;
   }
 
+  /**
+   * True while any mixer has a clip actually advancing. The editor viewport uses
+   * this to decide whether it must keep redrawing when otherwise idle — freezing
+   * an entity calls `action.stop()`, so this goes false for frozen entities too.
+   */
+  get hasRunningAction(): boolean {
+    for (const actionMap of this.actions.values()) {
+      for (const action of actionMap.values()) {
+        if (action.isRunning()) return true;
+      }
+    }
+    return false;
+  }
+
   updatePlayer(
     entityId: string,
     bindings: PlayerAnimBindings | undefined,

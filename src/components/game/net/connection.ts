@@ -477,6 +477,7 @@ export class GameConnection {
         wasCancelled: s.wasCancelled,
         adminMessage: s.adminMessage,
         adminMessageSeq: s.adminMessageSeq,
+        motionElapsedMs: s.motionElapsedMs,
       });
     };
     [
@@ -605,6 +606,11 @@ export class GameConnection {
   public onHitFx(callback: (msg: HitFxMessage) => void): void {
     this.hitFxCallback = callback;
     this.room?.onMessage('hitFx', callback);
+  }
+
+  /** Drop the hit-fx listener so an unmounted engine cannot spawn into a destroyed overlay. */
+  public offHitFx(): void {
+    this.hitFxCallback = null;
   }
 
   /** Admin-only — server re-checks adminSessions, this is UI convenience only. */

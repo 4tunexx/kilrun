@@ -4,6 +4,9 @@ import {
   flipPoseAroundPivot,
   nearestFaceAttach,
   nearestObbFaceAttach,
+  nearestPointSnap,
+  obbCorners,
+  obbEdgeMidpoints,
   rotatePoseAroundPivot,
   type Vec3,
 } from './selection-transform';
@@ -83,5 +86,64 @@ describe('nearestObbFaceAttach', () => {
     expect(hit).not.toBeNull();
     expect(round3(hit!.c[0])).toBe(0.4);
     expect(round3(hit!.c[1])).toBe(1);
+  });
+});
+
+describe('obbCorners', () => {
+  it('gives the 8 corners of an unrotated box', () => {
+    const corners = obbCorners({ c: [0, 0, 0], h: [1, 2, 3] });
+    expect(corners).toHaveLength(8);
+    for (const c of corners) {
+      expect([Math.abs(c[0]), Math.abs(c[1]), Math.abs(c[2])]).toEqual([1, 2, 3]);
+    }
+  });
+
+  it('follows the box rotation', () => {
+    // 90° yaw swaps the X and Z extents.
+    const corners = obbCorners({ c: [0, 0, 0], h: [1, 1, 3], rotDeg: [0, 90, 0] });
+    for (const c of corners) {
+      expect(round3(Math.abs(c[0]))).toBe(3);
+      expect(round3(Math.abs(c[2]))).toBe(1);
+    }
+  });
+});
+
+describe('obbEdgeMidpoints', () => {
+  it('gives 12 midpoints, each on the surface but not at a corner', () => {
+    const mids = obbEdgeMidpoints({ c: [0, 0, 0], h: [1, 1, 1] });
+    expect(mids).toHaveLength(12);
+    for (const m of mids) {
+      // An edge midpoint is centered on exactly one axis and extreme on the other two.
+      const centered = m.filter((v) => Math.abs(v) < 1e-9).length;
+      expect(centered).toBe(1);
+    }
+  });
+});
+
+describe('nearestPointSnap', () => {
+  it('returns the delta that lands the closest pair together', () => {
+    const hit = nearestPointSnap(
+      [
+        [0.9, 0, 0],
+        [-5, 0, 0],
+      ],
+      [[1, 0.1, 0]],
+      0.5
+    );
+    expect(hit).not.toBeNull();
+    expect(hit!.delta.map(round3)).toEqual([0.1, 0.1, 0]);
+  });
+
+  it('ignores pairs beyond maxDist', () => {
+    expect(nearestPointSnap([[0, 0, 0]], [[3, 0, 0]], 0.5)).toBeNull();
+  });
+
+  it('snaps a cube corner onto a neighbour corner', () => {
+    const anchor = obbCorners({ c: [0, 1, 0], h: [1, 1, 1] });
+    // Overlapping slightly, corner-to-corner within snap range.
+    const moving = obbCorners({ c: [2.1, 1.1, 0.1], h: [1, 1, 1] });
+    const hit = nearestPointSnap(moving, anchor, 0.5);
+    expect(hit).not.toBeNull();
+    expect(hit!.delta.map(round3)).toEqual([-0.1, -0.1, -0.1]);
   });
 });

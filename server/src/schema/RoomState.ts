@@ -306,4 +306,11 @@ export class RoomState extends Schema {
   @type('string') adminMessage = '';
   /** Increments each time adminMessage is set, so the client can detect a repeat message. */
   @type('number') adminMessageSeq = 0;
+  /**
+   * Match elapsed ms as the moving-platform clock sees it. Platform position is
+   * a pure function of this value (see shared/moving-platform.ts), so syncing it
+   * lets the client predict platform motion instead of predicting against a
+   * frozen pad and rubber-banding whenever the server carries the player.
+   */
+  @type('number') motionElapsedMs = 0;
 }

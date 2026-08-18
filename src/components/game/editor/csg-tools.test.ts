@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EditorEntity } from './map-document';
-import { isCsgDeleteResult, isCsgEligible, subtractEntities, unionEntities } from './csg-tools';
+import { isCsgDeleteResult, isCsgEligible, subtractEntities, unionEntities, intersectEntities } from './csg-tools';
 import { mapDocToSimPlatforms } from './prefab-storage';
 import type { MapDocument } from './map-document';
 
@@ -171,6 +171,8 @@ describe('unionEntities', () => {
     };
     const pads = mapDocToSimPlatforms(baseDoc([merged]));
     expect(pads.length).toBe(2);
+    expect(result.csgSources?.length).toBe(2);
+    expect(result.csgSources?.[0].id).toBe('a');
     // Both original box centers (three x=-2 and x=2 → sim y=-2/2) must each
     // still be covered by exactly one of the merged pads.
     for (const simY of [-2, 2]) {
@@ -183,5 +185,26 @@ describe('unionEntities', () => {
     const a = boxEntity();
     const result = await unionEntities([a]);
     expect('error' in result).toBe(true);
+  });
+});
+
+describe('intersectEntities', () => {
+  it('keeps only the overlapping volume of two aligned boxes and records source brushes', async () => {
+    const a = boxEntity({ id: 'a', collisionSize: [4, 4, 4], position: [0, 0, 0] });
+    const b = boxEntity({ id: 'b', collisionSize: [4, 4, 4], position: [2, 0, 0] });
+    const result = await intersectEntities(a, b);
+    expect('error' in result).toBe(false);
+    if ('error' in result || isCsgDeleteResult(result)) throw new Error('unexpected result shape');
+    expect(result.csgOp).toBe('intersect');
+    expect(result.csgPads.length).toBe(1);
+    expect(result.csgSources?.map((s) => s.id)).toEqual(['a', 'b']);
+    expect(result.customModelUrl.startsWith('data:model/gltf-binary;base64,')).toBe(true);
+  });
+
+  it('reports deleted when the solids do not overlap', async () => {
+    const a = boxEntity({ id: 'a', collisionSize: [1, 1, 1], position: [0, 0, 0] });
+    const b = boxEntity({ id: 'b', collisionSize: [1, 1, 1], position: [10, 0, 0] });
+    const result = await intersectEntities(a, b);
+    expect(isCsgDeleteResult(result)).toBe(true);
   });
 });

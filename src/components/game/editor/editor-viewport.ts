@@ -37,11 +37,15 @@ import {
   yawAlignedSize,
   scaleFromSideOffset,
   ensureEnvironment,
+  ensureSpinHazard,
 } from './map-document';
 import { bakeMeshCollisionForEntity, meshCollisionBakeKeyFor } from './mesh-voxelize';
 import {
   applySelectionTransformOp,
   nearestObbFaceAttach,
+  nearestPointSnap,
+  obbCorners,
+  obbEdgeMidpoints,
   type SelectionTransformOp,
   type SnapObb,
 } from './selection-transform';
@@ -78,13 +82,47 @@ export type EditorPerfMode = {
   hideVoidEffects: boolean;
   /** Disable scene fog in the editor viewport. */
   hideFog: boolean;
+  /**
+   * Skip the bloom composer and draw the scene directly. Bloom costs two full
+   * scene traversals plus two full renders per drawn frame, so this is the
+   * single biggest saving available on a heavy map.
+   */
+  disableBloom: boolean;
+  /** Render at 1 device pixel per CSS pixel — quarters the fragment work on a 2x display. */
+  capPixelRatio: boolean;
+  /**
+   * Stop rebuilding collision wireframes. The gizmo group is rebuilt for the
+   * WHOLE document on every refresh, so on a large map this dominates edit
+   * latency even though the wires are only a building aid.
+   */
+  skipCollisionGizmos: boolean;
 };
+
+/** What a finished translate drag clicks the selection onto. */
+export type SnapTarget = 'off' | 'face' | 'vertex' | 'edge';
+
+/**
+ * Which point a multi-selection rotates and scales about.
+ *
+ * - `median`: average of the objects' own origins.
+ * - `bounds`: center of the selection's bounding box, so a lopsided selection
+ *   turns about its visual middle rather than being pulled toward whichever
+ *   cluster happens to have more pieces in it.
+ * - `active`: the origin of the last-clicked object.
+ */
+export type PivotMode = 'median' | 'bounds' | 'active';
+
+/** Gizmo axis frame: world axes, or the active object's own axes. */
+export type TransformSpace = 'world' | 'local';
 
 export const DEFAULT_EDITOR_PERF_MODE: EditorPerfMode = {
   hideFloor: false,
   hideSkyTexture: false,
   hideVoidEffects: false,
   hideFog: false,
+  disableBloom: false,
+  capPixelRatio: false,
+  skipCollisionGizmos: false,
 };
 function makeLightBulb(ent: EditorEntity): THREE.Group {
   const lightCfg = ensureLight(ent);
@@ -225,6 +263,14 @@ export interface EditorViewportApi {
   setGridSnap: (on: boolean) => void;
   setGridSize: (n: number) => void;
   setSnapY: (on: boolean) => void;
+  /** What a finished translate drag clicks onto: nothing, faces, vertices, or edges. */
+  setSnapTarget: (target: SnapTarget) => void;
+  getSnapTarget: () => SnapTarget;
+  setPivotMode: (mode: PivotMode) => void;
+  getPivotMode: () => PivotMode;
+  /** Gizmo axis frame. TransformControls defaults to world and never switched before. */
+  setTransformSpace: (space: TransformSpace) => void;
+  getTransformSpace: () => TransformSpace;
   /** When true, scale gizmo grows/shrinks from the pulled side (opposite face fixed). */
   setScaleFromSide: (on: boolean) => void;
   getScaleFromSide: () => boolean;
@@ -271,7 +317,13 @@ export interface EditorViewportApi {
    */
   snapSelectedToFace: (
     face: '+x' | '-x' | '+y' | '-y' | '+z' | '-z',
-    idsOverride?: string[]
+    idsOverride?: string[],
+    /**
+     * `alignRotation` turns each moved piece to the anchor's orientation before
+     * placing it, so a piece lands parallel to the anchor face instead of merely
+     * touching it at whatever angle it happened to be sitting.
+     */
+    opts?: { alignRotation?: boolean }
   ) => boolean;
   /** Drop selection onto the floor / supporting surface under each pivot. */
   snapSelectedToFloor: (idsOverride?: string[]) => boolean;
@@ -343,7 +395,13 @@ export function createEditorViewport(
   handlers: {
     onSelect: (id: string | null) => void;
     onSelectionChange?: (ids: string[]) => void;
-    onDocChange: (doc: MapDocument) => void;
+    /**
+     * `transient` marks an intermediate state that will be superseded within
+     * milliseconds — every frame of a gizmo drag. The consumer may skip its
+     * expensive work (React re-render) for those and wait for the settled call
+     * that always follows when the drag ends.
+     */
+    onDocChange: (doc: MapDocument, opts?: { transient?: boolean }) => void;
     onFreeFlyChange?: (on: boolean) => void;
     onMeasureChange?: (distance: number | null) => void;
     /** Fired when place is blocked (locked layer) or placed onto a hidden layer. */
@@ -400,6 +458,11 @@ export function createEditorViewport(
   let gridSnap = true;
   let snapY = false;
   let gridSize = doc.gridSize || 1;
+  /** What a finished translate drag clicks onto. */
+  let snapTarget: SnapTarget = 'face';
+  /** Which point rotate/scale of a multi-selection turns about. */
+  let pivotMode: PivotMode = 'median';
+  let transformSpace: TransformSpace = 'world';
   /** Scale from pulled side (opposite face fixed) instead of both ways from center. */
   let scaleFromSide = true;
   /**
@@ -506,6 +569,55 @@ export function createEditorViewport(
     display: 'block',
     cursor: 'default',
   });
+
+  /**
+   * On-demand rendering.
+   *
+   * The viewport used to redraw unconditionally every frame, which in `single`
+   * layout means two full scene traversals plus two full renders through the
+   * bloom composer whether or not anything moved — an idle editor sitting on a
+   * large map burned a GPU for nothing.
+   *
+   * `requestRender` marks the view dirty for a short window rather than a single
+   * frame. The window matters: model loads, texture decodes and orbit damping
+   * all settle asynchronously after the interaction that triggered them, and a
+   * one-frame flag would leave those results undrawn until the next input.
+   */
+  const RENDER_HOLD_MS = 300;
+  let renderDeadlineMs = performance.now() + RENDER_HOLD_MS;
+  const requestRender = (holdMs = RENDER_HOLD_MS) => {
+    const until = performance.now() + holdMs;
+    if (until > renderDeadlineMs) renderDeadlineMs = until;
+  };
+
+  /**
+   * Entities with a live glow pulse or spin, maintained on sync instead of
+   * rediscovered by scanning every entity each frame. Doubles as the signal for
+   * whether the viewport must keep drawing while otherwise idle.
+   *
+   * Holds the entity itself so the frame loop needs no lookup; `syncEntity` runs
+   * for any entity whose data changed, which is exactly when the stored
+   * reference would otherwise go stale.
+   */
+  const animatedEntities = new Map<string, EditorEntity>();
+  const entityIsAnimated = (ent: EditorEntity): boolean => {
+    if (ent.glow?.enabled && ent.glow.pulse && ent.glow.pulse !== 'none') return true;
+    if (ent.kind !== 'spinner' && !ent.spinHazard?.enabled) return false;
+    const spin = ensureSpinHazard(ent);
+    return spin.enabled !== false && Math.abs(spin.speed) >= 1e-6;
+  };
+  const trackAnimatedEntity = (ent: EditorEntity) => {
+    if (entityIsAnimated(ent)) animatedEntities.set(ent.id, ent);
+    else animatedEntities.delete(ent.id);
+  };
+
+  /**
+   * Fingerprint of the last completed `syncEntity` per entity id, keyed by
+   * `entitySyncKey`. A present entry means the scene already reflects exactly
+   * that content, so `syncDoc` can skip it; anything that tears a root down or
+   * starts a sync clears the entry first.
+   */
+  const syncedKeys = new Map<string, { key: string; structure: string }>();
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
   scene.add(ambientLight);
@@ -746,8 +858,10 @@ export function createEditorViewport(
   orbit.enableDamping = true;
   orbit.dampingFactor = 0.08;
   orbit.maxPolarAngle = Math.PI * 0.49;
+  orbit.addEventListener('change', () => requestRender());
 
   const transform = new TransformControls(camera, renderer.domElement);
+  transform.addEventListener('change', () => requestRender());
   transform.setMode('translate');
   // Three.js rotate gizmos include a camera-facing filled yellow disc (E) and
   // a gray disc (XYZE). Hovering them — or the infinite axis helper lines in
@@ -783,6 +897,14 @@ export function createEditorViewport(
   };
 
   const computeSelectionPivot = (ids: string[]): THREE.Vector3 => {
+    if (pivotMode === 'active') {
+      const active = roots.get(selectedId ?? '') ?? roots.get(ids[ids.length - 1] ?? '');
+      if (active) return active.position.clone();
+    }
+    if (pivotMode === 'bounds') {
+      const box = worldBoxForIds(ids);
+      if (box) return box.getCenter(new THREE.Vector3());
+    }
     const pivot = new THREE.Vector3();
     let n = 0;
     for (const id of ids) {
@@ -952,6 +1074,12 @@ export function createEditorViewport(
         if (ent?.model) setLastPrefabScale(ent.model, ent.scale);
       }
     }
+    if (!dragging) {
+      // Settled pose. The per-frame emissions above are flagged transient, so
+      // this is the one the consumer commits — it must fire unconditionally,
+      // including for drags that ended without any end-of-drag re-seat.
+      handlers.onDocChange(doc);
+    }
   });
 
   /** Runs once when a single-object drag ends: snaps rotation to 90° steps
@@ -1009,6 +1137,7 @@ export function createEditorViewport(
    *  if a face is within ~one grid cell — uses each piece's OBB so rotated
    *  solids click on the real face, not the world AABB. */
   function snapDragToNearestNeighbor(): boolean {
+    if (snapTarget === 'off') return false;
     const movingIds = selectionTransformIds();
     if (!movingIds.length) return false;
     const skip = new Set(movingIds);
@@ -1031,11 +1160,25 @@ export function createEditorViewport(
           })();
     if (!moving) return false;
     const maxDist = Math.max(gridSize * 1.35, 0.65);
-    const hit = nearestObbFaceAttach(moving, anchors, maxDist);
-    if (!hit) return false;
-    const dx = hit.c[0] - moving.c[0];
-    const dy = hit.c[1] - moving.c[1];
-    const dz = hit.c[2] - moving.c[2];
+
+    let dx = 0;
+    let dy = 0;
+    let dz = 0;
+    if (snapTarget === 'vertex' || snapTarget === 'edge') {
+      // Corner-to-corner / edge-to-edge is a point match, so unlike face snap it
+      // moves on all three axes at once.
+      const points = snapTarget === 'vertex' ? obbCorners : obbEdgeMidpoints;
+      const anchorPoints = anchors.flatMap((a) => points(a));
+      const hit = nearestPointSnap(points(moving), anchorPoints, maxDist);
+      if (!hit) return false;
+      [dx, dy, dz] = hit.delta;
+    } else {
+      const hit = nearestObbFaceAttach(moving, anchors, maxDist);
+      if (!hit) return false;
+      dx = hit.c[0] - moving.c[0];
+      dy = hit.c[1] - moving.c[1];
+      dz = hit.c[2] - moving.c[2];
+    }
     if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-5) return false;
     for (const id of movingIds) {
       const root = roots.get(id);
@@ -1156,7 +1299,7 @@ export function createEditorViewport(
       applyProxyTransformToMembers();
       lastPrimaryPos.copy(groupProxy.position);
       lastPrimaryScale.copy(groupProxy.scale);
-      handlers.onDocChange(doc);
+      handlers.onDocChange(doc, { transient: transformDragging });
       refreshSelectionOutlines();
       return;
     }
@@ -1318,7 +1461,7 @@ export function createEditorViewport(
       }
     }
 
-    handlers.onDocChange(doc);
+    handlers.onDocChange(doc, { transient: transformDragging });
   });
   const transformHelper =
     typeof (transform as unknown as { getHelper?: () => THREE.Object3D }).getHelper === 'function'
@@ -1358,8 +1501,10 @@ export function createEditorViewport(
     const h = Math.max(1, host.clientHeight);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    renderer.setPixelRatio(editorPerf.capPixelRatio ? 1 : Math.min(devicePixelRatio, 2));
     renderer.setSize(w, h, false);
     bloom.setSize(w, h);
+    requestRender();
   };
   setSize();
   const ro = new ResizeObserver(setSize);
@@ -1543,6 +1688,8 @@ export function createEditorViewport(
     const myToken = (syncTokens.get(ent.id) ?? 0) + 1;
     syncTokens.set(ent.id, myToken);
     let root = roots.get(ent.id);
+    trackAnimatedEntity(ent);
+    requestRender();
 
     // Platform player avatar is settings-only — never show / pick it on the map.
     if (isPlatformPlayerKind(ent.kind)) {
@@ -1551,6 +1698,7 @@ export function createEditorViewport(
         roots.delete(ent.id);
         entityClips.delete(ent.id);
       }
+      animatedEntities.delete(ent.id);
       return;
     }
 
@@ -1780,12 +1928,16 @@ export function createEditorViewport(
     applyEntityTexture(root, ent);
     applyEntityGlow(root, ent.glow, ent.color);
     if (ent.kind === 'light') syncLightParams(root, ent);
+    // Model/texture loads above are async, so the dirty window opened when this
+    // sync started may already have closed by the time the mesh actually exists.
+    requestRender();
     // No refreshGizmos() here: it rebuilds the gizmos for the WHOLE document,
     // so calling it per entity made rebuildAll O(n^2) (500 entities = 500 full
     // teardowns). Every caller refreshes once after its batch instead.
   }
 
   function refreshGizmos() {
+    requestRender();
     while (gizmoGroup.children.length) {
       const c = gizmoGroup.children[0];
       gizmoGroup.remove(c);
@@ -1801,6 +1953,9 @@ export function createEditorViewport(
         else material?.dispose?.();
       }
     }
+    // Perf mode stops here: the group is already emptied above, so nothing is
+    // drawn and, more importantly, nothing is rebuilt per edit.
+    if (editorPerf.skipCollisionGizmos) return;
     const selectedSet = new Set(
       selectedIds.length ? selectedIds : selectedId ? [selectedId] : []
     );
@@ -1963,21 +2118,93 @@ export function createEditorViewport(
     disposeClonedMaterials(obj);
     disposeOwnedGeometry(obj);
     roots.delete(id);
+    animatedEntities.delete(id);
+    syncedKeys.delete(id);
+    requestRender();
   }
 
-  async function rebuildAll() {
-    // Detach first — rebuild may remove/recreate the attached mesh.
+  /**
+   * Fingerprint of everything `syncEntity` reads for one entity. Compared across
+   * `setDoc` calls so an edit only rebuilds the objects it actually touched.
+   *
+   * Layer visibility and the environment's default texture are folded in because
+   * `syncEntity` reads both — hiding a layer or changing the fallback texture has
+   * to resync the affected entities even though their own fields did not change.
+   */
+  function entitySyncKey(ent: EditorEntity, envTextureKey: string): string {
+    const hidden = layerMeta(ent.layerId)?.visible === false;
+    return `${hidden ? 0 : 1}|${envTextureKey}|${JSON.stringify(ent)}`;
+  }
+
+  /**
+   * The subset of fields that decide which object `syncEntity` builds. When one
+   * of these changes, `syncEntity` cannot patch the existing root — it has to be
+   * torn down so the next sync builds from scratch (the same reason
+   * `updateSelected` disposes before patching).
+   */
+  function entityStructureKey(ent: EditorEntity): string {
+    return JSON.stringify([
+      ent.kind,
+      ent.model,
+      ent.customModelUrl,
+      ent.primitive,
+      ent.collisionSize,
+      ent.light?.type,
+    ]);
+  }
+
+  /**
+   * Bring the scene in line with `doc`, syncing only what changed.
+   *
+   * The previous behaviour resynced every entity on every edit, and because
+   * `syncEntity` re-runs the texture, glow and opacity subtree traversals even
+   * for an object it is only updating, hiding a single layer cost a full
+   * thousand-entity resync.
+   */
+  async function syncDoc() {
+    const gen = docGeneration;
+    // Detach first — a resync may remove and recreate the attached mesh.
     transform.detach();
     const keep = new Set(doc.entities.map((e) => e.id));
     roots.forEach((_obj, id) => {
       if (!keep.has(id)) disposeRoot(id);
     });
-    await Promise.all(doc.entities.map((e) => syncEntity(e)));
+    for (const id of [...syncedKeys.keys()]) {
+      if (!keep.has(id)) syncedKeys.delete(id);
+    }
+
+    const envTextureKey = doc.environment?.defaultTextureUrl ?? '';
+    const dirty: { ent: EditorEntity; key: string; structure: string }[] = [];
+    for (const ent of doc.entities) {
+      const key = entitySyncKey(ent, envTextureKey);
+      const prev = syncedKeys.get(ent.id);
+      if (prev?.key === key) {
+        // Unchanged, but the frame loop holds entity references, so re-point it
+        // at the object from this document revision.
+        trackAnimatedEntity(ent);
+        continue;
+      }
+      const structure = entityStructureKey(ent);
+      // Cleared up front so an aborted sync cannot leave a stale "clean" mark.
+      syncedKeys.delete(ent.id);
+      if (prev && prev.structure !== structure) disposeRoot(ent.id);
+      dirty.push({ ent, key, structure });
+    }
+
+    if (dirty.length) {
+      await Promise.all(
+        dirty.map(async ({ ent, key, structure }) => {
+          await syncEntity(ent);
+          // A newer setDoc may have superseded this pass mid-load.
+          if (gen === docGeneration) syncedKeys.set(ent.id, { key, structure });
+        })
+      );
+    }
     refreshGizmos();
     attachSelectionGizmo();
   }
 
-  void rebuildAll();
+  void syncDoc();
 
   function select(id: string | null, additive = false) {
     if (!id) {
@@ -2910,17 +3137,33 @@ export function createEditorViewport(
     pitch = THREE.MathUtils.clamp(pitch, -1.4, 1.4);
   };
 
-  renderer.domElement.addEventListener('pointerdown', onPointerDown);
-  renderer.domElement.addEventListener('pointerup', onPointerUp);
+  // Every interaction path marks the view dirty here rather than inside each
+  // individual handler, so no branch can forget to.
+  const onPointerDownDirty = (ev: PointerEvent) => {
+    requestRender();
+    onPointerDown(ev);
+  };
+  const onPointerUpDirty = (ev: PointerEvent) => {
+    requestRender();
+    onPointerUp(ev);
+  };
+  const onMouseMoveDirty = (ev: MouseEvent) => {
+    requestRender();
+    onMouseMove(ev);
+  };
+  renderer.domElement.addEventListener('pointerdown', onPointerDownDirty);
+  renderer.domElement.addEventListener('pointerup', onPointerUpDirty);
+  renderer.domElement.addEventListener('wheel', () => requestRender(), { passive: true });
   renderer.domElement.addEventListener('contextmenu', (ev) => {
     // Prevent browser right-click menu in the viewport — Paint Tool uses RMB
     // as "copy texture + UV from this solid".
     if (editTool === 'paint') ev.preventDefault();
   });
-  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mousemove', onMouseMoveDirty);
 
   let ctrlAloneCandidate = false;
   const onKeyDown = (e: KeyboardEvent) => {
+    requestRender();
     if (e.key === 'Shift') {
       shiftHeld = true;
       syncTransformSnaps();
@@ -2934,6 +3177,7 @@ export function createEditorViewport(
     }
   };
   const onKeyUp = (e: KeyboardEvent) => {
+    requestRender();
     if (e.key === 'Shift') {
       shiftHeld = false;
       syncTransformSnaps();
@@ -2957,13 +3201,16 @@ export function createEditorViewport(
     if (paused) return;
     const dt = Math.min(clock.getDelta(), 0.05);
     const nowMs = performance.now();
-    for (const ent of doc.entities) {
+    let drawThisFrame = nowMs <= renderDeadlineMs;
+    // Only the handful of entities that actually glow or spin, rather than a
+    // scan of the whole map (with two roots.get lookups each) every frame.
+    for (const [id, ent] of animatedEntities) {
+      const root = roots.get(id);
+      if (!root) continue;
       if (ent.glow?.enabled && ent.glow.pulse && ent.glow.pulse !== 'none') {
-        const r = roots.get(ent.id);
-        if (r) tickEntityGlow(r, ent.glow, nowMs);
+        tickEntityGlow(root, ent.glow, nowMs);
       }
-      const spinRoot = roots.get(ent.id);
-      if (spinRoot) tickSpinHazardVisual(spinRoot, ent, dt);
+      tickSpinHazardVisual(root, ent, dt);
     }
 
     if (freeFly) {
@@ -3019,15 +3266,25 @@ export function createEditorViewport(
         camera.position.copy(orbit.target).add(offset);
         camera.lookAt(orbit.target);
       }
-      orbit.update();
+      // Returns true while damping is still easing the camera to a stop.
+      if (orbit.update()) drawThisFrame = true;
     }
     // Guard: TransformControls errors if its target left the scene (rebuild/delete/resync).
     const attached = (transform as unknown as { object?: THREE.Object3D | null }).object;
     if (attached && !attached.parent) {
       transform.detach();
       attachSelectionGizmo();
+      drawThisFrame = true;
     }
     director.update(dt);
+
+    // Anything still moving under its own power has to keep drawing, otherwise
+    // the dirty window expires mid-animation and the picture freezes.
+    if (freeFly || animatedEntities.size > 0 || director.hasRunningAction) {
+      drawThisFrame = true;
+    }
+    if (!drawThisFrame) return;
+
     for (const outline of selectionOutlines) {
       try {
         outline.update();
@@ -3041,7 +3298,8 @@ export function createEditorViewport(
     if (viewLayout === 'single') {
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, w, h);
-      bloom.render();
+      if (editorPerf.disableBloom) renderer.render(scene, camera);
+      else bloom.render();
     } else if (viewLayout === 'split') {
       // Main perspective (left) + top ortho (right) — shared scene.
       renderer.setScissorTest(true);
@@ -3096,14 +3354,14 @@ export function createEditorViewport(
   };
   raf = requestAnimationFrame(tick);
 
-  return {
+  const api: EditorViewportApi = {
     setDoc: (next) => {
       docGeneration++;
       doc = structuredClone(next);
       if (!doc.environment) doc.environment = { ...DEFAULT_ENVIRONMENT };
       gridSize = doc.gridSize || 1;
       applyEnvironment(ensureEnvironment(doc));
-      void rebuildAll();
+      void syncDoc();
     },
     getDoc: () => doc,
     setSelectedId: (id) => select(id),
@@ -3187,6 +3445,21 @@ export function createEditorViewport(
     setSnapY: (on) => {
       snapY = on;
     },
+    setSnapTarget: (target) => {
+      snapTarget = target;
+    },
+    getSnapTarget: () => snapTarget,
+    setPivotMode: (mode) => {
+      pivotMode = mode;
+      // The proxy is seated at the old pivot, so re-seat it for the new mode.
+      attachSelectionGizmo();
+    },
+    getPivotMode: () => pivotMode,
+    setTransformSpace: (space) => {
+      transformSpace = space;
+      transform.setSpace(space);
+    },
+    getTransformSpace: () => transformSpace,
     setScaleFromSide: (on) => {
       scaleFromSide = on;
     },
@@ -3218,8 +3491,11 @@ export function createEditorViewport(
       handlers.onDocChange(doc);
     },
     setEditorPerfMode: (opts) => {
+      const prev = editorPerf;
       editorPerf = { ...editorPerf, ...opts };
       applyEnvironment(ensureEnvironment(doc));
+      if (editorPerf.capPixelRatio !== prev.capPixelRatio) setSize();
+      if (editorPerf.skipCollisionGizmos !== prev.skipCollisionGizmos) refreshGizmos();
     },
     getEditorPerfMode: () => ({ ...editorPerf }),
     placeSpawn: (kind) => {
@@ -3535,7 +3811,7 @@ export function createEditorViewport(
       handlers.onSelectionChange?.(selectedIds);
       return true;
     },
-    snapSelectedToFace: (face, idsOverride) => {
+    snapSelectedToFace: (face, idsOverride, opts) => {
       const raw =
         idsOverride && idsOverride.length >= 2
           ? idsOverride
@@ -3640,6 +3916,8 @@ export function createEditorViewport(
       const anchorEnt = ents[0];
       const aM = measure(anchorEnt);
       const updates = new Map<string, [number, number, number]>();
+      /** Only populated for `alignRotation`, where pieces adopt the anchor's angle. */
+      const rotationUpdates = new Map<string, [number, number, number]>();
 
       // Anchor never moves — leave its pivot position exactly as-is (not
       // its geometric center, which can differ for bottom-aligned meshes).
@@ -3681,7 +3959,16 @@ export function createEditorViewport(
       let cursorSupport = support(aM, faceDir);
       for (let i = 1; i < ents.length; i++) {
         const e = ents[i];
-        const m = measure(e);
+        // Measure against the orientation the piece will END UP with, otherwise
+        // the flush distance is computed for the old angle and the aligned piece
+        // overlaps or floats.
+        let posed = e;
+        if (opts?.alignRotation) {
+          const rot = [...anchorEnt.rotation] as [number, number, number];
+          rotationUpdates.set(e.id, rot);
+          posed = { ...e, rotation: rot };
+        }
+        const m = measure(posed);
         const eSupport = support(m, faceDir);
         const newCenter = cursorCenter
           .clone()
@@ -3719,12 +4006,23 @@ export function createEditorViewport(
         ...doc,
         entities: doc.entities.map((e) => {
           const pos = updates.get(e.id);
-          return pos ? { ...e, position: pos } : e;
+          const rot = rotationUpdates.get(e.id);
+          if (!pos && !rot) return e;
+          return { ...e, ...(pos ? { position: pos } : {}), ...(rot ? { rotation: rot } : {}) };
         }),
       };
       for (const [id, pos] of updates) {
         const root = roots.get(id);
         if (root) root.position.set(pos[0], pos[1], pos[2]);
+      }
+      for (const [id, rot] of rotationUpdates) {
+        const root = roots.get(id);
+        if (!root) continue;
+        root.rotation.set(
+          THREE.MathUtils.degToRad(rot[0]),
+          THREE.MathUtils.degToRad(rot[1]),
+          THREE.MathUtils.degToRad(rot[2])
+        );
       }
       handlers.onDocChange(doc);
       attachSelectionGizmo();
@@ -4126,9 +4424,9 @@ export function createEditorViewport(
     destroy: () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      renderer.domElement.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('mousemove', onMouseMove);
+      renderer.domElement.removeEventListener('pointerdown', onPointerDownDirty);
+      renderer.domElement.removeEventListener('pointerup', onPointerUpDirty);
+      window.removeEventListener('mousemove', onMouseMoveDirty);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       if (document.pointerLockElement) document.exitPointerLock?.();
@@ -4158,4 +4456,24 @@ export function createEditorViewport(
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
     },
   };
+
+  /**
+   * Any call in from the outside can change what the viewport should show, so
+   * mark the view dirty around the whole API surface rather than trusting ~70
+   * individual methods to each remember. A redundant request from a getter costs
+   * one extra drawn frame, which is far cheaper than a missed one leaving the
+   * canvas stale until the user happens to move the mouse.
+   */
+  for (const key of Object.keys(api) as (keyof EditorViewportApi)[]) {
+    const original = api[key];
+    if (typeof original !== 'function') continue;
+    const wrapped = (...args: unknown[]) => {
+      const result = (original as (...a: unknown[]) => unknown).apply(api, args);
+      requestRender();
+      return result;
+    };
+    (api as unknown as Record<string, unknown>)[key] = wrapped;
+  }
+
+  return api;
 }

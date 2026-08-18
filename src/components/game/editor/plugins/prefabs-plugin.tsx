@@ -56,13 +56,15 @@ function PrefabsPanel({ brains }: { brains: MapEditorBrains }) {
           {snapFaceMenuOpen && (
             <SnapFacePicker
               anchorRect={snapFaceAnchorRect}
-              onPick={(face) => {
-                const ok = apiRef.current?.snapSelectedToFace(face, selectedIds);
+              onPick={(face, opts) => {
+                const ok = apiRef.current?.snapSelectedToFace(face, selectedIds, opts);
                 setSnapFaceMenuOpen(false);
                 if (ok) {
                   toast({
                     title: 'Snapped',
-                    description: `Joined ${SNAP_FACE_LABELS[face]} of the first-selected object.`,
+                    description: `Joined ${SNAP_FACE_LABELS[face]} of the first-selected object${
+                      opts.alignRotation ? ', turned to match its angle' : ''
+                    }.`,
                   });
                 } else {
                   toast({
@@ -71,6 +73,17 @@ function PrefabsPanel({ brains }: { brains: MapEditorBrains }) {
                     variant: 'destructive',
                   });
                 }
+              }}
+              onSnapTogether={() => {
+                const ok = apiRef.current?.snapSelectedTogether(selectedIds);
+                setSnapFaceMenuOpen(false);
+                toast({
+                  title: ok ? 'Lined up' : 'Line up failed',
+                  description: ok
+                    ? 'Shared bottom, edge to edge along X.'
+                    : 'Select 2+ unlocked objects, then try again.',
+                  variant: ok ? undefined : 'destructive',
+                });
               }}
               onClose={() => setSnapFaceMenuOpen(false)}
             />

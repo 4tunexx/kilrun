@@ -63,6 +63,7 @@ import {
   Route,
   Package,
   Fan,
+  Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -125,6 +126,7 @@ import { TextureAtlasPicker } from './texture-atlas-picker';
 import { PLAY_TEST_MESH_BAKE_OPTS } from './play-test-bake';
 import { worldScaleToUvRepeat } from './editor-mesh';
 import type { SelectionTransformOp } from './selection-transform';
+import { ModifyPanel } from './modify-panel';
 import { KILRUN_MODE_INFO } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS } from './prototype-catalog';
 import {
@@ -139,7 +141,7 @@ import {
   getMapThumbnail,
   importJson,
   listMaps,
-  loadMap,
+  loadMapDetailed,
   saveMap,
 } from './map-storage';
 import {
@@ -150,7 +152,10 @@ import {
   type EditorPerfMode,
   type EditorViewLayout,
   type EditorViewportApi,
+  type PivotMode,
+  type SnapTarget,
   type TransformMode,
+  type TransformSpace,
 } from './editor-viewport';
 import { MapPlayPreview } from './map-play-preview';
 import { PlayTestEngine } from './play-test-engine';
@@ -187,7 +192,7 @@ import {
 import { setLastPrefabScale } from './prefab-defaults';
 import { formatValidationSummary, validateMapForPublish } from './map-validate';
 import { MAX_MESH_COLLISION_PADS, needsMeshCollisionBake } from './mesh-voxelize';
-import { isCsgDeleteResult, isCsgEligible, subtractEntities, unionEntities } from './csg-tools';
+import { isCsgDeleteResult, isCsgEligible, subtractEntities, unionEntities, intersectEntities } from './csg-tools';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
@@ -232,11 +237,13 @@ export function MapEditor({
 
   const starter = useMemo(() => {
     if (initialMapId) {
-      const loaded = loadMap(initialMapId);
-      if (loaded) return { id: initialMapId, doc: stripLegacyBakedStairPads(loaded) };
+      const loaded = loadMapDetailed(initialMapId);
+      if (loaded.ok) return { id: initialMapId, doc: stripLegacyBakedStairPads(loaded.doc), error: null as string | null };
+      const fresh = ensureStarterMap();
+      return { id: fresh.id, doc: stripLegacyBakedStairPads(fresh.doc), error: loaded.error };
     }
     const fresh = ensureStarterMap();
-    return { id: fresh.id, doc: stripLegacyBakedStairPads(fresh.doc) };
+    return { id: fresh.id, doc: stripLegacyBakedStairPads(fresh.doc), error: null as string | null };
   }, [initialMapId]);
   const [mapId, setMapId] = useState(starter.id);
   const [doc, setDoc] = useState<MapDocument>(() => ({
@@ -318,6 +325,9 @@ export function MapEditor({
   const [playTestPromptTarget, setPlayTestPromptTarget] = useState<'preview' | 'live'>('preview');
   const [customTextures, setCustomTextures] = useState<CustomTexture[]>([]);
   const [snapY, setSnapY] = useState(false);
+  const [snapTarget, setSnapTarget] = useState<SnapTarget>('face');
+  const [pivotMode, setPivotMode] = useState<PivotMode>('median');
+  const [transformSpace, setTransformSpace] = useState<TransformSpace>('world');
   const [scaleFromSide, setScaleFromSide] = useState(() => {
     if (typeof window === 'undefined') return true;
     try {
@@ -331,6 +341,16 @@ export function MapEditor({
   });
   const isMobile = useIsMobile();
   const { toast } = useToast();
+  useEffect(() => {
+    if (!starter.error) return;
+    toast({
+      title: 'Map is corrupted',
+      description: `${starter.error}. Opened a new draft instead. The original text was kept for recovery (local storage key ends in .corrupt).`,
+      variant: 'destructive',
+    });
+    // Only once on mount for the initial id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const isTouch = typeof window !== 'undefined' && detectTouchDevice();
   const mobileFirst =
     typeof window !== 'undefined' &&
@@ -625,12 +645,17 @@ export function MapEditor({
     const api = createEditorViewport(host, doc, {
       onSelect: setSelectedId,
       onSelectionChange: setSelectedIds,
-      onDocChange: (next) => {
+      onDocChange: (next, opts) => {
         scheduleHistory();
         const merged = { ...next, environment: ensureEnvironment(next) };
         docRef.current = merged;
-        setDoc(merged);
         setDirty(true);
+        // Mid-drag the ref is enough: every reader that matters goes through
+        // docRef or the viewport's own copy, and re-rendering this component on
+        // every gizmo frame is what made dragging stutter on big maps. The
+        // viewport always follows up with a settled call when the drag ends.
+        if (opts?.transient) return;
+        setDoc(merged);
       },
       onFreeFlyChange: setFreeFly,
       onMeasureChange: setMeasureDist,
@@ -1220,6 +1245,35 @@ export function MapEditor({
     setDirty(true);
   };
 
+  /** What the Modify panel acts on: the selection, expanded to whole groups. */
+  const modifySelection = useMemo(() => {
+    const base = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+    if (!base.length) return [];
+    const ids = new Set(expandIdsWithGroups(doc.entities, base));
+    return doc.entities.filter((e) => ids.has(e.id));
+  }, [doc.entities, selectedIds, selectedId]);
+
+  const addBulkEntities = (added: EditorEntity[], label: string) => {
+    if (!added.length) return;
+    mutateLiveDoc((d) => ({ ...d, entities: [...d.entities, ...added] }));
+    // Select the new pieces so the next op chains off them.
+    const ids = added.map((e) => e.id);
+    setSelectedIds(ids);
+    setSelectedId(ids[0] ?? null);
+    apiRef.current?.setSelectedIds(ids);
+    toast({ title: label, description: `${ids.length} object${ids.length === 1 ? '' : 's'} added.` });
+  };
+
+  const updateBulkEntities = (updated: EditorEntity[], label: string) => {
+    if (!updated.length) return;
+    const byId = new Map(updated.map((e) => [e.id, e]));
+    mutateLiveDoc((d) => ({ ...d, entities: d.entities.map((e) => byId.get(e.id) ?? e) }));
+    toast({
+      title: label,
+      description: `${updated.length} object${updated.length === 1 ? '' : 's'} updated.`,
+    });
+  };
+
   const mutateLiveDoc = (fn: (d: MapDocument) => MapDocument) => {
     scheduleHistory();
     setDirty(true);
@@ -1311,6 +1365,7 @@ export function MapEditor({
                     collisionSize: result.collisionSize,
                     csgPads: result.csgPads,
                     csgOp: result.csgOp,
+                    csgSources: result.csgSources,
                     csgWarning: result.warning,
                     solid: true,
                     collideMaterial: 'solid' as const,
@@ -1389,6 +1444,7 @@ export function MapEditor({
           collisionSize: result.collisionSize,
           csgPads: result.csgPads,
           csgOp: result.csgOp,
+          csgSources: result.csgSources,
           solid: true,
           collideMaterial: 'solid',
         };
@@ -1407,6 +1463,104 @@ export function MapEditor({
     } finally {
       setCsgBusy(false);
     }
+  };
+
+  /** Keep only the overlapping volume of two selected solids. */
+  const runCsgIntersect = async () => {
+    if (selectedIds.length !== 2) {
+      toast({
+        title: 'Select exactly 2 objects',
+        description: 'Shift+click two overlapping Hammer solids, then Intersect.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const a = doc.entities.find((e) => e.id === selectedIds[0]);
+    const b = doc.entities.find((e) => e.id === selectedIds[1]);
+    if (!a || !b) return;
+    if (!isCsgEligible(a) || !isCsgEligible(b)) {
+      toast({
+        title: 'Not supported',
+        description: 'Intersect works on Hammer solids (Box, Cylinder, Wedge, …) and prior merge results.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setCsgBusy(true);
+    try {
+      const result = await intersectEntities(a, b);
+      if ('error' in result) {
+        toast({ title: 'Intersect failed', description: result.error, variant: 'destructive' });
+        return;
+      }
+      const deleted = isCsgDeleteResult(result);
+      const newId = generateId('csg');
+      mutateLiveDoc((d) => {
+        const entities = d.entities.filter((e) => e.id !== a.id && e.id !== b.id);
+        if (deleted) return { ...d, entities };
+        const merged: EditorEntity = {
+          id: newId,
+          name: 'Intersect',
+          kind: 'prop',
+          layerId: a.layerId,
+          position: result.position,
+          rotation: result.rotation,
+          scale: result.scale,
+          color: a.color,
+          customModelUrl: result.customModelUrl,
+          collisionSize: result.collisionSize,
+          csgPads: result.csgPads,
+          csgOp: result.csgOp,
+          csgSources: result.csgSources,
+          csgWarning: result.warning,
+          solid: true,
+          collideMaterial: 'solid',
+        };
+        return { ...d, entities: [...entities, merged] };
+      });
+      setSelectedIds([]);
+      if (deleted) {
+        setSelectedId(null);
+        apiRef.current?.setSelectedId(null);
+        toast({ title: 'Nothing left', description: 'The two solids did not overlap.' });
+      } else {
+        setSelectedId(newId);
+        apiRef.current?.setSelectedId(newId);
+        toast({
+          title: 'Intersect applied',
+          description: result.warning ?? 'Only the overlapping volume remains. Restore original brushes from Properties if you need to re-edit.',
+        });
+      }
+    } catch (err) {
+      toast({
+        title: 'Intersect failed',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setCsgBusy(false);
+    }
+  };
+
+  const restoreCsgSources = () => {
+    if (!selected?.csgSources?.length) return;
+    const sources = selected.csgSources.map((s) => ({
+      ...structuredClone(s),
+      id: generateId(),
+      name: s.name || 'Brush',
+    }));
+    const keepId = selected.id;
+    mutateLiveDoc((d) => ({
+      ...d,
+      entities: [...d.entities.filter((e) => e.id !== keepId), ...sources],
+    }));
+    setSelectedIds(sources.map((s) => s.id));
+    setSelectedId(sources[0]?.id ?? null);
+    apiRef.current?.setSelectedIds(sources.map((s) => s.id));
+    toast({
+      title: 'Brushes restored',
+      description: `${sources.length} original solid${sources.length === 1 ? '' : 's'} put back. The baked mesh was removed.`,
+    });
   };
 
   const selectionIds = useMemo(() => {
@@ -1428,13 +1582,19 @@ export function MapEditor({
   }, [doc.entities, selectionIds]);
 
   const patchEntityById = (id: string, patch: Partial<EditorEntity>) => {
+    // For the selected entity `updateSelected` is the complete path: it applies
+    // the patch to the live doc, fills in defaults for a changed kind, rebuilds
+    // the object, and reports back through onDocChange. Going through
+    // mutateLiveDoc as well applied and synced the same patch a second time.
+    if (id === selectedId && apiRef.current) {
+      scheduleHistory();
+      apiRef.current.updateSelected(patch);
+      return;
+    }
     mutateLiveDoc((d) => ({
       ...d,
       entities: d.entities.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     }));
-    if (id === selectedId) {
-      apiRef.current?.updateSelected(patch);
-    }
   };
 
   const sortedLayers = useMemo(
@@ -2128,15 +2288,22 @@ export function MapEditor({
           value={mapId}
           onChange={(e) => {
             const id = e.target.value;
-            const loaded = loadMap(id);
-            if (!loaded) return;
+            const loaded = loadMapDetailed(id);
+            if (!loaded.ok) {
+              toast({
+                title: 'Map is corrupted',
+                description: `${loaded.error}. The original text was kept so you can recover it from local storage (key ends in .corrupt).`,
+                variant: 'destructive',
+              });
+              return;
+            }
             if (isDirty()) {
               const ok = confirm(
                 'You have unsaved changes on this map.\n\nOK = discard and switch\nCancel = stay'
               );
               if (!ok) return;
             }
-            const cleaned = stripLegacyBakedStairPads(loaded);
+            const cleaned = stripLegacyBakedStairPads(loaded.doc);
             const withEnv = { ...cleaned, environment: ensureEnvironment(cleaned) };
             closeStudioPanels();
             setMapId(id);
@@ -2146,7 +2313,7 @@ export function MapEditor({
             clearHistory();
             apiRef.current?.setDoc(withEnv);
             setActivePlayId(getActivePlayMapIdForMode(getMapGameMode(withEnv)));
-            if (cleaned.entities.length !== loaded.entities.length) {
+            if (cleaned.entities.length !== loaded.doc.entities.length) {
               toast({
                 title: 'Removed old baked stair pads',
                 description: 'Stairs now collide automatically — no Bake button needed.',
@@ -2158,7 +2325,7 @@ export function MapEditor({
             .filter((m) => (m.gameMode ?? 'deathrun') === gameMode)
             .map((m) => (
             <option key={m.id} value={m.id}>
-              {m.name}
+              {m.corrupt ? `${m.name} (corrupted)` : m.name}
             </option>
           ))}
         </select>
@@ -2884,13 +3051,15 @@ export function MapEditor({
               {snapFaceMenuOpen && (
                 <SnapFacePicker
                   anchorRect={snapFaceAnchorRect}
-                  onPick={(face) => {
-                    const ok = apiRef.current?.snapSelectedToFace(face, selectedIds);
+                  onPick={(face, opts) => {
+                    const ok = apiRef.current?.snapSelectedToFace(face, selectedIds, opts);
                     setSnapFaceMenuOpen(false);
                     if (ok) {
                       toast({
                         title: 'Snapped',
-                        description: `Joined ${SNAP_FACE_LABELS[face]} of the first-selected object.`,
+                        description: `Joined ${SNAP_FACE_LABELS[face]} of the first-selected object${
+                          opts.alignRotation ? ', turned to match its angle' : ''
+                        }.`,
                       });
                     } else {
                       toast({
@@ -2899,6 +3068,17 @@ export function MapEditor({
                         variant: 'destructive',
                       });
                     }
+                  }}
+                  onSnapTogether={() => {
+                    const ok = apiRef.current?.snapSelectedTogether(selectedIds);
+                    setSnapFaceMenuOpen(false);
+                    toast({
+                      title: ok ? 'Lined up' : 'Line up failed',
+                      description: ok
+                        ? 'Shared bottom, edge to edge along X.'
+                        : 'Select 2+ unlocked objects, then try again.',
+                      variant: ok ? undefined : 'destructive',
+                    });
                   }}
                   onClose={() => setSnapFaceMenuOpen(false)}
                 />
@@ -2971,6 +3151,71 @@ export function MapEditor({
                 title="Custom grid size"
               />
             </div>
+            <div className="flex items-center gap-0.5">
+              {(
+                [
+                  ['off', 'OFF', 'Drop where you let go — no attach'],
+                  ['face', 'FACE', 'Click flush onto the nearest neighbour face'],
+                  ['vertex', 'VERT', 'Snap the nearest corner onto a neighbour corner'],
+                  ['edge', 'EDGE', 'Snap the nearest edge midpoint onto a neighbour edge'],
+                ] as const
+              ).map(([value, label, title]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setSnapTarget(value);
+                    apiRef.current?.setSnapTarget(value);
+                  }}
+                  className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${
+                    snapTarget === value
+                      ? 'bg-emerald-500/80 text-white'
+                      : 'bg-white/10 text-white/60 hover:bg-white/20'
+                  }`}
+                  title={title}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-0.5">
+              {(
+                [
+                  ['median', 'MED', 'Rotate / scale about the average of the objects’ origins'],
+                  ['bounds', 'BOX', 'Rotate / scale about the selection’s bounding-box center'],
+                  ['active', 'ACT', 'Rotate / scale about the last-clicked object'],
+                ] as const
+              ).map(([value, label, title]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setPivotMode(value);
+                    apiRef.current?.setPivotMode(value);
+                  }}
+                  className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${
+                    pivotMode === value
+                      ? 'bg-violet-500/80 text-white'
+                      : 'bg-white/10 text-white/60 hover:bg-white/20'
+                  }`}
+                  title={title}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const next: TransformSpace = transformSpace === 'world' ? 'local' : 'world';
+                setTransformSpace(next);
+                apiRef.current?.setTransformSpace(next);
+              }}
+              className="px-1 py-0.5 rounded text-[9px] font-bold bg-white/10 text-white/70 hover:bg-white/20 transition-colors"
+              title="Gizmo axes: world axes, or the selected object's own axes"
+            >
+              {transformSpace === 'world' ? 'WORLD' : 'LOCAL'}
+            </button>
             <ToolBtn onClick={() => apiRef.current?.focusSelected()} title="Focus selection (F)">
               <Crosshair className="w-4 h-4" />
             </ToolBtn>
@@ -3344,11 +3589,36 @@ export function MapEditor({
                     <Combine className="w-3.5 h-3.5" />
                     Union
                   </button>
+                  <button
+                    type="button"
+                    onClick={runCsgIntersect}
+                    disabled={csgBusy || selectedIds.length !== 2}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-xs text-sky-100 disabled:opacity-35"
+                    title="Keep only the overlapping volume of two solids"
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    Intersect
+                  </button>
                 </div>
                 <p className="text-[10px] text-white/40 leading-snug">
-                  Subtract / Union: Hammer solids only (Box, Cylinder, Wedge, …). Select order
+                  Subtract / Union / Intersect: Hammer solids only (Box, Cylinder, Wedge, …). Select order
                   matters for Subtract — first stays, second (shift+click) is cut off.
                 </p>
+                {selected.csgSources && selected.csgSources.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={restoreCsgSources}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-100"
+                    title="Replace this baked mesh with the original solids"
+                  >
+                    Restore original brushes ({selected.csgSources.length})
+                  </button>
+                )}
+                <ModifyPanel
+                  selection={modifySelection}
+                  onAdd={addBulkEntities}
+                  onUpdate={updateBulkEntities}
+                />
                 {(selected.locked || isEntityEditLocked(selected, doc.layers)) && (
                   <div className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 flex items-start gap-2">
                     <Lock className="w-3.5 h-3.5 text-amber-300 mt-0.5 shrink-0" />

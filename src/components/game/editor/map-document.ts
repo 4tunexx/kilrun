@@ -868,8 +868,14 @@ export interface EditorEntity {
    * rotation beyond entity.rotation[1] (0 for Subtract's axis-aligned slabs,
    * the source's own absolute yaw for Union members).
    */
-  csgOp?: 'subtract' | 'union';
+  csgOp?: 'subtract' | 'union' | 'intersect';
   csgPads?: CsgLocalPad[];
+  /**
+   * Snapshots of the Hammer solids (or prior bakes) that produced this CSG
+   * result. Restoring them puts the original brushes back in the map so the
+   * bake can be re-edited instead of remaining a dead GLB.
+   */
+  csgSources?: EditorEntity[];
   /** Set when collision could only be approximated (e.g. non-aligned Subtract). */
   csgWarning?: string;
   /**
@@ -2040,7 +2046,16 @@ export function ensureTeleport(ent: EditorEntity): EntityTeleport {
  * plays the map and notices the trap never hurts them / the button does
  * nothing / the platform never moves.
  */
-export function getEntityWarnings(ent: EditorEntity, allEntities: EditorEntity[]): string[] {
+export function getEntityWarnings(
+  ent: EditorEntity,
+  allEntities: EditorEntity[],
+  /**
+   * Ids that some entity listens to, precomputed. Pass this when warning on many
+   * entities at once — without it the button check rescans every entity, which
+   * makes a whole-map pass quadratic.
+   */
+  listenedIds?: ReadonlySet<string>
+): string[] {
   const warnings: string[] = [];
 
   if (ent.kind === 'trap' || ent.kind === 'hazard') {
@@ -2078,13 +2093,32 @@ export function getEntityWarnings(ent: EditorEntity, allEntities: EditorEntity[]
   if (ent.kind === 'button') {
     const anim = ent.animation;
     const hasTargets = (anim?.activatesEntityIds?.length ?? 0) > 0;
-    const hasListeners = allEntities.some((o) => o.animation?.listenToEntityId === ent.id);
+    const hasListeners = listenedIds
+      ? listenedIds.has(ent.id)
+      : allEntities.some((o) => o.animation?.listenToEntityId === ent.id);
     if (!hasTargets && !hasListeners) {
       warnings.push('This button doesn\'t activate anything yet — set "Activates trap / door" below.');
     }
   }
 
   return warnings;
+}
+
+/**
+ * Warnings for every entity in one linear pass, for callers that need the whole
+ * map at once (the outliner). Entities with no warnings are omitted.
+ */
+export function getAllEntityWarnings(allEntities: EditorEntity[]): Map<string, string[]> {
+  const listenedIds = new Set<string>();
+  for (const e of allEntities) {
+    if (e.animation?.listenToEntityId) listenedIds.add(e.animation.listenToEntityId);
+  }
+  const out = new Map<string, string[]>();
+  for (const e of allEntities) {
+    const warnings = getEntityWarnings(e, allEntities, listenedIds);
+    if (warnings.length) out.set(e.id, warnings);
+  }
+  return out;
 }
 
 /**
@@ -2860,6 +2894,7 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
     interact: ent.interact ? { ...ent.interact } : undefined,
     motion: ent.motion ? { ...ent.motion, offset: [...ent.motion.offset] as [number, number, number] } : undefined,
     csgPads: ent.csgPads ? ent.csgPads.map((p) => ({ ...p })) : undefined,
+    csgSources: ent.csgSources ? ent.csgSources.map((s) => structuredClone(s)) : undefined,
     meshCollisionPads: ent.meshCollisionPads ? ent.meshCollisionPads.map((p) => ({ ...p })) : undefined,
     collisionSize: ent.collisionSize ? ([...ent.collisionSize] as [number, number, number]) : undefined,
     textureRepeat: ent.textureRepeat ? ([...ent.textureRepeat] as [number, number]) : undefined,

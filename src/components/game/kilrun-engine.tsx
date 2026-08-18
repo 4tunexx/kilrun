@@ -85,12 +85,14 @@ import {
 } from './editor/prefab-storage';
 import {
   createSimScratch,
+  invalidatePadSpatialCache,
   stepPlatformer,
   type SimBody,
   type SimPad,
   type SimPhysicsOpts,
   type SimScratch,
 } from '@/lib/platformer-sim';
+import { advanceMovingPads, applyPadCarry } from '@shared/moving-platform';
 import { reconcilePredictedBody } from '@/lib/client-prediction';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
@@ -271,6 +273,18 @@ export default function KilrunEngine({
   const matchRemainingRef = useRef(room.matchTimeRemainingMs ?? 0);
   matchRemainingRef.current = room.matchTimeRemainingMs ?? 0;
   const matchDurationRef = useRef(180_000);
+  /**
+   * Server moving-platform clock plus the local time we received it, so the
+   * render loop can extrapolate between 30Hz patches and still evaluate the
+   * same triangle wave the server does.
+   */
+  const motionClockRef = useRef({ baseMs: 0, receivedAt: 0 });
+  useEffect(() => {
+    motionClockRef.current = {
+      baseMs: room.motionElapsedMs ?? 0,
+      receivedAt: performance.now(),
+    };
+  }, [room.motionElapsedMs]);
 
   // Prefer cloud Active map for this mode (works for all clients), fall back to localStorage.
   // Deathrun MAIN 3rd View always wins camera/crosshair for Horde / Comp / Deathrun.
@@ -635,7 +649,8 @@ export default function KilrunEngine({
       })
       .catch(() => {});
     const damageNumbers = new DamageNumberFx(hostElement);
-    connectionRef.current?.onHitFx((msg) => damageNumbers.spawn(msg.x, msg.y, msg.z, msg.amount, msg.kind));
+    const hitFxConnection = connectionRef.current;
+    hitFxConnection?.onHitFx((msg) => damageNumbers.spawn(msg.x, msg.y, msg.z, msg.amount, msg.kind));
     preloadSoundboard();
     let envHandle: { dispose: () => void } | null = null;
     let envFloor: THREE.Mesh | null = null;
@@ -731,7 +746,7 @@ export default function KilrunEngine({
       if (playDoc) {
         // Match map-play-preview.tsx's pad shape: stamp id/home* so moving
         // platforms have a stable identity for stepPlatformer's carry logic
-        // (`supportPadId`), even though we don't animate motion client-side.
+        // (`supportPadId`) and a fixed origin for the motion wave.
         predictedPads = mapDocToSimPlatforms(playDoc).map((p, i) => ({
           ...p,
           id: p.entityId || `pad_${i}`,
@@ -945,6 +960,18 @@ export default function KilrunEngine({
         } else {
           try {
             if (predictedPads.length > 0 && !frozen) {
+              // Animate predicted pads on the server's clock before stepping,
+              // then carry the body like the server's applyPlatformCarry does.
+              // Without this the local player predicts against a frozen pad and
+              // rubber-bands every time the server moves them underneath.
+              const motionClock = motionClockRef.current;
+              const motionElapsedMs =
+                motionClock.baseMs + (performance.now() - motionClock.receivedAt);
+              const padDeltas = advanceMovingPads(predictedPads, motionElapsedMs);
+              if (padDeltas.length) {
+                invalidatePadSpatialCache();
+                applyPadCarry(predictedBody, predictedScratch.supportPadId, padDeltas);
+              }
               const cos = Math.cos(cameraYaw);
               const sin = Math.sin(cameraYaw);
               const moveX = wishFwd * cos + wishStrafe * sin;
@@ -1422,6 +1449,7 @@ export default function KilrunEngine({
       disposed = true;
       cancelAnimationFrame(raf);
       window.clearInterval(syncTimer);
+      hitFxConnection?.offHitFx();
       stopLoopedSound('sprint_start');
       if (document.pointerLockElement) document.exitPointerLock?.();
       characters.forEach((c) => c.destroy());

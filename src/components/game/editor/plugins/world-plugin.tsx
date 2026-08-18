@@ -231,10 +231,13 @@ function WorldPanel({ brains }: { brains: MapEditorBrains }) {
                 Editor performance
               </p>
               <p className="text-[10px] text-white/35 leading-snug">
-                Hide heavy visuals while editing to cut RAM / GPU. Play Test and live matches still render full sky, floor, fog, and void effects.
+                Cut rendering work while editing a heavy map. Play Test and live matches are unaffected and still render everything at full quality.
               </p>
               {(
                 [
+                  ['disableBloom', 'Disable bloom (biggest GPU saving)'],
+                  ['capPixelRatio', 'Render at 1x pixel ratio'],
+                  ['skipCollisionGizmos', 'Skip collision wireframes'],
                   ['hideFloor', 'Hide floor / void disc'],
                   ['hideSkyTexture', 'Hide sky texture (solid color)'],
                   ['hideVoidEffects', 'Hide void glow / shadow'],
@@ -258,10 +261,9 @@ function WorldPanel({ brains }: { brains: MapEditorBrains }) {
                   />
                 </label>
               ))}
-              {(editorPerf.hideFloor ||
-                editorPerf.hideSkyTexture ||
-                editorPerf.hideVoidEffects ||
-                editorPerf.hideFog) && (
+              {(Object.keys(DEFAULT_EDITOR_PERF_MODE) as (keyof typeof DEFAULT_EDITOR_PERF_MODE)[]).some(
+                (key) => editorPerf[key] !== DEFAULT_EDITOR_PERF_MODE[key]
+              ) && (
                 <Button
                   size="sm"
                   variant="ghost"

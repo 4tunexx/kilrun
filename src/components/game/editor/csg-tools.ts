@@ -21,7 +21,7 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Brush, Evaluator, SUBTRACTION, ADDITION } from 'three-bvh-csg';
+import { Brush, Evaluator, SUBTRACTION, ADDITION, INTERSECTION } from 'three-bvh-csg';
 import type { EditorEntity, CsgLocalPad } from './map-document';
 import { isHammerSolidEntity, HAMMER_SOLID_MODEL } from './map-document';
 import type { HammerPrimitive } from './hammer-shapes';
@@ -40,7 +40,9 @@ export interface CsgBakeResult {
   customModelUrl: string;
   collisionSize: [number, number, number];
   csgPads: CsgLocalPad[];
-  csgOp: 'subtract' | 'union';
+  csgOp: 'subtract' | 'union' | 'intersect';
+  /** Snapshots of the source solids so the bake can be exploded back. */
+  csgSources?: EditorEntity[];
   warning?: string;
 }
 
@@ -55,7 +57,10 @@ export function isCsgDeleteResult(r: CsgResult): r is CsgDeleteResult {
   return 'deleted' in r;
 }
 
-/** Only Hammer solids (any shape but Arch) and prior CSG bakes are eligible. */
+/** Deep snapshot of the brushes that produced a CSG bake, for later restore. */
+export function snapshotCsgBrushes(entities: EditorEntity[]): EditorEntity[] {
+  return entities.map((e) => structuredClone(e));
+}
 export function isCsgEligible(e: EditorEntity): boolean {
   if (e.csgOp) return true;
   if (!isHammerSolidEntity(e)) return false;
@@ -342,6 +347,7 @@ export async function subtractEntities(base: EditorEntity, cutter: EditorEntity)
     collisionSize: size,
     csgPads,
     csgOp: 'subtract',
+    csgSources: snapshotCsgBrushes([base, cutter]),
     warning,
   };
 }
@@ -387,6 +393,95 @@ export async function unionEntities(sources: EditorEntity[]): Promise<CsgResult>
     collisionSize: size,
     csgPads,
     csgOp: 'union',
+    csgSources: snapshotCsgBrushes(sources),
+  };
+}
+
+function intersectBoxPads(a: EditorEntity, b: EditorEntity): CsgLocalPad[] | null {
+  if (!isBoxPrimitive(a) || !isBoxPrimitive(b)) return null;
+  if (!nearZero(a.rotation[0], TILT_TOLERANCE_DEG) || !nearZero(a.rotation[2], TILT_TOLERANCE_DEG)) {
+    return null;
+  }
+  if (!nearZero(b.rotation[0], TILT_TOLERANCE_DEG) || !nearZero(b.rotation[2], TILT_TOLERANCE_DEG)) {
+    return null;
+  }
+  if (angleDiffDeg(a.rotation[1], b.rotation[1]) > YAW_TOLERANCE_DEG) return null;
+
+  const aCenter = boxWorldCenter(a);
+  const [hxA, hyA, hzA] = boxWorldHalfExtents(a);
+  const bCenter = boxWorldCenter(b);
+  const [hxB, hyB, hzB] = boxWorldHalfExtents(b);
+  const yaw = degToRad(a.rotation[1]);
+  const dx = bCenter.x - aCenter.x;
+  const dz = bCenter.z - aCenter.z;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const blx = dx * cos - dz * sin;
+  const blz = dx * sin + dz * cos;
+  const bly = bCenter.y - aCenter.y;
+
+  const x0 = Math.max(-hxA, blx - hxB);
+  const x1 = Math.min(hxA, blx + hxB);
+  const y0 = Math.max(-hyA, bly - hyB);
+  const y1 = Math.min(hyA, bly + hyB);
+  const z0 = Math.max(-hzA, blz - hzB);
+  const z1 = Math.min(hzA, blz + hzB);
+  if (x0 >= x1 || y0 >= y1 || z0 >= z1) return [];
+  const overlap = pad((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, (x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2);
+  return overlap ? [overlap] : [];
+}
+
+/** Keep only the overlapping volume of two solids. */
+export async function intersectEntities(a: EditorEntity, b: EditorEntity): Promise<CsgResult> {
+  if (!isCsgEligible(a) || !isCsgEligible(b)) {
+    return { error: 'Intersect only works on Hammer solids (Box, Cylinder, Wedge, …) and prior merge results.' };
+  }
+  const [geoA, geoB] = await Promise.all([entityLocalGeometry(a), entityLocalGeometry(b)]);
+  const evaluator = new Evaluator();
+  const resultBrush = evaluator.evaluate(makeBrush(geoA, a), makeBrush(geoB, b), INTERSECTION);
+  resultBrush.geometry.computeVertexNormals();
+  const box = boundingBoxOf(resultBrush.geometry);
+  if (box.isEmpty()) return { deleted: true };
+
+  const size: [number, number, number] = [
+    Math.max(0.1, box.max.x - box.min.x),
+    Math.max(0.1, box.max.y - box.min.y),
+    Math.max(0.1, box.max.z - box.min.z),
+  ];
+  const anchor = plantedAnchorOf(resultBrush.geometry);
+  resultBrush.geometry.translate(-anchor.x, -anchor.y, -anchor.z);
+
+  const aCenter = boxWorldCenter(a);
+  const aYaw = degToRad(a.rotation[1]);
+  const exactPads = intersectBoxPads(a, b);
+  let csgPads: CsgLocalPad[];
+  let warning: string | undefined;
+  if (exactPads) {
+    if (exactPads.length === 0) return { deleted: true };
+    csgPads = exactPads.map((p) => rebasePad(p, aCenter, aYaw, anchor));
+  } else {
+    const fitted = voxelizeGeometryToPads(resultBrush.geometry.clone());
+    if (fitted.length) {
+      csgPads = fitted;
+    } else {
+      warning =
+        'Collision approximated — mesh-fit bake found no solid volume. Try overlapping Box+Box with matching rotation.';
+      const [hx, hy, hz] = boxWorldHalfExtents(a);
+      csgPads = [rebasePad({ cx: 0, cy: 0, cz: 0, hx, hy, hz }, aCenter, aYaw, anchor)];
+    }
+  }
+
+  const glb = await exportBrushAsGlbDataUrl(resultBrush);
+  return {
+    position: [anchor.x, anchor.y, anchor.z],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    customModelUrl: glb,
+    collisionSize: size,
+    csgPads,
+    csgOp: 'intersect',
+    csgSources: snapshotCsgBrushes([a, b]),
+    warning,
   };
 }
 

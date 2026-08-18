@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getAllEntityWarnings,
   getEntityWarnings,
   sanitizePlayerBindings,
   sanitizeShopPowerUp,
@@ -178,6 +179,47 @@ describe('getEntityWarnings', () => {
       },
     });
     expect(getEntityWarnings(button, [button, door])).toEqual([]);
+  });
+});
+
+describe('getAllEntityWarnings', () => {
+  const button = (id: string) =>
+    stub(id, {
+      kind: 'button',
+      animation: {
+        availableClips: [],
+        trigger: 'interact',
+        radius: 1.5,
+        loopActive: false,
+        loopDefault: false,
+        activatesEntityIds: [],
+      },
+    });
+
+  it('agrees with the per-entity check, including the button listener scan', () => {
+    const door = stub('d', {
+      kind: 'door',
+      animation: {
+        availableClips: [],
+        trigger: 'signal',
+        radius: 1.5,
+        loopActive: false,
+        loopDefault: false,
+        listenToEntityId: 'wired',
+      },
+    });
+    const entities = [button('wired'), button('orphan'), door, stub('plain')];
+    const map = getAllEntityWarnings(entities);
+    for (const e of entities) {
+      expect(map.get(e.id) ?? []).toEqual(getEntityWarnings(e, entities));
+    }
+  });
+
+  it('omits entities that have nothing wrong', () => {
+    const entities = [stub('plain'), button('orphan')];
+    const map = getAllEntityWarnings(entities);
+    expect(map.has('plain')).toBe(false);
+    expect(map.get('orphan')?.length).toBe(1);
   });
 });
 

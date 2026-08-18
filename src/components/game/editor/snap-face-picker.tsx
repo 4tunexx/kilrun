@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowDown,
@@ -31,12 +32,16 @@ export const SNAP_FACE_LABELS: Record<SnapFace, string> = {
 export function SnapFacePicker({
   anchorRect,
   onPick,
+  onSnapTogether,
   onClose,
 }: {
   anchorRect: DOMRect | null;
-  onPick: (face: SnapFace) => void;
+  onPick: (face: SnapFace, opts: { alignRotation: boolean }) => void;
+  /** Lay the selection out in a row on a shared bottom, edge to edge. */
+  onSnapTogether?: () => void;
   onClose: () => void;
 }) {
+  const [alignRotation, setAlignRotation] = useState(false);
   const btnCls =
     'flex flex-col items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2.5 text-white/85 hover:bg-emerald-500/20 hover:border-emerald-400/40 hover:text-emerald-200 active:scale-95 transition-colors';
   // Rendered via portal to document.body and positioned `fixed` from the
@@ -64,39 +69,92 @@ export function SnapFacePicker({
         </p>
         <div className="grid grid-cols-3 gap-1.5">
           <div />
-          <button type="button" className={btnCls} onClick={() => onPick('+y')} title="Stack on top of anchor">
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick('+y', { alignRotation })}
+            title="Stack on top of anchor"
+          >
             <ArrowUpToLine className="w-4 h-4" />
             <span className="text-[10px] leading-none">Top</span>
           </button>
           <div />
 
-          <button type="button" className={btnCls} onClick={() => onPick('-x')} title="Join left side of anchor">
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick('-x', { alignRotation })}
+            title="Join left side of anchor"
+          >
             <ArrowLeftToLine className="w-4 h-4" />
             <span className="text-[10px] leading-none">Left</span>
           </button>
-          <button type="button" className={btnCls} onClick={() => onPick('+z')} title="Join front side of anchor">
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick('+z', { alignRotation })}
+            title="Join front side of anchor"
+          >
             <ArrowUp className="w-4 h-4" />
             <span className="text-[10px] leading-none">Front</span>
           </button>
-          <button type="button" className={btnCls} onClick={() => onPick('+x')} title="Join right side of anchor">
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick('+x', { alignRotation })}
+            title="Join right side of anchor"
+          >
             <ArrowRightToLine className="w-4 h-4" />
             <span className="text-[10px] leading-none">Right</span>
           </button>
 
           <div />
-          <button type="button" className={btnCls} onClick={() => onPick('-z')} title="Join back side of anchor">
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick('-z', { alignRotation })}
+            title="Join back side of anchor"
+          >
             <ArrowDown className="w-4 h-4" />
             <span className="text-[10px] leading-none">Back</span>
           </button>
           <div />
 
           <div />
-          <button type="button" className={btnCls} onClick={() => onPick('-y')} title="Hang underneath anchor">
+          <button
+            type="button"
+            className={btnCls}
+            onClick={() => onPick('-y', { alignRotation })}
+            title="Hang underneath anchor"
+          >
             <ArrowDownToLine className="w-4 h-4" />
             <span className="text-[10px] leading-none">Bottom</span>
           </button>
           <div />
         </div>
+        <label className="mt-2.5 flex items-center justify-between gap-2 text-[11px] text-white/65 cursor-pointer select-none">
+          <span>Match the anchor&apos;s angle</span>
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 accent-emerald-400"
+            checked={alignRotation}
+            onChange={(e) => setAlignRotation(e.target.checked)}
+          />
+        </label>
+        <p className="text-[10px] text-white/35 leading-snug">
+          Off, pieces land flush but keep their own rotation. On, they turn to sit parallel to the
+          anchor face.
+        </p>
+        {onSnapTogether && (
+          <button
+            type="button"
+            className="mt-2 w-full rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-2 py-1.5 text-[11px] text-emerald-100 hover:bg-emerald-500/20"
+            onClick={onSnapTogether}
+            title="Shared bottom, edge to edge along X"
+          >
+            Line up in a row
+          </button>
+        )}
       </div>
     </>,
     document.body
