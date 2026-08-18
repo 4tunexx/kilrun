@@ -4,8 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Box,
-  Layers,
-  ListTree,
   Save,
   Download,
   Upload,
@@ -20,14 +18,12 @@ import {
   Flag,
   Play,
   Palette,
-  CloudSun,
   Navigation,
   User,
   CircleDot,
   Undo2,
   Redo2,
   HelpCircle,
-  Stamp,
   Crosshair,
   Skull,
   Zap,
@@ -37,7 +33,6 @@ import {
   Eye,
   Lock,
   Unlock,
-  Focus,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -47,7 +42,6 @@ import {
   FlagTriangleRight,
   PersonStanding,
   Home,
-  Shirt,
   Heart,
   HeartPulse,
   Bug,
@@ -58,29 +52,17 @@ import {
   FlipVertical,
   RotateCw,
   PaintBucket,
-  Settings2,
   Hammer,
   LayoutGrid,
   Square,
   Link2,
   Unlink2,
-  Sword,
-  Swords,
-  ShoppingCart,
   Sparkles,
   Scissors,
   Combine,
   Route,
   Package,
-  Volume2,
-  ArrowUp,
-  ArrowDown,
-  ArrowLeftToLine,
-  ArrowRightToLine,
-  ArrowUpToLine,
-  ArrowDownToLine,
   Fan,
-  Keyboard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -89,22 +71,17 @@ import type {
   EditorEntity,
   EntityCollideMaterial,
   EntityLightType,
-  FloorPreset,
   GlowPulseMode,
   HammerPrimitive,
   MapDocument,
-  SkyPreset,
 } from './map-document';
 import {
   HAMMER_SOLID_MODEL,
   ensureAnimation,
-  ensureCompetitiveSettings,
-  ensureDeathrunSettings,
   ensureEntityGlow,
   ensureEnvironment,
   ensureHazard,
   ensureHealthFloor,
-  ensureHordeSettings,
   ensureInteract,
   ensureJumpPad,
   ensureLight,
@@ -149,12 +126,11 @@ import { PLAY_TEST_MESH_BAKE_OPTS } from './play-test-bake';
 import { worldScaleToUvRepeat } from './editor-mesh';
 import type { SelectionTransformOp } from './selection-transform';
 import { KILRUN_MODE_INFO } from '@/lib/game-modes';
-import { PROTOTYPE_MODELS, previewUrl } from './prototype-catalog';
+import { PROTOTYPE_MODELS } from './prototype-catalog';
 import {
   getPrefabLibrary,
   getPrefabLibraryCategories,
   adminUploadPrefabModel,
-  adminDeletePrefabModel,
 } from '@/lib/prefab-library-actions';
 import { CharacterAssetPicker } from './character-asset-picker';
 import {
@@ -164,7 +140,6 @@ import {
   importJson,
   listMaps,
   loadMap,
-  MOOD_PRESETS,
   saveMap,
 } from './map-storage';
 import {
@@ -179,27 +154,19 @@ import {
 } from './editor-viewport';
 import { MapPlayPreview } from './map-play-preview';
 import { PlayTestEngine } from './play-test-engine';
-import { PlayerModelStudio } from './player-model-studio';
-import { ModelSkinEditor } from './model-skin-editor';
-import { TpsViewStudio } from './tps-view-studio';
-import { WeaponEditor } from './weapon-editor';
-import { CombatEditor } from './combat-editor';
-import { PowerEditor } from './power-editor';
-import { ControlsPanel } from './controls-panel';
-import { SoundBoardEditor } from './sound-board-editor';
-import { MapShopPanel } from './map-shop-panel';
 import { ensureMapPlayerEntity } from './player-avatar';
 import type { TpsViewSettings } from '../tps/tps-view-settings';
 import { sanitizeTpsView } from '../tps/tps-view-settings';
 import type { SkinAttachment } from '@/lib/player-skins';
-import { adminUpsertStoreItem } from '@/lib/social-actions';
-import { adminSyncDatabaseSchema } from '@/lib/admin-db-sync';
+import { SNAP_FACE_LABELS, SnapFacePicker } from './snap-face-picker';
+import './engine/builtins';
+import { getSidebarPlugin, getSidebarPlugins, isStudioPluginTab } from './engine/registry';
+import type { MapEditorBrains, MapEditorStudioOptions } from './engine/types';
 import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
 import { publishCloudMap } from '@/lib/game-map-actions';
 import type { MapShopSettings } from './map-document';
 import {
   BUILTIN_TEXTURES,
-  deleteCustomTexture,
   listCustomTextures,
   saveCustomTexture,
   type CustomTexture,
@@ -207,67 +174,46 @@ import {
 import { AnimationPropsPanel } from './animation-props-panel';
 import {
   EditorTutorial,
-  HelpTabPanel,
   hasCompletedTutorial,
-  resetTutorialFlag,
   type TutorialStep,
 } from './editor-help';
 import {
-  deletePrefab,
   getActivePlayMapIdForMode,
-  instantiatePrefab,
   listPrefabs,
-  savePrefab,
   setActivePlayMapIdForMode,
   stripLegacyBakedStairPads,
   type PrefabStamp,
 } from './prefab-storage';
 import { setLastPrefabScale } from './prefab-defaults';
 import { formatValidationSummary, validateMapForPublish } from './map-validate';
-import { MAX_MESH_COLLISION_PADS } from './mesh-voxelize';
+import { MAX_MESH_COLLISION_PADS, needsMeshCollisionBake } from './mesh-voxelize';
 import { isCsgDeleteResult, isCsgEligible, subtractEntities, unionEntities } from './csg-tools';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
 
-type SidebarTab =
-  | 'assets'
-  | 'layers'
-  | 'outliner'
-  | 'world'
-  | 'textures'
-  | 'prefabs'
-  | 'settings'
-  | 'help'
-  | 'tps'
-  | 'player'
-  | 'skins'
-  | 'weapon'
-  | 'combat'
-  | 'powers'
-  | 'sound'
-  | 'shop'
-  | 'controls';
-
-const STUDIO_SIDEBAR_TABS: SidebarTab[] = [
-  'tps',
-  'player',
-  'skins',
-  'weapon',
-  'combat',
-  'powers',
-  'sound',
-  'shop',
-  'controls',
-];
+/**
+ * Any registered sidebar plugin id. Host: undo/history, viewport and play test
+ * stay here — every panel, built-in or add-on, comes from engine/registry.
+ */
+type SidebarTab = string;
 
 function isStudioSidebarTab(tab: SidebarTab): boolean {
-  return STUDIO_SIDEBAR_TABS.includes(tab);
+  return isStudioPluginTab(tab);
 }
 
 function snapshotMapDoc(d: MapDocument) {
   return JSON.stringify(d);
 }
+
+/** Undo depth in steps. */
+const HISTORY_MAX_STEPS = 60;
+/**
+ * Ceiling on the serialized bytes the undo stack may hold (~48 MB). Guards
+ * against a very large map turning 60 full document snapshots into hundreds of
+ * megabytes of retained heap; ordinary maps never come close.
+ */
+const HISTORY_MAX_BYTES = 48 * 1024 * 1024;
 
 export function MapEditor({
   onClose,
@@ -487,6 +433,8 @@ export function MapEditor({
   const docRef = useRef(doc);
   const uiCollapsedRef = useRef(mobileFirst);
   const undoStack = useRef<MapDocument[]>([]);
+  /** Serialized size of each undoStack entry, same index — see pushUndoSnapshot. */
+  const undoStackBytes = useRef<number[]>([]);
   const redoStack = useRef<MapDocument[]>([]);
   const skipHistory = useRef(false);
   const lastSavedRef = useRef(
@@ -503,18 +451,42 @@ export function MapEditor({
   const tpsViewOpen = tab === 'tps';
   const playerStudioOpen = tab === 'player';
   const modelEditorOpen = tab === 'skins';
-  const weaponEditorOpen = tab === 'weapon';
-  const combatEditorOpen = tab === 'combat';
-  const powersEditorOpen = tab === 'powers';
-  const soundEditorOpen = tab === 'sound';
-  const controlsEditorOpen = tab === 'controls';
-  const shopEditorOpen = tab === 'shop';
   const anyStudioOpen = isStudioSidebarTab(tab);
   const [mapListTick, setMapListTick] = useState(0);
   const maps = useMemo(() => {
     void mapListTick;
     return listMaps();
   }, [mapListTick]);
+
+  /**
+   * Push one snapshot, then enforce both ceilings: the step cap (unchanged) and
+   * a byte budget. Every entry is a full structuredClone of the document, so on
+   * a very large map 60 of them can pin hundreds of megabytes — the step cap
+   * alone can't see that. Normal maps stay far under the budget and keep all 60
+   * steps; huge maps lose their oldest steps instead of the tab's heap.
+   */
+  const pushUndoSnapshot = (snapshot: MapDocument) => {
+    undoStack.current.push(snapshot);
+    // One stringify per debounced history entry (not per mutation), alongside a
+    // structuredClone of the same document — no meaningful added cost.
+    undoStackBytes.current.push(snapshotMapDoc(snapshot).length);
+    const dropOldest = () => {
+      undoStack.current.shift();
+      undoStackBytes.current.shift();
+    };
+    if (undoStack.current.length > HISTORY_MAX_STEPS) dropOldest();
+    let total = undoStackBytes.current.reduce((sum, n) => sum + n, 0);
+    // Always keep at least one step, so a single huge edit stays undoable.
+    while (undoStack.current.length > 1 && total > HISTORY_MAX_BYTES) {
+      total -= undoStackBytes.current[0];
+      dropOldest();
+    }
+  };
+
+  const popUndoSnapshot = () => {
+    undoStackBytes.current.pop();
+    return undoStack.current.pop();
+  };
 
   const historyAnchor = useRef<MapDocument | null>(null);
   const historyTimer = useRef<number | null>(null);
@@ -529,8 +501,7 @@ export function MapEditor({
     if (historyTimer.current) window.clearTimeout(historyTimer.current);
     historyTimer.current = window.setTimeout(() => {
       if (historyAnchor.current) {
-        undoStack.current.push(historyAnchor.current);
-        if (undoStack.current.length > 60) undoStack.current.shift();
+        pushUndoSnapshot(historyAnchor.current);
         historyAnchor.current = null;
         redoStack.current = [];
         setCanUndo(true);
@@ -545,8 +516,7 @@ export function MapEditor({
       historyTimer.current = null;
     }
     if (historyAnchor.current) {
-      undoStack.current.push(historyAnchor.current);
-      if (undoStack.current.length > 60) undoStack.current.shift();
+      pushUndoSnapshot(historyAnchor.current);
       historyAnchor.current = null;
       redoStack.current = [];
       setCanUndo(true);
@@ -564,7 +534,7 @@ export function MapEditor({
 
   const undo = () => {
     flushHistory();
-    const prev = undoStack.current.pop();
+    const prev = popUndoSnapshot();
     if (!prev) return;
     const current = structuredClone(apiRef.current?.getDoc() ?? docRef.current);
     redoStack.current.push(current);
@@ -582,7 +552,7 @@ export function MapEditor({
     const next = redoStack.current.pop();
     if (!next) return;
     const current = structuredClone(apiRef.current?.getDoc() ?? docRef.current);
-    undoStack.current.push(current);
+    pushUndoSnapshot(current);
     skipHistory.current = true;
     apiRef.current?.setDoc(next);
     setDoc({ ...next, environment: ensureEnvironment(next) });
@@ -877,6 +847,7 @@ export function MapEditor({
 
   const clearHistory = () => {
     undoStack.current = [];
+    undoStackBytes.current = [];
     redoStack.current = [];
     historyAnchor.current = null;
     setCanUndo(false);
@@ -1570,90 +1541,39 @@ export function MapEditor({
     apiRef.current?.placeEntity(kind, model);
   };
 
-  const openPlayerStudio = () => {
-    const ensured = ensureMapPlayerEntity(docRef.current);
-    if (ensured.created) {
-      scheduleHistory();
-      setDoc(ensured.doc);
-      docRef.current = ensured.doc;
-      apiRef.current?.setDoc(ensured.doc);
+  /**
+   * Opens any studio panel. What used to be nine near-identical openX helpers is
+   * now this one, driven by the plugin's declared `studio` options.
+   */
+  const openStudioTab = (id: SidebarTab, studio?: MapEditorStudioOptions) => {
+    if (studio?.ensurePlayerEntity) {
+      const ensured = ensureMapPlayerEntity(docRef.current);
+      if (ensured.created) {
+        scheduleHistory();
+        setDoc(ensured.doc);
+        docRef.current = ensured.doc;
+        apiRef.current?.setDoc(ensured.doc);
+      }
     }
-    // Do not select / focus avatar on the map — Player Model is platform settings.
-    setSelectedId(null);
-    apiRef.current?.setSelectedId(null);
-    setSelectedIds([]);
-    setTab('player');
-    setUiCollapsed(false);
-    setPropsOpen(false);
-    setSidebarOpen(true);
-    setToolsOpen(false);
-  };
-
-  const openModelEditor = () => {
-    const ensured = ensureMapPlayerEntity(docRef.current);
-    if (ensured.created) {
-      scheduleHistory();
-      setDoc(ensured.doc);
-      docRef.current = ensured.doc;
-      apiRef.current?.setDoc(ensured.doc);
+    if (studio?.clearSelection) {
+      // Studios edit platform settings, so nothing stays selected on the map.
+      setSelectedId(null);
+      apiRef.current?.setSelectedId(null);
+      setSelectedIds([]);
     }
-    setSelectedId(null);
-    apiRef.current?.setSelectedId(null);
-    setSelectedIds([]);
-    setTab('skins');
+    setTab(id);
     setUiCollapsed(false);
     setPropsOpen(false);
     setSidebarOpen(true);
     setToolsOpen(false);
   };
 
-  const openWeaponEditor = () => {
-    setTab('weapon');
-    setUiCollapsed(false);
-    setPropsOpen(false);
-    setSidebarOpen(true);
-    setToolsOpen(false);
+  const openStudioPluginTab = (id: SidebarTab) => {
+    openStudioTab(id, getSidebarPlugin(id)?.studio);
   };
 
-  const openCombatEditor = () => {
-    setTab('combat');
-    setUiCollapsed(false);
-    setPropsOpen(false);
-    setSidebarOpen(true);
-    setToolsOpen(false);
-  };
-
-  const openShopEditor = () => {
-    setTab('shop');
-    setUiCollapsed(false);
-    setPropsOpen(false);
-    setSidebarOpen(true);
-    setToolsOpen(false);
-  };
-
-  const openPowersEditor = () => {
-    setTab('powers');
-    setUiCollapsed(false);
-    setPropsOpen(false);
-    setSidebarOpen(true);
-    setToolsOpen(false);
-  };
-
-  const openSoundEditor = () => {
-    setTab('sound');
-    setUiCollapsed(false);
-    setPropsOpen(false);
-    setSidebarOpen(true);
-    setToolsOpen(false);
-  };
-
-  const openControlsEditor = () => {
-    setTab('controls');
-    setUiCollapsed(false);
-    setPropsOpen(false);
-    setSidebarOpen(true);
-    setToolsOpen(false);
-  };
+  const openPlayerStudio = () => openStudioPluginTab('player');
+  const openModelEditor = () => openStudioPluginTab('skins');
 
   const saveShopSettings = (settings: MapShopSettings) => {
     mutateLiveDoc((d) => ({ ...d, shopSettings: settings }));
@@ -1723,18 +1643,6 @@ export function MapEditor({
     apiRef.current?.applyEnvironment(next);
   };
 
-  const openTpsViewStudio = () => {
-    // Don't select the avatar — keeps Properties from fighting the studio panel.
-    setSelectedId(null);
-    apiRef.current?.setSelectedId(null);
-    setSelectedIds([]);
-    setTab('tps');
-    setUiCollapsed(false);
-    setPropsOpen(false);
-    setSidebarOpen(true);
-    setToolsOpen(false);
-  };
-
   const closeStudioPanels = () => {
     setTab((prev) => (isStudioSidebarTab(prev) ? 'assets' : prev));
   };
@@ -1768,10 +1676,10 @@ export function MapEditor({
     // solid). Users were relying on manually clicking "Bake"/"Fix Solid
     // Collision" first, which is easy to forget and left stale maps broken;
     // do it here automatically so entering Play Test always reflects the
-    // real mesh shape with no extra step. force: true so a prop baked
-    // before a voxelizer accuracy fix (see mesh-voxelize.ts) always gets
-    // re-fit at the current resolution instead of keeping its old, possibly
-    // gappy, cached boxes forever.
+    // real mesh shape with no extra step. Only stale/missing bakes are
+    // recomputed — a prop baked before a voxelizer accuracy fix has a stale
+    // meshCollisionBakeKey and is re-fit, while unchanged props are skipped
+    // (see PLAY_TEST_MESH_BAKE_OPTS).
     await bakeAllSolidMeshCollision(PLAY_TEST_MESH_BAKE_OPTS);
     // Do NOT auto-insert Player Avatar into the map — Play Test uses default
     // mannequin / existing avatar, and invents Start on a floor if needed.
@@ -1806,7 +1714,10 @@ export function MapEditor({
         resolveCollideMaterial(e) === 'solid' &&
         !isHammerSolidEntity(e) &&
         (e.model || e.customModelUrl) &&
-        (opts?.force || !e.meshCollisionPads?.length)
+        // force: the "Fix Solid Collision" button, which must re-bake even
+        // up-to-date props. Otherwise bake only what has no pads or whose pads
+        // came from a different model / older voxelizer.
+        (opts?.force || needsMeshCollisionBake(e))
     );
     if (!targets.length) {
       if (!opts?.silent) {
@@ -1862,6 +1773,102 @@ export function MapEditor({
       cameraBeforePlayRef.current = null;
     });
   };
+
+  const brains: MapEditorBrains = {
+    doc,
+    mapId,
+    isMobile,
+    tab,
+    selectedId,
+    selectedIds,
+    playerAvatar: playerAvatar ?? null,
+    sortedLayers,
+    activeLayerId,
+    setActiveLayerId,
+    closeStudioPanels,
+    startPlay,
+    saveTpsToMap,
+    openPlayerStudio,
+    openModelEditor,
+    patchEntityById,
+    saveCustomMoves,
+    applySkinsToPlayer,
+    saveWeaponDef,
+    saveCombatSettings,
+    saveShopSettings,
+    showAllLayers,
+    addBuildLevel,
+    setLayerFlag,
+    soloLayer,
+    deleteBuildLevel,
+    moveSelectionToLayer,
+    apiRef,
+    setSelectedId,
+    setSelectedIds,
+    setTutorialOpen,
+    setSidebarOpen,
+    setUiCollapsed,
+    prefabs,
+    setPrefabs,
+    cloudPrefabs,
+    setCloudPrefabs,
+    prefabName,
+    setPrefabName,
+    prefabSnapBtnRef,
+    snapFaceMenuOpen,
+    setSnapFaceMenuOpen,
+    snapFaceAnchorRect,
+    setSnapFaceAnchorRect,
+    selected,
+    env,
+    patchSelected,
+    patchEnv,
+    editTool,
+    setEditTool,
+    texFileRef,
+    paintTextureUrl,
+    setPaintTextureUrl,
+    copiedTextureInfo,
+    setCopiedTextureInfo,
+    paintRepeat,
+    setPaintRepeat,
+    paintWorldScale,
+    setPaintWorldScale,
+    customTextures,
+    setCustomTextures,
+    mutateLiveDoc,
+    toolsOpen,
+    setToolsOpen,
+    skyFileRef,
+    editorPerf,
+    setEditorPerf,
+    query,
+    setQuery,
+    setUploadOpen,
+    libraryCategories,
+    libraryCategory,
+    setLibraryCategory,
+    brush,
+    setBrush,
+    freeFly,
+    pendingPlaceKind,
+    setPendingPlaceKind,
+    filtered,
+    filteredLibraryPrefabs,
+    reloadPrefabLibrary,
+    setTab,
+    openStudioTab,
+    toast: (opts) => {
+      toast({
+        title: typeof opts.title === 'string' ? opts.title : undefined,
+        description: typeof opts.description === 'string' ? opts.description : undefined,
+        variant: opts.variant,
+      });
+    },
+  };
+
+  const sidebarPlugin = getSidebarPlugin(tab);
+  const railPlugins = getSidebarPlugins();
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] bg-[#0d121a] text-white flex flex-col">
@@ -2336,77 +2343,34 @@ export function MapEditor({
               : 'w-10 relative'
           }`}
         >
-          {(
-            [
-              ['assets', Box, 'Assets'],
-              ['layers', Layers, 'Layers'],
-              ['outliner', ListTree, 'Outliner'],
-              ['prefabs', Stamp, 'Prefabs'],
-              ['world', CloudSun, 'World'],
-              ['textures', Palette, 'Textures'],
-              ['tps', Eye, '3rd View'],
-              ['player', PersonStanding, 'Player Model'],
-              ['skins', Shirt, 'Model Editor'],
-              ['weapon', Sword, 'Weapon Editor'],
-              ['combat', Swords, 'Combat Editor'],
-              ['powers', Sparkles, 'Power Editor'],
-              ['sound', Volume2, 'Sound Board'],
-              ['shop', ShoppingCart, 'Buy Menu'],
-              ['controls', Keyboard, 'Controls'],
-              ['settings', Settings2, 'Settings'],
-              ['help', HelpCircle, 'Help'],
-            ] as const
-          ).map(([id, Icon, label]) => (
-            <button
-              key={id}
-              type="button"
-              title={label}
-              className={`w-8 h-8 rounded flex items-center justify-center ${
-                tab === id ? 'bg-cyan-500/20 text-cyan-300' : 'text-white/50 hover:text-white'
-              }`}
-              onClick={() => {
-                if (id === 'tps') {
-                  if (tpsViewOpen) { closeStudioPanels(); } else { openTpsViewStudio(); }
-                  return;
-                }
-                if (id === 'player') {
-                  if (playerStudioOpen) { closeStudioPanels(); } else { openPlayerStudio(); }
-                  return;
-                }
-                if (id === 'skins') {
-                  if (modelEditorOpen) { closeStudioPanels(); } else { openModelEditor(); }
-                  return;
-                }
-                if (id === 'weapon') {
-                  if (weaponEditorOpen) { closeStudioPanels(); } else { openWeaponEditor(); }
-                  return;
-                }
-                if (id === 'combat') {
-                  if (combatEditorOpen) { closeStudioPanels(); } else { openCombatEditor(); }
-                  return;
-                }
-                if (id === 'powers') {
-                  if (powersEditorOpen) { closeStudioPanels(); } else { openPowersEditor(); }
-                  return;
-                }
-                if (id === 'sound') {
-                  if (soundEditorOpen) { closeStudioPanels(); } else { openSoundEditor(); }
-                  return;
-                }
-                if (id === 'controls') {
-                  if (controlsEditorOpen) { closeStudioPanels(); } else { openControlsEditor(); }
-                  return;
-                }
-                if (id === 'shop') {
-                  if (shopEditorOpen) { closeStudioPanels(); } else { openShopEditor(); }
-                  return;
-                }
-                selectLibraryTab(id);
-              }}
-            >
-              <Icon className="w-4 h-4" />
-            </button>
-          ))}
+          {railPlugins.map((plugin) => {
+            const Icon = plugin.icon;
+            return (
+              <button
+                key={plugin.id}
+                type="button"
+                title={plugin.label}
+                className={`w-8 h-8 rounded flex items-center justify-center ${
+                  tab === plugin.id ? 'bg-cyan-500/20 text-cyan-300' : 'text-white/50 hover:text-white'
+                }`}
+                onClick={() => {
+                  if (plugin.onActivate) {
+                    plugin.onActivate(brains);
+                    return;
+                  }
+                  if (plugin.studio) {
+                    // Second click on an open studio closes it.
+                    if (tab === plugin.id) closeStudioPanels();
+                    else openStudioTab(plugin.id, plugin.studio);
+                    return;
+                  }
+                  selectLibraryTab(plugin.id);
+                }}
+              >
+                <Icon className="w-4 h-4" />
+              </button>
+            );
+          })}
           <button
             type="button"
             title="Hide tool icons"
@@ -2512,1723 +2476,8 @@ export function MapEditor({
             />
           )}
 
-          {tab === 'tps' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <TpsViewStudio
-                embedded
-                isMobile={isMobile}
-                mapId={mapId}
-                onClose={closeStudioPanels}
-                onPlayTest={(settings) => {
-                  closeStudioPanels();
-                  startPlay(settings);
-                }}
-                mapDoc={doc}
-                mapOverride={doc.tpsView ? sanitizeTpsView(doc.tpsView) : null}
-                onSaveToMap={saveTpsToMap}
-                playerEntity={playerAvatar}
-                onChangePlayer={(patch) => {
-                  if (!playerAvatar) {
-                    openPlayerStudio();
-                    return;
-                  }
-                  patchEntityById(playerAvatar.id, patch);
-                }}
-                onOpenFullPlayerStudio={() => {
-                  openPlayerStudio();
-                }}
-              />
-            </div>
-          )}
-          {tab === 'player' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              {playerAvatar ? (
-                <PlayerModelStudio
-                  embedded
-                  entity={playerAvatar}
-                  isMobile={isMobile}
-                  onClose={closeStudioPanels}
-                  onChange={(patch) => patchEntityById(playerAvatar.id, patch)}
-                  customMoves={doc.customMoves ?? []}
-                  onCustomMovesChange={saveCustomMoves}
-                />
-              ) : (
-                <div className="p-4 space-y-3 text-sm text-white/70">
-                  <p>No player avatar on this map yet.</p>
-                  <Button size="sm" onClick={() => openPlayerStudio()}>
-                    Create Player Model
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-          {tab === 'skins' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              {playerAvatar ? (
-                <ModelSkinEditor
-                  embedded
-                  entity={playerAvatar}
-                  isMobile={isMobile}
-                  onClose={closeStudioPanels}
-                  onApplyToPlayer={applySkinsToPlayer}
-                  onPublishToShop={async (payload) => {
-                    try {
-                      await adminSyncDatabaseSchema().catch(() => null);
-                      await adminUpsertStoreItem({
-                        itemName: payload.itemName,
-                        itemCategory: payload.itemCategory,
-                        itemSku: payload.itemSku,
-                        vpPrice: payload.vpPrice,
-                        imageUrl: payload.imageUrl,
-                        cosmeticSlot: payload.cosmeticSlot,
-                        cosmeticConfig: payload.cosmeticConfig,
-                      });
-                      toast({
-                        title: 'Skin published to shop',
-                        description: `${payload.itemName} is now in Skins.`,
-                      });
-                    } catch (e: unknown) {
-                      const msg = e instanceof Error ? e.message : 'Publish failed';
-                      toast({ title: msg, variant: 'destructive' });
-                    }
-                  }}
-                />
-              ) : (
-                <div className="p-4 space-y-3 text-sm text-white/70">
-                  <p>Model Editor needs a player avatar first.</p>
-                  <Button size="sm" onClick={() => openModelEditor()}>
-                    Create avatar & open
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-          {tab === 'weapon' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <WeaponEditor
-                key={mapId}
-                embedded
-                isMobile={isMobile}
-                mapDoc={doc}
-                onClose={closeStudioPanels}
-                onSaveToMap={saveWeaponDef}
-              />
-            </div>
-          )}
-          {tab === 'combat' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <CombatEditor
-                key={mapId}
-                embedded
-                isMobile={isMobile}
-                mapDoc={doc}
-                onClose={closeStudioPanels}
-                onSaveToMap={saveCombatSettings}
-              />
-            </div>
-          )}
-          {tab === 'powers' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <PowerEditor embedded onClose={closeStudioPanels} />
-            </div>
-          )}
-          {tab === 'sound' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <SoundBoardEditor embedded onClose={closeStudioPanels} />
-            </div>
-          )}
-          {tab === 'controls' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <ControlsPanel embedded onClose={closeStudioPanels} customMoves={doc.customMoves} />
-            </div>
-          )}
-          {tab === 'shop' && (
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              <MapShopPanel
-                key={mapId}
-                mapDoc={doc}
-                onClose={closeStudioPanels}
-                onSave={saveShopSettings}
-              />
-            </div>
-          )}
+          {sidebarPlugin?.render(brains)}
 
-          {tab === 'assets' && (
-            <>
-              <div className="p-2 border-b border-white/10 space-y-1">
-                <div className="flex gap-1">
-                  <input
-                    className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
-                    placeholder="Search models…"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="shrink-0 flex items-center gap-1 px-2 py-1.5 rounded border border-emerald-500/40 text-emerald-300 text-xs hover:bg-emerald-500/10"
-                    title="Upload a new prefab model into the library"
-                    onClick={() => setUploadOpen(true)}
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {['all', 'built-in', ...libraryCategories].map((cat) => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setLibraryCategory(cat)}
-                      className={`text-[10px] px-2 py-0.5 rounded-full border capitalize ${
-                        libraryCategory === cat
-                          ? 'border-cyan-400 text-cyan-200 bg-cyan-500/10'
-                          : 'border-white/15 text-white/50 hover:border-white/30'
-                      }`}
-                    >
-                      {cat === 'all' ? 'All' : cat === 'built-in' ? 'Built-in' : cat}
-                    </button>
-                  ))}
-                </div>
-                <div className="grid grid-cols-3 gap-1">
-                  <button
-                    type="button"
-                    className={`text-xs px-2 py-1.5 rounded border flex items-center justify-center gap-1 ${
-                      editTool === 'select' && !pendingPlaceKind
-                        ? 'border-amber-400 text-amber-200 bg-amber-500/10'
-                        : 'border-white/10 text-white/50'
-                    }`}
-                    onClick={() => {
-                      setEditTool('select');
-                      apiRef.current?.clearPendingPlace();
-                      setPendingPlaceKind(null);
-                    }}
-                    title="Select objects (V) — cancels spawn placement"
-                  >
-                    <MousePointer2 className="w-3 h-3" />
-                    Select
-                  </button>
-                  <button
-                    type="button"
-                    className={`text-xs px-2 py-1.5 rounded border flex items-center justify-center gap-1 ${
-                      editTool === 'brush'
-                        ? 'border-cyan-400 text-cyan-200 bg-cyan-500/10'
-                        : 'border-white/10 text-white/50'
-                    }`}
-                    onClick={() => {
-                      setEditTool('brush');
-                      if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
-                    }}
-                    title="Brush (B) — click once to place"
-                  >
-                    <Paintbrush className="w-3 h-3" />
-                    Brush
-                  </button>
-                  <button
-                    type="button"
-                    className={`text-xs px-2 py-1.5 rounded border flex items-center justify-center gap-1 ${
-                      editTool === 'bucket'
-                        ? 'border-fuchsia-400 text-fuchsia-200 bg-fuchsia-500/10'
-                        : 'border-white/10 text-white/50'
-                    }`}
-                    onClick={() => {
-                      // If a scene object is selected, paint that model; else keep library brush.
-                      const selModel = selected?.model;
-                      if (selModel && selModel !== HAMMER_SOLID_MODEL) setBrush(selModel);
-                      else if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
-                      setEditTool('bucket');
-                      if (freeFly) apiRef.current?.setFreeFly(false);
-                    }}
-                    title="Paint Bucket (P) — hold+drag paints; camera locked"
-                  >
-                    <PaintBucket className="w-3 h-3" />
-                    Bucket
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2 grid grid-cols-2 gap-2 content-start">
-                {filtered.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => {
-                      setBrush(name);
-                      // Keep Bucket if already painting; Hammer++ / Select return to Brush.
-                      setEditTool((t) => (t === 'bucket' ? 'bucket' : 'brush'));
-                      // Free the canvas after picking a brush on mobile.
-                      if (isMobile) {
-                        setSidebarOpen(false);
-                        setUiCollapsed(true);
-                      }
-                    }}
-                    className={`rounded border p-1 text-left ${
-                      brush === name &&
-                      (editTool === 'brush' || editTool === 'bucket')
-                        ? 'border-cyan-400 bg-cyan-500/10'
-                        : brush === name
-                          ? 'border-white/30 bg-white/5'
-                          : 'border-white/10 hover:border-white/30'
-                    }`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={previewUrl(name)}
-                      alt={name}
-                      className="w-full aspect-square object-contain bg-black/30 rounded"
-                    />
-                    <p className="text-[10px] mt-1 truncate text-white/80">{name}</p>
-                  </button>
-                ))}
-                {filteredLibraryPrefabs.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      setBrush(p.modelUrl);
-                      setEditTool((t) => (t === 'bucket' ? 'bucket' : 'brush'));
-                      if (isMobile) {
-                        setSidebarOpen(false);
-                        setUiCollapsed(true);
-                      }
-                    }}
-                    className={`relative rounded border p-1 text-left ${
-                      brush === p.modelUrl && (editTool === 'brush' || editTool === 'bucket')
-                        ? 'border-cyan-400 bg-cyan-500/10'
-                        : brush === p.modelUrl
-                          ? 'border-white/30 bg-white/5'
-                          : 'border-white/10 hover:border-white/30'
-                    }`}
-                  >
-                    {p.previewUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={p.previewUrl}
-                        alt={p.name}
-                        className="w-full aspect-square object-contain bg-black/30 rounded"
-                      />
-                    ) : (
-                      <div className="w-full aspect-square flex items-center justify-center bg-black/30 rounded">
-                        <Package className="w-6 h-6 text-white/30" />
-                      </div>
-                    )}
-                    <p className="text-[10px] mt-1 truncate text-white/80">{p.name}</p>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        if (!confirm(`Delete "${p.name}" from the library?`)) return;
-                        try {
-                          await adminDeletePrefabModel(p.id);
-                          reloadPrefabLibrary();
-                        } catch (err) {
-                          toast({
-                            title: err instanceof Error ? err.message : 'Delete failed',
-                            variant: 'destructive',
-                          });
-                        }
-                      }}
-                      className="absolute top-0.5 right-0.5 bg-black/60 rounded p-0.5 text-white/50 hover:text-red-400"
-                      title="Remove from library"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <p className="text-[10px] text-white/40 p-2 border-t border-white/10">
-                {editTool === 'bucket'
-                  ? 'Paint Bucket: camera locked — hold and drag to paint the selected model along a path.'
-                  : editTool === 'brush'
-                    ? 'Brush: click ground to place. Same model cell selects it. Alt+click stacks.'
-                    : editTool === 'hammer'
-                      ? 'Hammer++: place/drag solid boxes. Use Scale (R) to resize. Catalog Brush/Bucket unchanged.'
-                      : 'Select: click objects to pick them. Pick a model, then Brush or Bucket.'}{' '}
-                Orbit drag = move view. Ctrl = free fly.
-              </p>
-            </>
-          )}
-
-          {tab === 'layers' && (
-            <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              <div className="rounded-lg border border-cyan-400/20 bg-cyan-500/5 p-2.5 space-y-1.5">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-cyan-200">
-                  Build by level
-                </p>
-                <p className="text-[10px] text-white/45 leading-snug">
-                  Paint floors on <b className="text-white/70">Level 0 / Floor</b>, then switch to
-                  Level 1 for props, traps, etc. Tap the eye to hide a level and check the layout.
-                  Active layer (cyan) is where new pieces go.
-                </p>
-                <div className="flex gap-1.5 pt-0.5">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="flex-1 text-[10px] h-8"
-                    onClick={showAllLayers}
-                  >
-                    <Eye className="w-3.5 h-3.5 mr-1" /> Show all
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="flex-1 text-[10px] h-8"
-                    onClick={addBuildLevel}
-                  >
-                    <Plus className="w-3.5 h-3.5 mr-1" /> Add level
-                  </Button>
-                </div>
-              </div>
-
-              {sortedLayers.map((layer, index) => {
-                const count = doc.entities.filter((e) => e.layerId === layer.id).length;
-                const isActive = activeLayerId === layer.id;
-                return (
-                  <div
-                    key={layer.id}
-                    className={`rounded-xl border p-2.5 space-y-2 ${
-                      isActive
-                        ? 'border-cyan-400 bg-cyan-500/10'
-                        : layer.visible
-                          ? 'border-white/10 bg-black/20'
-                          : 'border-white/5 bg-black/40 opacity-70'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setActiveLayerId(layer.id)}
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${
-                          isActive
-                            ? 'bg-cyan-500/40 text-cyan-50'
-                            : 'bg-white/10 text-white/70 hover:bg-white/15'
-                        }`}
-                        title={`Build on level ${index}`}
-                      >
-                        {index}
-                      </button>
-                      <input
-                        className="min-w-0 flex-1 bg-transparent border-b border-transparent focus:border-white/20 text-sm font-semibold text-white outline-none py-0.5"
-                        value={layer.name}
-                        onChange={(e) => setLayerFlag(layer.id, { name: e.target.value })}
-                        onFocus={() => setActiveLayerId(layer.id)}
-                        aria-label={`Rename level ${index}`}
-                      />
-                      <span className="text-[10px] tabular-nums text-white/35 shrink-0">
-                        {count}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setActiveLayerId(layer.id)}
-                        className={`flex-1 min-w-[4.5rem] px-2 py-1.5 rounded-md text-[10px] font-bold uppercase border ${
-                          isActive
-                            ? 'border-cyan-400/60 bg-cyan-500/25 text-cyan-50'
-                            : 'border-white/10 text-white/55 hover:bg-white/5'
-                        }`}
-                      >
-                        Build here
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setLayerFlag(layer.id, { visible: !layer.visible })}
-                        className={`w-9 h-8 rounded-md flex items-center justify-center border ${
-                          layer.visible
-                            ? 'border-white/15 text-emerald-300 hover:bg-white/5'
-                            : 'border-white/10 text-white/35 hover:bg-white/5'
-                        }`}
-                        title={layer.visible ? 'Hide this level' : 'Show this level'}
-                      >
-                        {layer.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setLayerFlag(layer.id, { locked: !layer.locked })}
-                        className={`w-9 h-8 rounded-md flex items-center justify-center border ${
-                          layer.locked
-                            ? 'border-amber-400/40 text-amber-200 bg-amber-500/10'
-                            : 'border-white/10 text-white/35 hover:bg-white/5'
-                        }`}
-                        title={layer.locked ? 'Unlock (allow place/edit)' : 'Lock (no place/edit)'}
-                      >
-                        {layer.locked ? (
-                          <Lock className="w-3.5 h-3.5" />
-                        ) : (
-                          <Unlock className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => soloLayer(layer.id)}
-                        className="w-9 h-8 rounded-md flex items-center justify-center border border-white/10 text-white/55 hover:bg-white/5"
-                        title="Solo — hide every other level"
-                      >
-                        <Focus className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteBuildLevel(layer.id)}
-                        disabled={sortedLayers.length <= 1}
-                        className="w-9 h-8 rounded-md flex items-center justify-center border border-white/10 text-white/35 hover:bg-rose-500/15 hover:text-rose-200 hover:border-rose-400/30 disabled:opacity-30 disabled:hover:bg-transparent"
-                        title={
-                          sortedLayers.length <= 1
-                            ? 'Keep at least one level'
-                            : 'Delete this level (objects move to the previous level)'
-                        }
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    {(selectedId || selectedIds.length > 0) && (
-                      <button
-                        type="button"
-                        onClick={() => moveSelectionToLayer(layer.id)}
-                        className="w-full text-[10px] py-1 rounded-md border border-white/10 text-white/50 hover:bg-white/5 hover:text-white/80"
-                      >
-                        Move selection → this level
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {tab === 'outliner' && (
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {doc.entities
-                .filter((e) => !isPlatformPlayerKind(e.kind))
-                .map((e) => {
-                  const warnings = getEntityWarnings(e, doc.entities);
-                  return (
-                <div
-                  key={e.id}
-                  className={`flex items-center gap-0.5 rounded ${
-                    selectedId === e.id || selectedIds.includes(e.id)
-                      ? 'bg-cyan-500/20 text-cyan-100'
-                      : 'hover:bg-white/5'
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={(ev) => {
-                      if (ev.shiftKey) {
-                        const next = selectedIds.includes(e.id)
-                          ? selectedIds.filter((id) => id !== e.id)
-                          : [...(selectedIds.length ? selectedIds : selectedId ? [selectedId] : []), e.id];
-                        setSelectedIds(next);
-                        setSelectedId(next[next.length - 1] ?? null);
-                        apiRef.current?.setSelectedIds(next);
-                      } else {
-                        setSelectedId(e.id);
-                        // select() expands groups in the viewport
-                        apiRef.current?.setSelectedId(e.id);
-                      }
-                    }}
-                    className="flex-1 text-left px-2 py-1.5 text-sm truncate min-w-0"
-                    title={warnings.length ? warnings.join(' ') : undefined}
-                  >
-                    {warnings.length > 0 && (
-                      <span className="text-amber-400 mr-1" title={warnings.join(' ')}>
-                        ⚠
-                      </span>
-                    )}
-                    <span className="text-white/40 text-[10px] mr-1">{e.kind}</span>
-                    {e.name}
-                    {e.groupId ? (
-                      <span className="ml-1 text-[9px] text-sky-300/80">grp</span>
-                    ) : null}
-                  </button>
-                  <button
-                    type="button"
-                    className="w-7 h-7 shrink-0 rounded flex items-center justify-center text-white/50 hover:bg-white/10"
-                    title={e.visible === false ? 'Show' : 'Hide'}
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      patchEntityById(e.id, { visible: e.visible === false });
-                    }}
-                  >
-                    {e.visible === false ? (
-                      <EyeOff className="w-3.5 h-3.5" />
-                    ) : (
-                      <Eye className="w-3.5 h-3.5 text-emerald-300/80" />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    className="w-7 h-7 shrink-0 rounded flex items-center justify-center text-white/50 hover:bg-white/10"
-                    title={e.locked ? 'Unlock' : 'Lock'}
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      patchEntityById(e.id, { locked: !e.locked });
-                    }}
-                  >
-                    {e.locked ? (
-                      <Lock className="w-3.5 h-3.5 text-amber-300" />
-                    ) : (
-                      <Unlock className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </div>
-                  );
-                })}
-              <button
-                type="button"
-                className="w-full text-left px-2 py-1.5 rounded text-sm border border-sky-500/30 bg-sky-500/10 text-sky-100 mt-2"
-                onClick={() => openPlayerStudio()}
-              >
-                <span className="text-sky-300/70 text-[10px] mr-1">platform</span>
-                Player Model settings…
-              </button>
-            </div>
-          )}
-
-          {tab === 'prefabs' && (
-            <div className="flex-1 overflow-y-auto p-3 space-y-3 text-sm">
-              <p className="text-[10px] tracking-widest text-white/50 uppercase">Prefabs / Stamps</p>
-              <p className="text-[11px] text-white/55 leading-relaxed">
-                Shift+click to multi-select ({selectedIds.length || (selectedId ? 1 : 0)} selected).
-                With 2+ selected, press Snap and pick which side to join — the first object you
-                selected is the anchor and stays put.
-              </p>
-              {selectedIds.length >= 2 && (
-                <div className="relative">
-                  <Button
-                    ref={prefabSnapBtnRef}
-                    size="sm"
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => {
-                      setSnapFaceAnchorRect(prefabSnapBtnRef.current?.getBoundingClientRect() ?? null);
-                      setSnapFaceMenuOpen((v) => !v);
-                    }}
-                  >
-                    <Magnet className="w-4 h-4 mr-1" /> Snap…
-                  </Button>
-                  {snapFaceMenuOpen && (
-                    <SnapFacePicker
-                      anchorRect={snapFaceAnchorRect}
-                      onPick={(face) => {
-                        const ok = apiRef.current?.snapSelectedToFace(face, selectedIds);
-                        setSnapFaceMenuOpen(false);
-                        if (ok) {
-                          toast({
-                            title: 'Snapped',
-                            description: `Joined ${SNAP_FACE_LABELS[face]} of the first-selected object.`,
-                          });
-                        } else {
-                          toast({
-                            title: 'Snap failed',
-                            description: 'Select 2+ unlocked objects, then try again.',
-                            variant: 'destructive',
-                          });
-                        }
-                      }}
-                      onClose={() => setSnapFaceMenuOpen(false)}
-                    />
-                  )}
-                </div>
-              )}
-              <input
-                className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
-                value={prefabName}
-                onChange={(e) => setPrefabName(e.target.value)}
-                placeholder="Prefab name"
-              />
-              <Button
-                size="sm"
-                className="w-full"
-                disabled={!(selectedIds.length || selectedId)}
-                onClick={() => {
-                  const ids = selectedIds.length
-                    ? selectedIds
-                    : selectedId
-                      ? [selectedId]
-                      : [];
-                  const ents = doc.entities.filter((e) => ids.includes(e.id));
-                  if (!ents.length) return;
-                  try {
-                    savePrefab(prefabName.trim() || 'Prefab', ents);
-                    setPrefabs(listPrefabs());
-                    toast({
-                      title: 'Prefab saved (this browser only)',
-                      description: `${prefabName.trim() || 'Prefab'} — use "Publish cloud" below to share it with other staff.`,
-                    });
-                  } catch (err) {
-                    toast({
-                      title: 'Prefab failed',
-                      description: err instanceof Error ? err.message : 'Could not save prefab',
-                      variant: 'destructive',
-                    });
-                  }
-                }}
-                title="Saves to this browser only — other staff won't see it until you Publish cloud"
-              >
-                <Stamp className="w-4 h-4 mr-1" /> Save selection as prefab (local)
-              </Button>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="flex-1"
-                  disabled={!(selectedIds.length || selectedId)}
-                  onClick={() => {
-                    const ids = selectedIds.length
-                      ? selectedIds
-                      : selectedId
-                        ? [selectedId]
-                        : [];
-                    const ents = doc.entities.filter((e) => ids.includes(e.id));
-                    if (!ents.length) return;
-                    void (async () => {
-                      try {
-                        const { publishCloudPrefab } = await import('@/lib/game-prefab-actions');
-                        const origin = ents[0].position;
-                        const relative = ents.map((e) => ({
-                          ...e,
-                          position: [
-                            e.position[0] - origin[0],
-                            e.position[1] - origin[1],
-                            e.position[2] - origin[2],
-                          ] as [number, number, number],
-                        }));
-                        await publishCloudPrefab({
-                          name: prefabName.trim() || 'Prefab',
-                          mode: getMapGameMode(doc),
-                          entities: relative,
-                          thumbnailDataUrl: await (async () => {
-                            try {
-                              const { renderMapThumbnail } = await import('./map-thumbnail');
-                              const mini = {
-                                ...doc,
-                                name: prefabName.trim() || 'Prefab',
-                                entities: relative,
-                              };
-                              return await renderMapThumbnail(mini);
-                            } catch {
-                              return null;
-                            }
-                          })(),
-                        });
-                        toast({ title: 'Published to cloud library' });
-                        const { listCloudPrefabs } = await import('@/lib/game-prefab-actions');
-                        setCloudPrefabs(await listCloudPrefabs(getMapGameMode(doc)));
-                      } catch (err) {
-                        toast({
-                          title: 'Cloud publish failed',
-                          description: err instanceof Error ? err.message : 'Error',
-                          variant: 'destructive',
-                        });
-                      }
-                    })();
-                  }}
-                >
-                  Publish cloud
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        const { listCloudPrefabs } = await import('@/lib/game-prefab-actions');
-                        setCloudPrefabs(await listCloudPrefabs(getMapGameMode(doc)));
-                        toast({ title: 'Cloud library refreshed' });
-                      } catch (err) {
-                        toast({
-                          title: 'Could not load cloud prefabs',
-                          description:
-                            err instanceof Error
-                              ? err.message
-                              : 'Unknown error — check your connection and admin/moderator role, then retry.',
-                          variant: 'destructive',
-                        });
-                      }
-                    })();
-                  }}
-                >
-                  Pull cloud
-                </Button>
-              </div>
-              {cloudPrefabs.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-[10px] uppercase tracking-widest text-cyan-300/70">Cloud library</p>
-                  {cloudPrefabs.map((p) => (
-                    <div
-                      key={p.id}
-                      className="flex items-center gap-1 rounded border border-cyan-500/20 bg-cyan-500/5 p-2"
-                    >
-                      {p.thumbnailUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={p.thumbnailUrl}
-                          alt=""
-                          className="h-10 w-10 rounded object-cover border border-white/10 shrink-0"
-                        />
-                      ) : null}
-                      <button
-                        type="button"
-                        className="flex-1 text-left text-xs hover:text-cyan-200"
-                        onClick={() => {
-                          void (async () => {
-                            try {
-                              const { getCloudPrefabEntities } = await import(
-                                '@/lib/game-prefab-actions'
-                              );
-                              const ents = await getCloudPrefabEntities(p.id);
-                              const stamp = {
-                                id: p.id,
-                                name: p.name,
-                                createdAt: p.updatedAt,
-                                entities: ents,
-                              };
-                              const placed = instantiatePrefab(stamp, [0, 0, 0], activeLayerId);
-                              apiRef.current?.stampEntities(placed);
-                            } catch (err) {
-                              toast({
-                                title: 'Stamp failed',
-                                description: err instanceof Error ? err.message : 'Error',
-                                variant: 'destructive',
-                              });
-                            }
-                          })();
-                        }}
-                      >
-                        <span className="font-bold text-white">{p.name}</span>
-                        <span className="text-white/40 block">
-                          {p.entityCount} pieces · cloud
-                        </span>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="space-y-1">
-                <p className="text-[10px] uppercase tracking-widest text-white/50">Local</p>
-                {prefabs.length === 0 && (
-                  <p className="text-[11px] text-white/40">No local prefabs yet.</p>
-                )}
-                {prefabs.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center gap-1 rounded border border-white/10 bg-black/30 p-2"
-                  >
-                    <button
-                      type="button"
-                      className="flex-1 text-left text-xs hover:text-cyan-200"
-                      onClick={() => {
-                        const ents = instantiatePrefab(p, [0, 0, 0], activeLayerId);
-                        apiRef.current?.stampEntities(ents);
-                        if (isMobile) {
-                          setSidebarOpen(false);
-                          setUiCollapsed(true);
-                        }
-                      }}
-                      title="Click ground to stamp"
-                    >
-                      <span className="font-bold text-white">{p.name}</span>
-                      <span className="text-white/40 block">{p.entities.length} pieces</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="text-red-300/80 hover:text-red-200 p-1"
-                      onClick={() => {
-                        deletePrefab(p.id);
-                        setPrefabs(listPrefabs());
-                      }}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {tab === 'help' && (
-            <HelpTabPanel
-              onStartTutorial={() => {
-                resetTutorialFlag();
-                setTutorialOpen(true);
-              }}
-            />
-          )}
-
-          {tab === 'world' && (
-            <div className="flex-1 overflow-y-auto p-3 space-y-3 text-sm">
-              <p className="text-[10px] tracking-widest text-white/50 uppercase">Mood presets</p>
-              <div className="flex flex-wrap gap-1">
-                {MOOD_PRESETS.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    className="text-[10px] px-2 py-1 rounded border border-white/15 hover:border-cyan-400/50 hover:bg-cyan-500/10"
-                    onClick={() => patchEnv(m.env)}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[10px] tracking-widest text-white/50 uppercase">Sky / Surroundings</p>
-              <label className="block text-xs text-white/60">
-                Sky preset
-                <select
-                  className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5"
-                  value={env.sky}
-                  onChange={(e) => patchEnv({ sky: e.target.value as SkyPreset })}
-                >
-                  <option value="cavern">Cavern</option>
-                  <option value="dusk">Dusk</option>
-                  <option value="bright">Bright</option>
-                  <option value="void">Void</option>
-                  <option value="custom">Custom color</option>
-                </select>
-              </label>
-              <label className="block text-xs text-white/60">
-                Sky color
-                <input
-                  type="color"
-                  className="mt-1 w-full h-9 bg-transparent"
-                  value={env.skyColor}
-                  onChange={(e) => patchEnv({ sky: 'custom', skyColor: e.target.value })}
-                />
-              </label>
-              <div className="space-y-1.5">
-                <p className="text-xs text-white/60">Sky texture / background</p>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => skyFileRef.current?.click()}
-                >
-                  <Upload className="w-4 h-4 mr-1" /> Upload sky image
-                </Button>
-                <input
-                  ref={skyFileRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    e.target.value = '';
-                    if (!f) return;
-                    // Upload to a persistent /uploads/site/... URL instead of
-                    // embedding a base64 data URL in the map document — inline
-                    // data URLs get silently stripped by publishCloudMap's
-                    // size-cap pass (anything over ~8KB), so the sky would
-                    // "work" until the next Save + reload, then vanish.
-                    void (async () => {
-                      try {
-                        const form = new FormData();
-                        form.append('file', f);
-                        form.append('kind', 'bg');
-                        const res = await fetch('/api/admin/upload-site-image', {
-                          method: 'POST',
-                          body: form,
-                        });
-                        const data = (await res.json()) as { url?: string; error?: string };
-                        if (!res.ok || !data.url) {
-                          toast({
-                            title: 'Sky upload failed',
-                            description: data.error || 'Try a smaller image.',
-                            variant: 'destructive',
-                          });
-                          return;
-                        }
-                        patchEnv({ sky: 'custom', skyTextureUrl: data.url });
-                      } catch {
-                        toast({
-                          title: 'Sky upload failed',
-                          description: 'Network error, try again.',
-                          variant: 'destructive',
-                        });
-                      }
-                    })();
-                  }}
-                />
-                {env.skyTextureUrl && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="w-full text-xs text-red-300"
-                    onClick={() => patchEnv({ skyTextureUrl: undefined })}
-                  >
-                    Clear sky texture
-                  </Button>
-                )}
-                <p className="text-[10px] text-white/35">
-                  Panorama / equirectangular works best. JPG/PNG under ~2 MB.
-                </p>
-              </div>
-              <label className="block text-xs text-white/60">
-                Horizon / ground tint
-                <input
-                  type="color"
-                  className="mt-1 w-full h-9 bg-transparent"
-                  value={env.horizonColor || env.fogColor}
-                  onChange={(e) => patchEnv({ horizonColor: e.target.value })}
-                />
-              </label>
-              <label className="block text-xs text-white/60">
-                Fog color
-                <input
-                  type="color"
-                  className="mt-1 w-full h-9 bg-transparent"
-                  value={env.fogColor}
-                  onChange={(e) => patchEnv({ fogColor: e.target.value })}
-                />
-              </label>
-              <label className="block text-xs text-white/60">
-                Fog density ({env.fogDensity.toFixed(3)})
-                <input
-                  type="range"
-                  min={0}
-                  max={0.08}
-                  step={0.002}
-                  className="w-full"
-                  value={env.fogDensity}
-                  onChange={(e) => patchEnv({ fogDensity: Number(e.target.value) })}
-                />
-              </label>
-              <p className="text-[10px] tracking-widest text-white/50 uppercase pt-1">Lighting</p>
-              <label className="block text-xs text-white/60">
-                Ambient ({(env.ambientIntensity ?? 0.55).toFixed(2)})
-                <input
-                  type="range"
-                  min={0}
-                  max={2}
-                  step={0.05}
-                  className="w-full"
-                  value={env.ambientIntensity ?? 0.55}
-                  onChange={(e) => patchEnv({ ambientIntensity: Number(e.target.value) })}
-                />
-              </label>
-              <label className="block text-xs text-white/60">
-                Sun intensity ({(env.sunIntensity ?? 1.15).toFixed(2)})
-                <input
-                  type="range"
-                  min={0}
-                  max={4}
-                  step={0.05}
-                  className="w-full"
-                  value={env.sunIntensity ?? 1.15}
-                  onChange={(e) => patchEnv({ sunIntensity: Number(e.target.value) })}
-                />
-              </label>
-              <label className="block text-xs text-white/60">
-                Sun color
-                <input
-                  type="color"
-                  className="mt-1 w-full h-9 bg-transparent"
-                  value={env.sunColor || '#fff4e0'}
-                  onChange={(e) => patchEnv({ sunColor: e.target.value })}
-                />
-              </label>
-              <p className="text-[10px] tracking-widest text-white/50 uppercase pt-2">Floor type</p>
-              <select
-                className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5"
-                value={env.floor}
-                onChange={(e) => patchEnv({ floor: e.target.value as FloorPreset })}
-              >
-                <option value="grid">Grid</option>
-                <option value="solid">Solid</option>
-                <option value="water">Water</option>
-                <option value="void">Void (none)</option>
-              </select>
-              <label className="block text-xs text-white/60">
-                Floor color
-                <input
-                  type="color"
-                  className="mt-1 w-full h-9 bg-transparent"
-                  value={env.floorColor}
-                  onChange={(e) => patchEnv({ floorColor: e.target.value })}
-                />
-              </label>
-              <label className="block text-xs text-white/60">
-                Floor texture tile ({env.floorTextureScale ?? 40})
-                <input
-                  type="range"
-                  min={4}
-                  max={120}
-                  step={1}
-                  className="w-full"
-                  value={env.floorTextureScale ?? 40}
-                  onChange={(e) => patchEnv({ floorTextureScale: Number(e.target.value) })}
-                />
-              </label>
-              <p className="text-[10px] tracking-widest text-white/50 uppercase pt-2">
-                Editor view
-              </p>
-              <label className="flex items-center justify-between gap-3 text-xs text-white/70 select-none cursor-pointer">
-                <span>Show editing grid</span>
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-primary"
-                  checked={env.gridVisible ?? true}
-                  onChange={(e) => patchEnv({ gridVisible: e.target.checked })}
-                />
-              </label>
-              <p className="text-[10px] text-white/35 leading-snug">
-                Toggle the grid overlay off to preview the in-game floor style (solid / void / water) without grid lines on top.
-              </p>
-              <p className="text-[10px] tracking-widest text-amber-300/80 uppercase pt-2">
-                Editor performance
-              </p>
-              <p className="text-[10px] text-white/35 leading-snug">
-                Hide heavy visuals while editing to cut RAM / GPU. Play Test and live matches still render full sky, floor, fog, and void effects.
-              </p>
-              {(
-                [
-                  ['hideFloor', 'Hide floor / void disc'],
-                  ['hideSkyTexture', 'Hide sky texture (solid color)'],
-                  ['hideVoidEffects', 'Hide void glow / shadow'],
-                  ['hideFog', 'Hide fog'],
-                ] as const
-              ).map(([key, label]) => (
-                <label
-                  key={key}
-                  className="flex items-center justify-between gap-3 text-xs text-white/70 select-none cursor-pointer"
-                >
-                  <span>{label}</span>
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 accent-amber-400"
-                    checked={editorPerf[key]}
-                    onChange={(e) => {
-                      const next = { ...editorPerf, [key]: e.target.checked };
-                      setEditorPerf(next);
-                      apiRef.current?.setEditorPerfMode(next);
-                    }}
-                  />
-                </label>
-              ))}
-              {(editorPerf.hideFloor ||
-                editorPerf.hideSkyTexture ||
-                editorPerf.hideVoidEffects ||
-                editorPerf.hideFog) && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="w-full text-xs text-amber-200"
-                  onClick={() => {
-                    const next = { ...DEFAULT_EDITOR_PERF_MODE };
-                    setEditorPerf(next);
-                    apiRef.current?.setEditorPerfMode(next);
-                  }}
-                >
-                  Restore all editor visuals
-                </Button>
-              )}
-              {env.floor === 'void' && (
-                <div className="mt-3 pt-3 border-t border-white/10 space-y-3">
-                  <p className="text-[10px] tracking-widest text-emerald-300/80 uppercase">
-                    Void atmosphere
-                  </p>
-
-                  <label className="block text-xs text-white/60">
-                    Void sky tint (base abyss color)
-                    <div className="flex items-center gap-2 mt-1">
-                      <input
-                        type="color"
-                        className="h-9 w-20 shrink-0 bg-transparent"
-                        value={env.voidColor || '#050810'}
-                        onChange={(e) => patchEnv({ voidColor: e.target.value })}
-                      />
-                      <div className="flex-1 text-[10px] text-white/50 font-mono">
-                        {env.voidColor || '#050810'}
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2 text-[10px] text-white/50 hover:text-white"
-                        onClick={() => patchEnv({ voidColor: undefined })}
-                      >
-                        Reset
-                      </Button>
-                    </div>
-                  </label>
-
-                  <label className="block text-xs text-white/60">
-                    Void floor disc (painted ground)
-                    <div className="flex items-center gap-2 mt-1">
-                      <input
-                        type="color"
-                        className="h-9 w-20 shrink-0 bg-transparent"
-                        value={env.voidFloorColor ?? env.voidColor ?? '#0a2412'}
-                        onChange={(e) => patchEnv({ voidFloorColor: e.target.value })}
-                      />
-                      <div className="flex-1 text-[10px] text-white/50 font-mono">
-                        {env.voidFloorColor ?? '(inherits sky)'}
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2 text-[10px] text-white/50 hover:text-white"
-                        onClick={() =>
-                          patchEnv({ voidFloorColor: undefined, voidFloorOpacity: undefined })
-                        }
-                      >
-                        Match sky
-                      </Button>
-                    </div>
-                  </label>
-
-                  <label className="block text-xs text-white/60">
-                    Floor opacity ({Math.round((env.voidFloorOpacity ?? 0.9) * 100)}%)
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      className="w-full"
-                      value={env.voidFloorOpacity ?? 0.9}
-                      onChange={(e) =>
-                        patchEnv({ voidFloorOpacity: Number(e.target.value) })
-                      }
-                    />
-                    <p className="text-[10px] text-white/35 leading-snug mt-0.5">
-                      Lower to let the glowing void fog show through the floor disc (pure abyss feel).
-                    </p>
-                  </label>
-
-                  <div className="pt-2 border-t border-white/10 space-y-3">
-                    <p className="text-[10px] tracking-widest text-emerald-300/80 uppercase">
-                      Void fog &amp; abyss shadow
-                    </p>
-
-                    <label className="block text-xs text-white/60">
-                      Fog color (falling shadow tint)
-                      <div className="flex items-center gap-2 mt-1">
-                        <input
-                          type="color"
-                          className="h-9 w-20 shrink-0 bg-transparent"
-                          value={env.voidFogColor ?? '#26c05d'}
-                          onChange={(e) => patchEnv({ voidFogColor: e.target.value })}
-                        />
-                        <div className="flex-1 text-[10px] text-white/50 font-mono">
-                          {env.voidFogColor ?? '(global fog)'}
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 text-[10px] text-white/50 hover:text-white"
-                          onClick={() =>
-                            patchEnv({ voidFogColor: undefined, voidFogDensity: undefined })
-                          }
-                        >
-                          Use global
-                        </Button>
-                      </div>
-                    </label>
-
-                    <label className="block text-xs text-white/60">
-                      Fog density · how far you can see down (
-                      {(env.voidFogDensity ?? 0.05).toFixed(3)})
-                      <input
-                        type="range"
-                        min={0}
-                        max={0.18}
-                        step={0.001}
-                        className="w-full"
-                        value={env.voidFogDensity ?? 0.05}
-                        onChange={(e) =>
-                          patchEnv({ voidFogDensity: Number(e.target.value) })
-                        }
-                      />
-                      <p className="text-[10px] text-white/35 leading-snug mt-0.5">
-                        Higher density = the abyss eats platforms sooner as they recede from the camera.
-                      </p>
-                    </label>
-
-                    <label className="block text-xs text-white/60">
-                      Glow shadow halo color
-                      <div className="flex items-center gap-2 mt-1">
-                        <input
-                          type="color"
-                          className="h-9 w-20 shrink-0 bg-transparent"
-                          value={env.voidShadowColor ?? env.voidFogColor ?? '#65ffa9'}
-                          onChange={(e) => patchEnv({ voidShadowColor: e.target.value })}
-                        />
-                        <div className="flex-1 text-[10px] text-white/50 font-mono">
-                          {env.voidShadowColor ?? '(matches fog)'}
-                        </div>
-                      </div>
-                    </label>
-
-                    <label className="block text-xs text-white/60">
-                      Shadow glow intensity (
-                      {Number((env.voidShadowIntensity ?? 1.1).toFixed(2))})
-                      <input
-                        type="range"
-                        min={0}
-                        max={2}
-                        step={0.01}
-                        className="w-full"
-                        value={env.voidShadowIntensity ?? 1.1}
-                        onChange={(e) =>
-                          patchEnv({ voidShadowIntensity: Number(e.target.value) })
-                        }
-                      />
-                      <p className="text-[10px] text-white/35 leading-snug mt-0.5">
-                        0 = no halo glow at all, 2 = neon-max abyss glow under every platform.
-                      </p>
-                    </label>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {tab === 'textures' && (
-            <div className="flex-1 overflow-y-auto p-2 space-y-3">
-              <Button size="sm" className="w-full" onClick={() => texFileRef.current?.click()}>
-                <Upload className="w-4 h-4 mr-1" /> Upload texture
-              </Button>
-              <Button
-                size="sm"
-                variant={editTool === 'paint' ? 'default' : 'outline'}
-                className={`w-full ${editTool === 'paint' ? 'bg-fuchsia-600 hover:bg-fuchsia-500' : ''}`}
-                onClick={() => {
-                  const url =
-                    paintTextureUrl ||
-                    selected?.textureUrl ||
-                    env.defaultTextureUrl ||
-                    BUILTIN_TEXTURES[0]?.url ||
-                    null;
-                  setPaintTextureUrl(url);
-                  apiRef.current?.setPaintTexture(url);
-                  setEditTool('paint');
-                }}
-              >
-                <PaintBucket className="w-4 h-4 mr-1" /> Paint brush (release to paint)
-              </Button>
-              <p className="text-[10px] text-white/45 leading-snug">
-                Pick a texture, drag a region on the atlas editor (if an object is selected), then
-                paint or apply. Atlas selection sets UV offset + tile for multi-tile sheets.
-              </p>
-              <div className="rounded-lg border border-fuchsia-500/25 bg-fuchsia-500/5 px-2.5 py-2 space-y-1">
-                <p className="text-[10px] text-fuchsia-100/90 leading-snug">
-                  <span className="font-semibold text-fuchsia-200">Copy a texture:</span> with the
-                  Paint tool active, <span className="font-semibold">right-click</span> any
-                  textured solid to copy its exact texture, tiling, offset, and rotation. Then{' '}
-                  <span className="font-semibold">left-click</span> another solid to paste it —
-                  aligned exactly like the source, seam-free.
-                </p>
-                {copiedTextureInfo && (
-                  <div className="flex items-center justify-between gap-2 rounded-md bg-black/30 px-2 py-1">
-                    <span className="text-[10px] text-emerald-300 truncate">
-                      Copied{copiedTextureInfo.sourceName ? `: ${copiedTextureInfo.sourceName}` : ''} —
-                      ready to paste
-                    </span>
-                    <button
-                      type="button"
-                      className="text-[10px] text-white/50 hover:text-white/80 shrink-0"
-                      onClick={() => {
-                        apiRef.current?.clearCopiedTexture();
-                        setCopiedTextureInfo(null);
-                      }}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                )}
-              </div>
-              {(paintTextureUrl ||
-                selected?.textureUrl ||
-                env.defaultTextureUrl ||
-                BUILTIN_TEXTURES[0]?.url) && (
-                <TextureAtlasPicker
-                  imageUrl={
-                    paintTextureUrl ||
-                    selected?.textureUrl ||
-                    env.defaultTextureUrl ||
-                    BUILTIN_TEXTURES[0].url
-                  }
-                  repeat={selected?.textureRepeat ?? paintRepeat}
-                  offset={selected?.textureOffset}
-                  onChange={(uv) => {
-                    setPaintRepeat(uv.repeat);
-                    apiRef.current?.setPaintUv({
-                      worldScale: paintWorldScale,
-                      repeat: uv.repeat,
-                      offset: uv.offset,
-                    });
-                    if (selected) {
-                      patchSelected({
-                        textureUrl:
-                          selected.textureUrl ||
-                          paintTextureUrl ||
-                          env.defaultTextureUrl ||
-                          undefined,
-                        textureRepeat: uv.repeat,
-                        textureOffset: uv.offset,
-                        textureWorldScale: undefined,
-                      });
-                    }
-                  }}
-                />
-              )}
-              <label className="block text-[10px] text-white/55">
-                Texture scale — world units / tile ({paintWorldScale.toFixed(2)})
-                <input
-                  type="range"
-                  min={0.25}
-                  max={16}
-                  step={0.25}
-                  className="w-full"
-                  value={paintWorldScale}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    setPaintWorldScale(n);
-                    setPaintRepeat([n, n]);
-                    apiRef.current?.setPaintUv({ worldScale: n, repeat: [n, n] });
-                  }}
-                />
-              </label>
-              <p className="text-[9px] text-white/40 leading-snug">
-                Same scale tiles identically on every object size. Last scale is remembered for the
-                next paint.
-              </p>
-              <input
-                ref={texFileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    const dataUrl = String(reader.result);
-                    saveCustomTexture(f.name, dataUrl);
-                    setCustomTextures(listCustomTextures());
-                  };
-                  reader.readAsDataURL(f);
-                }}
-              />
-              <p className="text-[10px] text-white/40">Built-in</p>
-              <div className="grid grid-cols-2 gap-2">
-                {BUILTIN_TEXTURES.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className={`rounded border p-1 hover:border-cyan-400 ${
-                      paintTextureUrl === t.url && editTool === 'paint'
-                        ? 'border-fuchsia-400'
-                        : 'border-white/10'
-                    }`}
-                    onClick={() => {
-                      setPaintTextureUrl(t.url);
-                      apiRef.current?.setPaintTexture(t.url);
-                      apiRef.current?.clearCopiedTexture();
-                      setCopiedTextureInfo(null);
-                      setEditTool('paint');
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      if (selected) patchSelected({ textureUrl: t.url });
-                      else patchEnv({ defaultTextureUrl: t.url });
-                    }}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={t.url} alt={t.name} className="w-full aspect-square object-cover rounded" />
-                    <p className="text-[10px] mt-1 truncate">{t.name}</p>
-                  </button>
-                ))}
-              </div>
-              <p className="text-[10px] text-white/40">Uploaded</p>
-              <div className="grid grid-cols-2 gap-2">
-                {customTextures.map((t) => (
-                  <div key={t.id} className="rounded border border-white/10 p-1 relative">
-                    <button
-                      type="button"
-                      className="w-full"
-                      onClick={() => {
-                        setPaintTextureUrl(t.dataUrl);
-                        apiRef.current?.setPaintTexture(t.dataUrl);
-                        apiRef.current?.clearCopiedTexture();
-                        setCopiedTextureInfo(null);
-                        setEditTool('paint');
-                      }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={t.dataUrl} alt={t.name} className="w-full aspect-square object-cover rounded" />
-                      <p className="text-[10px] mt-1 truncate">{t.name}</p>
-                    </button>
-                    <button
-                      type="button"
-                      className="absolute top-1 right-1 w-5 h-5 rounded bg-black/70 text-red-300 text-xs"
-                      onClick={() => {
-                        deleteCustomTexture(t.id);
-                        setCustomTextures(listCustomTextures());
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[10px] text-white/40">
-                Left-click texture = paint brush (release on model). Right-click = apply to selection /
-                world default.
-              </p>
-            </div>
-          )}
-
-          {tab === 'settings' && (
-            <div className="flex-1 overflow-y-auto p-3 space-y-4">
-              <div>
-                <p className="text-xs font-bold text-cyan-300 tracking-wide uppercase">
-                  Editor UI
-                </p>
-                <p className="text-[10px] text-white/45 mt-1 leading-snug">
-                  Toggle on-canvas tools that sit over the viewport.
-                </p>
-                <label className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-xs text-white/80">
-                  <span>
-                    Show tool bar
-                    <span className="block text-[10px] text-white/45 mt-0.5">
-                      Select / move / paint / place tools overlay
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    className="accent-cyan-400 h-4 w-4"
-                    checked={toolsOpen}
-                    onChange={(e) => setToolsOpen(e.target.checked)}
-                  />
-                </label>
-              </div>
-
-              <div>
-                <p className="text-xs font-bold text-cyan-300 tracking-wide uppercase">
-                  {modeInfo.shortTitle} settings
-                </p>
-                <p className="text-[10px] text-white/45 mt-1 leading-snug">
-                  Match timings for this map. Place mode entities from the bottom toolbar — they stay
-                  invisible in Play Test / game.
-                </p>
-              </div>
-
-              {gameMode === 'deathrun' && (
-                <div className="space-y-3">
-                  {(() => {
-                    const s = ensureDeathrunSettings(doc);
-                    const patch = (partial: Partial<typeof s>) => {
-                      mutateLiveDoc((d) => ({
-                        ...d,
-                        modeSettings: {
-                          ...d.modeSettings,
-                          deathrun: { ...ensureDeathrunSettings(d), ...partial },
-                        },
-                      }));
-                    };
-                    return (
-                      <>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-300/80">Timing</p>
-                        <label className="block text-xs text-white/60">
-                          Warmup ({s.warmupSec}s) — lobby countdown before run starts
-                          <input type="range" min={0} max={60} className="w-full accent-sky-400" value={s.warmupSec}
-                            onChange={(e) => patch({ warmupSec: Number(e.target.value) })} />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Round time ({s.roundTimeSec}s)
-                          <input type="range" min={30} max={600} step={10} className="w-full accent-sky-400" value={s.roundTimeSec}
-                            onChange={(e) => patch({ roundTimeSec: Number(e.target.value) })} />
-                        </label>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-300/80 mt-1">Players</p>
-                        <label className="block text-xs text-white/60">
-                          Max runners ({s.maxRunners}) — place that many Runner Spawns
-                          <input type="range" min={1} max={8} className="w-full accent-sky-400" value={s.maxRunners}
-                            onChange={(e) => patch({ maxRunners: Number(e.target.value) })} />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Lives per runner ({s.livesPerRunner === 0 ? '∞' : s.livesPerRunner})
-                          <input type="range" min={0} max={10} className="w-full accent-sky-400" value={s.livesPerRunner}
-                            onChange={(e) => patch({ livesPerRunner: Number(e.target.value) })} />
-                        </label>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-300/80 mt-1">Trapper</p>
-                        <label className="flex items-center gap-2 text-xs text-white/70">
-                          <input type="checkbox" checked={s.trapperEnabled}
-                            onChange={(e) => patch({ trapperEnabled: e.target.checked })} />
-                          Trapper enabled
-                        </label>
-                        {s.trapperEnabled && (
-                          <label className="block text-xs text-white/60">
-                            Trap cooldown ({s.trapCooldownSec}s between activations)
-                            <input type="range" min={1} max={30} className="w-full accent-sky-400" value={s.trapCooldownSec}
-                              onChange={(e) => patch({ trapCooldownSec: Number(e.target.value) })} />
-                          </label>
-                        )}
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-300/80 mt-1">Respawn</p>
-                        <label className="flex items-center gap-2 text-xs text-white/70">
-                          <input type="checkbox" checked={s.checkpointRespawn}
-                            onChange={(e) => patch({ checkpointRespawn: e.target.checked })} />
-                          Checkpoint respawn (spawn at last checkpoint on death)
-                        </label>
-                        <p className="text-[10px] text-white/45 leading-snug rounded-lg border border-white/10 bg-black/30 p-2 mt-1">
-                          Entities: Runner Spawn ×{s.maxRunners}{s.trapperEnabled ? ', Trapper Spawn' : ''}, Light, Button, Trap, Death Zone,
-                          Door, Jump pad, Finish, Action, Checkpoint
-                        </p>
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-
-              {gameMode === 'horde' && (
-                <div className="space-y-3">
-                  {(() => {
-                    const s = ensureHordeSettings(doc);
-                    const patch = (partial: Partial<typeof s>) => {
-                      mutateLiveDoc((d) => ({
-                        ...d,
-                        modeSettings: {
-                          ...d.modeSettings,
-                          horde: { ...ensureHordeSettings(d), ...partial },
-                        },
-                      }));
-                    };
-                    return (
-                      <>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-300/80">Timing</p>
-                        <label className="block text-xs text-white/60">
-                          Warmup ({s.warmupSec}s) — countdown before wave 1
-                          <input type="range" min={0} max={60} className="w-full accent-violet-400" value={s.warmupSec}
-                            onChange={(e) => patch({ warmupSec: Number(e.target.value) })} />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Wave time limit ({s.waveTimeSec === 0 ? '∞ (kill all)' : s.waveTimeSec + 's'})
-                          <input type="range" min={0} max={300} step={5} className="w-full accent-violet-400" value={s.waveTimeSec}
-                            onChange={(e) => patch({ waveTimeSec: Number(e.target.value) })} />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Intermission / buy phase ({s.intermissionSec}s between waves)
-                          <input type="range" min={5} max={90} className="w-full accent-violet-400" value={s.intermissionSec}
-                            onChange={(e) => patch({ intermissionSec: Number(e.target.value) })} />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Weapon shop window ({Math.min(s.waveBuyTimeSec, s.intermissionSec)}s of intermission)
-                          <input type="range" min={0} max={s.intermissionSec} className="w-full accent-violet-400"
-                            value={Math.min(s.waveBuyTimeSec, s.intermissionSec)}
-                            onChange={(e) => patch({ waveBuyTimeSec: Number(e.target.value) })} />
-                          <span className="block text-[9px] text-white/40 mt-1">
-                            Weapon list: left-nav Buy Menu. Also opens during match countdown.
-                          </span>
-                        </label>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-300/80 mt-1">Waves</p>
-                        <label className="block text-xs text-white/60">
-                          Total waves ({s.totalWaves === 0 ? '∞ endless' : s.totalWaves})
-                          <input type="range" min={0} max={50} className="w-full accent-violet-400" value={s.totalWaves}
-                            onChange={(e) => patch({ totalWaves: Number(e.target.value) })} />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Starting wave ({s.startingWave})
-                          <input type="range" min={1} max={20} className="w-full accent-violet-400" value={s.startingWave}
-                            onChange={(e) => patch({ startingWave: Number(e.target.value) })} />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Difficulty ramp ({s.difficultyScale.toFixed(1)}× per wave)
-                          <input type="range" min={0.5} max={3.0} step={0.1} className="w-full accent-violet-400"
-                            value={s.difficultyScale}
-                            onChange={(e) => patch({ difficultyScale: Number(e.target.value) })} />
-                        </label>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-300/80 mt-1">Players</p>
-                        <label className="block text-xs text-white/60">
-                          Max players ({s.maxPlayers})
-                          <input type="range" min={1} max={8} className="w-full accent-violet-400" value={s.maxPlayers}
-                            onChange={(e) => patch({ maxPlayers: Number(e.target.value) })} />
-                        </label>
-                        <label className="flex items-center gap-2 text-xs text-white/70">
-                          <input type="checkbox" checked={s.respawnOnWaveClear}
-                            onChange={(e) => patch({ respawnOnWaveClear: e.target.checked })} />
-                          Respawn downed players when a wave clears
-                        </label>
-                        <p className="text-[10px] text-white/45 leading-snug rounded-lg border border-white/10 bg-black/30 p-2 mt-1">
-                          Entities: Player Spawn ×{s.maxPlayers}, Enemy Spawn, Red Zone, Health Floor, Revive Pad,
-                          Wave Anchor, Death Zone, Light, Door
-                        </p>
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-
-              {gameMode === 'competitive' && (
-                <div className="space-y-3">
-                  {(() => {
-                    const s = ensureCompetitiveSettings(doc);
-                    const patch = (partial: Partial<typeof s>) => {
-                      mutateLiveDoc((d) => ({
-                        ...d,
-                        modeSettings: {
-                          ...d.modeSettings,
-                          competitive: { ...ensureCompetitiveSettings(d), ...partial },
-                        },
-                      }));
-                    };
-                    return (
-                      <>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-300/80">Timing</p>
-                        <label className="block text-xs text-white/60">
-                          Warmup ({s.warmupSec}s) — lobby countdown
-                          <input type="range" min={0} max={60} className="w-full accent-orange-400" value={s.warmupSec}
-                            onChange={(e) => patch({ warmupSec: Number(e.target.value) })} />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Buy / weapon shop time ({s.buyTimeSec}s per round start)
-                          <input type="range" min={0} max={60} className="w-full accent-orange-400" value={s.buyTimeSec}
-                            onChange={(e) => patch({ buyTimeSec: Number(e.target.value) })} />
-                          <p className="text-[9px] text-white/40 mt-1">
-                            Weapons listed in left-nav Buy Menu (Competitive flag). Applies every round.
-                          </p>
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Round time ({s.roundTimeSec}s)
-                          <input type="range" min={30} max={300} step={5} className="w-full accent-orange-400" value={s.roundTimeSec}
-                            onChange={(e) => patch({ roundTimeSec: Number(e.target.value) })} />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Overtime ({s.overtimeSec}s, 0 = sudden death)
-                          <input type="range" min={0} max={120} step={5} className="w-full accent-orange-400" value={s.overtimeSec}
-                            onChange={(e) => patch({ overtimeSec: Number(e.target.value) })} />
-                        </label>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-300/80 mt-1">Rounds &amp; Teams</p>
-                        <label className="block text-xs text-white/60">
-                          Rounds to win ({s.roundCount})
-                          <input type="range" min={1} max={12} className="w-full accent-orange-400" value={s.roundCount}
-                            onChange={(e) => patch({ roundCount: Number(e.target.value) })} />
-                        </label>
-                        <label className="block text-xs text-white/60">
-                          Max players per team ({s.maxPlayersPerTeam})
-                          <input type="range" min={1} max={8} className="w-full accent-orange-400" value={s.maxPlayersPerTeam}
-                            onChange={(e) => patch({ maxPlayersPerTeam: Number(e.target.value) })} />
-                        </label>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-300/80 mt-1">Rules</p>
-                        <label className="flex items-center gap-2 text-xs text-white/70">
-                          <input type="checkbox" checked={s.friendlyFire}
-                            onChange={(e) => patch({ friendlyFire: e.target.checked })} />
-                          Friendly fire
-                        </label>
-                        <label className="flex items-center gap-2 text-xs text-white/70">
-                          <input type="checkbox" checked={s.respawnInRound}
-                            onChange={(e) => patch({ respawnInRound: e.target.checked })} />
-                          Respawn mid-round (unchecked = elimination)
-                        </label>
-                        <p className="text-[10px] text-white/45 leading-snug rounded-lg border border-white/10 bg-black/30 p-2 mt-1">
-                          Entities: Team A Spawn ×{s.maxPlayersPerTeam}, Team B Spawn ×{s.maxPlayersPerTeam},
-                          Push Rail, Push Block, Light, Door, Death Zone
-                        </p>
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-            </div>
-          )}
         </div>
         )}
 
@@ -7585,99 +5834,6 @@ function ToolBtn({
     >
       {children}
     </button>
-  );
-}
-
-type SnapFace = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
-
-const SNAP_FACE_LABELS: Record<SnapFace, string> = {
-  '+x': 'right side',
-  '-x': 'left side',
-  '+y': 'top (stack on)',
-  '-y': 'bottom (hang under)',
-  '+z': 'front side',
-  '-z': 'back side',
-};
-
-/**
- * Magnet tool popover — lets the user explicitly pick WHICH face of the
- * anchor (first-selected object) the rest of the selection snaps onto,
- * instead of auto-guessing the nearest face. Auto-guessing was the source
- * of "it just snaps wherever" — two objects close on multiple axes could
- * get glued on the wrong side entirely.
- */
-function SnapFacePicker({
-  anchorRect,
-  onPick,
-  onClose,
-}: {
-  anchorRect: DOMRect | null;
-  onPick: (face: SnapFace) => void;
-  onClose: () => void;
-}) {
-  const btnCls =
-    'flex flex-col items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2.5 text-white/85 hover:bg-emerald-500/20 hover:border-emerald-400/40 hover:text-emerald-200 active:scale-95 transition-colors';
-  // Rendered via portal to document.body and positioned `fixed` from the
-  // trigger button's screen rect — the toolbar this opens from scrolls
-  // horizontally (overflow-x-auto), and per the CSS overflow spec setting
-  // overflow-x to anything but visible silently forces overflow-y to `auto`
-  // too, clipping any `absolute`-positioned popup inside it. Escaping to a
-  // body-level portal sidesteps that entirely instead of fighting it.
-  const width = 256; // w-64
-  const left = anchorRect ? Math.min(Math.max(8, anchorRect.left + anchorRect.width / 2 - width / 2), window.innerWidth - width - 8) : 8;
-  const bottom = anchorRect ? Math.max(8, window.innerHeight - anchorRect.top + 8) : 8;
-  return createPortal(
-    <>
-      {/* Click-outside catcher */}
-      <div className="fixed inset-0 z-[9998]" onClick={onClose} />
-      <div
-        className="fixed z-[9999] w-64 rounded-xl border border-white/15 bg-slate-900/95 backdrop-blur p-3 shadow-2xl"
-        style={{ left, bottom }}
-      >
-        <p className="text-[10px] uppercase tracking-widest text-white/50 mb-2 text-center">
-          Snap selection to…
-        </p>
-        <p className="text-[10px] text-white/40 mb-2.5 text-center leading-relaxed">
-          First-selected object stays put. Others join the side you pick, flush and centered.
-        </p>
-        <div className="grid grid-cols-3 gap-1.5">
-          <div />
-          <button type="button" className={btnCls} onClick={() => onPick('+y')} title="Stack on top of anchor">
-            <ArrowUpToLine className="w-4 h-4" />
-            <span className="text-[10px] leading-none">Top</span>
-          </button>
-          <div />
-
-          <button type="button" className={btnCls} onClick={() => onPick('-x')} title="Join left side of anchor">
-            <ArrowLeftToLine className="w-4 h-4" />
-            <span className="text-[10px] leading-none">Left</span>
-          </button>
-          <button type="button" className={btnCls} onClick={() => onPick('+z')} title="Join front side of anchor">
-            <ArrowUp className="w-4 h-4" />
-            <span className="text-[10px] leading-none">Front</span>
-          </button>
-          <button type="button" className={btnCls} onClick={() => onPick('+x')} title="Join right side of anchor">
-            <ArrowRightToLine className="w-4 h-4" />
-            <span className="text-[10px] leading-none">Right</span>
-          </button>
-
-          <div />
-          <button type="button" className={btnCls} onClick={() => onPick('-z')} title="Join back side of anchor">
-            <ArrowDown className="w-4 h-4" />
-            <span className="text-[10px] leading-none">Back</span>
-          </button>
-          <div />
-
-          <div />
-          <button type="button" className={btnCls} onClick={() => onPick('-y')} title="Hang underneath anchor">
-            <ArrowDownToLine className="w-4 h-4" />
-            <span className="text-[10px] leading-none">Bottom</span>
-          </button>
-          <div />
-        </div>
-      </div>
-    </>,
-    document.body
   );
 }
 

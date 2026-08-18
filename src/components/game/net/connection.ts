@@ -800,6 +800,7 @@ export class GameConnection {
       height: number;
       healPerTick?: number;
       intervalMs?: number;
+      maxHealPercent?: number;
     }[];
     redZones?: {
       id: string;
@@ -811,6 +812,7 @@ export class GameConnection {
       height: number;
       damagePerTick?: number;
       intervalMs?: number;
+      instantKill?: number;
     }[];
     revivePads?: {
       id: string;
@@ -821,6 +823,7 @@ export class GameConnection {
       depth: number;
       height: number;
       reviveTimeMs?: number;
+      capacity?: number;
     }[];
     worldBounds?: {
       minX: number;

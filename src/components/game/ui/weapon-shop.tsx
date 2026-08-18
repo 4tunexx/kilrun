@@ -4,6 +4,7 @@ import React from 'react';
 import { Sword, Crosshair, Zap, Shield, ShoppingCart, Coins } from 'lucide-react';
 import { SHOP_PRESET_TO_CATALOG, catalogWeaponUrl } from '@/lib/weapon-catalog';
 import type { MapShopItem, MapShopPowerUp, MapShopSkin } from '@/components/game/editor/map-document';
+import { playSound } from '../effects/soundboard';
 
 export interface WeaponPreset {
   id: string;
@@ -288,7 +289,11 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({
                 key={preset.id}
                 type="button"
                 disabled={!canAfford}
-                onClick={() => canAfford && onBuy(preset)}
+                onClick={() => {
+                  if (!canAfford) return;
+                  playSound('purchase');
+                  onBuy(preset);
+                }}
                 className={`flex flex-col items-start gap-1 rounded-xl border px-2.5 py-2 text-left transition-all active:scale-95 ${
                   canAfford ? preset.accentClass : 'border-white/10 bg-white/5 opacity-40 cursor-not-allowed'
                 }`}
@@ -332,7 +337,11 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({
                     key={sk.id}
                     type="button"
                     disabled={!canAfford}
-                    onClick={() => canAfford && onBuySkin(sk)}
+                    onClick={() => {
+                      if (!canAfford) return;
+                      playSound('purchase');
+                      onBuySkin(sk);
+                    }}
                     className={`rounded-xl border px-2 py-1.5 text-left ${
                       canAfford
                         ? 'border-cyan-400/50 bg-cyan-500/15 hover:bg-cyan-500/25'
@@ -374,7 +383,11 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({
                     key={pu.id}
                     type="button"
                     disabled={!canAfford}
-                    onClick={() => canAfford && onBuyPowerUp(pu)}
+                    onClick={() => {
+                      if (!canAfford) return;
+                      playSound('purchase');
+                      onBuyPowerUp(pu);
+                    }}
                     className={`rounded-xl border px-2 py-1.5 text-left ${
                       canAfford
                         ? 'border-violet-400/50 bg-violet-500/15 hover:bg-violet-500/25'

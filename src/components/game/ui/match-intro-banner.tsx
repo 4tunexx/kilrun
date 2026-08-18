@@ -57,6 +57,12 @@ export const MatchIntroBanner: React.FC<{
     } else if (prev === 'countdown' && phase === 'playing') {
       playSound('match_start');
       setStage({ kind: 'go', key: nextKeyRef.current++ });
+    } else if (prev === 'playing' && phase === 'results') {
+      // Symmetric with match_start above, and for the same reason it lives
+      // here: keyed off the phase transition, so joining a finished room does
+      // not replay it, and one shared banner covers every mode's results
+      // screen instead of each screen firing its own on mount.
+      playSound('match_end');
     }
   }, [phase]);
 

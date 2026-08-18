@@ -38,7 +38,7 @@ import {
   scaleFromSideOffset,
   ensureEnvironment,
 } from './map-document';
-import { bakeMeshCollisionForEntity } from './mesh-voxelize';
+import { bakeMeshCollisionForEntity, meshCollisionBakeKeyFor } from './mesh-voxelize';
 import {
   applySelectionTransformOp,
   nearestObbFaceAttach,
@@ -1780,7 +1780,9 @@ export function createEditorViewport(
     applyEntityTexture(root, ent);
     applyEntityGlow(root, ent.glow, ent.color);
     if (ent.kind === 'light') syncLightParams(root, ent);
-    refreshGizmos();
+    // No refreshGizmos() here: it rebuilds the gizmos for the WHOLE document,
+    // so calling it per entity made rebuildAll O(n^2) (500 entities = 500 full
+    // teardowns). Every caller refreshes once after its batch instead.
   }
 
   function refreshGizmos() {
@@ -3807,10 +3809,14 @@ export function createEditorViewport(
         const pads = await bakeMeshCollisionForEntity(e);
         const cur = doc.entities.find((x) => x.id === id);
         if (!cur) return { ok: false, error: 'Object was removed while baking.' };
+        // Stamp what this bake was derived from so Play Test can skip it next
+        // time (see needsMeshCollisionBake). Keyed off `cur`, not `e`, in case
+        // the model changed while the load was in flight.
+        const bakeKey = meshCollisionBakeKeyFor(cur) ?? undefined;
         doc = {
           ...doc,
           entities: doc.entities.map((x) =>
-            x.id === id ? { ...x, meshCollisionPads: pads } : x
+            x.id === id ? { ...x, meshCollisionPads: pads, meshCollisionBakeKey: bakeKey } : x
           ),
         };
         handlers.onDocChange(doc);
@@ -3825,7 +3831,9 @@ export function createEditorViewport(
       doc = {
         ...doc,
         entities: doc.entities.map((x) =>
-          x.id === id ? { ...x, meshCollisionPads: undefined } : x
+          x.id === id
+            ? { ...x, meshCollisionPads: undefined, meshCollisionBakeKey: undefined }
+            : x
         ),
       };
       handlers.onDocChange(doc);
@@ -3989,12 +3997,16 @@ export function createEditorViewport(
           }
           await syncEntity(ent);
           attachSelectionGizmo();
+          refreshGizmos();
           handlers.onDocChange(doc);
         })();
       } else {
         const ent = doc.entities.find((e) => e.id === id);
         if (ent) {
-          void syncEntity(ent).then(() => attachSelectionGizmo());
+          void syncEntity(ent).then(() => {
+            attachSelectionGizmo();
+            refreshGizmos();
+          });
         }
         handlers.onDocChange(doc);
       }

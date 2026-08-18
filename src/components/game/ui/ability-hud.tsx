@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   getActivePowerDefinitions,
   getAbilitySlotKind,
@@ -20,6 +20,7 @@ import {
 import type { CustomMoveDef } from '@shared/custom-moves';
 import { getLucideIcon } from '@/lib/move-icons';
 import { ChevronsUp, FlipVertical, Waves, type LucideIcon } from 'lucide-react';
+import { playSound } from '../effects/soundboard';
 
 /** Renders a ring icon: a LucideIcon component directly, a "lucide:Name"
  * data string, or (only for pre-existing legacy power defs) emoji/image. */
@@ -48,7 +49,7 @@ function RingGlyph({ icon }: { icon: string | LucideIcon }) {
  * author overrides it; the ring still starts/clears at the right times either way. */
 const SLIDE_COOLDOWN_MS_DEFAULT = 1000;
 
-const SLOT_FIELDS: Record<AbilitySlotKind, { endsAt: keyof NetAbilityLoadoutState; cooldownEndsAt: keyof NetAbilityLoadoutState }> = {
+export const SLOT_FIELDS: Record<AbilitySlotKind, { endsAt: keyof NetAbilityLoadoutState; cooldownEndsAt: keyof NetAbilityLoadoutState }> = {
   visibility: { endsAt: 'visibilityEndsAt', cooldownEndsAt: 'visibilityCooldownEndsAt' },
   fly: { endsAt: 'flyEndsAt', cooldownEndsAt: 'flyCooldownEndsAt' },
   berserk: { endsAt: 'berserkEndsAt', cooldownEndsAt: 'berserkCooldownEndsAt' },
@@ -87,6 +88,7 @@ export function AbilityRingIcon({
   buffEndsAt,
   energyCost,
   playerEnergy,
+  announceReady = false,
 }: {
   icon: string | LucideIcon;
   cooldownMs: number;
@@ -94,9 +96,19 @@ export function AbilityRingIcon({
   buffEndsAt: number;
   energyCost: number;
   playerEnergy: number;
+  /** Play the authored "Power Ready" cue when this ring's cooldown finishes.
+   *  Opt-in so the movement row (slide, flip, custom moves) stays silent. */
+  announceReady?: boolean;
 }) {
   const now = useNowWhileActive(Math.max(cooldownEndsAt, buffEndsAt));
   const onCooldown = cooldownEndsAt > now;
+  const wasOnCooldownRef = useRef(false);
+  useEffect(() => {
+    // Rising edge of "available again". Skipped when nothing was counting down,
+    // so mounting mid-match (or a rejoin) never fires a spurious cue.
+    if (announceReady && wasOnCooldownRef.current && !onCooldown) playSound('power_ready');
+    wasOnCooldownRef.current = onCooldown;
+  }, [announceReady, onCooldown]);
   const buffActive = buffEndsAt > now;
   const remaining = onCooldown ? cooldownEndsAt - now : 0;
   const progress = onCooldown && cooldownMs > 0 ? Math.max(0, Math.min(1, 1 - remaining / cooldownMs)) : 1;
@@ -178,6 +190,7 @@ export const AbilityCooldownRow: React.FC<{
             buffEndsAt={abilities?.[fields.endsAt] ?? 0}
             energyCost={getEnergyCostForAbility(def.key)}
             playerEnergy={playerEnergy}
+            announceReady
           />
         );
       })}

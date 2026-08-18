@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../net/types';
+import { playSound } from '../effects/soundboard';
 
 const FADE_MS = 7000;
 const MAX_VISIBLE = 6;
@@ -46,6 +47,7 @@ export const LiveChatOverlay: React.FC<{
         id: `${msg.sessionId}-${msg.at}-${idCounter.current}`,
         expiresAt: performance.now() + FADE_MS,
       };
+      playSound('chat_message');
       setFeed((prev) => [...prev.slice(-(MAX_VISIBLE - 1)), item]);
     });
   }, [registerOnChat]);
@@ -67,6 +69,7 @@ export const LiveChatOverlay: React.FC<{
       expiresAt: performance.now() + FADE_MS * 1.5,
       isAdminBroadcast: true,
     };
+    playSound('chat_message');
     setFeed((prev) => [...prev.slice(-(MAX_VISIBLE - 1)), item]);
   }, [adminMessage, adminMessageSeq]);
 

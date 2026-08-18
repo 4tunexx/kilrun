@@ -597,15 +597,25 @@ export interface EntityTeleport {
 /**
  * Prop interaction — play animation + optional damage / push when the player touches.
  * Shown on props / traps / doors so rotating hazards can hurt or shove.
+ *
+ * Every field here is a convenience MIRROR, not its own simulated behavior: the
+ * Interaction checkboxes in the Properties panel write both this object and the
+ * canonical field the runtime actually reads (playAnimationOnTouch →
+ * `animation.trigger = 'collide'`, damageOnTouch → `hazard.enabled`, pushPlayer /
+ * pushStrength → `surface.conveyor` / `surface.conveyorSpeed`, which
+ * mapDocToSimPlatforms exports as a `conveyor` pad and server/src/sim/movement.ts
+ * applies). Nothing reads `interact` outside that panel, and nothing should —
+ * treat the canonical fields as the source of truth and keep this in sync with
+ * them, rather than adding a second simulation path.
  */
 export interface EntityInteract {
-  /** Play active animation while colliding / on trigger. */
+  /** Mirror of `animation.trigger === 'collide'`. */
   playAnimationOnTouch?: boolean;
-  /** Damage the player on touch (mirrors hazard.enabled for quick authoring). */
+  /** Mirror of `hazard.enabled`. */
   damageOnTouch?: boolean;
-  /** Horizontal shove when the player touches this object. */
+  /** Mirror of `surface.conveyor`. */
   pushPlayer?: boolean;
-  /** Push strength in world units / second. */
+  /** Mirror of `surface.conveyorSpeed` — world units / second. */
   pushStrength?: number;
 }
 
@@ -875,6 +885,14 @@ export interface EditorEntity {
    * this entity's position) so it reuses the exact same runtime pad export.
    */
   meshCollisionPads?: CsgLocalPad[];
+  /**
+   * Fingerprint of the inputs that produced `meshCollisionPads` — see
+   * `meshCollisionBakeKeyFor` in mesh-voxelize.ts. Play Test re-bakes only
+   * entities whose key is missing or stale instead of re-voxelizing the whole
+   * map on every entry. Bumping VOXELIZER_VERSION invalidates every key, so
+   * maps baked by an older voxelizer self-heal.
+   */
+  meshCollisionBakeKey?: string;
   animation?: EntityAnimation;
   /** Only for kind === 'player' */
   playerAnims?: PlayerAnimBindings;

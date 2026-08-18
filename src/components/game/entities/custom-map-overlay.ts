@@ -8,7 +8,14 @@ import {
 } from '../editor/map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from '../editor/model-scan';
 import { AnimationDirector } from '../editor/animation-director';
-import { applyTextureToObject, plantLocalFeet, resolveEntityTextureRepeat } from '../editor/editor-mesh';
+import {
+  applyTextureToObject,
+  disposeClonedMaterials,
+  disposeOwnedGeometry,
+  markOwnsGpuResources,
+  plantLocalFeet,
+  resolveEntityTextureRepeat,
+} from '../editor/editor-mesh';
 import {
   applyEntityOpacity,
   applyEntityGlow,
@@ -30,36 +37,31 @@ function applyEntTexture(obj: THREE.Object3D, ent: EditorEntity, doc: MapDocumen
   });
 }
 
-/** Release GPU resources for a detached Object3D tree. */
-function disposeObjectTree(root: THREE.Object3D) {
-  root.traverse((obj) => {
-    const mesh = obj as THREE.Mesh;
-    if (mesh.geometry) mesh.geometry.dispose();
-    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-    if (!mat) return;
-    for (const m of Array.isArray(mat) ? mat : [mat]) {
-      const std = m as THREE.MeshStandardMaterial;
-      for (const key of [
-        'map',
-        'normalMap',
-        'roughnessMap',
-        'metalnessMap',
-        'emissiveMap',
-        'aoMap',
-        'alphaMap',
-      ] as const) {
-        const tex = std[key];
-        if (tex) tex.dispose();
-      }
-      m.dispose();
-    }
-  });
+/**
+ * Release the GPU resources this overlay actually owns.
+ *
+ * Every entity root here mixes uniquely-built geometry (hammer solids,
+ * placeholders, gameplay fallbacks, light fixtures — tagged
+ * `__ownsGpuResources` at creation) with cache-derived GLB parts from
+ * loadAnimatedPrefab, whose geometry and material.map textures still point at
+ * that loader's module-level cache. This previously disposed everything
+ * unconditionally, which freed geometry and textures still referenced by the
+ * cache — corrupting every later entity built from the same model for the rest
+ * of the session (and every subsequent match, since the cache outlives the
+ * scene). Same split editor-viewport's disposeRoot and map-play-preview's
+ * teardown use.
+ */
+function disposeEntityTree(root: THREE.Object3D) {
+  disposeClonedMaterials(root);
+  disposeOwnedGeometry(root);
 }
 
 function makeHammerSolid(ent: EditorEntity): THREE.Object3D {
   const size = ent.collisionSize ?? [2, 0.25, 2];
   const shape = (ent.primitive as HammerPrimitive) || 'box';
-  return makeHammerSolidObject(shape, size, ent.color || '#64748b');
+  const obj = makeHammerSolidObject(shape, size, ent.color || '#64748b');
+  markOwnsGpuResources(obj);
+  return obj;
 }
 
 /**
@@ -77,6 +79,7 @@ function makeGenericBoxPlaceholder(ent: EditorEntity): THREE.Object3D {
     new THREE.MeshStandardMaterial({ color: ent.color ? new THREE.Color(ent.color) : 0x888888 })
   );
   box.position.y = Math.max(0.2, size[1]) * 0.5;
+  markOwnsGpuResources(box);
   return box;
 }
 
@@ -135,6 +138,8 @@ export class CustomMapOverlay {
         let clips: THREE.AnimationClip[] = [];
         if (ent.kind === 'light') {
           obj = makeAuthoredLight(ent);
+          // Fixture bulb geometry is built fresh per light, never cache-shared.
+          markOwnsGpuResources(obj);
           // makeAuthoredLight already sets position; still apply rotation/scale below.
         } else if (isHammerSolidEntity(ent) || ent.model === HAMMER_SOLID_MODEL) {
           obj = makeHammerSolid(ent);
@@ -144,6 +149,8 @@ export class CustomMapOverlay {
           // A newer load() call (rapid map switch) may have already cleared
           // and superseded this one while the fetch above was in flight.
           if (token !== this.loadToken) return;
+          // Deliberately NOT tagged __ownsGpuResources — geometry and textures
+          // are shared with loadAnimatedPrefab's module-level cache.
           plantLocalFeet(loaded.root);
           const wrap = new THREE.Group();
           wrap.add(loaded.root);
@@ -162,6 +169,7 @@ export class CustomMapOverlay {
             applyEntTexture(obj, ent, doc);
           } else {
             obj = fallback;
+            markOwnsGpuResources(obj);
             applyEntTexture(obj, ent, doc);
           }
         }
@@ -199,6 +207,7 @@ export class CustomMapOverlay {
         if (!shouldUseGameplayFallback(ent, 'load-failed')) continue;
         try {
           const placeholder = makeGameplayFallback(ent) ?? makeGenericBoxPlaceholder(ent);
+          markOwnsGpuResources(placeholder);
           applyEntTexture(placeholder, ent, doc);
           placeholder.position.set(...ent.position);
           placeholder.rotation.set(
@@ -308,7 +317,7 @@ export class CustomMapOverlay {
     this.director.clear();
     for (const obj of this.entityRoots.values()) {
       obj.removeFromParent();
-      disposeObjectTree(obj);
+      disposeEntityTree(obj);
     }
     this.entityRoots.clear();
     this.restPositions.clear();
@@ -316,7 +325,7 @@ export class CustomMapOverlay {
     while (this.root.children.length) {
       const child = this.root.children[0];
       this.root.remove(child);
-      disposeObjectTree(child);
+      disposeEntityTree(child);
     }
   }
 

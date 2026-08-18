@@ -120,6 +120,20 @@ export function stopLoopedSound(eventKey: string): void {
   }
 }
 
+/** Play `eventKey`, falling back to `fallbackKey` when no clip is bound to it.
+ * Lets a specific cue (monster_hit) degrade to its generic parent (hit_dealt)
+ * on sound boards that never filled the specific slot. */
+export function playSoundOrFallback(
+  eventKey: string,
+  fallbackKey: string,
+  opts?: { volume?: number }
+): void {
+  if (typeof window === 'undefined' || typeof AudioContext === 'undefined') return;
+  void ensureLoaded().then(() => {
+    playSound(cache[eventKey]?.fileUrl ? eventKey : fallbackKey, opts);
+  });
+}
+
 /** Fire-and-forget playback for a game-engine event (see
  * shared/sound-events.ts for valid keys). No-ops if nothing is bound. */
 export function playSound(eventKey: string, opts?: { volume?: number }): void {

@@ -42,6 +42,8 @@ import { MobileActionButtons } from './ui/mobile-action-buttons';
 import { Crosshair } from './ui/crosshair';
 import { LiveChatOverlay } from './ui/live-chat-overlay';
 import { AdminInGamePanel } from './ui/admin-in-game-panel';
+import { SLOT_FIELDS } from './ui/ability-hud';
+import { getAbilitySlotKind, getEnergyCostForAbility } from '@shared/power-definitions';
 import {
   loadTpsViewSettings,
   mouseSensRadians,
@@ -843,6 +845,7 @@ export default function KilrunEngine({
       obstaclesRef.current.forEach((o, i) => void map.upsertObstacle(i, o as NetObstacleState));
     }
 
+    let liveMonsterIds = new Set<string>();
     const syncTimer = window.setInterval(() => {
       if (!hasCustomMap) {
         map.prunePlatforms(platformsRef.current.keys());
@@ -859,6 +862,19 @@ export default function KilrunEngine({
         }
       });
       playersRef.current.forEach((p, id) => spawnCharacter(id, p.username));
+      // Horde monsters live in the obstacle list under a `mon_` id (see
+      // HordeRoom.spawnMonster) and are spliced out on death, so an id that
+      // disappears between passes is exactly one monster kill.
+      const monsterIdsNow = new Set<string>();
+      obstaclesRef.current.forEach((o) => {
+        if (o.id?.startsWith('mon_')) monsterIdsNow.add(o.id);
+      });
+      let removed = 0;
+      for (const id of liveMonsterIds) if (!monsterIdsNow.has(id)) removed += 1;
+      // One cue per pass, and only mid-match: HordeRoom.clearMonsters() wipes
+      // the whole list on wave reset / match end, which is not a kill.
+      if (removed > 0 && roomPhaseRef.current === 'playing') playSound('monster_death');
+      liveMonsterIds = monsterIdsNow;
       setAssetsReady(true);
     }, 400);
 
@@ -1277,8 +1293,18 @@ export default function KilrunEngine({
           inputManager.consumeAbilityPulse('fly') ??
           inputManager.consumeAbilityPulse('backflip');
         if (abilityPulse && !gameMenuOpenRef.current && localSessionId && localState) {
+          // Always send: the server is authoritative and our cooldown/energy
+          // view can be a tick stale, so a local check only picks the cue.
           connectionRef.current?.sendActivateAbility(abilityPulse);
-          playSound(`power_${abilityPulse}`);
+          const slot = getAbilitySlotKind(abilityPulse);
+          const cooldownEndsAt = slot
+            ? localState.ability?.[SLOT_FIELDS[slot].cooldownEndsAt] ?? 0
+            : 0;
+          const energyCost = getEnergyCostForAbility(abilityPulse);
+          const denied =
+            cooldownEndsAt > Date.now() ||
+            (energyCost > 0 && (localState.energy ?? 0) < energyCost);
+          playSound(denied ? 'power_denied' : `power_${abilityPulse}`);
         }
         const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
         const localWep = localSessionId ? playersRef.current.get(localSessionId) : undefined;
@@ -1293,6 +1319,11 @@ export default function KilrunEngine({
         const reloading =
           (localWep?.reloadEndsAt ?? 0) > 0 &&
           Date.now() < (localWep?.reloadEndsAt ?? 0);
+        if (edge && localSessionId && !canLocalFireVisual && !reloading) {
+          // Dry fire — trigger pulled with an empty magazine. Rising-edge only,
+          // so holding an automatic weapon clicks once, not every frame.
+          playSound('weapon_empty');
+        }
         if (edge && localSessionId && canLocalFireVisual && !reloading) {
           const weaponAtt = findWeaponAttachment(equippedSkinsRef.current);
           const combat = resolveWeaponCombat(weaponAtt);

@@ -34,6 +34,50 @@ export interface VoxelizeOptions {
 /** Default cap per Solid — enough for an arch/doorway, cheap on the server. */
 export const MAX_MESH_COLLISION_PADS = 48;
 
+/**
+ * Bump this whenever a change here would produce different pads for the same
+ * model (resolution defaults, containment test, pad merging). Every cached
+ * `EditorEntity.meshCollisionBakeKey` stops matching, so existing maps quietly
+ * re-bake at the current accuracy on their next Play Test.
+ */
+export const VOXELIZER_VERSION = 1;
+
+/** Clamp exactly as voxelizeGeometryToPads does, so the key records the
+ * options the bake actually ran with rather than what was requested. */
+function effectiveVoxelizeOptions(opts?: VoxelizeOptions) {
+  return {
+    maxPads: Math.max(4, opts?.maxPads ?? MAX_MESH_COLLISION_PADS),
+    resolution: Math.max(2, Math.min(32, opts?.resolution ?? 16)),
+  };
+}
+
+/**
+ * Fingerprints everything `bakeMeshCollisionForEntity` actually reads: the
+ * resolved model source and the voxelize options. Entity scale and
+ * collisionSize are deliberately absent — pads are baked in local space at
+ * scale 1 and scaled during export (see localPadsToSimPads in
+ * prefab-storage.ts), so rescaling an instance cannot change the bake.
+ * Returns null when the entity has no bakeable model.
+ */
+export function meshCollisionBakeKeyFor(
+  e: Pick<EditorEntity, 'model' | 'customModelUrl'>,
+  opts?: VoxelizeOptions
+): string | null {
+  const src = resolveModelSrc(e.model, e.customModelUrl);
+  if (!src) return null;
+  const { maxPads, resolution } = effectiveVoxelizeOptions(opts);
+  return `v${VOXELIZER_VERSION}|r${resolution}|p${maxPads}|${src}`;
+}
+
+/** True when `e` has no usable bake for its current model/voxelizer. */
+export function needsMeshCollisionBake(e: EditorEntity, opts?: VoxelizeOptions): boolean {
+  if (!e.meshCollisionPads?.length) return true;
+  const key = meshCollisionBakeKeyFor(e, opts);
+  // No key derivable (unsupported model) — leave whatever pads exist alone.
+  if (!key) return false;
+  return e.meshCollisionBakeKey !== key;
+}
+
 /** A non-axis-aligned direction avoids degenerate axis-aligned ray hits
  * (grazing exactly along a box face/edge) that break the parity count. */
 const PROBE_DIR = new THREE.Vector3(0.998, 0.0537, 0.0261).normalize();
@@ -235,8 +279,8 @@ export function voxelizeGeometryToPads(
   geometry: THREE.BufferGeometry,
   opts?: VoxelizeOptions
 ): CsgLocalPad[] {
-  const maxPads = Math.max(4, opts?.maxPads ?? MAX_MESH_COLLISION_PADS);
-  let resolution = Math.max(2, Math.min(32, opts?.resolution ?? 16));
+  const { maxPads, resolution: startResolution } = effectiveVoxelizeOptions(opts);
+  let resolution = startResolution;
   let pads = voxelizeAtResolution(geometry, resolution);
   while (pads.length > maxPads && resolution > 6) {
     resolution = Math.max(6, Math.floor(resolution * 0.7));

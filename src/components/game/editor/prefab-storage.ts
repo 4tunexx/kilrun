@@ -839,9 +839,10 @@ function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
   // shape (an arch, a doorway opening) doesn't collide as its full bounding
   // box. Low sample resolution combined with a heavily non-uniform-scaled
   // instance can leave real gaps in the approximation (see VOXEL_RESOLUTION
-  // in mesh-voxelize.ts) — that's fixed at the source (higher resolution +
-  // forced re-bake on every Play Test entry, see bakeAllSolidMeshCollision
-  // in map-editor.tsx), not by discarding the approximation here.
+  // in mesh-voxelize.ts) — that's fixed at the source (higher resolution, plus
+  // a VOXELIZER_VERSION bump that makes every cached bake stale so Play Test
+  // re-fits it, see bakeAllSolidMeshCollision in map-editor.tsx), not by
+  // discarding the approximation here.
   if (e.meshCollisionPads?.length) return localPadsToSimPads(e, e.meshCollisionPads);
   const model = e.model ?? '';
   if (model.includes('stair') || model.includes('ramp')) {
@@ -1039,6 +1040,37 @@ function collectActivatorControlledDoorIds(doc: MapDocument): Set<string> {
   return ids;
 }
 
+/**
+ * How long a button / action keeps its targets armed.
+ *
+ * Every room resolves this as `zone.holdMs > 0 ? zone.holdMs : obs.activeMs`,
+ * so hardcoding a non-zero holdMs here made the authored per-trap "stays ON"
+ * duration (`hazard.activeMs`) unreachable — the trap editor's Active ms field
+ * did nothing for button-wired traps. Prefer the authored value, and fall back
+ * to the previous constant when no target has one so unauthored maps behave
+ * exactly as before. The longest target wins, since one value covers them all
+ * and a shorter hold would cut the slower trap short.
+ */
+function resolveActivatorHoldMs(
+  doc: MapDocument,
+  targetIds: string[],
+  fallbackMs: number
+): number {
+  let authored = 0;
+  for (const id of targetIds) {
+    const target = doc.entities.find((e) => e.id === id);
+    const activeMs = target?.hazard?.activeMs;
+    if (typeof activeMs === 'number' && activeMs > 0) authored = Math.max(authored, activeMs);
+  }
+  return authored > 0 ? authored : fallbackMs;
+}
+
+/** Cooldown between presses. Not author-controlled yet — no UI exposes it. */
+const BUTTON_PRESS_COOLDOWN_MS = 600;
+const ACTION_TRIGGER_COOLDOWN_MS = 500;
+const BUTTON_DEFAULT_HOLD_MS = 2500;
+const ACTION_DEFAULT_HOLD_MS = 2000;
+
 export function mapDocToSimButtons(doc: MapDocument): SimButtonBlueprint[] {
   return doc.entities
     .filter((e) => e.visible !== false && e.kind === 'button')
@@ -1053,8 +1085,8 @@ export function mapDocToSimButtons(doc: MapDocument): SimButtonBlueprint[] {
         z: ty,
         radius: Math.max(1.2, anim?.radius ?? 2.5),
         activatesObstacleIds,
-        holdMs: 2500,
-        cooldownMs: 600,
+        holdMs: resolveActivatorHoldMs(doc, activatesObstacleIds, BUTTON_DEFAULT_HOLD_MS),
+        cooldownMs: BUTTON_PRESS_COOLDOWN_MS,
       };
     })
     .filter((b) => b.activatesObstacleIds.length > 0);
@@ -1094,8 +1126,8 @@ export function mapDocToSimActions(doc: MapDocument): SimActionBlueprint[] {
         radius: Math.max(1.0, anim?.radius ?? 2.0),
         trigger,
         activatesObstacleIds,
-        holdMs: 2000,
-        cooldownMs: 500,
+        holdMs: resolveActivatorHoldMs(doc, activatesObstacleIds, ACTION_DEFAULT_HOLD_MS),
+        cooldownMs: ACTION_TRIGGER_COOLDOWN_MS,
       };
     })
     .filter((a) => a.activatesObstacleIds.length > 0 || a.trigger === 'always');
@@ -1395,6 +1427,7 @@ export function mapDocHealthFloors(doc: MapDocument) {
       padZoneFromEntity(e, {
         healPerTick: e.healthFloor?.healPerTick ?? 8,
         intervalMs: e.healthFloor?.intervalMs ?? 500,
+        maxHealPercent: e.healthFloor?.maxHealPercent ?? 100,
       })
     );
 }
@@ -1404,8 +1437,12 @@ export function mapDocRedZones(doc: MapDocument) {
     .filter((e) => e.visible !== false && e.kind === 'red_zone')
     .map((e) =>
       padZoneFromEntity(e, {
-        damagePerTick: e.redZone?.damagePerTick ?? 15,
+        // Matches the hazard/obstacle convention above: instant kill is carried
+        // as a flag AND a lethal damage value, so a server that only reads
+        // `damagePerTick` still kills.
+        damagePerTick: e.redZone?.instantKill ? 9999 : e.redZone?.damagePerTick ?? 15,
         intervalMs: e.redZone?.intervalMs ?? 500,
+        instantKill: e.redZone?.instantKill ? 1 : 0,
       })
     );
 }
@@ -1416,6 +1453,7 @@ export function mapDocRevivePads(doc: MapDocument) {
     .map((e) =>
       padZoneFromEntity(e, {
         reviveTimeMs: e.revive?.reviveTimeMs ?? 4000,
+        capacity: e.revive?.capacity ?? 1,
       })
     );
 }

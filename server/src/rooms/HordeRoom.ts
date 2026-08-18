@@ -141,8 +141,14 @@ interface PadZone {
   height: number;
   healPerTick?: number;
   intervalMs?: number;
+  /** Stop healing above this percent of max HP; 0 or 100 = heal to full. */
+  maxHealPercent?: number;
   damagePerTick?: number;
+  /** Authored red-zone "instant kill" toggle, sent as 1/0. */
+  instantKill?: number;
   reviveTimeMs?: number;
+  /** Max players this pad may revive in one tick. */
+  capacity?: number;
 }
 
 interface ButtonZone {
@@ -999,7 +1005,8 @@ export class HordeRoom extends Room<RoomState> {
       o.z = zone.z;
       o.width = zone.width;
       o.height = Math.max(zone.height, 1.2);
-      o.damage = zone.damagePerTick ?? 15;
+      o.instantKill = !!zone.instantKill;
+      o.damage = o.instantKill ? 9999 : zone.damagePerTick ?? 15;
       o.intervalMs = zone.intervalMs ?? 500;
       o.activeMs = 999999;
       o.alwaysActive = true;
@@ -1543,15 +1550,22 @@ export class HordeRoom extends Room<RoomState> {
 
   private tickPads() {
     const now = Date.now();
+    // Authored "Max simultaneous revives" per pad — a pad with capacity 1 no
+    // longer revives a whole downed squad standing on it in the same tick.
+    const revivesUsed = new Map<string, number>();
     for (const player of this.state.players.values()) {
       if (!player.isAlive) {
         // Revive pad: standing teammate not required for MVP — auto revive if body on pad
         for (const pad of this.revivePads) {
-          if (this.isOnPad(player, pad)) {
-            player.health = Math.min(getMaxHealth(player), 60);
-            player.isAlive = true;
-            player.z = pad.z + 0.1;
-          }
+          if (!this.isOnPad(player, pad)) continue;
+          const capacity = Math.max(1, Math.round(pad.capacity ?? 1));
+          const used = revivesUsed.get(pad.id) ?? 0;
+          if (used >= capacity) continue;
+          revivesUsed.set(pad.id, used + 1);
+          player.health = Math.min(getMaxHealth(player), 60);
+          player.isAlive = true;
+          player.z = pad.z + 0.1;
+          break;
         }
         continue;
       }
@@ -1561,8 +1575,17 @@ export class HordeRoom extends Room<RoomState> {
         const last = this.lastHealAt.get(key) ?? 0;
         const interval = floor.intervalMs ?? 500;
         if (now - last < interval) continue;
+        const maxHealth = getMaxHealth(player);
+        // Authored heal cap (percent of max HP). 0 means "no cap" per
+        // EntityHealthFloor, and so does 100 — both heal to full.
+        const percent = floor.maxHealPercent ?? 100;
+        const ceiling =
+          percent > 0 && percent < 100
+            ? Math.min(maxHealth, Math.round((maxHealth * percent) / 100))
+            : maxHealth;
+        if (player.health >= ceiling) continue;
         this.lastHealAt.set(key, now);
-        player.health = Math.min(getMaxHealth(player), player.health + (floor.healPerTick ?? 8));
+        player.health = Math.min(ceiling, player.health + (floor.healPerTick ?? 8));
       }
     }
   }
