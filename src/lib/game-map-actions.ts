@@ -4,6 +4,7 @@
  * Cloud-published match maps — active map per mode for all clients.
  * Local editor drafts remain in browser localStorage.
  */
+import { unstable_noStore as noStore } from 'next/cache';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
@@ -280,7 +281,15 @@ export async function getCloudMapDocument(
 /** Public: active cloud map document for a mode (used by match clients). */
 export async function getActiveCloudMapDocument(
   mode: string
-): Promise<{ id: string; name: string; document: MapDocument; thumbnailUrl: string | null } | null> {
+): Promise<{
+  id: string;
+  localId: string | null;
+  name: string;
+  document: MapDocument;
+  thumbnailUrl: string | null;
+  updatedAt: string;
+} | null> {
+  noStore();
   const normalized = normalizeKilrunMode(mode);
   const row = await prisma.gameMap.findFirst({
     where: { mode: normalized, isActive: true },
@@ -291,9 +300,11 @@ export async function getActiveCloudMapDocument(
     const document = JSON.parse(row.documentJson) as MapDocument;
     return {
       id: row.id,
+      localId: row.localId,
       name: row.name,
       document,
       thumbnailUrl: row.thumbnailUrl,
+      updatedAt: row.updatedAt.toISOString(),
     };
   } catch (err) {
     // This is the LIVE map served to match clients — a corrupt row here

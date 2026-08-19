@@ -260,6 +260,7 @@ export default function KilrunEngine({
   const customDocRef = useRef<MapDocument | null>(null);
   const customLoadedRef = useRef(false);
   const cloudDocRef = useRef<MapDocument | null>(null);
+  const [liveMapLocalId, setLiveMapLocalId] = useState<string | null>(null);
   /** Deathrun MAIN map 3rd View — overrides camera for every game mode. */
   const deathrunTpsRef = useRef<unknown | null>(null);
   const [cloudReady, setCloudReady] = useState(false);
@@ -327,6 +328,7 @@ export default function KilrunEngine({
 
         if (cloud?.document) {
           cloudDocRef.current = cloud.document;
+          setLiveMapLocalId(cloud.localId || cloud.id);
           // Allow lobby effect to re-push if we already short-circuited on local-only miss.
           customLoadedRef.current = false;
         }
@@ -409,6 +411,7 @@ export default function KilrunEngine({
       const fresh = await getActiveCloudMapDocument(mode).catch(() => null);
       if (fresh?.document) {
         cloudDocRef.current = fresh.document;
+        setLiveMapLocalId(fresh.localId || fresh.id);
         return prepareDocForPlayTest(fresh.document).doc;
       }
       const raw =
@@ -1826,6 +1829,7 @@ export default function KilrunEngine({
         {editorOpen && isAdmin && (
           <MapEditor
             isAdmin={isAdmin}
+            initialMapId={liveMapLocalId ?? getActivePlayMapIdForMode(mode) ?? undefined}
             onClose={() => {
               setEditorOpen(false);
               setPaused(true);

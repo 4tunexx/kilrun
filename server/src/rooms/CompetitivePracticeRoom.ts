@@ -4,6 +4,7 @@ import { CompetitiveRoom } from './CompetitiveRoom.js';
 /** Solo map-editor Play Test — same Competitive sim, no matchmaking / rewards. */
 export class CompetitivePracticeRoom extends CompetitiveRoom {
   maxClients = 1;
+  protected usePublishedActiveMap = false;
   protected minPlayersToStart = 1;
 
   onCreate() {

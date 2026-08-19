@@ -24,6 +24,8 @@ import {
 } from '@/components/game/editor/prefab-storage';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * Public (match-server) endpoint: active MAIN cloud map for a mode, already
@@ -40,7 +42,10 @@ export async function GET(req: NextRequest) {
       orderBy: { updatedAt: 'desc' },
     });
     if (!row) {
-      return NextResponse.json({ ok: true, map: null });
+      return NextResponse.json(
+        { ok: true, map: null },
+        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+      );
     }
 
     let document: MapDocument;
@@ -82,16 +87,25 @@ export async function GET(req: NextRequest) {
       customMoves: prepared.customMoves as unknown as Record<string, unknown>[] | undefined,
     };
 
-    return NextResponse.json({
-      ok: true,
-      map: {
-        id: row.id,
-        name: row.name,
-        mode,
-        thumbnailUrl: row.thumbnailUrl,
-        payload,
+    return NextResponse.json(
+      {
+        ok: true,
+        map: {
+          id: row.id,
+          localId: row.localId,
+          name: row.name,
+          mode,
+          thumbnailUrl: row.thumbnailUrl,
+          updatedAt: row.updatedAt.toISOString(),
+          payload,
+        },
       },
-    });
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+        },
+      }
+    );
   } catch (err) {
     console.error('[api/game/active-map]', err);
     return NextResponse.json({ ok: false, error: 'Failed to load map' }, { status: 500 });

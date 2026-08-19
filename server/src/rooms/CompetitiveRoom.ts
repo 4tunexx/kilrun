@@ -223,6 +223,8 @@ export class CompetitiveRoom extends Room<RoomState> {
   private worldBounds: WorldBounds = { ...DEFAULT_WORLD_BOUNDS };
   private hostSessionId: string | null = null;
   private customMapLoaded = false;
+  /** Practice rooms set false — never load/replace with published MAIN. */
+  protected usePublishedActiveMap = true;
   private adminSessions = new Set<string>();
   /** Admin OR moderator sessions — eligible for the reserved staff join seat. */
   private staffSessions = new Set<string>();
@@ -837,6 +839,7 @@ export class CompetitiveRoom extends Room<RoomState> {
    * admin manually restarts Colyseus.
    */
   private syncActiveMapFromCloud(force = false) {
+    if (!this.usePublishedActiveMap) return;
     void fetchActiveMapPayload('competitive').then((active) => {
       if (!active) return;
       if (this.customMapLoaded && !force) return;

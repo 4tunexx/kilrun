@@ -246,6 +246,12 @@ export class DeathrunRoom extends Room<RoomState> {
 
   /** True after a client successfully pushed the Active/MAIN map. */
   private customMapLoaded = false;
+  /**
+   * Practice rooms set this false so Play Test (Live) never loads the
+   * published MAIN map (or swaps back to it on round reset). The client
+   * pushes the in-editor draft via loadCustomMap.
+   */
+  protected usePublishedActiveMap = true;
 
   onCreate() {
     this.setState(new RoomState());
@@ -508,13 +514,15 @@ export class DeathrunRoom extends Room<RoomState> {
 
     void ensurePowerDefinitionsLoaded();
 
-    void fetchActiveMapPayload('deathrun').then((active) => {
-      if (!active || this.customMapLoaded) return;
-      this.bootstrapCustomMap(
-        active.payload as Parameters<DeathrunRoom['bootstrapCustomMap']>[0],
-        `server:${active.name}`
-      );
-    });
+    if (this.usePublishedActiveMap) {
+      void fetchActiveMapPayload('deathrun').then((active) => {
+        if (!active || this.customMapLoaded) return;
+        this.bootstrapCustomMap(
+          active.payload as Parameters<DeathrunRoom['bootstrapCustomMap']>[0],
+          `server:${active.name}`
+        );
+      });
+    }
 
     // Defense-in-depth alongside sanitizeInput above: no code path in the sim
     // should be able to throw here anymore, but there's no process-level
@@ -1625,14 +1633,16 @@ export class DeathrunRoom extends Room<RoomState> {
       // across many rounds, so without this a map edit published mid-session
       // (e.g. taller walls) never reaches players until an admin manually
       // restarts Colyseus. Every new round now re-checks the cloud MAIN doc.
-      void fetchActiveMapPayload('deathrun').then((active) => {
-        if (!active) return;
-        this.bootstrapCustomMap(
-          active.payload as Parameters<DeathrunRoom['bootstrapCustomMap']>[0],
-          `server:${active.name}`,
-          true
-        );
-      });
+      if (this.usePublishedActiveMap) {
+        void fetchActiveMapPayload('deathrun').then((active) => {
+          if (!active) return;
+          this.bootstrapCustomMap(
+            active.payload as Parameters<DeathrunRoom['bootstrapCustomMap']>[0],
+            `server:${active.name}`,
+            true
+          );
+        });
+      }
     }
   }
 }
