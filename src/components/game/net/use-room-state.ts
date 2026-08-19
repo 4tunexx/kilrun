@@ -107,12 +107,13 @@ export function useRoomState(
         }
         if (removedAny) setPlayerCount(playersRef.current.size);
       },
-      onConnectionState: (state) => {
+      onConnectionState: (state, reason) => {
         if (disposed) return;
         setConnectionState(state);
         if (state === 'lost') {
           setConnectionError(
-            'Lost connection to the game server and could not reconnect. Check that the realtime server is deployed and NEXT_PUBLIC_GAME_SERVER_URL is set correctly.'
+            reason ??
+              'Lost connection to the game server and could not reconnect. Check that the realtime server is deployed and NEXT_PUBLIC_GAME_SERVER_URL is set correctly.'
           );
         } else if (state === 'connected') {
           setConnectionError(null);

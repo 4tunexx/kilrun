@@ -332,8 +332,24 @@ app.use('/monitor', monitor());
 
 const httpServer = http.createServer(app);
 
+/**
+ * Incoming WebSocket frame cap. `@colyseus/ws-transport` defaults to 4096
+ * bytes — far too small for Kilrun:
+ *   - `loadCustomMap` (Play Test + live host push) serializes the full sim
+ *     map (platforms, hazards, custom moves, shop/combat settings)
+ *   - join options include compacted skin JSON (up to ~48KB)
+ *
+ * Those frames were rejected as `RangeError: Max payload size exceeded`,
+ * which dropped the socket before the match could start. 8 MiB covers
+ * large custom maps with headroom while still bounding abusive clients.
+ */
+const WS_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024;
+
 const gameServer = new Server({
-  transport: new WebSocketTransport({ server: httpServer }),
+  transport: new WebSocketTransport({
+    server: httpServer,
+    maxPayload: WS_MAX_PAYLOAD_BYTES,
+  }),
 });
 
 gameServer.define('deathrun', DeathrunRoom);

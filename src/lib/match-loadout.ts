@@ -8,6 +8,9 @@ import {
   type WeaponCombatConfig,
 } from '@/lib/weapons';
 
+/** Join-options budget for equipped skins. Must stay well under the
+ * Colyseus WebSocket `maxPayload` (8 MiB on the game server) — this is
+ * the per-player cosmetics cap, not the map-push cap. */
 const MAX_SKIN_JSON_CHARS = 48_000;
 
 /** Strip huge data URLs before sending skins over the wire.

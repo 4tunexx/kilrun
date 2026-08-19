@@ -96,7 +96,10 @@ export interface RoomCallbacks {
    * to recover automatically; 'lost' means all reconnect attempts failed and
    * the caller should surface an error / stop sending input.
    */
-  onConnectionState?: (state: 'connected' | 'reconnecting' | 'lost') => void;
+  onConnectionState?: (
+    state: 'connected' | 'reconnecting' | 'lost',
+    reason?: string
+  ) => void;
 }
 
 function resolveGameServerUrl(): string {
@@ -124,6 +127,21 @@ const CONSENTED_CLOSE_CODE = 4000;
 /** Close code CompetitiveRoom sends for a deliberate @abandonMatch — never
  * worth auto-reconnecting or offering a manual rejoin for. */
 const ABANDONED_CLOSE_CODE = 4002;
+/** RFC 6455: Message Too Big. Retrying the same oversized join/map payload
+ * cannot succeed — the server closed us with 1009. */
+const MESSAGE_TOO_BIG_CODE = 1009;
+const MESSAGE_TOO_BIG_HINT =
+  'The game server closed the connection because a message was too large (usually the map). Make sure the latest game server is deployed.';
+
+/** Close codes that must not auto-reconnect (intentional leave, or a retry
+ * that cannot succeed). Exported for unit tests. */
+export function shouldAttemptReconnect(code: number): boolean {
+  return (
+    code !== CONSENTED_CLOSE_CODE &&
+    code !== ABANDONED_CLOSE_CODE &&
+    code !== MESSAGE_TOO_BIG_CODE
+  );
+}
 /** How many automatic reconnect attempts before giving up and reporting 'lost'. */
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 800;
@@ -279,6 +297,13 @@ export class GameConnection {
   private scheduleReconnect(code: number) {
     if (this.disposed || !this.lastJoin) return;
     if (code === CONSENTED_CLOSE_CODE) return; // we left on purpose
+    if (!shouldAttemptReconnect(code)) {
+      this.lastJoin.callbacks.onConnectionState?.(
+        'lost',
+        code === MESSAGE_TOO_BIG_CODE ? MESSAGE_TOO_BIG_HINT : undefined
+      );
+      return;
+    }
     const { roomName, options, callbacks } = this.lastJoin;
 
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
