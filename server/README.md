@@ -101,6 +101,11 @@ GAME_JOIN_TOKEN_SECRET=<same as game server>
 
 Redeploy the Next.js app after changing `NEXT_PUBLIC_*` (inlined at build time).
 
+### Troubleshooting
+
+**`RangeError: Max payload size exceeded` (can't start a real match or Play Test Live)**  
+Colyseus's WebSocket transport defaults to a **4KB** incoming message cap. Kilrun map pushes (`loadCustomMap`) and join skin JSON are much larger than that, so the socket is dropped as soon as the client sends the map. The server now sets `maxPayload` to 8 MiB in `server/src/index.ts`. Redeploy this service (or Admin → Dashboard → Restart Colyseus after the new build is live) for the change to take effect.
+
 ### After game-server deploy
 
 From the hub as admin:
