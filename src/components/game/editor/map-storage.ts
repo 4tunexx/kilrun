@@ -3,6 +3,7 @@ import { createEmptyMap, ensureEnvironment, generateId, getMapGameMode } from '.
 import type { KilrunMode } from '@/lib/game-modes';
 import { KILRUN_MODES, normalizeKilrunMode } from '@/lib/game-modes';
 import { getActivePlayMapIdForMode } from './prefab-storage';
+import { deleteMapOnDesktop, syncMapToDesktop } from '@/lib/engine/desktop-bridge';
 
 const INDEX_KEY = 'kilrun.mapIndex.v1';
 const DOC_PREFIX = 'kilrun.mapDoc.v1.';
@@ -132,7 +133,7 @@ export function listMaps(filterMode?: KilrunMode): MapListItem[] {
 export function saveMap(
   id: string,
   doc: MapDocument,
-  opts?: { thumbnailDataUrl?: string | null }
+  opts?: { thumbnailDataUrl?: string | null; skipDesktopSync?: boolean }
 ): void {
   const updatedAt = new Date().toISOString();
   const next: MapDocument = {
@@ -165,6 +166,12 @@ export function saveMap(
   const index = readIndex().filter((m) => m.id !== id);
   index.push(indexEntryFromDoc(id, next, serialized));
   writeIndex(index);
+  if (!opts?.skipDesktopSync) {
+    const thumb =
+      opts?.thumbnailDataUrl ??
+      (typeof window !== 'undefined' ? localStorage.getItem(THUMB_PREFIX + id) : null);
+    syncMapToDesktop({ id, serialized, thumbnail: thumb });
+  }
 }
 
 function normalizeMapDocument(doc: MapDocument): MapDocument {
@@ -297,6 +304,7 @@ export function deleteMap(id: string): void {
   localStorage.removeItem(DOC_PREFIX + id);
   localStorage.removeItem(THUMB_PREFIX + id);
   writeIndex(readIndex().filter((m) => m.id !== id));
+  deleteMapOnDesktop(id);
 }
 
 export function duplicateMap(id: string, newName?: string): string | null {

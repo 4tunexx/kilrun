@@ -14,7 +14,12 @@
     "db:seed-assets": "tsx scripts/seed-asset-registry.ts",
     "db:seed-guides": "tsx scripts/seed-guides.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "engine:ui:dev": "vite --config desktop/ui/vite.config.ts",
+    "engine:ui:build": "vite build --config desktop/ui/vite.config.ts",
+    "engine:icon": "node desktop/scripts/make-engine-icon.mjs",
+    "engine:dev": "tauri dev --config desktop/src-tauri/tauri.conf.json",
+    "engine:build": "node desktop/scripts/build-engine.mjs"
   },
   "dependencies": {
     "@clerk/backend": "^3.11.7",
@@ -45,6 +50,7 @@
     "@radix-ui/react-tooltip": "^1.1.8",
     "@simplewebauthn/browser": "^9.0.1",
     "@simplewebauthn/server": "^9.0.3",
+    "@tauri-apps/api": "^2.9.1",
     "@vercel/blob": "^2.6.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -73,15 +79,21 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.9.6",
     "@types/node": "^20",
     "@types/react": "^19.2.1",
     "@types/react-dom": "^19.2.1",
     "@types/three": "^0.185.1",
+    "@vitejs/plugin-react": "^4.7.0",
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.5.20",
+    "png-to-ico": "^3.0.2",
     "postcss": "^8",
+    "rcedit": "^4.0.1",
+    "sharp": "^0.35.3",
     "tailwindcss": "^3.4.1",
     "typescript": "^5",
+    "vite": "^6.3.5",
     "vitest": "^3.2.7"
   }
 }

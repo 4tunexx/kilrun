@@ -8,6 +8,7 @@ export default {
     './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+    './desktop/ui/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     container: {
@@ -149,6 +150,18 @@ export default {
           "0%, 100%": { filter: "brightness(1)" },
           "50%": { filter: "brightness(1.15)" },
         },
+        "engine-mark": {
+          "0%, 100%": { transform: "scale(1)", filter: "drop-shadow(0 0 18px rgba(226,61,74,0.4))" },
+          "50%": { transform: "scale(1.06)", filter: "drop-shadow(0 0 36px rgba(226,61,74,0.8))" },
+        },
+        "engine-load": {
+          "0%": { transform: "translateX(-120%)" },
+          "100%": { transform: "translateX(220%)" },
+        },
+        "engine-sheen": {
+          "0%": { backgroundPosition: "0% 50%" },
+          "100%": { backgroundPosition: "200% 50%" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -171,6 +184,9 @@ export default {
         "nick-neon": "nick-neon 1.6s ease-in-out infinite",
         "nick-glitch": "nick-glitch 0.45s steps(2) infinite",
         "nick-glow": "nick-glow 2.4s ease-in-out infinite",
+        "engine-mark": "engine-mark 2.4s ease-in-out infinite",
+        "engine-load": "engine-load 1.4s ease-in-out infinite",
+        "engine-sheen": "engine-sheen 4s linear infinite",
       },
     },
   },

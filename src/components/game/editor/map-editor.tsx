@@ -227,13 +227,20 @@ const HISTORY_MAX_STEPS = 60;
  */
 const HISTORY_MAX_BYTES = 48 * 1024 * 1024;
 
+export type MapEditorVariant = 'overlay' | 'engine';
+
 export function MapEditor({
   onClose,
   initialMapId,
+  variant = 'overlay',
+  onViewportReady,
 }: {
   onClose: () => void;
   isAdmin?: boolean;
   initialMapId?: string;
+  /** overlay = hub portal; engine = fill Kilrun Engine shell */
+  variant?: MapEditorVariant;
+  onViewportReady?: (api: EditorViewportApi | null) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<EditorViewportApi | null>(null);
@@ -762,6 +769,7 @@ export function MapEditor({
       },
     });
     apiRef.current = api;
+    onViewportReady?.(api);
     api.setBrush(brush);
     api.setEditTool(editTool);
     api.setActiveLayerId(activeLayerId);
@@ -775,6 +783,7 @@ export function MapEditor({
     return () => {
       api.destroy();
       apiRef.current = null;
+      onViewportReady?.(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -853,8 +862,8 @@ export function MapEditor({
           updatedAt: row.updatedAt,
         });
         toast({
-          title: `“${published.name}” is Active ${modeInfo.shortTitle} map`,
-          description: 'Published to cloud for all players. Rejoin a match (or wait for the next round) to load it.',
+          title: `“${published.name}” is now the MAIN map for ${modeInfo.shortTitle}`,
+          description: 'Players load this map on the live web game. Rejoin a match (or wait for the next round) to see it.',
         });
       })
       .catch((err) => {
@@ -926,11 +935,16 @@ export function MapEditor({
         }
         if (!opts?.quiet) {
           const isLive = row.isActive;
+          const origin = typeof window !== 'undefined' ? (window.__KILRUN_PLATFORM_URL__ || '') : '';
           toast({
-            title: isLive ? 'Saved — this is the live match map' : 'Map saved',
+            title: isLive
+              ? `This is now the MAIN map for ${modeInfo.shortTitle}`
+              : variant === 'engine'
+                ? `Uploaded${origin ? ` to ${origin.replace(/^https?:\/\//, '')}` : ''} as a draft`
+                : 'Map saved',
             description: isLive
-              ? `“${next.name}” is Active. Players already in a match get it on the next round; new matches use it now.`
-              : `“${next.name}” saved to cloud. Live matches still use the Active/MAIN map until you Set as MAIN.`,
+              ? `Players load “${next.name}” on the next match.`
+              : `“${next.name}” saved. Set as MAIN when it is ready for players.`,
           });
         }
       }).catch((err) => {
@@ -2107,8 +2121,46 @@ export function MapEditor({
   const sidebarPlugin = getSidebarPlugin(tab);
   const railPlugins = getSidebarPlugins();
 
-  return createPortal(
-    <div className="fixed inset-0 z-[9999] bg-[#0d121a] text-white flex flex-col">
+  useEffect(() => {
+    if (variant !== 'engine' || typeof window === 'undefined') return;
+    const onCommand = (event: Event) => {
+      const type = (event as CustomEvent<{ type?: string }>).detail?.type;
+      if (!type) return;
+      if (type === 'save' || type === 'upload-draft') handleManualSave();
+      else if (type === 'export') doExport();
+      else if (type === 'import') fileRef.current?.click();
+      else if (type === 'undo') undo();
+      else if (type === 'redo') redo();
+      else if (type === 'play') void startPlay();
+      else if (type === 'play-live') void startPlayLive();
+      else if (type === 'publish') publishToMatch();
+      else if (type === 'hide-ui') collapseAllMenus();
+      else if (type === 'help') setShowHelp(true);
+      else if (type === 'tab-assets') setTab('assets');
+      else if (type === 'reset-camera') apiRef.current?.resetCamera();
+      else if (type === 'validate') {
+        const issues = validateMapForPublish(workingDoc());
+        const errors = issues.filter((i) => i.level === 'error').length;
+        toast({
+          title: errors ? `Map has ${errors} error${errors === 1 ? '' : 's'}` : 'Validation passed',
+          description: formatValidationSummary(issues) || 'No issues.',
+          variant: errors ? 'destructive' : undefined,
+        });
+      }
+    };
+    window.addEventListener('kilrun-engine-command', onCommand);
+    return () => window.removeEventListener('kilrun-engine-command', onCommand);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant]);
+
+  const editorShell = (
+    <div
+      className={
+        variant === 'engine'
+          ? 'absolute inset-0 bg-[#0d121a] text-white flex flex-col'
+          : 'fixed inset-0 z-[9999] bg-[#0d121a] text-white flex flex-col'
+      }
+    >
       {isTouch && (
         <>
           {/* Joystick layer stays under chrome (z-[120]+) so Tools / Levels stay clickable */}
@@ -2340,8 +2392,14 @@ export function MapEditor({
 
       {/* Top bar */}
       {!uiCollapsed && (
-      <div className="h-12 border-b border-white/10 flex items-center gap-2 px-3 bg-[#121a24] relative z-[60] overflow-x-auto shrink-0">
-        <span className="text-xs font-bold tracking-widest text-cyan-300/90 uppercase shrink-0">Map Editor</span>
+      <div className={`h-12 border-b flex items-center gap-2 px-3 overflow-x-auto shrink-0 ${
+        variant === 'engine'
+          ? 'border-red-500/20 bg-[#0c1018] relative z-10'
+          : 'border-white/10 bg-[#121a24] relative z-[60]'
+      }`}>
+        <span className={`text-xs font-bold tracking-widest uppercase shrink-0 ${
+          variant === 'engine' ? 'text-red-300/90' : 'text-cyan-300/90'
+        }`}>{variant === 'engine' ? 'Map' : 'Map Editor'}</span>
         <span
           className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded shrink-0 ${modeInfo.badgeClass}`}
           title={modeInfo.editorBlurb}
@@ -2407,6 +2465,8 @@ export function MapEditor({
           ))}
         </select>
 
+        {variant !== 'engine' ? (
+        <>
         <Button
           size="sm"
           className="ml-2 bg-emerald-600 hover:bg-emerald-500 text-white shrink-0"
@@ -2456,6 +2516,14 @@ export function MapEditor({
         >
           {isLiveHere ? 'MAIN map ✓' : 'Set as MAIN map'}
         </Button>
+        </>
+        ) : (
+          <span className={`ml-2 shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded ${
+            isLiveHere ? 'border border-red-400/50 text-red-200 bg-red-500/15' : 'text-slate-500'
+          }`}>
+            {isLiveHere ? 'MAIN' : dirty ? 'Unsaved' : 'Draft'}
+          </span>
+        )}
 
         <Button
           size="sm"
@@ -2509,6 +2577,8 @@ export function MapEditor({
             Live map
           </span>
         )}
+        {variant !== 'engine' ? (
+        <>
         <Button
           size="sm"
           variant="secondary"
@@ -2524,6 +2594,8 @@ export function MapEditor({
         <Button size="sm" variant="secondary" className="shrink-0" onClick={() => fileRef.current?.click()}>
           <Upload className="w-4 h-4 mr-1" /> Import
         </Button>
+        </>
+        ) : null}
         <input
           ref={fileRef}
           type="file"
@@ -2569,14 +2641,16 @@ export function MapEditor({
             e.target.value = '';
           }}
         />
-        <Button size="sm" variant="destructive" className="shrink-0" onClick={requestClose} title="Exit (Esc)">
+        <Button size="sm" variant="destructive" className="shrink-0" onClick={requestClose} title={variant === 'engine' ? 'Back to projects (Esc)' : 'Exit (Esc)'}>
           <X className="w-4 h-4" />
         </Button>
       </div>
       )}
 
       {!uiCollapsed && cloudActive && !isCloudLive && (
-        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-amber-950/90 border-b border-amber-500/35 text-[11px] text-amber-100 relative z-[55]">
+        <div className={`shrink-0 flex items-center gap-2 px-3 py-1.5 bg-amber-950/90 border-b border-amber-500/35 text-[11px] text-amber-100 relative ${
+          variant === 'engine' ? 'z-10' : 'z-[55]'
+        }`}>
           <span className="min-w-0 truncate">
             {liveCloudMismatchMessage(doc.name, cloudActive)}
           </span>
@@ -6166,9 +6240,11 @@ export function MapEditor({
           />
         </div>
       )}
-    </div>,
-    document.body
+    </div>
   );
+
+  if (variant === 'engine') return editorShell;
+  return createPortal(editorShell, document.body);
 }
 
 function ToolBtn({

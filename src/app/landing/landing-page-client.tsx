@@ -216,7 +216,8 @@ export default function LandingPageClient({
   const wordmarkSrc = resolveHeaderLogo(headerLogoUrl);
 
   const handleNavigation = () => {
-    window.location.href = '/api/auth/steam';
+    const next = new URLSearchParams(window.location.search).get('next');
+    window.location.href = next === '/engine' ? '/api/auth/steam?next=/engine' : '/api/auth/steam';
   };
 
   const renderAuthCard = () => (

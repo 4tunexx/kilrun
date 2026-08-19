@@ -7,6 +7,7 @@ import {
 import { steamIdsPromotedToAdmin } from '@/lib/roles';
 import { runAsTrustedServer } from '@/lib/trusted-server';
 import { getSiteSecretValue } from '@/lib/site-secrets';
+import { KILRUN_AUTH_NEXT_COOKIE, steamAuthRedirect } from '@/lib/steam-auth-next';
 
 const STEAM_OPENID_URL = 'https://steamcommunity.com/openid/login';
 const STEAM_CLAIMED_ID_REGEX = /^https:\/\/steamcommunity\.com\/openid\/id\/(\d+)$/;
@@ -178,7 +179,9 @@ async function handleSteamCallback(req: NextRequest) {
     salt: SESSION_COOKIE,
   });
 
-  const response = NextResponse.redirect(`${origin}/`);
+  const response = NextResponse.redirect(
+    steamAuthRedirect(origin, req.cookies.get(KILRUN_AUTH_NEXT_COOKIE)?.value)
+  );
   response.cookies.set(SESSION_COOKIE, sessionToken, {
     httpOnly: true,
     secure: isSecureDeployment,
@@ -186,5 +189,6 @@ async function handleSteamCallback(req: NextRequest) {
     path: '/',
     maxAge: 30 * 24 * 60 * 60,
   });
+  response.cookies.delete('kilrun_auth_next');
   return response;
 }

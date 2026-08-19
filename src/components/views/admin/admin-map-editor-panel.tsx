@@ -49,6 +49,10 @@ import {
 } from '@/lib/game-modes';
 import { getMapGameMode } from '@/components/game/editor/map-document';
 import { listCloudMapDocuments, publishCloudMap, forkCloudMap, deleteCloudMapsMatching } from '@/lib/game-map-actions';
+import { EngineLaunchBanner } from '@/components/engine/engine-launch-banner';
+import { tryLaunchKilrunEngine } from '@/lib/engine/protocol';
+import { isKilrunEngineDesktop, isWindowsClient } from '@/lib/engine/runtime';
+import { getEngineLaunchPref } from '@/lib/engine/launch-pref';
 
 const MapEditor = dynamic(() => import('@/components/game/editor/map-editor'), {
   ssr: false,
@@ -150,6 +154,7 @@ export function AdminMapEditorPanel() {
   if (!selectedMode) {
     return (
       <div className="space-y-4">
+        <EngineLaunchBanner />
         <Card className="border-slate-700/60 bg-slate-900/50">
           <CardHeader className="pb-2">
             <CardTitle className="text-lg flex items-center gap-2">
@@ -202,6 +207,7 @@ export function AdminMapEditorPanel() {
 
   return (
     <div className="space-y-4">
+      <EngineLaunchBanner />
       <Card className="border-slate-700/60 bg-slate-900/50">
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -383,7 +389,16 @@ export function AdminMapEditorPanel() {
                         <Button
                           size="sm"
                           className="h-7 text-xs"
-                          onClick={() => setEditorMapId(m.id)}
+                          onClick={() => {
+                            if (
+                              isWindowsClient() &&
+                              !isKilrunEngineDesktop() &&
+                              getEngineLaunchPref() === 'auto'
+                            ) {
+                              tryLaunchKilrunEngine({ mapId: m.id });
+                            }
+                            setEditorMapId(m.id);
+                          }}
                         >
                           <Pencil className="h-3 w-3 mr-1" /> Open
                         </Button>

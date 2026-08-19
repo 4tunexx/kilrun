@@ -1,0 +1,20 @@
+{
+  "identifier": "default",
+  "description": "Kilrun Engine window capabilities",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:1420/*",
+      "http://localhost:3000/*",
+      "http://127.0.0.1:3000/*",
+      "https://kilrun.vercel.app/*"
+    ]
+  },
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "deep-link:default"
+  ]
+}

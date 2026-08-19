@@ -42,6 +42,13 @@ docs/
 
 ## Getting started
 
+Install **Kilrun Engine** with the Windows installer (no npm, no browser). After
+`npm run engine:build`, share:
+
+`desktop/dist/Kilrun Engine Setup.exe`
+
+Maps save to `Documents/Kilrun/Projects`. The website hub is unchanged for players.
+
 1. Copy `.env.example` → `.env` and fill values (MongoDB, Steam, Clerk, secrets).
 2. Install and push schema:
 
@@ -78,6 +85,10 @@ docs/
 | `npm test` | Vitest unit tests |
 | `npm run db:push` | Push Prisma schema to MongoDB |
 | `npm run db:seed` | Seed progression catalogs locally |
+| `npm run engine:dev` | Rebuild Kilrun Engine (developers only; players install the `.exe`) |
+| `npm run engine:build` | Windows installer → `desktop/dist/Kilrun Engine Setup.exe` |
+
+See [`desktop/README.md`](./desktop/README.md) for the Engine architecture.
 
 ## Environment variables
 

@@ -72,6 +72,20 @@ import {
   type HammerPrimitive,
 } from './hammer-shapes';
 
+export type EditorRenderStats = {
+  fps: number;
+  frameMs: number;
+  calls: number;
+  triangles: number;
+  geometries: number;
+  textures: number;
+  programs: number;
+  pixelRatio: number;
+  webgl: 'WebGL2' | 'WebGL';
+  gpu: string;
+  idle: boolean;
+};
+
 /** Editor-only rendering shortcuts — never written into MapDocument.environment. */
 export type EditorPerfMode = {
   /** Hide floor plane + void floor disc. */
@@ -384,6 +398,8 @@ export interface EditorViewportApi {
   } | null;
   /** Clear the copied paint state so LMB clicks revert to the brush default. */
   clearCopiedTexture: () => void;
+  /** Desktop Engine HUD — does not dirty the viewport. */
+  getRenderStats: () => EditorRenderStats;
   destroy: () => void;
 }
 
@@ -3196,6 +3212,23 @@ export function createEditorViewport(
 
   let raf = 0;
   const clock = new THREE.Clock();
+  let fps = 0;
+  let frameMs = 0;
+  let fpsFrames = 0;
+  let fpsWindowStart = performance.now();
+  let lastDrawAt = 0;
+  const gl = renderer.getContext();
+  const webglKind: 'WebGL2' | 'WebGL' =
+    typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext
+      ? 'WebGL2'
+      : 'WebGL';
+  let gpuName = '';
+  try {
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    if (dbg) gpuName = String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '');
+  } catch {
+    gpuName = '';
+  }
   const tick = () => {
     raf = requestAnimationFrame(tick);
     if (paused) return;
@@ -3350,6 +3383,15 @@ export function createEditorViewport(
       renderer.setViewport(col * 2, 0, w - col * 2, h);
       renderer.setScissor(col * 2, 0, w - col * 2, h);
       renderer.render(scene, sideCam);
+    }
+    const drawnAt = performance.now();
+    frameMs = drawnAt - nowMs;
+    lastDrawAt = drawnAt;
+    fpsFrames += 1;
+    if (drawnAt - fpsWindowStart >= 500) {
+      fps = (fpsFrames * 1000) / Math.max(1, drawnAt - fpsWindowStart);
+      fpsFrames = 0;
+      fpsWindowStart = drawnAt;
     }
   };
   raf = requestAnimationFrame(tick);
@@ -4421,6 +4463,22 @@ export function createEditorViewport(
     clearCopiedTexture: () => {
       copiedTexture = null;
     },
+    getRenderStats: () => {
+      const info = renderer.info;
+      return {
+        fps,
+        frameMs,
+        calls: info.render.calls,
+        triangles: info.render.triangles,
+        geometries: info.memory.geometries,
+        textures: info.memory.textures,
+        programs: info.programs?.length ?? 0,
+        pixelRatio: renderer.getPixelRatio(),
+        webgl: webglKind,
+        gpu: gpuName,
+        idle: lastDrawAt > 0 ? performance.now() - lastDrawAt > 800 : true,
+      };
+    },
     destroy: () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
@@ -4467,6 +4525,7 @@ export function createEditorViewport(
   for (const key of Object.keys(api) as (keyof EditorViewportApi)[]) {
     const original = api[key];
     if (typeof original !== 'function') continue;
+    if (key === 'getRenderStats' || key === 'getDoc' || key === 'destroy') continue;
     const wrapped = (...args: unknown[]) => {
       const result = (original as (...a: unknown[]) => unknown).apply(api, args);
       requestRender();

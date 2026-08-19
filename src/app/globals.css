@@ -147,3 +147,14 @@
     border: 2px solid transparent;
   }
 }
+
+.engine-grid {
+  background-image:
+    linear-gradient(rgba(226, 61, 74, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(226, 61, 74, 0.07) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.engine-sheen {
+  background-size: 200% 200%;
+}
