@@ -4,6 +4,7 @@ import { HordeRoom } from './HordeRoom.js';
 /** Solo map-editor Play Test — same Horde sim, no matchmaking / rewards. */
 export class HordePracticeRoom extends HordeRoom {
   maxClients = 1;
+  protected usePublishedActiveMap = false;
   protected minPlayersToStart = 1;
 
   onCreate() {

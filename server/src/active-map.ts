@@ -23,14 +23,14 @@ export async function fetchActiveMapPayload(
     return null;
   }
 
-  const url = `${base}/api/game/active-map?mode=${encodeURIComponent(mode)}`;
+  const url = `${base}/api/game/active-map?mode=${encodeURIComponent(mode)}&t=${Date.now()}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
 
   try {
     const res = await fetch(url, {
       method: 'GET',
-      headers: { accept: 'application/json' },
+      headers: { accept: 'application/json', 'cache-control': 'no-store' },
       signal: controller.signal,
     });
     if (!res.ok) {

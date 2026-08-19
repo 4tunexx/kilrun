@@ -139,8 +139,10 @@ import {
   ensureStarterMap,
   exportJson,
   getMapThumbnail,
+  hydrateCloudMapsIntoLocal,
   importJson,
   listMaps,
+  loadMap,
   loadMapDetailed,
   saveMap,
 } from './map-storage';
@@ -168,7 +170,12 @@ import './engine/builtins';
 import { getSidebarPlugin, getSidebarPlugins, isStudioPluginTab } from './engine/registry';
 import type { MapEditorBrains, MapEditorStudioOptions } from './engine/types';
 import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
-import { publishCloudMap } from '@/lib/game-map-actions';
+import { listCloudMapDocuments, publishCloudMap } from '@/lib/game-map-actions';
+import {
+  isEditorMapTheLiveCloudMap,
+  liveCloudMismatchMessage,
+  type CloudActiveMapMeta,
+} from './live-map-identity';
 import type { MapShopSettings } from './map-document';
 import {
   BUILTIN_TEXTURES,
@@ -381,15 +388,11 @@ export function MapEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
-  // handleManualSave is called from the keydown effect below, whose
-  // dependency array intentionally omits activePlayId (it changes without
-  // touching any listed dep, so the effect wouldn't rebind) — read the
-  // latest value via ref instead of letting the Ctrl+S handler close over a
-  // stale activePlayId and skip the "this map is live" warning.
-  const activePlayIdRef = useRef<string | null>(null);
+  const [cloudActive, setCloudActive] = useState<CloudActiveMapMeta | null>(null);
+  const cloudActiveRef = useRef<CloudActiveMapMeta | null>(null);
   useEffect(() => {
-    activePlayIdRef.current = activePlayId;
-  }, [activePlayId]);
+    cloudActiveRef.current = cloudActive;
+  }, [cloudActive]);
   const [measureMode, setMeasureMode] = useState(false);
   const [measureDist, setMeasureDist] = useState<number | null>(null);
   /** Master hide: collapses top bar, side menus, tools, and properties for a clear canvas. */
@@ -592,6 +595,8 @@ export function MapEditor({
   const gameMode = getMapGameMode(doc);
   const modeInfo = KILRUN_MODE_INFO[gameMode];
   const kindOptions = entityKindsForMode(gameMode);
+  const isCloudLive = isEditorMapTheLiveCloudMap(mapId, cloudActive);
+  const isLiveHere = isCloudLive || (!cloudActive && activePlayId === mapId);
 
   // Mobile: start with menus tucked away so the viewport is usable for placing.
   useEffect(() => {
@@ -840,10 +845,16 @@ export function MapEditor({
       thumbnailDataUrl: getMapThumbnail(mapId),
       setActive: true,
     })
-      .then(() => {
+      .then((row) => {
+        setCloudActive({
+          id: row.id,
+          localId: row.localId,
+          name: row.name,
+          updatedAt: row.updatedAt,
+        });
         toast({
           title: `“${published.name}” is Active ${modeInfo.shortTitle} map`,
-          description: 'Published to cloud for all players. Rejoin lobby to reload.',
+          description: 'Published to cloud for all players. Rejoin a match (or wait for the next round) to load it.',
         });
       })
       .catch((err) => {
@@ -904,14 +915,22 @@ export function MapEditor({
         document: next,
         thumbnailDataUrl: liveThumb ?? getMapThumbnail(mapId),
         setActive: false,
-      }).then(() => {
+      }).then((row) => {
+        if (row.isActive) {
+          setCloudActive({
+            id: row.id,
+            localId: row.localId,
+            name: row.name,
+            updatedAt: row.updatedAt,
+          });
+        }
         if (!opts?.quiet) {
-          const isLive = activePlayId === mapId;
+          const isLive = row.isActive;
           toast({
-            title: isLive ? '🔴 Saved — LIVE for players' : 'Map saved',
+            title: isLive ? 'Saved — this is the live match map' : 'Map saved',
             description: isLive
-              ? `“${next.name}” is the Active map — players in a match right now just got this change.`
-              : `“${next.name}” saved and synced to cloud — visible on all devices.`,
+              ? `“${next.name}” is Active. Players already in a match get it on the next round; new matches use it now.`
+              : `“${next.name}” saved to cloud. Live matches still use the Active/MAIN map until you Set as MAIN.`,
           });
         }
       }).catch((err) => {
@@ -947,9 +966,11 @@ export function MapEditor({
    * so if this map is already Active it goes live for players immediately.
    */
   const handleManualSave = () => {
-    if (activePlayIdRef.current === mapId && !liveSaveConfirmedRef.current) {
+    const cloud = cloudActiveRef.current;
+    const editingLive = isEditorMapTheLiveCloudMap(mapId, cloud);
+    if (editingLive && !liveSaveConfirmedRef.current) {
       const ok = confirm(
-        `“${docRef.current.name}” is the Active ${modeInfo.shortTitle} map — players are on it right now.\n\nSave will publish your changes to them immediately. Continue?`
+        `“${docRef.current.name}” is the Active ${modeInfo.shortTitle} map — live matches load this document.\n\nSave will publish your changes to new matches immediately. Continue?`
       );
       if (!ok) return;
       liveSaveConfirmedRef.current = true;
@@ -972,6 +993,62 @@ export function MapEditor({
       onClose();
     }
   };
+
+  // Pull cloud drafts + the real Active/MAIN identity so live-play isn't
+  // confused with "whatever this browser last edited".
+  useEffect(() => {
+    let cancelled = false;
+    void listCloudMapDocuments(gameMode)
+      .then((rows) => {
+        if (cancelled) return;
+        const { activeLocalId } = hydrateCloudMapsIntoLocal(
+          rows,
+          gameMode,
+          setActivePlayMapIdForMode
+        );
+        const active = rows.find((r) => r.isActive) ?? null;
+        setCloudActive(
+          active
+            ? {
+                id: active.id,
+                localId: active.localId,
+                name: active.name,
+                updatedAt: active.updatedAt,
+              }
+            : null
+        );
+        if (activeLocalId) setActivePlayId(activeLocalId);
+        const openRow = rows.find((r) => (r.localId || r.id) === mapId);
+        if (
+          openRow &&
+          snapshotMapDoc(workingDoc()) === lastSavedRef.current
+        ) {
+          const localUpdated = loadMap(mapId)?.meta?.updatedAt ?? '';
+          if (!localUpdated || openRow.updatedAt.localeCompare(localUpdated) > 0) {
+            const next = {
+              ...openRow.document,
+              name: openRow.name || openRow.document.name,
+              gameMode,
+              environment: ensureEnvironment(openRow.document),
+            };
+            skipHistory.current = true;
+            apiRef.current?.setDoc(next);
+            setDoc(next);
+            docRef.current = next;
+            markClean(next);
+            skipHistory.current = false;
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[map editor cloud hydrate]', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Re-run when switching modes so Horde/Comp MAIN isn't confused with Deathrun.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameMode, mapId]);
 
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
@@ -2104,10 +2181,10 @@ export function MapEditor({
             <Save className="w-4 h-4" />
             {dirty ? 'Save •' : 'Save'}
           </button>
-          {activePlayId === mapId && (
+          {isLiveHere && (
             <span
               className="flex items-center gap-1.5 rounded-xl border border-red-400/60 bg-red-500/25 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-red-200 shadow-lg"
-              title="This is the Active map players are in right now."
+              title="This document is the cloud Active/MAIN map live matches load."
             >
               <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
               Live map
@@ -2367,11 +2444,17 @@ export function MapEditor({
         <Button
           size="sm"
           variant="secondary"
-          className={`shrink-0 ${activePlayId === mapId ? 'border border-emerald-400/50 text-emerald-200' : ''}`}
+          className={`shrink-0 ${isLiveHere ? 'border border-emerald-400/50 text-emerald-200' : ''}`}
           onClick={publishToMatch}
-          title="Use this map in Deathrun matches"
+          title={
+            isLiveHere
+              ? 'This is the cloud Active/MAIN map live matches load'
+              : cloudActive
+                ? liveCloudMismatchMessage(doc.name, cloudActive)
+                : 'Publish this map as the live match map for this mode'
+          }
         >
-          {activePlayId === mapId ? 'MAIN map ✓' : 'Set as MAIN map'}
+          {isLiveHere ? 'MAIN map ✓' : 'Set as MAIN map'}
         </Button>
 
         <Button
@@ -2417,10 +2500,10 @@ export function MapEditor({
         </Button>
 
         <div className="flex-1 min-w-2" />
-        {activePlayId === mapId && (
+        {isLiveHere && (
           <span
             className="shrink-0 flex items-center gap-1.5 rounded-full border border-red-400/60 bg-red-500/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-red-200"
-            title="This is the Active map players are in right now — Save publishes changes to them immediately."
+            title="This document is the cloud Active/MAIN map live matches load — Save publishes to new matches."
           >
             <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
             Live map
@@ -2490,6 +2573,22 @@ export function MapEditor({
           <X className="w-4 h-4" />
         </Button>
       </div>
+      )}
+
+      {!uiCollapsed && cloudActive && !isCloudLive && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-amber-950/90 border-b border-amber-500/35 text-[11px] text-amber-100 relative z-[55]">
+          <span className="min-w-0 truncate">
+            {liveCloudMismatchMessage(doc.name, cloudActive)}
+          </span>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="shrink-0 h-7 border border-amber-400/50 text-amber-50"
+            onClick={publishToMatch}
+          >
+            Set as MAIN
+          </Button>
+        </div>
       )}
 
       <div className="flex-1 flex min-h-0 relative">

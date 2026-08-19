@@ -1,7 +1,8 @@
 import type { MapDocument, MapEnvironment } from './map-document';
 import { createEmptyMap, ensureEnvironment, generateId, getMapGameMode } from './map-document';
 import type { KilrunMode } from '@/lib/game-modes';
-import { normalizeKilrunMode } from '@/lib/game-modes';
+import { KILRUN_MODES, normalizeKilrunMode } from '@/lib/game-modes';
+import { getActivePlayMapIdForMode } from './prefab-storage';
 
 const INDEX_KEY = 'kilrun.mapIndex.v1';
 const DOC_PREFIX = 'kilrun.mapDoc.v1.';
@@ -396,6 +397,14 @@ export function formatBytes(n?: number): string {
 }
 
 export function ensureStarterMap(): { id: string; doc: MapDocument } {
+  // Prefer the locally marked Active/MAIN map so opening the editor without
+  // an id doesn't resurrect an older prototype sitting first in the index.
+  for (const mode of KILRUN_MODES) {
+    const activeId = getActivePlayMapIdForMode(mode);
+    if (!activeId) continue;
+    const activeDoc = loadMap(activeId);
+    if (activeDoc) return { id: activeId, doc: activeDoc };
+  }
   const existing = listMaps()[0];
   if (existing) {
     const doc = loadMap(existing.id);
