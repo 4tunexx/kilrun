@@ -25,12 +25,19 @@ const nextConfig: NextConfig = {
   // same code is also compiled by the standalone Colyseus server build
   // (server/tsconfig.json) under Node's native ESM loader, which requires
   // real .js extensions on relative imports. Without this, Turbopack dev
-  // fails with "Module not found: Can't resolve './power-definitions.js'"
+  // fails with "Module not found: Can't resolve './sim-constants.js'"
   // even though `next build` (webpack) compiles the exact same file fine.
+  // Next 15 Turbopack has no extensionAlias equivalent (resolveExtensionAlias
+  // only landed in a later release), so every shared/ module imported with a
+  // .js suffix needs an explicit entry. Alias *values* resolve from the
+  // project root, so map to './shared/<name>.ts'. Keep this list in sync with
+  // `grep -rhoE "from '\./[a-z-]+\.js'" shared/`.
   turbopack: {
     resolveExtensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.json'],
     resolveAlias: {
-      './power-definitions.js': './power-definitions.ts',
+      './power-definitions.js': './shared/power-definitions.ts',
+      './sim-constants.js': './shared/sim-constants.ts',
+      './custom-moves.js': './shared/custom-moves.ts',
     },
   },
   // Ensure custom-output Prisma engines are traced into Vercel serverless bundles.
