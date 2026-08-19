@@ -38,6 +38,34 @@ export function applyEntityOpacity(root: THREE.Object3D, opacity: number | undef
   });
 }
 
+/**
+ * Tint every standard material under a root. Called on the existing-root
+ * `syncEntity` path so the Properties color picker actually updates the mesh
+ * (previously color was only applied when Hammer solids / fallbacks were
+ * first constructed).
+ *
+ * Writes `__origColor` so a later `applyEntityGlow(..., off)` restores this
+ * tint instead of the GLB's factory color.
+ */
+export function applyEntityColor(root: THREE.Object3D, color?: string) {
+  if (!color) return;
+  if (root.userData?.isEditorMarker) return;
+  const tint = new THREE.Color(color);
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !child.material) return;
+    if (child.name === '__glow_halo__') return;
+    const mats = Array.isArray(child.material) ? child.material : [child.material];
+    for (const m of mats) {
+      if (!m || !('color' in m)) continue;
+      const mat = m as THREE.MeshStandardMaterial;
+      if (!mat.color) continue;
+      mat.color.copy(tint);
+      mat.userData.__origColor = tint.clone();
+      mat.needsUpdate = true;
+    }
+  });
+}
+
 const GLOW_HALO_NAME = '__glow_halo__';
 const GLOW_LIGHT_NAME = '__glow_point_light__';
 

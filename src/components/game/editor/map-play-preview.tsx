@@ -12,6 +12,7 @@ import {
   HAMMER_SOLID_MODEL,
   ensureEnvironment,
   entityExportsAsPlatform,
+  getMapGameMode,
   isHammerSolidEntity,
   isInvisibleMarkerKind,
   suggestPlayerBindings,
@@ -272,6 +273,7 @@ export function MapPlayPreview({
   // live matches use (kilrun-engine.tsx), so Play Test never drifts.
   // Defaults apply until the async fetch resolves.
   const bindingsRef = useRef<Record<KeyBindAction, string>>(DEFAULT_KEY_BINDINGS);
+  const playMode = getMapGameMode(doc);
   useEffect(() => {
     let cancelled = false;
     getKeyBindings()
@@ -389,6 +391,10 @@ export function MapPlayPreview({
     const prepared = prepareDocForPlayTest(doc);
     const playDoc = prepared.doc;
     if (prepared.autoStart) setAutoStartNote(true);
+    const animatedPlay = playDoc.entities.filter((ent) => {
+      if (ent.glow?.enabled && ent.glow.pulse && ent.glow.pulse !== 'none') return true;
+      return ent.kind === 'spinner' || !!ent.spinHazard?.enabled;
+    });
 
     const initialTps = tpsRef.current;
     setTpsHud(initialTps);
@@ -1001,7 +1007,7 @@ export function MapPlayPreview({
       const frameDt = Math.min(clock.getDelta(), 0.05);
       const now = performance.now();
 
-      for (const ent of playDoc.entities) {
+      for (const ent of animatedPlay) {
         if (ent.glow?.enabled && ent.glow.pulse && ent.glow.pulse !== 'none') {
           const r = roots.get(ent.id);
           if (r) tickEntityGlow(r, ent.glow, now);
@@ -1787,6 +1793,14 @@ export function MapPlayPreview({
             <p className="mx-auto max-w-md rounded-lg border border-amber-400/40 bg-amber-500/20 px-3 py-2 text-center text-[11px] text-amber-100">
               Auto-spawned on a solid floor (no Start marker needed). Optional: place a green Start
               if you want a specific spawn spot.
+            </p>
+          </div>
+        )}
+        {playMode !== 'deathrun' && !embedded && !loading && (
+          <div className="absolute bottom-3 left-3 right-3 z-[70] pointer-events-none">
+            <p className="mx-auto max-w-lg rounded-lg border border-sky-400/40 bg-sky-500/15 px-3 py-2 text-center text-[11px] text-sky-100">
+              Local Play Test simulates movement and collision only. Use Play Test (Live) for{' '}
+              {playMode === 'horde' ? 'Horde waves, red zones, and revives' : 'team spawns, shops, and round rules'}.
             </p>
           </div>
         )}

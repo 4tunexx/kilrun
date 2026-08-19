@@ -5,6 +5,7 @@ import {
   getSidebarPlugins,
   isStudioPluginTab,
   registerMapEditorPlugin,
+  resetMapEditorPluginRegistry,
   setBuiltinMapEditorPlugins,
 } from './registry';
 import type { MapEditorBrains, MapEditorPlugin } from './types';
@@ -17,7 +18,7 @@ function plugin(id: string, order: number, extra: Partial<MapEditorPlugin> = {})
 
 describe('map editor plugin registry', () => {
   beforeEach(() => {
-    setBuiltinMapEditorPlugins([]);
+    resetMapEditorPluginRegistry();
   });
 
   it('sorts the rail by ascending order, not registration order', () => {
@@ -62,5 +63,22 @@ describe('map editor plugin registry', () => {
     setBuiltinMapEditorPlugins([plugin('weapon', 100, { onActivate: (b) => { seen = b; } })]);
     getSidebarPlugin('weapon')?.onActivate?.(brains);
     expect(seen).toBe(brains);
+  });
+
+  it('replaces an add-on re-registered with the same id (HMR / double import)', () => {
+    setBuiltinMapEditorPlugins([plugin('assets', 10)]);
+    registerMapEditorPlugin(plugin('addon', 15, { label: 'first' }));
+    registerMapEditorPlugin(plugin('addon', 15, { label: 'second' }));
+    const addons = getSidebarPlugins().filter((p) => p.id === 'addon');
+    expect(addons).toHaveLength(1);
+    expect(addons[0].label).toBe('second');
+  });
+
+  it('lets an add-on replace a built-in with the same id instead of duplicating it', () => {
+    setBuiltinMapEditorPlugins([plugin('world', 50, { label: 'built-in' })]);
+    registerMapEditorPlugin(plugin('world', 50, { label: 'override' }));
+    const worlds = getSidebarPlugins().filter((p) => p.id === 'world');
+    expect(worlds).toHaveLength(1);
+    expect(worlds[0].label).toBe('override');
   });
 });

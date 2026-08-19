@@ -4,7 +4,7 @@ import { CloudSun, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { FloorPreset, SkyPreset } from '../map-document';
 import { MOOD_PRESETS } from '../map-storage';
-import { DEFAULT_EDITOR_PERF_MODE } from '../editor-viewport';
+import { DEFAULT_EDITOR_PERF_MODE, LARGE_MAP_EDITOR_PERF_MODE } from '../editor-viewport';
 import type { MapEditorBrains, MapEditorPlugin } from '../engine/types';
 
 function WorldPanel({ brains }: { brains: MapEditorBrains }) {
@@ -233,6 +233,23 @@ function WorldPanel({ brains }: { brains: MapEditorBrains }) {
               <p className="text-[10px] text-white/35 leading-snug">
                 Cut rendering work while editing a heavy map. Play Test and live matches are unaffected and still render everything at full quality.
               </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full text-xs border-amber-500/40 text-amber-200 hover:bg-amber-500/10"
+                onClick={() => {
+                  const next = { ...LARGE_MAP_EDITOR_PERF_MODE };
+                  setEditorPerf(next);
+                  apiRef.current?.setEditorPerfMode(next);
+                  toast({
+                    title: 'Large-map performance on',
+                    description:
+                      'Bloom, sky texture, fog, void glow, and collision wires are off in the editor only. Play Test stays full quality.',
+                  });
+                }}
+              >
+                Large map preset
+              </Button>
               {(
                 [
                   ['disableBloom', 'Disable bloom (biggest GPU saving)'],

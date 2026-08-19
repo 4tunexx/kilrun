@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isEditorMapTheLiveCloudMap,
+  isEditorMapLiveHere,
   liveCloudMismatchMessage,
   type CloudActiveMapMeta,
 } from './live-map-identity';
@@ -27,6 +28,18 @@ describe('isEditorMapTheLiveCloudMap', () => {
 
   it('is false when nothing is Active in cloud yet', () => {
     expect(isEditorMapTheLiveCloudMap('map_local_a', null)).toBe(false);
+  });
+});
+
+describe('isEditorMapLiveHere', () => {
+  it('trusts cloud Active over a stale local MAIN flag', () => {
+    expect(isEditorMapLiveHere('map_local_new', cloud, 'map_local_new')).toBe(false);
+    expect(isEditorMapLiveHere('map_local_a', cloud, 'map_local_new')).toBe(true);
+  });
+
+  it('falls back to the local MAIN flag when cloud identity is unknown', () => {
+    expect(isEditorMapLiveHere('map_local_a', null, 'map_local_a')).toBe(true);
+    expect(isEditorMapLiveHere('map_local_a', null, 'other')).toBe(false);
   });
 });
 

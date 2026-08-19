@@ -39,7 +39,7 @@ import {
   ensureEnvironment,
   ensureSpinHazard,
 } from './map-document';
-import { bakeMeshCollisionForEntity, meshCollisionBakeKeyFor } from './mesh-voxelize';
+import { bakeMeshCollisionForEntity, meshCollisionBakeKeyFor, stripMeshCollisionIfModelChanged } from './mesh-voxelize';
 import {
   applySelectionTransformOp,
   nearestObbFaceAttach,
@@ -62,7 +62,11 @@ import {
   disposeOwnedGeometry,
   markOwnsGpuResources,
 } from './editor-mesh';
-import { applyEntityOpacity, applyEntityGlow, tickEntityGlow, tickSpinHazardVisual, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
+import { applyEntityOpacity, applyEntityColor, applyEntityGlow, tickEntityGlow, tickSpinHazardVisual, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
+import {
+  entityStructureFingerprint,
+  entityVisualFingerprint,
+} from './engine/entity-fingerprint';
 import {
   defaultSizeForHammer,
   hollowHammerCollisionPads,
@@ -123,6 +127,17 @@ export const DEFAULT_EDITOR_PERF_MODE: EditorPerfMode = {
   disableBloom: false,
   capPixelRatio: false,
   skipCollisionGizmos: false,
+};
+
+/** One-click preset for maps that stall the editor (hundreds of solids / lights). */
+export const LARGE_MAP_EDITOR_PERF_MODE: EditorPerfMode = {
+  hideFloor: false,
+  hideSkyTexture: true,
+  hideVoidEffects: true,
+  hideFog: true,
+  disableBloom: true,
+  capPixelRatio: true,
+  skipCollisionGizmos: true,
 };
 function makeLightBulb(ent: EditorEntity): THREE.Group {
   const lightCfg = ensureLight(ent);
@@ -618,6 +633,29 @@ export function createEditorViewport(
    * starts a sync clears the entry first.
    */
   const syncedKeys = new Map<string, { key: string; structure: string }>();
+  /** World AABBs for place-on-surface — avoids `Box3.setFromObject` on every click. */
+  const worldBoxes = new Map<string, THREE.Box3>();
+  let envLoadGen = 0;
+
+  const gizmoMatSolid = new THREE.MeshBasicMaterial({
+    color: 0x22c55e,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.75,
+    depthTest: false,
+  });
+  const gizmoMatJump = gizmoMatSolid.clone();
+  gizmoMatJump.color.setHex(0x38bdf8);
+  const gizmoMatHazard = gizmoMatSolid.clone();
+  gizmoMatHazard.color.setHex(0xff2244);
+  const gizmoMatAnim = new THREE.LineBasicMaterial({
+    color: 0xfbbf24,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const gizmoCache = new Map<string, { key: string; objects: THREE.Object3D[] }>();
+  const animWireGroup = new THREE.Group();
+  animWireGroup.name = '__anim_wires';
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
   scene.add(ambientLight);
@@ -714,6 +752,7 @@ export function createEditorViewport(
   const gizmoGroup = new THREE.Group();
   gizmoGroup.name = '__gizmos';
   scene.add(gizmoGroup);
+  scene.add(animWireGroup);
   const measureGroup = new THREE.Group();
   scene.add(measureGroup);
 
@@ -721,6 +760,7 @@ export function createEditorViewport(
     const skyHex = env.sky === 'custom' ? env.skyColor : SKY_COLORS[env.sky] ?? env.skyColor;
     const isVoid = env.floor === 'void';
     const perf = editorPerf;
+    const loadGen = ++envLoadGen;
 
     // Void maps: use VOID-SPECIFIC fog override (density & color) so the abyss
     // looks like Minecraft-style glowing-green shadow fog instead of the regular
@@ -748,16 +788,23 @@ export function createEditorViewport(
       new THREE.TextureLoader().load(
         env.skyTextureUrl,
         (tex) => {
+          if (loadGen !== envLoadGen) {
+            tex.dispose();
+            return;
+          }
           tex.colorSpace = THREE.SRGBColorSpace;
           tex.mapping = THREE.EquirectangularReflectionMapping;
           skyTexture = tex;
           scene.background = tex;
           scene.environment = tex;
+          requestRender();
         },
         undefined,
         () => {
+          if (loadGen !== envLoadGen) return;
           scene.background = new THREE.Color(effectiveSky);
           scene.environment = null;
+          requestRender();
         }
       );
     } else {
@@ -841,13 +888,20 @@ export function createEditorViewport(
     const tile = Math.max(1, env.floorTextureScale ?? 40);
     if (!isVoid && !perf.hideFloor && env.defaultTextureUrl) {
       new THREE.TextureLoader().load(env.defaultTextureUrl, (tex) => {
+        if (loadGen !== envLoadGen) {
+          tex.dispose();
+          return;
+        }
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
         tex.repeat.set(tile, tile);
+        if (mat.map && mat.map !== tex) mat.map.dispose();
         mat.map = tex;
         mat.needsUpdate = true;
+        requestRender();
       });
     } else if (mat.map) {
+      mat.map.dispose();
       mat.map = null;
       mat.needsUpdate = true;
     }
@@ -962,6 +1016,7 @@ export function createEditorViewport(
         m.scale.z * groupProxy.scale.z
       );
       applyPose(m.id, root);
+      cacheWorldBox(m.id, root);
     }
   };
 
@@ -1446,6 +1501,7 @@ export function createEditorViewport(
     };
 
     applyPose(selectedId, obj);
+    cacheWorldBox(selectedId, obj);
 
     if (transform.mode === 'translate' && selectedIds.length > 1) {
       for (const id of selectedIds) {
@@ -1458,6 +1514,7 @@ export function createEditorViewport(
         other.position.y += dy;
         other.position.z += dz;
         applyPose(id, other);
+        cacheWorldBox(id, other);
       }
     }
 
@@ -1489,6 +1546,7 @@ export function createEditorViewport(
   // becomes an untracked orphan (disposeRoot can never find it again), a
   // permanent duplicate-mesh + geometry/material leak.
   const syncTokens = new Map<string, number>();
+  const selectedUpdateTokens = new Map<string, number>();
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   let downX = 0;
@@ -1532,6 +1590,13 @@ export function createEditorViewport(
     return loadAnimatedPrefab(src);
   }
 
+  function cacheWorldBox(id: string, root: THREE.Object3D) {
+    root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(root);
+    if (box.isEmpty()) worldBoxes.delete(id);
+    else worldBoxes.set(id, box.clone());
+  }
+
   /** World Y of the top surface under a point (mesh AABB or ground). Ignores invisible markers. */
   function surfaceYAt(x: number, z: number, ignoreId?: string): number {
     let best = 0;
@@ -1544,8 +1609,11 @@ export function createEditorViewport(
         return;
       }
       if (root.userData.isEditorMarker) return;
-      const box = new THREE.Box3().setFromObject(root);
-      if (box.isEmpty()) return;
+      const box = worldBoxes.get(id) ?? (() => {
+        cacheWorldBox(id, root);
+        return worldBoxes.get(id);
+      })();
+      if (!box) return;
       if (x < box.min.x - 0.05 || x > box.max.x + 0.05) return;
       if (z < box.min.z - 0.05 || z > box.max.z + 0.05) return;
       if (box.max.y > best) best = box.max.y;
@@ -1925,9 +1993,11 @@ export function createEditorViewport(
     if (typeof ent.opacity === 'number') {
       applyEntityOpacity(root, ent.opacity);
     }
+    applyEntityColor(root, ent.color);
     applyEntityTexture(root, ent);
     applyEntityGlow(root, ent.glow, ent.color);
     if (ent.kind === 'light') syncLightParams(root, ent);
+    cacheWorldBox(ent.id, root);
     // Model/texture loads above are async, so the dirty window opened when this
     // sync started may already have closed by the time the mesh actually exists.
     requestRender();
@@ -1936,122 +2006,167 @@ export function createEditorViewport(
     // teardowns). Every caller refreshes once after its batch instead.
   }
 
-  function refreshGizmos() {
-    requestRender();
-    while (gizmoGroup.children.length) {
-      const c = gizmoGroup.children[0];
-      gizmoGroup.remove(c);
+  function disposeGizmoObjects(objects: THREE.Object3D[]) {
+    for (const c of objects) {
+      c.removeFromParent();
       if (c instanceof THREE.Mesh || c instanceof THREE.Line) {
         c.geometry?.dispose?.();
-        // Every hazard/solid wire-box and animation-wire Line below builds a
-        // fresh Material each refresh — disposing only geometry (as before)
-        // leaked one Material per gizmo every syncEntity()/select() call,
-        // i.e. on essentially every editor interaction. Mirrors
-        // clearSelectionOutlines()'s identical geometry+material disposal.
-        const material = c.material;
-        if (Array.isArray(material)) material.forEach((m) => m.dispose());
-        else material?.dispose?.();
+        // Shared gizmo materials are owned by the viewport, not these meshes.
       }
     }
-    // Perf mode stops here: the group is already emptied above, so nothing is
-    // drawn and, more importantly, nothing is rebuilt per edit.
-    if (editorPerf.skipCollisionGizmos) return;
+  }
+
+  function clearCollisionGizmos() {
+    for (const cached of gizmoCache.values()) disposeGizmoObjects(cached.objects);
+    gizmoCache.clear();
+    while (animWireGroup.children.length) {
+      const c = animWireGroup.children[0];
+      animWireGroup.remove(c);
+      if (c instanceof THREE.Line) c.geometry?.dispose?.();
+    }
+  }
+
+  function collisionGizmoKey(ent: EditorEntity, isSelected: boolean): string {
+    return [
+      isSelected ? 1 : 0,
+      showAllCollisionGizmos ? 1 : 0,
+      ent.kind,
+      ent.position.join(','),
+      ent.rotation.join(','),
+      ent.scale.join(','),
+      ent.collisionSize?.join(',') ?? '',
+      ent.primitive ?? '',
+      ent.jumpPad?.enabled ? 1 : 0,
+      ent.hazard?.enabled ? 1 : 0,
+      entityExportsAsPlatform(ent) ? 1 : 0,
+    ].join('|');
+  }
+
+  function buildCollisionGizmo(ent: EditorEntity): THREE.Object3D[] {
+    const objects: THREE.Object3D[] = [];
+    const root = roots.get(ent.id);
+    const isHz = ent.kind === 'hazard' || ent.hazard?.enabled;
+    if (isHz) {
+      const box =
+        (root && makeBoundsWireBox(root, 0xff2244, { material: gizmoMatHazard })) ||
+        new THREE.Mesh(
+          new THREE.BoxGeometry(
+            Math.max(0.5, Math.abs(ent.scale[0]) * 1.6),
+            Math.max(0.2, Math.abs(ent.scale[1]) * 0.4),
+            Math.max(0.5, Math.abs(ent.scale[2]) * 1.6)
+          ),
+          gizmoMatHazard
+        );
+      if (!root) box.position.set(ent.position[0], ent.position[1] + 0.05, ent.position[2]);
+      objects.push(box);
+      return objects;
+    }
+    if (!entityExportsAsPlatform(ent)) return objects;
+    const jump = ent.jumpPad?.enabled || ent.kind === 'jump_pad';
+    const mat = jump ? gizmoMatJump : gizmoMatSolid;
+    const hammerVol =
+      ent.primitive === 'box' ||
+      isHammerPrimitive(ent.primitive) ||
+      ent.model === HAMMER_SOLID_MODEL;
+    const pad =
+      (root &&
+        makeBoundsWireBox(root, jump ? 0x38bdf8 : 0x22c55e, {
+          flattenY: !hammerVol,
+          material: mat,
+        })) ||
+      (() => {
+        const foot = ent.collisionSize ?? [2, 0.25, 2];
+        const hy = hammerVol
+          ? Math.max(0.4, Math.abs(foot[1] * (ent.scale?.[1] ?? 1)))
+          : 0.08;
+        const m = new THREE.Mesh(
+          new THREE.BoxGeometry(
+            Math.max(0.5, Math.abs((ent.collisionSize?.[0] ?? ent.scale[0]) * (hammerVol ? 1 : 2))),
+            hy,
+            Math.max(0.5, Math.abs((ent.collisionSize?.[2] ?? ent.scale[2]) * (hammerVol ? 1 : 2)))
+          ),
+          mat
+        );
+        m.position.set(
+          ent.position[0],
+          ent.position[1] + (hammerVol ? hy * 0.5 : 0.04),
+          ent.position[2]
+        );
+        return m;
+      })();
+    objects.push(pad);
+    return objects;
+  }
+
+  function refreshGizmos() {
+    requestRender();
+    if (editorPerf.skipCollisionGizmos) {
+      clearCollisionGizmos();
+      refreshSelectionOutlines();
+      return;
+    }
     const selectedSet = new Set(
       selectedIds.length ? selectedIds : selectedId ? [selectedId] : []
     );
-    for (const ent of doc.entities) {
+    const entityById = new Map(doc.entities.map((e) => [e.id, e] as const));
+    const need = new Set<string>();
+    if (showAllCollisionGizmos) {
+      for (const ent of doc.entities) need.add(ent.id);
+    } else {
+      for (const id of selectedSet) need.add(id);
+    }
+
+    for (const [id, cached] of [...gizmoCache.entries()]) {
+      if (!need.has(id)) {
+        disposeGizmoObjects(cached.objects);
+        gizmoCache.delete(id);
+      }
+    }
+
+    for (const id of need) {
+      const ent = entityById.get(id);
+      if (!ent) continue;
       const isSelected = selectedSet.has(ent.id);
       const drawCollision = showAllCollisionGizmos || isSelected;
-      const root = roots.get(ent.id);
-      const isHz = ent.kind === 'hazard' || ent.hazard?.enabled;
+      if (!drawCollision) continue;
+      const key = collisionGizmoKey(ent, isSelected);
+      const prev = gizmoCache.get(id);
+      if (prev?.key === key) continue;
+      if (prev) disposeGizmoObjects(prev.objects);
+      const objects = buildCollisionGizmo(ent);
+      for (const o of objects) gizmoGroup.add(o);
+      gizmoCache.set(id, { key, objects });
+    }
 
-      if (drawCollision && isHz) {
-        const box =
-          (root && makeBoundsWireBox(root, 0xff2244)) ||
-          (() => {
-            const m = new THREE.Mesh(
-              new THREE.BoxGeometry(
-                Math.max(0.5, Math.abs(ent.scale[0]) * 1.6),
-                Math.max(0.2, Math.abs(ent.scale[1]) * 0.4),
-                Math.max(0.5, Math.abs(ent.scale[2]) * 1.6)
-              ),
-              new THREE.MeshBasicMaterial({
-                color: 0xff2244,
-                wireframe: true,
-                transparent: true,
-                opacity: 0.85,
-                depthTest: false,
-              })
-            );
-            m.position.set(ent.position[0], ent.position[1] + 0.05, ent.position[2]);
-            return m;
-          })();
-        gizmoGroup.add(box);
-      }
-
-      const showSolid = entityExportsAsPlatform(ent);
-      if (drawCollision && showSolid && !isHz) {
-        const color = ent.jumpPad?.enabled || ent.kind === 'jump_pad' ? 0x38bdf8 : 0x22c55e;
-        const hammerVol =
-          ent.primitive === 'box' ||
-          isHammerPrimitive(ent.primitive) ||
-          ent.model === HAMMER_SOLID_MODEL;
-        // Hammer solids are full volumes — show full-height wire, not flat pad.
-        const pad =
-          (root &&
-            makeBoundsWireBox(root, color, {
-              flattenY: !hammerVol,
-            })) ||
-          (() => {
-            const foot = ent.collisionSize ?? [2, 0.25, 2];
-            const hy = hammerVol
-              ? Math.max(0.4, Math.abs(foot[1] * (ent.scale?.[1] ?? 1)))
-              : 0.08;
-            const m = new THREE.Mesh(
-              new THREE.BoxGeometry(
-                Math.max(0.5, Math.abs((ent.collisionSize?.[0] ?? ent.scale[0]) * (hammerVol ? 1 : 2))),
-                hy,
-                Math.max(0.5, Math.abs((ent.collisionSize?.[2] ?? ent.scale[2]) * (hammerVol ? 1 : 2)))
-              ),
-              new THREE.MeshBasicMaterial({
-                color,
-                wireframe: true,
-                transparent: true,
-                opacity: 0.75,
-                depthTest: false,
-              })
-            );
-            m.position.set(
-              ent.position[0],
-              ent.position[1] + (hammerVol ? hy * 0.5 : 0.04),
-              ent.position[2]
-            );
-            return m;
-          })();
-        gizmoGroup.add(pad);
-      }
-
+    while (animWireGroup.children.length) {
+      const c = animWireGroup.children[0];
+      animWireGroup.remove(c);
+      if (c instanceof THREE.Line) c.geometry?.dispose?.();
+    }
+    const wireSources = showAllCollisionGizmos
+      ? doc.entities
+      : doc.entities.filter((e) => {
+          if (selectedSet.has(e.id)) return true;
+          const listen = e.animation?.listenToEntityId;
+          if (listen && selectedSet.has(listen)) return true;
+          return (e.animation?.activatesEntityIds ?? []).some((tid) => selectedSet.has(tid));
+        });
+    for (const ent of wireSources) {
       const listen = ent.animation?.listenToEntityId;
       const activates = ent.animation?.activatesEntityIds ?? [];
       const pairs: [string, string][] = [];
       if (listen) pairs.push([listen, ent.id]);
       for (const tid of activates) pairs.push([ent.id, tid]);
       for (const [fromId, toId] of pairs) {
-        const a = doc.entities.find((e) => e.id === fromId);
-        const b = doc.entities.find((e) => e.id === toId);
+        const a = entityById.get(fromId);
+        const b = entityById.get(toId);
         if (!a || !b) continue;
         const pts = [
-          new THREE.Vector3(...a.position),
-          new THREE.Vector3(...b.position),
+          new THREE.Vector3(a.position[0], a.position[1] + 0.8, a.position[2]),
+          new THREE.Vector3(b.position[0], b.position[1] + 0.8, b.position[2]),
         ];
-        pts[0].y += 0.8;
-        pts[1].y += 0.8;
         const geo = new THREE.BufferGeometry().setFromPoints(pts);
-        const line = new THREE.Line(
-          geo,
-          new THREE.LineBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.85 })
-        );
-        gizmoGroup.add(line);
+        animWireGroup.add(new THREE.Line(geo, gizmoMatAnim));
       }
     }
     refreshSelectionOutlines();
@@ -2120,6 +2235,12 @@ export function createEditorViewport(
     roots.delete(id);
     animatedEntities.delete(id);
     syncedKeys.delete(id);
+    worldBoxes.delete(id);
+    const giz = gizmoCache.get(id);
+    if (giz) {
+      disposeGizmoObjects(giz.objects);
+      gizmoCache.delete(id);
+    }
     requestRender();
   }
 
@@ -2133,7 +2254,7 @@ export function createEditorViewport(
    */
   function entitySyncKey(ent: EditorEntity, envTextureKey: string): string {
     const hidden = layerMeta(ent.layerId)?.visible === false;
-    return `${hidden ? 0 : 1}|${envTextureKey}|${JSON.stringify(ent)}`;
+    return entityVisualFingerprint(ent, { envTextureKey, layerHidden: hidden });
   }
 
   /**
@@ -2143,14 +2264,7 @@ export function createEditorViewport(
    * `updateSelected` disposes before patching).
    */
   function entityStructureKey(ent: EditorEntity): string {
-    return JSON.stringify([
-      ent.kind,
-      ent.model,
-      ent.customModelUrl,
-      ent.primitive,
-      ent.collisionSize,
-      ent.light?.type,
-    ]);
+    return entityStructureFingerprint(ent);
   }
 
   /**
@@ -4250,11 +4364,14 @@ export function createEditorViewport(
         transform.detach();
         disposeRoot(id);
       }
+      const gen = docGeneration;
+      const myToken = (selectedUpdateTokens.get(id) ?? 0) + 1;
+      selectedUpdateTokens.set(id, myToken);
       doc = {
         ...doc,
         entities: doc.entities.map((e) => {
           if (e.id !== id) return e;
-          const next = { ...e, ...patch };
+          let next = { ...e, ...patch };
           if (patch.kind === 'light' && !next.light) next.light = defaultLight(next.color);
           if (patch.kind === 'hazard' && !next.hazard) next.hazard = defaultHazard();
           if (patch.kind === 'spinner' && !next.spinHazard) next.spinHazard = defaultSpinHazard();
@@ -4267,45 +4384,47 @@ export function createEditorViewport(
               defaultSizeForHammer(shape);
             next.meshCollisionPads = hollowHammerCollisionPads(shape, size);
           }
+          if (modelChanged) next = stripMeshCollisionIfModelChanged(e, next);
           return next;
         }),
       };
       const ent = doc.entities.find((e) => e.id === id);
       if (ent) {
         void (async () => {
+          if (gen !== docGeneration || selectedUpdateTokens.get(id) !== myToken) return;
           if (modelChanged && (ent.model || ent.customModelUrl)) {
             const src = resolveModelSrc(ent.model, ent.customModelUrl);
             if (src) {
               const names = await scanModelClips(src);
+              if (gen !== docGeneration || selectedUpdateTokens.get(id) !== myToken) return;
+              const live = doc.entities.find((e) => e.id === id);
+              if (!live) return;
               if (names.length) {
                 const sug = AnimationDirector.suggestClips(names);
-                ent.animation = {
+                live.animation = {
                   ...defaultAnimation(),
-                  ...ent.animation,
+                  ...live.animation,
                   availableClips: names,
-                  defaultClip: ent.animation?.defaultClip || sug.defaultClip,
-                  activeClip: ent.animation?.activeClip || sug.activeClip,
+                  defaultClip: live.animation?.defaultClip || sug.defaultClip,
+                  activeClip: live.animation?.activeClip || sug.activeClip,
                 };
                 doc = {
                   ...doc,
-                  entities: doc.entities.map((e) => (e.id === id ? { ...ent } : e)),
+                  entities: doc.entities.map((e) => (e.id === id ? { ...live } : e)),
                 };
               }
             }
           }
-          await syncEntity(ent);
+          if (gen !== docGeneration || selectedUpdateTokens.get(id) !== myToken) return;
+          const live = doc.entities.find((e) => e.id === id);
+          if (!live) return;
+          await syncEntity(live);
+          if (gen !== docGeneration || selectedUpdateTokens.get(id) !== myToken) return;
           attachSelectionGizmo();
           refreshGizmos();
           handlers.onDocChange(doc);
         })();
       } else {
-        const ent = doc.entities.find((e) => e.id === id);
-        if (ent) {
-          void syncEntity(ent).then(() => {
-            attachSelectionGizmo();
-            refreshGizmos();
-          });
-        }
         handlers.onDocChange(doc);
       }
     },
@@ -4422,6 +4541,7 @@ export function createEditorViewport(
       copiedTexture = null;
     },
     destroy: () => {
+      envLoadGen += 1;
       cancelAnimationFrame(raf);
       ro.disconnect();
       renderer.domElement.removeEventListener('pointerdown', onPointerDownDirty);
@@ -4432,7 +4552,13 @@ export function createEditorViewport(
       if (document.pointerLockElement) document.exitPointerLock?.();
       boxOverlay.remove();
       director.clear();
+      clearSelectionOutlines();
+      clearCollisionGizmos();
       for (const id of [...roots.keys()]) disposeRoot(id);
+      gizmoMatSolid.dispose();
+      gizmoMatJump.dispose();
+      gizmoMatHazard.dispose();
+      gizmoMatAnim.dispose();
       if (skyTexture) {
         skyTexture.dispose();
         skyTexture = null;
@@ -4465,6 +4591,7 @@ export function createEditorViewport(
    * canvas stale until the user happens to move the mouse.
    */
   for (const key of Object.keys(api) as (keyof EditorViewportApi)[]) {
+    if (key === 'destroy') continue;
     const original = api[key];
     if (typeof original !== 'function') continue;
     const wrapped = (...args: unknown[]) => {

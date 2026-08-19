@@ -19,6 +19,20 @@ export function isEditorMapTheLiveCloudMap(
   return cloud.localId === editorLocalId || cloud.id === editorLocalId;
 }
 
+/**
+ * MAIN badge in the editor: cloud Active identity wins whenever it is known.
+ * Falling back to the browser's local MAIN flag while a *different* cloud
+ * Active map exists made the toolbar claim this draft was live.
+ */
+export function isEditorMapLiveHere(
+  editorLocalId: string,
+  cloud: CloudActiveMapMeta | null | undefined,
+  localActivePlayId: string | null | undefined
+): boolean {
+  if (cloud) return isEditorMapTheLiveCloudMap(editorLocalId, cloud);
+  return localActivePlayId === editorLocalId;
+}
+
 export function liveCloudMismatchMessage(
   editorName: string,
   cloud: CloudActiveMapMeta

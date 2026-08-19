@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyEntityGlow,
   applyEntityOpacity,
+  applyEntityColor,
   makeGameplayFallback,
   resolveFogColor,
   resolveSkyColor,
@@ -96,5 +97,16 @@ describe('map-scene-visuals', () => {
     expect(shouldUseGameplayFallback(stubEntity({ kind: 'red_zone' }), 'missing-model')).toBe(
       true
     );
+  });
+
+  it('tints existing meshes so the editor color picker is not a no-op', () => {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshStandardMaterial({ color: 0xffffff })
+    );
+    applyEntityColor(mesh, '#ff3366');
+    const mat = mesh.material as THREE.MeshStandardMaterial;
+    expect(mat.color.getHexString()).toBe('ff3366');
+    expect((mat.userData.__origColor as THREE.Color).getHexString()).toBe('ff3366');
   });
 });

@@ -216,7 +216,7 @@ export function makeSelectionOutline(root: THREE.Object3D, color = 0x38bdf8): TH
 export function makeBoundsWireBox(
   root: THREE.Object3D,
   color: number,
-  opts?: { flattenY?: boolean; yPad?: number }
+  opts?: { flattenY?: boolean; yPad?: number; material?: THREE.Material }
 ): THREE.Mesh | null {
   const box = entityWorldBox(root);
   if (!box) return null;
@@ -227,13 +227,14 @@ export function makeBoundsWireBox(
   const h = opts?.flattenY ? Math.max(0.06, opts.yPad ?? 0.08) : Math.max(0.08, size.y);
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(Math.max(0.2, size.x), h, Math.max(0.2, size.z)),
-    new THREE.MeshBasicMaterial({
-      color,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.8,
-      depthTest: false,
-    })
+    opts?.material ??
+      new THREE.MeshBasicMaterial({
+        color,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.8,
+        depthTest: false,
+      })
   );
   mesh.position.copy(center);
   if (opts?.flattenY) mesh.position.y = box.min.y + h * 0.5;

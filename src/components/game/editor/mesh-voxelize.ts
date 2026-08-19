@@ -78,6 +78,21 @@ export function needsMeshCollisionBake(e: EditorEntity, opts?: VoxelizeOptions):
   return e.meshCollisionBakeKey !== key;
 }
 
+/**
+ * Drop cached mesh-fit pads when the visual model changes. Export prefers
+ * `meshCollisionPads` over the live mesh, so keeping the previous bake would
+ * collide as the old doorway/arch until the next Play Test.
+ */
+export function stripMeshCollisionIfModelChanged(
+  prev: Pick<EditorEntity, 'model' | 'customModelUrl'> | undefined,
+  next: EditorEntity
+): EditorEntity {
+  if (!prev) return next;
+  if (prev.model === next.model && prev.customModelUrl === next.customModelUrl) return next;
+  if (!next.meshCollisionPads && !next.meshCollisionBakeKey) return next;
+  return { ...next, meshCollisionPads: undefined, meshCollisionBakeKey: undefined };
+}
+
 /** A non-axis-aligned direction avoids degenerate axis-aligned ray hits
  * (grazing exactly along a box face/edge) that break the parity count. */
 const PROBE_DIR = new THREE.Vector3(0.998, 0.0537, 0.0261).normalize();
@@ -313,6 +328,11 @@ async function entityLocalRenderGeometry(e: EditorEntity): Promise<THREE.BufferG
   if (!geometries.length) throw new Error('No mesh geometry found in this model.');
   const merged = geometries.length === 1 ? geometries[0] : mergeGeometries(geometries, false);
   if (!merged) throw new Error('Could not merge model geometry.');
+  // mergeGeometries copies into a new BufferGeometry — free the per-submesh
+  // clones so repeated bakes on large props don't accumulate GPU buffers.
+  if (geometries.length > 1) {
+    for (const g of geometries) g.dispose();
+  }
 
   // Same bottom-align + XZ-center convention every renderer applies via
   // plantLocalFeet, so voxel-space matches where the mesh visually sits

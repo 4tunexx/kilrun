@@ -98,9 +98,11 @@ function indexEntryFromDoc(id: string, doc: MapDocument, serialized: string): Ma
   };
 }
 
-/** Rebuild missing stats on older index rows (in-memory only — safe in React render). */
+/** Rebuild missing stats on older index rows. Writes the repaired stats back
+ * so the next listMaps call does not re-parse every document. */
 export function listMaps(filterMode?: KilrunMode): MapListItem[] {
   const index = readIndex();
+  let repaired = false;
   const enriched = index.map((item) => {
     if (
       item.entityCount != null &&
@@ -113,6 +115,7 @@ export function listMaps(filterMode?: KilrunMode): MapListItem[] {
         hasThumbnail: !!localStorage.getItem(THUMB_PREFIX + item.id),
       };
     }
+    repaired = true;
     const detailed = loadMapDetailed(item.id);
     if (!detailed.ok) {
       return {
@@ -122,8 +125,23 @@ export function listMaps(filterMode?: KilrunMode): MapListItem[] {
         hasThumbnail: !!localStorage.getItem(THUMB_PREFIX + item.id),
       };
     }
-    return indexEntryFromDoc(item.id, detailed.doc, JSON.stringify(detailed.doc));
+    return {
+      ...indexEntryFromDoc(item.id, detailed.doc, JSON.stringify(detailed.doc)),
+      hasThumbnail: !!localStorage.getItem(THUMB_PREFIX + item.id),
+    };
   });
+  if (repaired) {
+    try {
+      writeIndex(
+        enriched.map((item) => {
+          const { hasThumbnail: _thumb, ...row } = item;
+          return row;
+        })
+      );
+    } catch {
+      /* quota / private mode — in-memory list is still valid */
+    }
+  }
   const sorted = enriched.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   if (!filterMode) return sorted;
   return sorted.filter((m) => normalizeKilrunMode(m.gameMode) === filterMode);

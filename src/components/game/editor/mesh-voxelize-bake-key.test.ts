@@ -4,6 +4,7 @@ import {
   VOXELIZER_VERSION,
   meshCollisionBakeKeyFor,
   needsMeshCollisionBake,
+  stripMeshCollisionIfModelChanged,
 } from './mesh-voxelize';
 import type { CsgLocalPad, EditorEntity } from './map-document';
 
@@ -105,5 +106,28 @@ describe('needsMeshCollisionBake', () => {
   it('leaves existing pads alone when no key can be derived', () => {
     const e = entity({ model: undefined, meshCollisionPads: PADS });
     expect(needsMeshCollisionBake(e)).toBe(false);
+  });
+});
+
+describe('stripMeshCollisionIfModelChanged', () => {
+  it('clears pads and bake key when the model URL changes', () => {
+    const prev = entity({
+      model: 'crate',
+      meshCollisionPads: PADS,
+      meshCollisionBakeKey: 'v1|crate',
+    });
+    const next = stripMeshCollisionIfModelChanged(prev, { ...prev, model: 'barrel' });
+    expect(next.meshCollisionPads).toBeUndefined();
+    expect(next.meshCollisionBakeKey).toBeUndefined();
+  });
+
+  it('keeps pads when only pose changes', () => {
+    const prev = entity({
+      meshCollisionPads: PADS,
+      meshCollisionBakeKey: 'v1|crate',
+    });
+    const next = stripMeshCollisionIfModelChanged(prev, { ...prev, position: [4, 0, 0] });
+    expect(next.meshCollisionPads).toBe(PADS);
+    expect(next.meshCollisionBakeKey).toBe('v1|crate');
   });
 });

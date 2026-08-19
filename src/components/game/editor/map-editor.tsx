@@ -173,6 +173,7 @@ import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
 import { listCloudMapDocuments, publishCloudMap } from '@/lib/game-map-actions';
 import {
   isEditorMapTheLiveCloudMap,
+  isEditorMapLiveHere,
   liveCloudMismatchMessage,
   type CloudActiveMapMeta,
 } from './live-map-identity';
@@ -596,7 +597,7 @@ export function MapEditor({
   const modeInfo = KILRUN_MODE_INFO[gameMode];
   const kindOptions = entityKindsForMode(gameMode);
   const isCloudLive = isEditorMapTheLiveCloudMap(mapId, cloudActive);
-  const isLiveHere = isCloudLive || (!cloudActive && activePlayId === mapId);
+  const isLiveHere = isEditorMapLiveHere(mapId, cloudActive, activePlayId);
 
   // Mobile: start with menus tucked away so the viewport is usable for placing.
   useEffect(() => {
@@ -833,39 +834,41 @@ export function MapEditor({
       );
       if (!ok) return;
     }
-    persist();
-    setActivePlayMapIdForMode(gameMode, mapId);
-    setActivePlayId(mapId);
-    const published = workingDoc();
-    void publishCloudMap({
-      localId: mapId,
-      name: published.name,
-      mode: gameMode,
-      document: published,
-      thumbnailDataUrl: getMapThumbnail(mapId),
-      setActive: true,
-    })
-      .then((row) => {
-        setCloudActive({
-          id: row.id,
-          localId: row.localId,
-          name: row.name,
-          updatedAt: row.updatedAt,
-        });
-        toast({
-          title: `“${published.name}” is Active ${modeInfo.shortTitle} map`,
-          description: 'Published to cloud for all players. Rejoin a match (or wait for the next round) to load it.',
-        });
+    void persist().then((ok) => {
+      if (!ok) return;
+      setActivePlayMapIdForMode(gameMode, mapId);
+      setActivePlayId(mapId);
+      const published = workingDoc();
+      void publishCloudMap({
+        localId: mapId,
+        name: published.name,
+        mode: gameMode,
+        document: published,
+        thumbnailDataUrl: getMapThumbnail(mapId),
+        setActive: true,
       })
-      .catch((err) => {
-        console.warn('[publishToMatch cloud]', err);
-        toast({
-          title: `“${published.name}” is Active locally`,
-          description:
-            'Cloud publish failed — run Admin → Sync database schema if needed, then retry.',
-          variant: 'destructive',
+        .then((row) => {
+          setCloudActive({
+            id: row.id,
+            localId: row.localId,
+            name: row.name,
+            updatedAt: row.updatedAt,
+          });
+          toast({
+            title: `“${published.name}” is Active ${modeInfo.shortTitle} map`,
+            description: 'Published to cloud for all players. Rejoin a match (or wait for the next round) to load it.',
+          });
+        })
+        .catch((err) => {
+          console.warn('[publishToMatch cloud]', err);
+          toast({
+            title: `“${published.name}” is Active locally`,
+            description:
+              'Cloud publish failed — run Admin → Sync database schema if needed, then retry.',
+            variant: 'destructive',
+          });
         });
-      });
+    });
   };
 
   const workingDoc = () => {
@@ -895,7 +898,11 @@ export function MapEditor({
     setDirty(false);
   };
 
-  const persist = (opts?: { quiet?: boolean }) => {
+  const persist = async (opts?: { quiet?: boolean }) => {
+    // Same auto-bake Play Test uses — Save / Set MAIN / autosave used to write
+    // whatever pads were in the document, so Solid catalog props without a
+    // bake shipped as a single bounding box (blocked doorways in live matches).
+    await bakeAllSolidMeshCollision(PLAY_TEST_MESH_BAKE_OPTS);
     try {
       const next = workingDoc();
       const liveThumb = apiRef.current?.captureThumbnail() ?? null;
@@ -985,8 +992,9 @@ export function MapEditor({
     }
     // Browser confirm only has 2 buttons — approximate Save / Don't save / Cancel.
     if (confirm('You have unsaved changes.\n\nOK = Save and exit\nCancel = don’t save yet')) {
-      persist();
-      onClose();
+      void persist().then((ok) => {
+        if (ok) onClose();
+      });
       return;
     }
     if (confirm('Discard unsaved changes and exit the Map Editor?')) {
@@ -1666,6 +1674,7 @@ export function MapEditor({
     if (id === selectedId && apiRef.current) {
       scheduleHistory();
       apiRef.current.updateSelected(patch);
+      pullViewportDoc();
       return;
     }
     mutateLiveDoc((d) => ({
@@ -1920,7 +1929,13 @@ export function MapEditor({
     await bakeAllSolidMeshCollision(PLAY_TEST_MESH_BAKE_OPTS);
     // Do NOT auto-insert Player Avatar into the map — Play Test uses default
     // mannequin / existing avatar, and invents Start on a floor if needed.
-    persist();
+    await persist({ quiet: true });
+    if (gameMode !== 'deathrun') {
+      toast({
+        title: 'Local Play Test is platforming-only',
+        description: `${modeInfo.shortTitle} waves, shops, and team rules run in Play Test (Live). Movement and collision here still match the live sim.`,
+      });
+    }
     setPlayTpsOverride(tpsOverride ?? null);
     setPlayTest(true);
   };
@@ -1946,7 +1961,8 @@ export function MapEditor({
    * Brings existing maps in line with newly-placed props without making
    * the user re-toggle the Material dropdown on each one by hand. */
   const bakeAllSolidMeshCollision = async (opts?: { silent?: boolean; force?: boolean }) => {
-    const targets = doc.entities.filter(
+    const live = apiRef.current?.getDoc() ?? docRef.current ?? doc;
+    const targets = live.entities.filter(
       (e) =>
         resolveCollideMaterial(e) === 'solid' &&
         !isHammerSolidEntity(e) &&
@@ -1994,7 +2010,7 @@ export function MapEditor({
     // Same auto-bake as startPlay — the live server reads whatever collision
     // is persisted, so it must be up to date before persist() runs.
     await bakeAllSolidMeshCollision(PLAY_TEST_MESH_BAKE_OPTS);
-    persist();
+    await persist({ quiet: true });
     setPlayTestLive(true);
   };
 
