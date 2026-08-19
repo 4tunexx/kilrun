@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildEngineDeepLink, parseEngineDeepLink } from './protocol';
+import { buildEngineDeepLink, parseEngineDeepLink, parseEngineLoopbackUrl } from './protocol';
 import { detectEngineEnv, isKilrunEngineDesktop, isWindowsClient } from './runtime';
 import { shouldOfferEngineLaunch } from './launch-pref';
 
@@ -30,6 +30,16 @@ describe('kilrun engine protocol', () => {
       action: 'auth',
       token: 'abc.def',
     });
+  });
+});
+
+describe('engine loopback auth url', () => {
+  it('accepts only local engine-auth URLs', () => {
+    expect(parseEngineLoopbackUrl('http://127.0.0.1:54321/engine-auth')).toBe(
+      'http://127.0.0.1:54321/engine-auth'
+    );
+    expect(parseEngineLoopbackUrl('http://evil.example/engine-auth')).toBeNull();
+    expect(parseEngineLoopbackUrl('https://127.0.0.1:54321/engine-auth')).toBeNull();
   });
 });
 

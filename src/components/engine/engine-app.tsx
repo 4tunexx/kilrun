@@ -29,6 +29,7 @@ import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
 import { ENGINE_MARK, ENGINE_WORDMARK } from '@/lib/engine/brand';
 import {
   desktopEngineInfo,
+  startDesktopAuthLoopback,
   hydrateDesktopProjectsIntoLocal,
   openDesktopExternalUrl,
   openDesktopKilrunFolder,
@@ -42,6 +43,7 @@ import {
   configureEnginePlatform,
   enginePlatformOrigin,
   fetchEngineSession,
+  hasEngineSession,
   probeEngineApi,
   type EngineSessionUser,
 } from '@/lib/engine/platform-client';
@@ -56,7 +58,8 @@ export type EngineUser = {
 
 type PendingLiveAction =
   | { kind: 'command'; type: string }
-  | { kind: 'hub-upload'; mapId: string; setActive: boolean };
+  | { kind: 'hub-upload'; mapId: string; setActive: boolean }
+  | { kind: 'pull'; mode: KilrunMode };
 
 type CloudBadge = { uploaded: boolean; isActive: boolean };
 
@@ -220,10 +223,17 @@ export function EngineApp({
         pendingLiveActionRef.current = null;
         return;
       }
-      await openDesktopExternalUrl(`${origin}/api/engine/desktop-login`);
+      const port = await startDesktopAuthLoopback();
+      const login =
+        port != null
+          ? `${origin}/api/engine/desktop-login?loopback=${encodeURIComponent(
+              `http://127.0.0.1:${port}/engine-auth`
+            )}`
+          : `${origin}/api/engine/desktop-login`;
+      await openDesktopExternalUrl(login);
       toast({
         title: 'Link live game',
-        description: 'Finish Steam in the browser (staff account), then Open Kilrun Engine.',
+        description: 'Finish Steam in the browser, then return to Kilrun Engine. Keep this window open.',
       });
     } catch (err) {
       toast({
@@ -273,6 +283,8 @@ export function EngineApp({
             pendingLiveActionRef.current = null;
             if (pending?.kind === 'hub-upload') {
               await uploadHubMap(pending.mapId, pending.setActive);
+            } else if (pending?.kind === 'pull') {
+              await syncCloud(pending.mode, { alreadyLinked: true });
             } else if (pending?.kind === 'command') {
               window.dispatchEvent(
                 new CustomEvent('kilrun-engine-command', { detail: { type: pending.type } })
@@ -330,18 +342,40 @@ export function EngineApp({
     (m) => !query.trim() || m.name.toLowerCase().includes(query.trim().toLowerCase())
   );
 
-  const syncCloud = async (mode: KilrunMode) => {
+  const syncCloud = async (mode: KilrunMode, opts?: { alreadyLinked?: boolean }) => {
+    if (!opts?.alreadyLinked && !hasEngineSession()) {
+      pendingLiveActionRef.current = { kind: 'pull', mode };
+      toast({
+        title: 'Link live game first',
+        description: 'Pull copies maps from the website. Sign in with a staff Steam account.',
+        variant: 'destructive',
+      });
+      void connectLiveGame();
+      return;
+    }
     try {
       const rows = await listCloudMapDocuments(mode);
-      const { pulled } = hydrateCloudMapsIntoLocal(rows, mode, setActivePlayMapIdForMode);
+      const { pulled } = hydrateCloudMapsIntoLocal(rows, mode, setActivePlayMapIdForMode, {
+        force: true,
+      });
       refresh();
       await refreshCloud();
+      if (!rows.length) {
+        toast({
+          title: `No ${KILRUN_MODE_INFO[mode].shortTitle} maps on the live site`,
+          description: 'Create or upload a map, then Pull again.',
+        });
+        return;
+      }
       toast({
-        title: pulled ? `Pulled ${pulled} cloud map${pulled === 1 ? '' : 's'}` : 'Cloud maps up to date',
+        title: pulled
+          ? `Pulled ${pulled} ${KILRUN_MODE_INFO[mode].shortTitle} map${pulled === 1 ? '' : 's'}`
+          : `${KILRUN_MODE_INFO[mode].shortTitle} maps already in Engine`,
+        description: `From ${siteHost}`,
       });
     } catch (err) {
       toast({
-        title: 'Cloud sync failed',
+        title: 'Could not pull maps',
         description: err instanceof Error ? err.message : 'Staff live-link required',
         variant: 'destructive',
       });
@@ -760,6 +794,7 @@ function EngineMenuBar({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={ENGINE_MARK} alt="" className="h-7 w-7 object-contain drop-shadow-[0_0_10px_rgba(226,61,74,0.6)]" />
         <span className="font-black tracking-[0.22em] text-red-200">ENGINE</span>
+        <span className="text-[10px] text-slate-500">{KILRUN_ENGINE_VERSION}</span>
         <nav className="flex items-center gap-0.5 text-slate-200">
           <MenuDrop
             label="File"

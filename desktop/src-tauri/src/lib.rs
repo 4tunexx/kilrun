@@ -1,11 +1,13 @@
 use serde::Serialize;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use tauri::{AppHandle, Emitter};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager};
 
-const ENGINE_VERSION: &str = "0.1.0";
+const ENGINE_VERSION: &str = "0.1.1";
 
 fn default_platform_origin() -> String {
     option_env!("KILRUN_PLATFORM_URL")
@@ -467,11 +469,115 @@ fn emit_deep_link(app: &AppHandle, raw: &str) {
     let _ = app.emit("kilrun-engine-deep-link", raw);
 }
 
+fn percent_decode(input: &str) -> String {
+    let raw = input.as_bytes();
+    let mut bytes = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == b'%' && i + 2 < raw.len() {
+            if let Ok(value) =
+                u8::from_str_radix(std::str::from_utf8(&raw[i + 1..i + 3]).unwrap_or(""), 16)
+            {
+                bytes.push(value);
+                i += 3;
+                continue;
+            }
+        }
+        bytes.push(if raw[i] == b'+' { b' ' } else { raw[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+fn parse_loopback_token(request: &str) -> Option<String> {
+    let line = request.lines().next()?;
+    let path = line.split_whitespace().nth(1)?;
+    if !path.starts_with("/engine-auth") {
+        return None;
+    }
+    let query = path.split_once('?')?.1;
+    for pair in query.split('&') {
+        if let Some((key, value)) = pair.split_once('=') {
+            if key == "token" && !value.is_empty() {
+                return Some(percent_decode(value));
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+fn start_auth_loopback(app: AppHandle) -> Result<u16, String> {
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(180);
+        loop {
+            if Instant::now() > deadline {
+                break;
+            }
+            match listener.accept() {
+                Ok((mut stream, addr)) => {
+                    if !addr.ip().is_loopback() {
+                        continue;
+                    }
+                    listener.set_nonblocking(false).ok();
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                    let mut buf = vec![0u8; 8192];
+                    let n = stream.read(&mut buf).unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    if req.contains("favicon") {
+                        let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        listener.set_nonblocking(true).ok();
+                        continue;
+                    }
+                    if let Some(token) = parse_loopback_token(&req) {
+                        emit_deep_link(&app, &format!("kilrun-engine://auth?token={token}"));
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.set_focus();
+                            let _ = window.unminimize();
+                        }
+                        let body = b"<!DOCTYPE html><html><body style=\"font-family:Segoe UI,sans-serif;background:#0d121a;color:#e2e8f0;display:grid;place-items:center;height:100vh;margin:0\"><main><h1>Back in Kilrun Engine</h1><p>You can close this tab.</p></main></body></html>";
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes());
+                        let _ = stream.write_all(body);
+                    } else {
+                        let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        listener.set_nonblocking(true).ok();
+                        continue;
+                    }
+                    break;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(40));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    Ok(port)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let startup_link = std::env::args().find(|a| a.starts_with("kilrun-engine:"));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(url) = argv.iter().find(|a| a.starts_with("kilrun-engine:")) {
+                emit_deep_link(app, url);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+        }))
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             engine_info,
@@ -485,7 +591,8 @@ pub fn run() {
             set_engine_session,
             clear_engine_session,
             open_external_url,
-            navigate_engine
+            navigate_engine,
+            start_auth_loopback
         ])
         .setup(move |app| {
             let _ = ensure_layout();
@@ -501,6 +608,7 @@ pub fn run() {
             #[cfg(windows)]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
+                let _ = app.deep_link().register("kilrun-engine");
                 let app2 = handle.clone();
                 app.deep_link().on_open_url(move |event| {
                     for url in event.urls() {
@@ -512,7 +620,7 @@ pub fn run() {
             Ok(())
         })
         .on_page_load(|window, _payload| {
-            let _ = window.eval("window.__KILRUN_ENGINE__=true;window.__KILRUN_ENGINE_VERSION__='0.1.0';");
+            let _ = window.eval("window.__KILRUN_ENGINE__=true;window.__KILRUN_ENGINE_VERSION__='0.1.1';");
         })
         .run(tauri::generate_context!())
         .expect("error while running Kilrun Engine");

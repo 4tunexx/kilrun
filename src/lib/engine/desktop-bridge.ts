@@ -112,6 +112,17 @@ export async function setDesktopEngineSession(token: string | null): Promise<voi
   else await invoke('clear_engine_session');
 }
 
+export async function startDesktopAuthLoopback(): Promise<number | null> {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  try {
+    return await invoke<number>('start_auth_loopback');
+  } catch (err) {
+    console.warn('[kilrun-engine] auth loopback failed', err);
+    return null;
+  }
+}
+
 export async function openDesktopExternalUrl(url: string): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {

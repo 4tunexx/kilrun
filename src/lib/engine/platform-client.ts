@@ -144,9 +144,16 @@ export async function listCloudMaps(mode?: string): Promise<CloudMapListItem[]> 
 }
 
 export async function listCloudMapDocuments(mode: KilrunMode): Promise<CloudMapDocumentRow[]> {
-  if (!platform.token) return [];
+  if (!platform.token) {
+    throw new Error('Link live game first — Pull needs a staff Steam session');
+  }
   const res = await engineFetch(`/api/engine/maps?mode=${encodeURIComponent(mode)}`);
-  if (res.status === 401) return [];
+  if (res.status === 404) {
+    throw new Error('Live login is not on the website yet — deploy /api/engine');
+  }
+  if (res.status === 401) {
+    throw new Error('Link live game first — session expired');
+  }
   if (!res.ok) throw new Error(await readError(res));
   const data = (await res.json()) as { maps?: CloudMapDocumentRow[] };
   return data.maps ?? [];

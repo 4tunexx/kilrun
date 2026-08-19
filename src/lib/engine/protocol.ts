@@ -6,6 +6,21 @@ export type EngineDeepLinkOpts = {
   token?: string;
 };
 
+export function parseEngineLoopbackUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:') return null;
+    if (url.hostname !== '127.0.0.1') return null;
+    const port = Number(url.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+    if (url.pathname !== '/engine-auth') return null;
+    return `http://127.0.0.1:${port}/engine-auth`;
+  } catch {
+    return null;
+  }
+}
+
 export function buildEngineDeepLink(opts: EngineDeepLinkOpts = {}): string {
   if (opts.action === 'auth' && opts.token) {
     return `${KILRUN_ENGINE_PROTOCOL}://auth?token=${encodeURIComponent(opts.token)}`;

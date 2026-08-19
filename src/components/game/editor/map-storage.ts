@@ -267,7 +267,8 @@ export function hydrateCloudMapsIntoLocal(
     document: MapDocument;
   }>,
   mode: KilrunMode,
-  setActive: (mode: KilrunMode, mapId: string | null) => void
+  setActive: (mode: KilrunMode, mapId: string | null) => void,
+  opts?: { force?: boolean }
 ): { pulled: number; activeLocalId: string | null } {
   let pulled = 0;
   let activeLocalId: string | null = null;
@@ -277,6 +278,7 @@ export function hydrateCloudMapsIntoLocal(
     const cloudUpdated = row.updatedAt;
     const localUpdated = local?.meta?.updatedAt ?? '';
     const shouldWrite =
+      opts?.force === true ||
       !local ||
       !localUpdated ||
       cloudUpdated.localeCompare(localUpdated) > 0;

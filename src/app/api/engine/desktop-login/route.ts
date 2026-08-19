@@ -3,9 +3,12 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
 import { signEngineStaffToken } from '@/lib/engine/staff-token';
+import { parseEngineLoopbackUrl } from '@/lib/engine/protocol';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const LOOPBACK_COOKIE = 'kilrun_engine_loopback';
 
 function html(body: string, status = 200) {
   return new Response(body, {
@@ -42,15 +45,34 @@ function escapeHtml(value: string) {
     .replace(/"/g, '&quot;');
 }
 
+function readLoopback(req: NextRequest): string | null {
+  return (
+    parseEngineLoopbackUrl(req.nextUrl.searchParams.get('loopback')) ||
+    parseEngineLoopbackUrl(req.cookies.get(LOOPBACK_COOKIE)?.value)
+  );
+}
+
 /**
  * Steam login for Kilrun Engine.exe. After staff auth, hands a session token
- * back to the Windows app via kilrun-engine://auth?token=...
+ * back to the Windows app via localhost loopback (reliable) and kilrun-engine://.
  */
 export async function GET(req: NextRequest) {
+  const loopback = readLoopback(req);
   const session = await auth();
   const steamId = (session?.user as { steamId?: string } | undefined)?.steamId;
   if (!steamId) {
-    return Response.redirect(`${req.nextUrl.origin}/api/auth/steam?next=/api/engine/desktop-login`);
+    const redirect = Response.redirect(
+      `${req.nextUrl.origin}/api/auth/steam?next=/api/engine/desktop-login`
+    );
+    if (loopback) {
+      redirect.headers.append(
+        'Set-Cookie',
+        `${LOOPBACK_COOKIE}=${encodeURIComponent(loopback)}; Path=/; Max-Age=600; SameSite=Lax; HttpOnly${
+          req.nextUrl.protocol === 'https:' ? '; Secure' : ''
+        }`
+      );
+    }
+    return redirect;
   }
 
   const user = await prisma.user.findUnique({ where: { steamId } });
@@ -76,7 +98,12 @@ export async function GET(req: NextRequest) {
     steamId: user.steamId,
     secret,
   });
-  const href = `kilrun-engine://auth?token=${encodeURIComponent(token)}`;
+  const protocolHref = `kilrun-engine://auth?token=${encodeURIComponent(token)}`;
+  const loopbackHref = loopback
+    ? `${loopback}?token=${encodeURIComponent(token)}`
+    : null;
+  const primaryHref = loopbackHref || protocolHref;
+
   return html(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -86,17 +113,24 @@ export async function GET(req: NextRequest) {
   <style>
     body { font-family: Segoe UI, sans-serif; background: #0d121a; color: #e2e8f0; margin: 0; min-height: 100vh; display: grid; place-items: center; }
     main { max-width: 460px; padding: 32px; border: 1px solid #1e293b; background: #111827; border-radius: 16px; }
-    a { display: inline-block; margin-top: 16px; padding: 10px 16px; background: #22d3ee; color: #0d121a; font-weight: 700; text-decoration: none; border-radius: 8px; }
+    a { display: inline-block; margin-top: 16px; padding: 10px 16px; background: #e23d4a; color: #fff; font-weight: 700; text-decoration: none; border-radius: 8px; }
     p { color: #94a3b8; line-height: 1.5; }
   </style>
 </head>
 <body>
   <main>
     <h1>Connected as ${escapeHtml(user.username)}</h1>
-    <p>Click to send this staff session to Kilrun Engine. After that, Save and Set as MAIN in the Windows app push maps onto the live web game.</p>
-    <a id="open" href="${href}">Open Kilrun Engine</a>
+    <p>Sending this staff session back to Kilrun Engine. Keep the Engine window open.</p>
+    <a id="open" href="${escapeHtml(primaryHref)}">Return to Kilrun Engine</a>
+    ${
+      loopbackHref
+        ? `<p style="margin-top:18px"><a href="${escapeHtml(protocolHref)}" style="background:#1e293b">Protocol backup</a></p>`
+        : ''
+    }
   </main>
-  <script>location.replace(${JSON.stringify(href)});</script>
+  <script>
+    location.replace(${JSON.stringify(primaryHref)});
+  </script>
 </body>
 </html>`);
 }
