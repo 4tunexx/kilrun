@@ -114,10 +114,13 @@ const distDir = path.join(root, 'desktop/dist');
 fs.mkdirSync(distDir, { recursive: true });
 const distSetup = path.join(distDir, 'Kilrun Engine Setup.exe');
 fs.copyFileSync(setupSrc, distSetup);
+fs.copyFileSync(exe, path.join(distDir, 'Kilrun Engine.exe'));
 
 const desktopDir = path.join(process.env.USERPROFILE || process.env.HOME || '', 'Desktop');
 if (fs.existsSync(desktopDir)) {
   fs.copyFileSync(setupSrc, path.join(desktopDir, 'Kilrun Engine Setup.exe'));
+  fs.copyFileSync(exe, path.join(desktopDir, 'Kilrun Engine.exe'));
+  fs.copyFileSync(exe, path.join(desktopDir, 'KilrunEngine.exe'));
 }
 
 console.log('Kilrun Engine installer ready:');
@@ -125,5 +128,6 @@ console.log(' ', setupSrc);
 console.log(' ', distSetup);
 if (fs.existsSync(desktopDir)) {
   console.log(' ', path.join(desktopDir, 'Kilrun Engine Setup.exe'));
+  console.log(' ', path.join(desktopDir, 'Kilrun Engine.exe'));
 }
 console.log('Platform:', platformUrl);
