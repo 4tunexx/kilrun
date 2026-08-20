@@ -80,6 +80,7 @@ import {
   mapDocToWorldBounds,
   mapDocPushPayloads,
   mapDocWaveAnchors,
+  mapDocPluginEntities,
   prepareDocForPlayTest,
   type SimWorldBounds,
 } from './editor/prefab-storage';
@@ -99,6 +100,8 @@ import type { MapDocument } from './editor/map-document';
 import { ensureEnvironment, shopItemsForMode, shopPowerUpsForMode, shopSkinsForMode, ensureShopSettings, ensureCombatSettings } from './editor/map-document';
 import { applyAuthoredEnvironment } from './editor/map-scene-visuals';
 import type { KilrunMode } from '@/lib/game-modes';
+import { isCoreKilrunMode, registerModesFromPluginRuntime, resolveModeBase } from '@/lib/game-modes';
+import { loadMapEmbeddedPlugins } from '@/lib/engine/plugin-loader';
 import { getActiveCloudMapDocument } from '@/lib/game-map-actions';
 import { getMyMetricCounts } from '@/lib/actions';
 import { HordeLobbyOverlay } from './modes/horde/lobby-overlay';
@@ -167,9 +170,10 @@ export default function KilrunEngine({
   const gameMenuOpenRef = useRef(false);
   const inputManagerRef = useRef<InputManager | null>(null);
   const mouseFreeRef = useRef(false);
+  const simMode = resolveModeBase(mode);
   const roomName: GameRoomName =
     roomNameOverride ??
-    (mode === 'competitive'
+    (simMode === 'competitive' && isCoreKilrunMode(mode)
       ? competitiveQueue === 'ranked'
         ? 'competitive_ranked'
         : 'competitive'
@@ -312,7 +316,7 @@ export default function KilrunEngine({
     }
     void Promise.all([
       getActiveCloudMapDocument(mode),
-      mode === 'deathrun'
+      simMode === 'deathrun'
         ? Promise.resolve(null)
         : getActiveCloudMapDocument('deathrun').catch(() => null),
     ])
@@ -322,7 +326,7 @@ export default function KilrunEngine({
         const localDeathrun = localDeathrunId ? loadMapPlayable(localDeathrunId) : null;
         deathrunTpsRef.current =
           deathrunCloud?.document?.tpsView ??
-          (mode === 'deathrun' ? cloud?.document?.tpsView : null) ??
+          (simMode === 'deathrun' ? cloud?.document?.tpsView : null) ??
           localDeathrun?.tpsView ??
           null;
 
@@ -365,7 +369,7 @@ export default function KilrunEngine({
     let cancelled = false;
     const items = shopItemsForMode(
       customDocRef.current ?? cloudDocRef.current,
-      mode === 'competitive' ? 'competitive' : 'horde'
+      simMode === 'competitive' ? 'competitive' : 'horde'
     );
     const metrics = items
       .map((it) => it.unlockMetric)
@@ -472,6 +476,8 @@ export default function KilrunEngine({
         combatSettings: doc.combatSettings as Record<string, unknown> | undefined,
         customMoves: doc.customMoves as unknown as Record<string, unknown>[] | undefined,
         shopSettings: ensureShopSettings(doc) as unknown as Record<string, unknown>,
+        pluginRuntime: doc.pluginRuntime,
+        pluginEntities: mapDocPluginEntities(doc),
       });
       if (practiceRole) {
         connectionRef.current.sendPracticeSetRole(practiceRole);
@@ -480,6 +486,8 @@ export default function KilrunEngine({
 
     void resolveDoc().then((doc) => {
       if (cancelled || !doc) return;
+      registerModesFromPluginRuntime(doc.pluginRuntime);
+      void loadMapEmbeddedPlugins(doc.pluginRuntime);
       pushCustomMap(doc);
     });
 
@@ -687,11 +695,11 @@ export default function KilrunEngine({
         const localDeathrun = localDeathrunId ? loadMapPlayable(localDeathrunId) : null;
         deathrunTpsRef.current =
           deathrunTpsRef.current ??
-          (mode === 'deathrun' ? playDoc.tpsView : null) ??
+          (simMode === 'deathrun' ? playDoc.tpsView : null) ??
           localDeathrun?.tpsView ??
           null;
         // Prefer freshest Deathrun / mode map values when available
-        if (mode === 'deathrun' && playDoc.tpsView) {
+        if (simMode === 'deathrun' && playDoc.tpsView) {
           deathrunTpsRef.current = playDoc.tpsView;
         } else if (!deathrunTpsRef.current && localDeathrun?.tpsView) {
           deathrunTpsRef.current = localDeathrun.tpsView;
@@ -1140,7 +1148,7 @@ export default function KilrunEngine({
             view.syncedWeaponModelUrl = modelUrl;
             view.syncedWeaponSkinId = skinId;
             view.syncedWeaponId = weaponId;
-            const shopMode = mode === 'competitive' ? 'competitive' : 'horde';
+            const shopMode = simMode === 'competitive' ? 'competitive' : 'horde';
             const skinTex = skinId
               ? shopSkinsForMode(customDocRef.current, shopMode).find((s) => s.id === skinId)
                   ?.textureUrl
@@ -1478,9 +1486,9 @@ export default function KilrunEngine({
   const runnersLeft = useMemo(() => {
     let n = 0;
     playersRef.current.forEach((p) => {
-      if (mode === 'competitive') {
+      if (simMode === 'competitive') {
         if (p.isAlive) n += 1;
-      } else if (mode === 'horde') {
+      } else if (simMode === 'horde') {
         if ((p.role === 'survivor' || p.role === 'runner') && p.isAlive) n += 1;
       } else if (p.role === 'runner' && p.isAlive) {
         n += 1;
@@ -1562,7 +1570,7 @@ export default function KilrunEngine({
           </>
         )}
         {room.phase === 'lobby' &&
-          (mode === 'horde' ? (
+          (simMode === 'horde' ? (
             <HordeLobbyOverlay
               playerCount={playerCount}
               isAdmin={isAdmin}
@@ -1572,7 +1580,7 @@ export default function KilrunEngine({
                   : undefined
               }
             />
-          ) : mode === 'competitive' ? (
+          ) : simMode === 'competitive' ? (
             <CompetitiveLobbyOverlay
               playerCount={playerCount}
               queue={competitiveQueue}
@@ -1603,7 +1611,7 @@ export default function KilrunEngine({
             />
           </>
         )}
-        {(mode === 'competitive' || mode === 'horde' || mode === 'deathrun') &&
+        {(simMode === 'competitive' || simMode === 'horde' || simMode === 'deathrun') &&
           (room.buyPhaseMs ?? 0) > 0 &&
           !paused &&
           !editorOpen && (
@@ -1614,30 +1622,30 @@ export default function KilrunEngine({
               currentSkinId={localPlayer?.weaponSkinId}
               credits={localPlayer?.credits ?? 0}
               items={
-                mode === 'deathrun'
+                simMode === 'deathrun'
                   ? []
                   : mapShopItemsToPresets(
                       shopItemsForMode(
                         customDocRef.current,
-                        mode === 'competitive' ? 'competitive' : 'horde'
+                        simMode === 'competitive' ? 'competitive' : 'horde'
                       ),
                       shopMetricCounts
                     )
               }
               skins={
-                mode === 'deathrun'
+                simMode === 'deathrun'
                   ? []
                   : mapShopSkinsToPresets(
                       shopSkinsForMode(
                         customDocRef.current,
-                        mode === 'competitive' ? 'competitive' : 'horde'
+                        simMode === 'competitive' ? 'competitive' : 'horde'
                       )
                     )
               }
               powerUps={mapPowerUpsToPresets(
                 shopPowerUpsForMode(
                   customDocRef.current,
-                  mode === 'competitive' ? 'competitive' : mode === 'horde' ? 'horde' : 'deathrun'
+                  simMode === 'competitive' ? 'competitive' : simMode === 'horde' ? 'horde' : 'deathrun'
                 )
               )}
               onBuy={(preset: WeaponPreset) => {
@@ -1661,7 +1669,7 @@ export default function KilrunEngine({
                 const sid = localSessionRef.current;
                 if (preset.modelUrl && sid) {
                   const view = charactersRef.current.get(sid);
-                  const shopMode = mode === 'competitive' ? 'competitive' : 'horde';
+                  const shopMode = simMode === 'competitive' ? 'competitive' : 'horde';
                   const skinId = localPlayer?.weaponSkinId;
                   const equippedSkin = skinId
                     ? shopSkinsForMode(customDocRef.current, shopMode).find((s) => s.id === skinId)
@@ -1701,9 +1709,9 @@ export default function KilrunEngine({
             />
           )}
         {room.phase === 'results' && localPlayer && (
-          mode === 'horde' ? (
+          simMode === 'horde' ? (
             <HordeResultsScreen room={room} player={localPlayer} onContinue={onExit} />
-          ) : mode === 'competitive' ? (
+          ) : simMode === 'competitive' ? (
             <CompetitiveResultsScreen
               room={room}
               player={localPlayer}
@@ -1818,7 +1826,7 @@ export default function KilrunEngine({
           onToggleFullscreen={toggleFullscreen}
           onExit={onExit}
           showAbandon={
-            mode === 'competitive' && (room.phase === 'countdown' || room.phase === 'playing')
+            simMode === 'competitive' && (room.phase === 'countdown' || room.phase === 'playing')
           }
           onAbandon={() => {
             connectionRef.current?.sendAbandonMatch();

@@ -1,7 +1,7 @@
 import type { MapDocument, MapEnvironment } from './map-document';
 import { createEmptyMap, ensureEnvironment, generateId, getMapGameMode } from './map-document';
 import type { KilrunMode } from '@/lib/game-modes';
-import { KILRUN_MODES, normalizeKilrunMode } from '@/lib/game-modes';
+import { KILRUN_MODES, normalizeKilrunMode, resolveModeBase } from '@/lib/game-modes';
 import { getActivePlayMapIdForMode } from './prefab-storage';
 import { deleteMapOnDesktop, syncMapToDesktop } from '@/lib/engine/desktop-bridge';
 
@@ -343,7 +343,7 @@ export function createNewMap(
 export function ensureStarterFloors(doc: MapDocument): MapDocument {
   const mode = getMapGameMode(doc);
   // Horde / competitive templates already ship with arena floors.
-  if (mode !== 'deathrun') return doc;
+  if (resolveModeBase(mode) !== 'deathrun') return doc;
 
   const hasFloor = (doc.entities ?? []).some((e) => e.model?.includes('floor'));
   if (hasFloor) return doc;

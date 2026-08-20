@@ -5,4 +5,5 @@ export {
   getSidebarPlugins,
   getMapEditorPlugins,
   isStudioPluginTab,
+  removeMapEditorPlugins,
 } from './registry';

@@ -17,6 +17,7 @@ import {
   Swords,
   Users,
   ArrowLeft,
+  Puzzle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -43,10 +44,12 @@ import {
 } from '@/components/game/editor/prefab-storage';
 import { useToast } from '@/hooks/use-toast';
 import {
-  KILRUN_MODE_INFO,
-  KILRUN_MODES,
+  getKilrunModeInfo,
+  registerPluginMode,
+  type CoreKilrunMode,
   type KilrunMode,
 } from '@/lib/game-modes';
+import { useKilrunModes } from '@/lib/use-kilrun-modes';
 import { getMapGameMode } from '@/components/game/editor/map-document';
 import { listCloudMapDocuments, publishCloudMap, forkCloudMap, deleteCloudMapsMatching } from '@/lib/game-map-actions';
 import { EngineLaunchBanner } from '@/components/engine/engine-launch-banner';
@@ -58,7 +61,7 @@ const MapEditor = dynamic(() => import('@/components/game/editor/map-editor'), {
   ssr: false,
 });
 
-const MODE_ICONS: Record<KilrunMode, typeof Skull> = {
+const MODE_ICONS: Record<CoreKilrunMode, typeof Skull> = {
   deathrun: Skull,
   horde: Users,
   competitive: Swords,
@@ -66,6 +69,7 @@ const MODE_ICONS: Record<KilrunMode, typeof Skull> = {
 
 export function AdminMapEditorPanel() {
   const { toast } = useToast();
+  const modeList = useKilrunModes();
   const [selectedMode, setSelectedMode] = useState<KilrunMode | null>(null);
   const [maps, setMaps] = useState<MapListItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -74,6 +78,16 @@ export function AdminMapEditorPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [syncingCloud, setSyncingCloud] = useState(false);
+
+  useEffect(() => {
+    void fetch('/api/game/plugin-modes', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data: { ok?: boolean; modes?: Array<{ id: string; base?: string; title?: string }> }) => {
+        if (!data?.ok || !Array.isArray(data.modes)) return;
+        for (const row of data.modes) registerPluginMode(row);
+      })
+      .catch(() => undefined);
+  }, []);
 
   const refresh = useCallback(() => {
     if (!selectedMode) {
@@ -168,9 +182,9 @@ export function AdminMapEditorPanel() {
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-3">
-              {KILRUN_MODES.map((id) => {
-                const info = KILRUN_MODE_INFO[id];
-                const Icon = MODE_ICONS[id];
+              {modeList.map((id) => {
+                const info = getKilrunModeInfo(id);
+                const Icon = MODE_ICONS[id as CoreKilrunMode] ?? Puzzle;
                 const count = listMaps(id).length;
                 return (
                   <button
@@ -202,8 +216,8 @@ export function AdminMapEditorPanel() {
     );
   }
 
-  const modeInfo = KILRUN_MODE_INFO[selectedMode];
-  const ModeIcon = MODE_ICONS[selectedMode];
+  const modeInfo = getKilrunModeInfo(selectedMode);
+  const ModeIcon = MODE_ICONS[selectedMode as CoreKilrunMode] ?? Puzzle;
 
   return (
     <div className="space-y-4">
@@ -238,9 +252,9 @@ export function AdminMapEditorPanel() {
                     setQuery('');
                   }}
                 >
-                  {KILRUN_MODES.map((id) => (
+                  {modeList.map((id) => (
                     <option key={id} value={id}>
-                      {KILRUN_MODE_INFO[id].title}
+                      {getKilrunModeInfo(id).title}
                     </option>
                   ))}
                 </select>
@@ -309,8 +323,8 @@ export function AdminMapEditorPanel() {
                     toast({ title: `Imported “${doc.name || id}”` });
                   } else {
                     toast({
-                      title: `Imported “${doc.name || id}” as ${KILRUN_MODE_INFO[importedMode].title}`,
-                      description: `The JSON file's own mode wins over what you're currently browsing (${modeInfo.title}). Switch to the ${KILRUN_MODE_INFO[importedMode].title} tab to see it.`,
+                      title: `Imported “${doc.name || id}” as ${getKilrunModeInfo(importedMode).title}`,
+                      description: `The JSON file's own mode wins over what you're currently browsing (${modeInfo.title}). Switch to the ${getKilrunModeInfo(importedMode).title} tab to see it.`,
                     });
                   }
                 } catch (err) {

@@ -11,6 +11,8 @@ import {
   Gem,
   Zap,
   ShieldCheck,
+  Puzzle,
+  RotateCcw,
 } from 'lucide-react';
 import {
   Card,
@@ -23,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { getSiteSettings } from '@/lib/progression-actions';
 import { resolveGameDisabled } from '@/lib/branding';
-import { KILRUN_MODE_INFO, type KilrunMode } from '@/lib/game-modes';
+import { getKilrunModeInfo, isCoreKilrunMode, registerPluginMode, type KilrunMode } from '@/lib/game-modes';
 import { PartyPanel } from '@/components/party-panel';
 import {
   getMyParty,
@@ -31,7 +33,6 @@ import {
 } from '@/lib/party-actions';
 import { getMyAbandonCooldown } from '@/lib/match-abandon-actions';
 import { getStoredRejoin } from '@/components/game/net/connection';
-import { RotateCcw } from 'lucide-react';
 
 export type { KilrunMode };
 export type CompetitiveQueue = 'casual' | 'ranked';
@@ -40,6 +41,7 @@ interface ModeDefinition {
   id: KilrunMode;
   icon: typeof Skull;
   isLive: boolean;
+  hasMain?: boolean;
 }
 
 function formatCooldownRemaining(until: Date): string {
@@ -92,6 +94,7 @@ export default function PlayView({
   const [disabledMsg, setDisabledMsg] = useState('');
   const [abandonCooldownUntil, setAbandonCooldownUntil] = useState<Date | null>(null);
   const [rejoinRoom, setRejoinRoom] = useState<KilrunMode | null>(null);
+  const [pluginModes, setPluginModes] = useState<ModeDefinition[]>([]);
 
   useEffect(() => {
     getSiteSettings().then((s) => {
@@ -110,10 +113,28 @@ export default function PlayView({
     if (stored) {
       if (stored.roomName === 'competitive_ranked' || stored.roomName === 'competitive') {
         setRejoinRoom('competitive');
-      } else if (stored.roomName === 'deathrun' || stored.roomName === 'horde') {
-        setRejoinRoom(stored.roomName);
+      } else if (stored.roomName && !stored.roomName.endsWith('_practice')) {
+        setRejoinRoom(stored.roomName.replace(/_ranked$/, '') as KilrunMode);
       }
     }
+    void fetch('/api/game/plugin-modes', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data: { ok?: boolean; modes?: Array<{ id: string; base?: string; title?: string; hasMain?: boolean }> }) => {
+        if (!data?.ok || !Array.isArray(data.modes)) return;
+        const extra: ModeDefinition[] = [];
+        for (const row of data.modes) {
+          if (!row?.id || isCoreKilrunMode(row.id)) continue;
+          registerPluginMode(row);
+          extra.push({
+            id: row.id,
+            icon: Puzzle,
+            isLive: row.hasMain !== false,
+            hasMain: row.hasMain !== false,
+          });
+        }
+        setPluginModes(extra);
+      })
+      .catch(() => undefined);
   }, []);
 
   const cooldownActive = !!abandonCooldownUntil && abandonCooldownUntil.getTime() > Date.now();
@@ -208,8 +229,8 @@ export default function PlayView({
       ) : null}
 
       <div className="grid gap-5 md:grid-cols-3">
-        {modes.map((mode) => {
-          const info = KILRUN_MODE_INFO[mode.id];
+        {[...modes, ...pluginModes].map((mode) => {
+          const info = getKilrunModeInfo(mode.id);
           const Icon = mode.icon;
           const canPlay = mode.isLive && !gameDisabled;
 
@@ -306,7 +327,11 @@ export default function PlayView({
                   </CardTitle>
                   {!canPlay && (
                     <Badge variant="secondary" className="text-[10px]">
-                      {gameDisabled && mode.isLive ? 'Disabled' : 'Soon'}
+                      {gameDisabled && mode.isLive
+                        ? 'Disabled'
+                        : mode.hasMain === false
+                          ? 'Needs MAIN'
+                          : 'Soon'}
                     </Badge>
                   )}
                 </div>
@@ -324,6 +349,10 @@ export default function PlayView({
                   {canPlay ? (
                     <>
                       Queue <ArrowRight className="h-4 w-4 ml-1" />
+                    </>
+                  ) : mode.hasMain === false ? (
+                    <>
+                      <Lock className="h-4 w-4 mr-1" /> Needs MAIN map
                     </>
                   ) : (
                     <>

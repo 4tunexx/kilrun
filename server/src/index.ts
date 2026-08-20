@@ -11,6 +11,7 @@ import { HordeRoom } from './rooms/HordeRoom.js';
 import { HordePracticeRoom } from './rooms/HordePracticeRoom.js';
 import { CompetitiveRoom } from './rooms/CompetitiveRoom.js';
 import { CompetitivePracticeRoom } from './rooms/CompetitivePracticeRoom.js';
+import { syncPluginRooms } from './plugin-rooms.js';
 import { isJoinTokenRequired } from './join-token.js';
 
 /** The 3 room classes all expose this same admin control surface (kept as
@@ -364,6 +365,11 @@ gameServer.define('competitive_practice', CompetitivePracticeRoom);
 gameServer
   .define('competitive_ranked', CompetitiveRoom)
   .filterBy(['rankKey']);
+
+void syncPluginRooms(gameServer);
+setInterval(() => {
+  void syncPluginRooms(gameServer);
+}, 30_000);
 
 httpServer.listen(PORT, () => {
   // eslint-disable-next-line no-console

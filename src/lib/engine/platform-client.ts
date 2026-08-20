@@ -5,6 +5,7 @@
  */
 import type { MapDocument } from '@/components/game/editor/map-document';
 import type { KilrunMode } from '@/lib/game-modes';
+import type { MapPluginBundle } from '@/lib/engine/plugin-runtime-store';
 import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
 
 export type CloudMapListItem = {
@@ -106,6 +107,25 @@ export async function probeEngineApi(): Promise<'ok' | 'missing' | 'error'> {
   } catch {
     return 'error';
   }
+}
+
+export async function publishCloudPlugin(bundle: MapPluginBundle): Promise<void> {
+  if (!platform.token) return;
+  const res = await engineFetch('/api/engine/plugins', {
+    method: 'POST',
+    body: JSON.stringify({
+      pluginId: bundle.id,
+      version: bundle.version,
+      source: bundle.source,
+      entry: bundle.entry,
+      permissions: bundle.permissions,
+      modes: bundle.modes,
+      weapons: bundle.weapons,
+      shopItems: bundle.shopItems,
+    }),
+  });
+  if (res.status === 404) return;
+  if (!res.ok) throw new Error(await readError(res));
 }
 
 export async function publishCloudMap(input: {

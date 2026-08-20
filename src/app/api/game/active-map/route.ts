@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { normalizeKilrunMode } from '@/lib/game-modes';
+import { normalizeKilrunMode, registerModesFromPluginRuntime } from '@/lib/game-modes';
 import type { MapDocument } from '@/components/game/editor/map-document';
 import { ensureShopSettings } from '@/components/game/editor/map-document';
+import { overlayCatalogOnRuntime } from '@/lib/engine/plugin-catalog';
+import {
+  mergeShopItemsById,
+  pluginShopItemsFromBundles,
+} from '@/lib/engine/plugin-runtime-store';
 import {
   mapDocHealthFloors,
   mapDocMonsterSpawns,
@@ -20,6 +25,7 @@ import {
   mapDocToSimTeleports,
   mapDocToWorldBounds,
   mapDocWaveAnchors,
+  mapDocPluginEntities,
   prepareDocForPlayTest,
 } from '@/components/game/editor/prefab-storage';
 
@@ -56,6 +62,11 @@ export async function GET(req: NextRequest) {
     }
 
     const prepared = prepareDocForPlayTest(document).doc;
+    const catalog = await prisma.gamePlugin
+      .findMany({ select: { pluginId: true, version: true, source: true, manifestJson: true } })
+      .catch(() => []);
+    const pluginRuntime = overlayCatalogOnRuntime(prepared.pluginRuntime, catalog);
+    registerModesFromPluginRuntime(pluginRuntime);
     const platforms = mapDocToSimPlatforms(prepared);
     if (!platforms.length) {
       return NextResponse.json({ ok: true, map: null, reason: 'empty_platforms' });
@@ -83,8 +94,14 @@ export async function GET(req: NextRequest) {
       worldBounds: mapDocToWorldBounds(prepared, platforms, finishes),
       modeSettings: prepared.modeSettings as Record<string, unknown> | undefined,
       combatSettings: prepared.combatSettings as Record<string, unknown> | undefined,
-      shopSettings: ensureShopSettings(prepared) as unknown as Record<string, unknown>,
+      shopSettings: (() => {
+        const shop = ensureShopSettings(prepared);
+        const extras = pluginShopItemsFromBundles(pluginRuntime);
+        return { ...shop, items: mergeShopItemsById(shop.items, extras) } as unknown as Record<string, unknown>;
+      })(),
       customMoves: prepared.customMoves as unknown as Record<string, unknown>[] | undefined,
+      pluginRuntime,
+      pluginEntities: mapDocPluginEntities(prepared),
     };
 
     return NextResponse.json(

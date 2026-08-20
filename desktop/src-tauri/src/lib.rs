@@ -1,17 +1,19 @@
+use base64::Engine as _;
 use serde::Serialize;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
+use zip::ZipArchive;
 
 const ENGINE_VERSION: &str = "0.1.1";
 
 fn default_platform_origin() -> String {
     option_env!("KILRUN_PLATFORM_URL")
-        .unwrap_or("http://localhost:3000")
+        .unwrap_or("https://kilrun.vercel.app")
         .trim_end_matches('/')
         .to_string()
 }
@@ -76,6 +78,10 @@ fn kilrun_root() -> PathBuf {
 
 fn projects_root() -> PathBuf {
     kilrun_root().join("Projects")
+}
+
+fn plugins_root() -> PathBuf {
+    kilrun_root().join("Plugins")
 }
 
 fn config_path() -> PathBuf {
@@ -257,6 +263,7 @@ fn save_project(
 #[tauri::command]
 fn engine_info() -> Result<EngineInfo, String> {
     ensure_layout()?;
+    let _ = seed_example_plugin();
     Ok(EngineInfo {
         version: ENGINE_VERSION.into(),
         os: std::env::consts::OS.into(),
@@ -564,6 +571,489 @@ fn start_auth_loopback(app: AppHandle) -> Result<u16, String> {
     Ok(port)
 }
 
+const EXAMPLE_PLUGIN_JSON: &str = include_str!("../../plugins/kilrun-example/plugin.json");
+const EXAMPLE_PLUGIN_JS: &str = include_str!("../../plugins/kilrun-example/index.js");
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginListItem {
+    id: String,
+    name: String,
+    version: String,
+    author: Option<String>,
+    description: Option<String>,
+    engine: Option<String>,
+    entry: String,
+    permissions: Vec<String>,
+    enabled: bool,
+    path: String,
+}
+
+fn plugin_dir(id: &str) -> Result<PathBuf, String> {
+    Ok(plugins_root().join(sanitize_id(id)?))
+}
+
+fn is_plugin_enabled(id: &str) -> bool {
+    match read_config()
+        .get("pluginEnabled")
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get(id))
+    {
+        Some(value) => value.as_bool().unwrap_or(true),
+        None => true,
+    }
+}
+
+fn parse_semver(raw: &str) -> [u32; 3] {
+    let mut out = [0u32; 3];
+    for (i, part) in raw.split('.').take(3).enumerate() {
+        let digits: String = part.chars().filter(|c| c.is_ascii_digit()).collect();
+        out[i] = digits.parse().unwrap_or(0);
+    }
+    out
+}
+
+fn engine_meets(required: &str) -> bool {
+    let need = parse_semver(required);
+    let have = parse_semver(ENGINE_VERSION);
+    for i in 0..3 {
+        if have[i] > need[i] {
+            return true;
+        }
+        if have[i] < need[i] {
+            return false;
+        }
+    }
+    true
+}
+
+fn read_plugin_manifest(dir: &Path) -> Result<PluginListItem, String> {
+    let raw = fs::read_to_string(dir.join("plugin.json")).map_err(|_| "plugin.json missing".to_string())?;
+    let value: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("plugin.json: {e}"))?;
+    let id = value
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    sanitize_id(&id)?;
+    let name = value
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&id)
+        .to_string();
+    let version = value
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0.0.0")
+        .to_string();
+    let entry = value
+        .get("entry")
+        .and_then(|v| v.as_str())
+        .unwrap_or("index.js")
+        .replace('\\', "/");
+    if entry.is_empty() || entry.contains("..") || entry.starts_with('/') {
+        return Err("invalid plugin entry".into());
+    }
+    let permissions = value
+        .get("permissions")
+        .and_then(|v| v.as_array())
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(PluginListItem {
+        id: id.clone(),
+        name,
+        version,
+        author: value.get("author").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        description: value
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        engine: value.get("engine").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        entry,
+        permissions,
+        enabled: is_plugin_enabled(&id),
+        path: dir.to_string_lossy().into_owned(),
+    })
+}
+
+fn djb2_hex(bytes: &[u8]) -> String {
+    let mut hash: u64 = 5381;
+    for b in bytes {
+        hash = hash.wrapping_mul(33).wrapping_add(*b as u64);
+    }
+    format!("{hash:x}")
+}
+
+/// Previous bundled example (v1.1.0) — upgrade only if disk still matches this.
+const PRISTINE_V1_1_0_JSON: &str = "a2307820c5e826e4";
+const PRISTINE_V1_1_0_JS: &str = "3dd765c9dd37685d";
+
+fn seed_example_plugin() -> Result<(), String> {
+    ensure_layout()?;
+    let dir = plugins_root().join("kilrun-example");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let json_path = dir.join("plugin.json");
+    let js_path = dir.join("index.js");
+    let meta_path = dir.join(".seed-meta.json");
+    let bundled_json_hash = djb2_hex(EXAMPLE_PLUGIN_JSON.as_bytes());
+    let bundled_js_hash = djb2_hex(EXAMPLE_PLUGIN_JS.as_bytes());
+    let bundled_version = serde_json::from_str::<serde_json::Value>(EXAMPLE_PLUGIN_JSON)
+        .ok()
+        .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(|s| s.to_string()))
+        .unwrap_or_else(|| "0.0.0".into());
+
+    let write_bundled = || -> Result<(), String> {
+        atomic_write(json_path.as_path(), EXAMPLE_PLUGIN_JSON.as_bytes())?;
+        atomic_write(js_path.as_path(), EXAMPLE_PLUGIN_JS.as_bytes())?;
+        let meta = serde_json::json!({
+            "version": bundled_version,
+            "jsonHash": bundled_json_hash,
+            "jsHash": bundled_js_hash,
+        });
+        atomic_write(meta_path.as_path(), meta.to_string().as_bytes())?;
+        Ok(())
+    };
+
+    if !json_path.exists() || !js_path.exists() {
+        return write_bundled();
+    }
+
+    let disk_json = fs::read(&json_path).unwrap_or_default();
+    let disk_js = fs::read(&js_path).unwrap_or_default();
+    let disk_json_hash = djb2_hex(&disk_json);
+    let disk_js_hash = djb2_hex(&disk_js);
+
+    if disk_json_hash == bundled_json_hash && disk_js_hash == bundled_js_hash {
+        let meta = serde_json::json!({
+            "version": bundled_version,
+            "jsonHash": bundled_json_hash,
+            "jsHash": bundled_js_hash,
+        });
+        let _ = atomic_write(meta_path.as_path(), meta.to_string().as_bytes());
+        return Ok(());
+    }
+
+    let meta = fs::read_to_string(&meta_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+    let meta_json_hash = meta
+        .as_ref()
+        .and_then(|v| v.get("jsonHash").and_then(|x| x.as_str()))
+        .unwrap_or("");
+    let meta_js_hash = meta
+        .as_ref()
+        .and_then(|v| v.get("jsHash").and_then(|x| x.as_str()))
+        .unwrap_or("");
+    let matches_meta = !meta_json_hash.is_empty()
+        && meta_json_hash == disk_json_hash
+        && meta_js_hash == disk_js_hash;
+    let matches_known_pristine =
+        disk_json_hash == PRISTINE_V1_1_0_JSON && disk_js_hash == PRISTINE_V1_1_0_JS;
+    let disk_version = serde_json::from_slice::<serde_json::Value>(&disk_json)
+        .ok()
+        .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(|s| s.to_string()))
+        .unwrap_or_default();
+    let bundled_newer = parse_semver(&bundled_version) > parse_semver(&disk_version);
+
+    if bundled_newer && (matches_meta || matches_known_pristine) {
+        return write_bundled();
+    }
+    Ok(())
+}
+
+fn safe_plugin_rel(rel: &str) -> Result<PathBuf, String> {
+    let cleaned = rel.replace('\\', "/");
+    if cleaned.is_empty() || cleaned.starts_with('/') || cleaned.contains("..") {
+        return Err("invalid plugin file path".into());
+    }
+    Ok(PathBuf::from(cleaned))
+}
+
+fn mime_for(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "glb" => "model/gltf-binary",
+        "gltf" => "model/gltf+json",
+        "json" => "application/json",
+        "js" | "mjs" => "text/javascript",
+        "css" => "text/css",
+        "wav" => "audio/wav",
+        "mp3" => "audio/mpeg",
+        "ogg" => "audio/ogg",
+        _ => "application/octet-stream",
+    }
+}
+
+#[tauri::command]
+fn list_plugins() -> Result<Vec<PluginListItem>, String> {
+    ensure_layout()?;
+    let _ = seed_example_plugin();
+    let mut out = Vec::new();
+    let entries = match fs::read_dir(plugins_root()) {
+        Ok(e) => e,
+        Err(_) => return Ok(out),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if let Ok(item) = read_plugin_manifest(&path) {
+            out.push(item);
+        }
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(out)
+}
+
+#[tauri::command]
+fn set_plugin_enabled(id: String, enabled: bool) -> Result<(), String> {
+    let id = sanitize_id(&id)?;
+    let mut cfg = read_config();
+    let map = cfg
+        .as_object_mut()
+        .ok_or_else(|| "invalid engine config".to_string())?;
+    let enabled_map = map
+        .entry("pluginEnabled")
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(obj) = enabled_map.as_object_mut() {
+        obj.insert(id, serde_json::Value::Bool(enabled));
+    }
+    write_config(&cfg)
+}
+
+#[tauri::command]
+fn uninstall_plugin(id: String) -> Result<(), String> {
+    let dir = plugin_dir(&id)?;
+    if dir.exists() {
+        fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    let mut cfg = read_config();
+    if let Some(obj) = cfg
+        .get_mut("pluginEnabled")
+        .and_then(|v| v.as_object_mut())
+    {
+        obj.remove(&id);
+    }
+    write_config(&cfg)
+}
+
+#[tauri::command]
+fn read_plugin_file(id: String, rel: String) -> Result<String, String> {
+    let dir = plugin_dir(&id)?;
+    let rel_path = safe_plugin_rel(&rel)?;
+    let path = dir.join(&rel_path);
+    if !path.starts_with(&dir) {
+        return Err("plugin file escapes plugin folder".into());
+    }
+    fs::read_to_string(&path).map_err(|_| "plugin file not found".to_string())
+}
+
+#[tauri::command]
+fn plugin_asset_data_url(id: String, rel: String) -> Result<String, String> {
+    let dir = plugin_dir(&id)?;
+    let rel_path = safe_plugin_rel(&rel)?;
+    let path = dir.join(&rel_path);
+    if !path.starts_with(&dir) {
+        return Err("plugin asset escapes plugin folder".into());
+    }
+    let bytes = fs::read(&path).map_err(|_| "plugin asset not found".to_string())?;
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Err("plugin asset is too large".into());
+    }
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", mime_for(&path), b64))
+}
+
+fn zip_plugin_manifest(bytes: &[u8]) -> Result<(String, serde_json::Value), String> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes.to_vec())).map_err(|e| format!("not a zip/.kplugin: {e}"))?;
+    let mut manifest_name: Option<String> = None;
+    for i in 0..archive.len() {
+        let file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = file.name().replace('\\', "/");
+        if name.ends_with("plugin.json") && !name.contains("..") {
+            manifest_name = Some(name);
+            break;
+        }
+    }
+    let manifest_name = manifest_name.ok_or_else(|| "zip has no plugin.json".to_string())?;
+    let mut file = archive
+        .by_name(&manifest_name)
+        .map_err(|_| "plugin.json missing".to_string())?;
+    let mut raw = String::new();
+    file.read_to_string(&mut raw).map_err(|e| e.to_string())?;
+    let value: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("plugin.json: {e}"))?;
+    let id = value
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    Ok((sanitize_id(&id)?, value))
+}
+
+fn manifest_item_from_value(id: String, value: &serde_json::Value, path: String, enabled: bool) -> PluginListItem {
+    PluginListItem {
+        id: id.clone(),
+        name: value
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&id)
+            .to_string(),
+        version: value
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.0.0")
+            .to_string(),
+        author: value.get("author").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        description: value
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        engine: value.get("engine").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        entry: value
+            .get("entry")
+            .and_then(|v| v.as_str())
+            .unwrap_or("index.js")
+            .replace('\\', "/"),
+        permissions: value
+            .get("permissions")
+            .and_then(|v| v.as_array())
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        enabled,
+        path,
+    }
+}
+
+#[tauri::command]
+fn inspect_plugin(archive_base64: String) -> Result<PluginListItem, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(archive_base64.trim())
+        .map_err(|_| "plugin archive is not valid base64".to_string())?;
+    if bytes.len() > 32 * 1024 * 1024 {
+        return Err("plugin archive is too large".into());
+    }
+    let (id, value) = zip_plugin_manifest(&bytes)?;
+    if let Some(required) = value.get("engine").and_then(|v| v.as_str()) {
+        if !engine_meets(required) {
+            return Err(format!(
+                "plugin needs Engine {required}+ (this app is {ENGINE_VERSION})"
+            ));
+        }
+    }
+    Ok(manifest_item_from_value(id, &value, "(archive)".into(), true))
+}
+
+#[tauri::command]
+fn install_plugin(archive_base64: String) -> Result<PluginListItem, String> {
+    ensure_layout()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(archive_base64.trim())
+        .map_err(|_| "plugin archive is not valid base64".to_string())?;
+    if bytes.len() > 32 * 1024 * 1024 {
+        return Err("plugin archive is too large".into());
+    }
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("not a zip/.kplugin: {e}"))?;
+    let mut manifest_name: Option<String> = None;
+    for i in 0..archive.len() {
+        let file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = file.name().replace('\\', "/");
+        if name.ends_with("plugin.json") && !name.contains("..") {
+            manifest_name = Some(name);
+            break;
+        }
+    }
+    let manifest_name = manifest_name.ok_or_else(|| "zip has no plugin.json".to_string())?;
+    let prefix = manifest_name
+        .rsplit_once('/')
+        .map(|(head, _)| format!("{head}/"))
+        .unwrap_or_default();
+    let manifest_raw = {
+        let mut file = archive
+            .by_name(&manifest_name)
+            .map_err(|_| "plugin.json missing".to_string())?;
+        let mut raw = String::new();
+        file.read_to_string(&mut raw).map_err(|e| e.to_string())?;
+        raw
+    };
+    let manifest_value: serde_json::Value =
+        serde_json::from_str(&manifest_raw).map_err(|e| format!("plugin.json: {e}"))?;
+    let id = manifest_value
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let id = sanitize_id(&id)?;
+    if let Some(required) = manifest_value.get("engine").and_then(|v| v.as_str()) {
+        if !engine_meets(required) {
+            return Err(format!(
+                "plugin needs Engine {required}+ (this app is {ENGINE_VERSION})"
+            ));
+        }
+    }
+    let dest = plugins_root().join(&id);
+    if dest.exists() {
+        fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
+    }
+    fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        if file.is_dir() {
+            continue;
+        }
+        let name = file.name().replace('\\', "/");
+        if name.contains("..") {
+            continue;
+        }
+        let stripped = if prefix.is_empty() {
+            name.clone()
+        } else if let Some(rest) = name.strip_prefix(&prefix) {
+            rest.to_string()
+        } else {
+            continue;
+        };
+        if stripped.is_empty() {
+            continue;
+        }
+        let out_path = dest.join(Path::new(&stripped));
+        if !out_path.starts_with(&dest) {
+            continue;
+        }
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        atomic_write(&out_path, &buf)?;
+    }
+    read_plugin_manifest(&dest)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let startup_link = std::env::args().find(|a| a.starts_with("kilrun-engine:"));
@@ -592,7 +1082,14 @@ pub fn run() {
             clear_engine_session,
             open_external_url,
             navigate_engine,
-            start_auth_loopback
+            start_auth_loopback,
+            list_plugins,
+            set_plugin_enabled,
+            uninstall_plugin,
+            read_plugin_file,
+            plugin_asset_data_url,
+            inspect_plugin,
+            install_plugin
         ])
         .setup(move |app| {
             let _ = ensure_layout();

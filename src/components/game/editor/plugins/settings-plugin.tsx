@@ -1,7 +1,7 @@
 'use client';
 
 import { Settings2 } from 'lucide-react';
-import { KILRUN_MODE_INFO } from '@/lib/game-modes';
+import { getKilrunModeInfo, resolveModeBase } from '@/lib/game-modes';
 import {
   ensureCompetitiveSettings,
   ensureDeathrunSettings,
@@ -13,7 +13,8 @@ import type { MapEditorBrains, MapEditorPlugin } from '../engine/types';
 function SettingsPanel({ brains }: { brains: MapEditorBrains }) {
   const { doc, toolsOpen, setToolsOpen, mutateLiveDoc } = brains;
   const gameMode = getMapGameMode(doc);
-  const modeInfo = KILRUN_MODE_INFO[gameMode];
+  const simMode = resolveModeBase(gameMode);
+  const modeInfo = getKilrunModeInfo(gameMode);
 
   return (
     <div className="flex-1 overflow-y-auto p-3 space-y-4">
@@ -50,7 +51,7 @@ function SettingsPanel({ brains }: { brains: MapEditorBrains }) {
         </p>
       </div>
 
-      {gameMode === 'deathrun' && (
+      {simMode === 'deathrun' && (
         <div className="space-y-3">
           {(() => {
             const s = ensureDeathrunSettings(doc);
@@ -116,7 +117,7 @@ function SettingsPanel({ brains }: { brains: MapEditorBrains }) {
         </div>
       )}
 
-      {gameMode === 'horde' && (
+      {simMode === 'horde' && (
         <div className="space-y-3">
           {(() => {
             const s = ensureHordeSettings(doc);
@@ -194,7 +195,7 @@ function SettingsPanel({ brains }: { brains: MapEditorBrains }) {
         </div>
       )}
 
-      {gameMode === 'competitive' && (
+      {simMode === 'competitive' && (
         <div className="space-y-3">
           {(() => {
             const s = ensureCompetitiveSettings(doc);

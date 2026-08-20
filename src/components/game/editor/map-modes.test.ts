@@ -42,6 +42,19 @@ describe('map game modes', () => {
     expect(entityKindsForMode('competitive')).toContain('door');
   });
 
+  it('uses the plugin mode base for entity palettes', async () => {
+    const { registerPluginMode, clearPluginModes } = await import('@/lib/game-modes');
+    clearPluginModes();
+    registerPluginMode({
+      id: 'gauntlet',
+      title: 'Gauntlet',
+      base: 'deathrun',
+    });
+    expect(entityKindsForMode('gauntlet')).toContain('finish');
+    expect(entityKindsForMode('gauntlet')).toContain('spawn_trapper');
+    clearPluginModes();
+  });
+
   it('treats spawns as invisible markers', () => {
     expect(isInvisibleMarkerKind('start')).toBe(true);
     expect(isInvisibleMarkerKind('spawn_trapper')).toBe(true);

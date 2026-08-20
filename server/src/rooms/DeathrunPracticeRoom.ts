@@ -24,7 +24,6 @@ export class DeathrunPracticeRoom extends DeathrunRoom {
   onCreate(options?: unknown) {
     super.onCreate();
     this.setPrivate(true);
-    this.state.modeTag = 'deathrun_practice';
 
     // Solo practice — always a runner by default; trapper testing is done via
     // this message (no second player to auto-assign trapper to like a real

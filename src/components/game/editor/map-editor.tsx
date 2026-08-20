@@ -127,7 +127,7 @@ import { PLAY_TEST_MESH_BAKE_OPTS } from './play-test-bake';
 import { worldScaleToUvRepeat } from './editor-mesh';
 import type { SelectionTransformOp } from './selection-transform';
 import { ModifyPanel } from './modify-panel';
-import { KILRUN_MODE_INFO } from '@/lib/game-modes';
+import { getKilrunModeInfo } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS } from './prototype-catalog';
 import {
   getPrefabLibrary,
@@ -167,10 +167,13 @@ import { sanitizeTpsView } from '../tps/tps-view-settings';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { SNAP_FACE_LABELS, SnapFacePicker } from './snap-face-picker';
 import './engine/builtins';
+import { emitPlaytest } from '@/lib/engine/plugin-sdk';
 import { getSidebarPlugin, getSidebarPlugins, isStudioPluginTab } from './engine/registry';
 import type { MapEditorBrains, MapEditorStudioOptions } from './engine/types';
 import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
 import { listCloudMapDocuments, publishCloudMap } from '@/lib/game-map-actions';
+import { attachPluginRuntimeToDoc } from '@/lib/engine/plugin-runtime-store';
+import { loadMapEmbeddedPlugins } from '@/lib/engine/plugin-loader';
 import {
   isEditorMapTheLiveCloudMap,
   liveCloudMismatchMessage,
@@ -273,6 +276,12 @@ export function MapEditor({
   useEffect(() => {
     void hydrateWeaponCatalogFromApi();
   }, []);
+
+  useEffect(() => {
+    void loadMapEmbeddedPlugins(doc.pluginRuntime);
+    // Map open / switch — don't re-run on every entity edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapId]);
   /** Active placeable model (kept while in Select so Brush can resume). */
   const [brush, setBrush] = useState<string | null>('floor-square');
   /** Select = pick objects; Brush = paint/place. Defaults to Select so clicks don't stack. */
@@ -600,7 +609,7 @@ export function MapEditor({
   }, []);
 
   const gameMode = getMapGameMode(doc);
-  const modeInfo = KILRUN_MODE_INFO[gameMode];
+  const modeInfo = getKilrunModeInfo(gameMode);
   const kindOptions = entityKindsForMode(gameMode);
   const isCloudLive = isEditorMapTheLiveCloudMap(mapId, cloudActive);
   const isLiveHere = isCloudLive || (!cloudActive && activePlayId === mapId);
@@ -850,7 +859,7 @@ export function MapEditor({
       localId: mapId,
       name: published.name,
       mode: gameMode,
-      document: published,
+      document: attachPluginRuntimeToDoc(published),
       thumbnailDataUrl: getMapThumbnail(mapId),
       setActive: true,
     })
@@ -921,7 +930,7 @@ export function MapEditor({
         localId: mapId,
         name: next.name,
         mode: gameMode,
-        document: next,
+        document: attachPluginRuntimeToDoc(next),
         thumbnailDataUrl: liveThumb ?? getMapThumbnail(mapId),
         setActive: false,
       }).then((row) => {
@@ -990,6 +999,57 @@ export function MapEditor({
       liveSaveConfirmedRef.current = true;
     }
     persist();
+  };
+
+  const uploadDraftToLive = () => {
+    try {
+      const next = workingDoc();
+      const liveThumb = apiRef.current?.captureThumbnail() ?? null;
+      saveMap(mapId, next, { thumbnailDataUrl: liveThumb });
+      setDoc(next);
+      docRef.current = next;
+      markClean(next);
+      setMapListTick((t) => t + 1);
+      void publishCloudMap({
+        localId: mapId,
+        name: next.name,
+        mode: gameMode,
+        document: attachPluginRuntimeToDoc(next),
+        thumbnailDataUrl: liveThumb ?? getMapThumbnail(mapId),
+        setActive: false,
+      })
+        .then((row) => {
+          if (row.isActive) {
+            setCloudActive({
+              id: row.id,
+              localId: row.localId,
+              name: row.name,
+              updatedAt: row.updatedAt,
+            });
+          }
+          const origin =
+            typeof window !== 'undefined' ? window.__KILRUN_PLATFORM_URL__ || '' : '';
+          const host = origin.replace(/^https?:\/\//, '').replace(/\/$/, '');
+          toast({
+            title: host ? `Uploaded to ${host} as a draft` : 'Uploaded as a draft',
+            description: `“${next.name}” is on the website. Set as MAIN when it is ready for players.`,
+          });
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          toast({
+            title: 'Upload failed',
+            description: msg,
+            variant: 'destructive',
+          });
+        });
+    } catch (err) {
+      toast({
+        title: 'Upload failed',
+        description: err instanceof Error ? err.message : 'Could not save map',
+        variant: 'destructive',
+      });
+    }
   };
 
   const requestClose = () => {
@@ -1935,6 +1995,7 @@ export function MapEditor({
     // Do NOT auto-insert Player Avatar into the map — Play Test uses default
     // mannequin / existing avatar, and invents Start on a floor if needed.
     persist();
+    emitPlaytest('beforeStart', { live: false, mode: gameMode });
     setPlayTpsOverride(tpsOverride ?? null);
     setPlayTest(true);
   };
@@ -2118,15 +2179,23 @@ export function MapEditor({
     },
   };
 
+  const [pluginEpoch, setPluginEpoch] = useState(0);
+  useEffect(() => {
+    const bump = () => setPluginEpoch((n) => n + 1);
+    window.addEventListener('kilrun-plugins-changed', bump);
+    return () => window.removeEventListener('kilrun-plugins-changed', bump);
+  }, []);
   const sidebarPlugin = getSidebarPlugin(tab);
   const railPlugins = getSidebarPlugins();
+  void pluginEpoch;
 
   useEffect(() => {
     if (variant !== 'engine' || typeof window === 'undefined') return;
     const onCommand = (event: Event) => {
       const type = (event as CustomEvent<{ type?: string }>).detail?.type;
       if (!type) return;
-      if (type === 'save' || type === 'upload-draft') handleManualSave();
+      if (type === 'save') handleManualSave();
+      else if (type === 'upload-draft') uploadDraftToLive();
       else if (type === 'export') doExport();
       else if (type === 'import') fileRef.current?.click();
       else if (type === 'undo') undo();
@@ -3654,6 +3723,17 @@ export function MapEditor({
                   className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
                   value={selected.name}
                   onChange={(e) => patchSelected({ name: e.target.value })}
+                />
+              </label>
+              <label className="block text-xs text-white/60">
+                Plugin script
+                <input
+                  className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 font-mono text-[11px]"
+                  placeholder="kilrun-example.pulse"
+                  value={selected.pluginScript ?? ''}
+                  onChange={(e) =>
+                    patchSelected({ pluginScript: e.target.value.trim() || undefined })
+                  }
                 />
               </label>
 

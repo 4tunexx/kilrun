@@ -1,6 +1,7 @@
 import type { SkinAttachment } from '@/lib/player-skins';
 import type { KilrunMode } from '@/lib/game-modes';
-import { normalizeKilrunMode } from '@/lib/game-modes';
+import { normalizeKilrunMode, resolveModeBase } from '@/lib/game-modes';
+import type { MapPluginBundle } from '@/lib/engine/plugin-runtime-store';
 import { CATALOG_WEAPONS, resolveCatalogCombat } from '@/lib/weapon-catalog';
 import type {
   TpsCameraSettings,
@@ -953,6 +954,8 @@ export interface EditorEntity {
   waveAnchor?: EntityWaveAnchor;
   /** Prop / trap / door touch interaction (damage, push, anim). */
   interact?: EntityInteract;
+  /** Installed Engine plugin script id, e.g. `kilrun-example.pulse`. */
+  pluginScript?: string;
 }
 
 export interface EditorLayer {
@@ -1778,14 +1781,30 @@ export function ensureShopSettings(doc: MapDocument | null | undefined): MapShop
   return { items, powerUps, skins, startingCredits, creditsPerKill, creditsPerWaveClear };
 }
 
+let shopItemExtras: () => MapShopItem[] = () => [];
+
+export function setShopItemExtrasProvider(fn: () => MapShopItem[]) {
+  shopItemExtras = fn;
+}
+
 /** Items enabled for a given match mode. */
 export function shopItemsForMode(
   doc: MapDocument | null | undefined,
-  mode: 'horde' | 'competitive'
+  mode: string
 ): MapShopItem[] {
-  return ensureShopSettings(doc).items.filter(
-    (it) => it.enabled && it.modes.includes(mode)
+  const base = resolveModeBase(mode);
+  if (base !== 'horde' && base !== 'competitive') return [];
+  const fromMap = ensureShopSettings(doc).items.filter(
+    (it) => it.enabled && it.modes.includes(base)
   );
+  const extras = shopItemExtras().filter(
+    (it) =>
+      it.enabled !== false &&
+      (!it.modes?.length || (it.modes as string[]).includes(base) || (it.modes as string[]).includes(mode))
+  );
+  if (!extras.length) return fromMap;
+  const seen = new Set(fromMap.map((it) => it.id));
+  return [...fromMap, ...extras.filter((it) => !seen.has(it.id))];
 }
 
 export function parsePowerUpPool(raw: string | undefined): string[] {
@@ -1848,6 +1867,11 @@ export interface MapDocument {
    * Adjust in Map Editor → Shop tab.
    */
   shopSettings?: Partial<MapShopSettings>;
+  /**
+   * Plugin JS bundled at Engine upload so the live game server (and website
+   * Play Test) can run the same entity scripts / extra modes.
+   */
+  pluginRuntime?: MapPluginBundle[];
   meta?: { createdAt?: string; updatedAt?: string };
 }
 
@@ -2336,7 +2360,8 @@ export function entityKindHint(kind: EditorEntityKind): string | null {
  * Props / floors still come from the Assets brush, not this list.
  */
 export function entityKindsForMode(mode: KilrunMode): EditorEntityKind[] {
-  if (mode === 'horde') {
+  const base = resolveModeBase(mode);
+  if (base === 'horde') {
     return [
       'start',
       'spawn_monster',
@@ -2350,7 +2375,7 @@ export function entityKindsForMode(mode: KilrunMode): EditorEntityKind[] {
       'player',
     ];
   }
-  if (mode === 'competitive') {
+  if (base === 'competitive') {
     return [
       'spawn_team_a',
       'spawn_team_b',
@@ -2501,9 +2526,15 @@ export function createEmptyMap(
   gameMode: KilrunMode = 'deathrun'
 ): MapDocument {
   const mode = normalizeKilrunMode(gameMode);
-  if (mode === 'horde') return createEmptyHordeMap(name);
-  if (mode === 'competitive') return createEmptyCompetitiveMap(name);
-  return createEmptyDeathrunMap(name);
+  const base = resolveModeBase(mode);
+  const doc =
+    base === 'horde'
+      ? createEmptyHordeMap(name)
+      : base === 'competitive'
+        ? createEmptyCompetitiveMap(name)
+        : createEmptyDeathrunMap(name);
+  doc.gameMode = mode;
+  return doc;
 }
 
 function baseLayers() {

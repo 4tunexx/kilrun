@@ -1,15 +1,13 @@
 'use client';
 
 import React from 'react';
-import { Cloud, Globe, Monitor, Plus, Upload } from 'lucide-react';
+import { Globe } from 'lucide-react';
 import MapEditor from '@/components/game/editor/map-editor';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { InteractiveWordmark } from '@/components/interactive-wordmark';
 import {
   createNewMap,
-  formatBytes,
   getMapThumbnail,
   hydrateCloudMapsIntoLocal,
   importJson,
@@ -21,12 +19,13 @@ import {
 } from '@/components/game/editor/map-storage';
 import { getMapGameMode } from '@/components/game/editor/map-document';
 import type { EditorRenderStats, EditorViewportApi } from '@/components/game/editor/editor-viewport';
-import { getActivePlayMapIdForMode, setActivePlayMapIdForMode } from '@/components/game/editor/prefab-storage';
-import { KILRUN_MODE_INFO, KILRUN_MODES, type KilrunMode } from '@/lib/game-modes';
+import { setActivePlayMapIdForMode } from '@/components/game/editor/prefab-storage';
+import { getKilrunModeInfo, listKilrunModes, type KilrunMode } from '@/lib/game-modes';
 import { listCloudMapDocuments, publishCloudMap } from '@/lib/game-map-actions';
+import { attachPluginRuntimeToDoc } from '@/lib/engine/plugin-runtime-store';
 import { useToast } from '@/hooks/use-toast';
 import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
-import { ENGINE_MARK, ENGINE_WORDMARK } from '@/lib/engine/brand';
+import { ENGINE_MARK } from '@/lib/engine/brand';
 import {
   desktopEngineInfo,
   startDesktopAuthLoopback,
@@ -48,7 +47,10 @@ import {
   type EngineSessionUser,
 } from '@/lib/engine/platform-client';
 import { EnginePerfHud } from './engine-perf-hud';
-import { EngineBackdrop, EngineSplash } from './engine-splash';
+import { EngineSplash } from './engine-splash';
+import { EngineHome, type CloudBadge } from './engine-home';
+import { PluginManagerDialog } from './plugin-manager';
+import { loadDesktopPlugins } from '@/lib/engine/plugin-loader';
 
 export type EngineUser = {
   username: string;
@@ -60,8 +62,6 @@ type PendingLiveAction =
   | { kind: 'command'; type: string }
   | { kind: 'hub-upload'; mapId: string; setActive: boolean }
   | { kind: 'pull'; mode: KilrunMode };
-
-type CloudBadge = { uploaded: boolean; isActive: boolean };
 
 export function EngineApp({
   user = { username: 'Editor', role: 'admin' },
@@ -81,8 +81,10 @@ export function EngineApp({
   const [editorMapId, setEditorMapId] = React.useState<string | null>(initialMapId ?? null);
   const [stats, setStats] = React.useState<EditorRenderStats | null>(null);
   const [entityCount, setEntityCount] = React.useState(0);
-  const [showPerfHud, setShowPerfHud] = React.useState(true);
+  const [showPerfHud, setShowPerfHud] = React.useState(false);
   const [showAbout, setShowAbout] = React.useState(false);
+  const [showPlugins, setShowPlugins] = React.useState(false);
+  const [livePingMs, setLivePingMs] = React.useState<number | null>(null);
   const [projectsRoot, setProjectsRoot] = React.useState<string | null>(null);
   const [dataRoot, setDataRoot] = React.useState<string | null>(null);
   const [cloudByLocalId, setCloudByLocalId] = React.useState<Record<string, CloudBadge>>({});
@@ -104,7 +106,7 @@ export function EngineApp({
     const next: Record<string, CloudBadge> = {};
     try {
       await Promise.all(
-        KILRUN_MODES.map(async (mode) => {
+        listKilrunModes().map(async (mode) => {
           const rows = await listCloudMapDocuments(mode);
           for (const row of rows) {
             const key = row.localId || row.id;
@@ -113,10 +115,14 @@ export function EngineApp({
         })
       );
       setCloudByLocalId(next);
-    } catch {
-      setCloudByLocalId({});
+    } catch (err) {
+      toast({
+        title: 'Could not refresh cloud maps',
+        description: err instanceof Error ? err.message : 'Live link may have expired',
+        variant: 'destructive',
+      });
     }
-  }, [liveUser]);
+  }, [liveUser, toast]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -144,6 +150,10 @@ export function EngineApp({
           saveMap,
           setMapThumbnail,
         });
+        const plugins = await loadDesktopPlugins();
+        if (!cancelled && plugins.errors.length) {
+          console.warn('[kilrun-engine] plugin load', plugins.errors);
+        }
       } catch (err) {
         console.warn('[kilrun-engine] desktop hydrate failed', err);
       }
@@ -162,11 +172,46 @@ export function EngineApp({
   }, [refreshCloud]);
 
   React.useEffect(() => {
+    if (!liveUser) {
+      setLivePingMs(null);
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      const started = performance.now();
+      const result = await probeEngineApi();
+      if (cancelled) return;
+      if (result === 'ok') setLivePingMs(Math.round(performance.now() - started));
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [liveUser, platformUrl]);
+
+  React.useEffect(() => {
     const id = window.setTimeout(() => setSplash(false), 2200);
     return () => window.clearTimeout(id);
   }, []);
 
   const siteHost = platformUrl.replace(/^https?:\/\//, '').replace(/\/$/, '') || 'kilrun.vercel.app';
+
+  const persistPlatformUrl = React.useCallback(async (url: string) => {
+    const origin = url.trim().replace(/\/$/, '') || enginePlatformOrigin();
+    setPlatformUrl(origin);
+    configureEnginePlatform({ origin });
+    try {
+      await setDesktopPlatformUrl(origin);
+    } catch (err) {
+      toast({
+        title: 'Could not save website URL',
+        description: err instanceof Error ? err.message : 'Use kilrun.vercel.app or localhost',
+        variant: 'destructive',
+      });
+    }
+  }, [toast]);
 
   const uploadHubMap = React.useCallback(
     async (mapId: string, setActive: boolean) => {
@@ -181,7 +226,7 @@ export function EngineApp({
           localId: mapId,
           name: doc.name,
           mode,
-          document: doc,
+          document: attachPluginRuntimeToDoc(doc),
           thumbnailDataUrl: getMapThumbnail(mapId),
           setActive,
         });
@@ -190,7 +235,7 @@ export function EngineApp({
         refresh();
         toast({
           title: setActive || row.isActive
-            ? `This is now the MAIN map for ${KILRUN_MODE_INFO[mode].shortTitle}`
+            ? `This is now the MAIN map for ${getKilrunModeInfo(mode).shortTitle}`
             : `Uploaded to ${siteHost} as a draft`,
           description: setActive || row.isActive
             ? `Players load “${doc.name}” on the live web game.`
@@ -257,15 +302,15 @@ export function EngineApp({
         await refreshCloud();
         if (!rows.length) {
           toast({
-            title: `No ${KILRUN_MODE_INFO[mode].shortTitle} maps on the live site`,
+            title: `No ${getKilrunModeInfo(mode).shortTitle} maps on the live site`,
             description: 'Create or upload a map, then Pull again.',
           });
           return;
         }
         toast({
           title: pulled
-            ? `Pulled ${pulled} ${KILRUN_MODE_INFO[mode].shortTitle} map${pulled === 1 ? '' : 's'}`
-            : `${KILRUN_MODE_INFO[mode].shortTitle} maps already in Engine`,
+            ? `Pulled ${pulled} ${getKilrunModeInfo(mode).shortTitle} map${pulled === 1 ? '' : 's'}`
+            : `${getKilrunModeInfo(mode).shortTitle} maps already in Engine`,
           description: `From ${siteHost}`,
         });
       } catch (err) {
@@ -410,7 +455,7 @@ export function EngineApp({
   };
 
   const createMap = (mode: KilrunMode) => {
-    const { id } = createNewMap(`Untitled ${KILRUN_MODE_INFO[mode].shortTitle}`, mode);
+    const { id } = createNewMap(`Untitled ${getKilrunModeInfo(mode).shortTitle}`, mode);
     refresh();
     setEditorMapId(id);
   };
@@ -469,6 +514,24 @@ export function EngineApp({
       setShowAbout(true);
       return;
     }
+    if (type === 'plugins-manage') {
+      setShowPlugins(true);
+      return;
+    }
+    if (type === 'plugins-reload') {
+      void loadDesktopPlugins().then((result) => {
+        toast({
+          title: result.loaded.length
+            ? `Loaded ${result.loaded.length} plugin${result.loaded.length === 1 ? '' : 's'}`
+            : 'Plugins reloaded',
+          description: result.errors.length
+            ? result.errors.map((row) => `${row.id}: ${row.error}`).join(' · ')
+            : undefined,
+          variant: result.errors.length ? 'destructive' : undefined,
+        });
+      });
+      return;
+    }
     if (type === 'upload-draft' || type === 'publish') {
       requireLiveThen({ kind: 'command', type });
       return;
@@ -487,8 +550,10 @@ export function EngineApp({
         inEditor={Boolean(editorMapId)}
         liveUser={liveUser}
         liveBusy={liveBusy}
+        livePingMs={livePingMs}
         platformUrl={platformUrl}
         onUrlChange={setPlatformUrl}
+        onUrlCommit={() => void persistPlatformUrl(platformUrl)}
         onConnect={() => void connectLiveGame()}
         onDisconnect={() => void disconnectLiveGame()}
         onCommand={handleCommand}
@@ -503,7 +568,7 @@ export function EngineApp({
 
   if (editorMapId && ready) {
     return (
-      <div className="h-screen w-screen bg-[#080b12] text-white flex flex-col overflow-hidden">
+      <div className="h-screen w-screen bg-[#080b12] text-white font-sans antialiased flex flex-col overflow-hidden">
         {shell}
         <div className="flex-1 min-h-0 relative">
           <MapEditor
@@ -533,114 +598,36 @@ export function EngineApp({
           dataRoot={dataRoot}
           platformUrl={platformUrl}
         />
+        <PluginManagerDialog open={showPlugins} onClose={() => setShowPlugins(false)} />
       </div>
     );
   }
 
   return (
-    <div className="h-screen w-screen bg-[#080b12] text-white flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-[#080b12] text-white font-sans antialiased flex flex-col overflow-hidden">
       {shell}
-      <div className="flex-1 min-h-0 overflow-auto relative">
-        <div className="absolute inset-0 pointer-events-none">
-          <EngineBackdrop />
-        </div>
-        <div className="relative max-w-6xl mx-auto px-6 py-10 space-y-10">
-          <header className="flex flex-col items-center text-center gap-5 pt-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={ENGINE_MARK}
-              alt=""
-              className="h-20 w-20 object-contain drop-shadow-[0_0_28px_rgba(226,61,74,0.55)]"
-            />
-            <InteractiveWordmark
-              src={ENGINE_WORDMARK}
-              alt="Kilrun"
-              className="h-16 sm:h-24 md:h-28 w-auto max-w-[min(90vw,640px)]"
-            />
-            <p className="text-sm sm:text-base text-slate-200 max-w-xl">
-              Create maps in the Engine. Upload a draft to the website, then Set as MAIN when
-              players should load it.
-            </p>
-          </header>
-
-          <section>
-            <p className="text-[11px] uppercase tracking-[0.28em] text-red-300/80 mb-3">New file</p>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {KILRUN_MODES.map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => createMap(mode)}
-                  className="group relative overflow-hidden rounded-2xl border border-red-500/25 bg-[#121821]/80 px-5 py-6 text-left transition hover:border-red-400/70 hover:shadow-[0_0_28px_rgba(226,61,74,0.25)]"
-                >
-                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition bg-gradient-to-br from-red-600/20 to-transparent" />
-                  <div className="relative flex items-start gap-3">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-600/20 text-red-300">
-                      <Plus className="h-5 w-5" />
-                    </span>
-                    <span>
-                      <span className="block font-semibold text-lg">{KILRUN_MODE_INFO[mode].shortTitle}</span>
-                      <span className="block text-[12px] text-slate-400 mt-1">
-                        {KILRUN_MODE_INFO[mode].editorBlurb}
-                      </span>
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2 mt-4">
-              <Button
-                size="sm"
-                variant="secondary"
-                className="border border-white/10"
-                onClick={() => importRef.current?.click()}
-              >
-                <Upload className="h-3.5 w-3.5 mr-1" />
-                Import JSON
-              </Button>
-              {KILRUN_MODES.map((mode) => (
-                <Button
-                  key={`cloud-${mode}`}
-                  size="sm"
-                  variant="ghost"
-                  className="text-slate-300"
-                  onClick={() => void syncCloud(mode)}
-                >
-                  <Cloud className="h-3.5 w-3.5 mr-1" />
-                  Pull {KILRUN_MODE_INFO[mode].shortTitle}
-                </Button>
-              ))}
-            </div>
-          </section>
-
-          <section>
-            <div className="flex items-end justify-between gap-4 mb-3">
-              <p className="text-[11px] uppercase tracking-[0.28em] text-red-300/80">Maps</p>
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search maps…"
-                className="max-w-xs bg-slate-950/70 border-red-500/20"
-              />
-            </div>
-            {filtered.length === 0 ? (
-              <p className="text-sm text-slate-400">No maps yet. Start a new file above.</p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {filtered.map((item) => (
-                  <ProjectCard
-                    key={item.id}
-                    item={item}
-                    cloud={cloudByLocalId[item.id]}
-                    onOpen={() => setEditorMapId(item.id)}
-                    onUpload={() => requireLiveThen({ kind: 'hub-upload', mapId: item.id, setActive: false })}
-                    onSetMain={() => requireLiveThen({ kind: 'hub-upload', mapId: item.id, setActive: true })}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
+      <div className="flex-1 min-h-0 overflow-hidden relative">
+        <EngineHome
+          maps={maps}
+          filtered={filtered}
+          query={query}
+          onQueryChange={setQuery}
+          cloudByLocalId={cloudByLocalId}
+          liveUser={liveUser}
+          siteHost={siteHost}
+          livePingMs={livePingMs}
+          desktop={desktop}
+          onCreateMap={createMap}
+          onImport={() => importRef.current?.click()}
+          onPull={(mode) => void syncCloud(mode)}
+          onOpenProjects={() => void openDesktopProjectsFolder()}
+          onOpenPlugins={() => setShowPlugins(true)}
+          onOpenMap={setEditorMapId}
+          onUpload={(mapId) => requireLiveThen({ kind: 'hub-upload', mapId, setActive: false })}
+          onSetMain={(mapId) => requireLiveThen({ kind: 'hub-upload', mapId, setActive: true })}
+          onConnect={() => void connectLiveGame()}
+          onDisconnect={() => void disconnectLiveGame()}
+        />
       </div>
       <input
         ref={importRef}
@@ -669,7 +656,6 @@ export function EngineApp({
           }
         }}
       />
-      <EnginePerfHud hidden={!showPerfHud} stats={null} entityCount={0} collisionBoxes={0} />
       <AboutDialog
         open={showAbout}
         onClose={() => setShowAbout(false)}
@@ -677,71 +663,7 @@ export function EngineApp({
         dataRoot={dataRoot}
         platformUrl={platformUrl}
       />
-    </div>
-  );
-}
-
-function ProjectCard({
-  item,
-  cloud,
-  onOpen,
-  onUpload,
-  onSetMain,
-}: {
-  item: MapListItem;
-  cloud?: CloudBadge;
-  onOpen: () => void;
-  onUpload: () => void;
-  onSetMain: () => void;
-}) {
-  const thumb = getMapThumbnail(item.id);
-  const mode = item.gameMode;
-  const localMain = mode != null && getActivePlayMapIdForMode(mode) === item.id;
-  const isMain = cloud?.isActive || (!cloud && localMain);
-  const status = isMain ? 'MAIN' : cloud?.uploaded ? 'Cloud draft' : 'Local';
-  return (
-    <div className="rounded-2xl border border-white/10 bg-slate-950/70 hover:border-red-400/50 hover:shadow-[0_0_24px_rgba(226,61,74,0.18)] overflow-hidden transition flex flex-col">
-      <button type="button" onClick={onOpen} className="text-left">
-        <div className="h-32 bg-[#070a10] overflow-hidden relative">
-          {thumb ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={thumb} alt="" className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-slate-600">
-              <Monitor className="h-8 w-8" />
-            </div>
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-[#080b12] to-transparent opacity-70" />
-        </div>
-        <div className="px-3 pt-3 space-y-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-semibold truncate">{item.name}</span>
-            <Badge className={`text-[10px] shrink-0 ${isMain ? 'bg-red-600/90' : 'bg-slate-800'}`}>
-              {status}
-            </Badge>
-            {item.corrupt ? (
-              <Badge variant="destructive" className="text-[10px]">
-                corrupt
-              </Badge>
-            ) : null}
-          </div>
-          <div className="text-[11px] text-slate-400 flex justify-between">
-            <span>{mode ? KILRUN_MODE_INFO[mode].shortTitle : 'Map'}</span>
-            <span>{formatBytes(item.sizeBytes)}</span>
-          </div>
-        </div>
-      </button>
-      <div className="p-3 pt-2 flex flex-wrap gap-1.5">
-        <Button size="sm" variant="secondary" className="h-7 text-[11px]" onClick={onOpen}>
-          Open
-        </Button>
-        <Button size="sm" variant="secondary" className="h-7 text-[11px]" onClick={onUpload}>
-          Upload
-        </Button>
-        <Button size="sm" className="h-7 text-[11px] bg-red-700 hover:bg-red-600" onClick={onSetMain}>
-          Set MAIN
-        </Button>
-      </div>
+      <PluginManagerDialog open={showPlugins} onClose={() => setShowPlugins(false)} />
     </div>
   );
 }
@@ -761,8 +683,10 @@ function EngineMenuBar({
   inEditor,
   liveUser,
   liveBusy,
+  livePingMs,
   platformUrl,
   onUrlChange,
+  onUrlCommit,
   onConnect,
   onDisconnect,
   onCommand,
@@ -774,8 +698,10 @@ function EngineMenuBar({
   inEditor: boolean;
   liveUser: EngineSessionUser | null;
   liveBusy: boolean;
+  livePingMs: number | null;
   platformUrl: string;
   onUrlChange: (url: string) => void;
+  onUrlCommit: () => void;
   onConnect: () => void;
   onDisconnect: () => void;
   onCommand: (type: string) => void;
@@ -807,13 +733,14 @@ function EngineMenuBar({
   return (
     <div
       ref={barRef}
-      className="relative z-[200] shrink-0 border-b border-red-500/20 bg-[#090c14]/95 backdrop-blur-md"
+      className="relative z-[200] shrink-0 border-b border-slate-700/40 bg-[#090c14]/95 backdrop-blur-md shadow-[0_1px_0_rgba(226,61,74,0.28)]"
     >
-      <div className="h-11 px-3 flex items-center gap-2 text-[12px]">
+      <div className="h-12 px-3 flex items-center gap-2 text-[12px]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={ENGINE_MARK} alt="" className="h-7 w-7 object-contain drop-shadow-[0_0_10px_rgba(226,61,74,0.6)]" />
         <span className="font-black tracking-[0.22em] text-red-200">ENGINE</span>
         <span className="text-[10px] text-slate-500">{KILRUN_ENGINE_VERSION}</span>
+        <div className="h-5 w-px bg-slate-700/50 mx-1" />
         <nav className="flex items-center gap-0.5 text-slate-200">
           <MenuDrop
             label="File"
@@ -849,6 +776,16 @@ function EngineMenuBar({
               { label: 'Reset camera', onSelect: () => run('reset-camera'), disabled: !inEditor },
               { label: 'Hide UI', onSelect: () => run('hide-ui'), disabled: !inEditor },
               { label: 'Toggle perf HUD', onSelect: () => run('toggle-perf-hud') },
+            ]}
+          />
+          <MenuDrop
+            label="Plugins"
+            open={openMenu === 'Plugins'}
+            onOpen={() => setOpenMenu((m) => (m === 'Plugins' ? null : 'Plugins'))}
+            items={[
+              { label: 'Manage plugins…', onSelect: () => run('plugins-manage'), disabled: !desktop },
+              { label: 'Reload plugins', onSelect: () => run('plugins-reload'), disabled: !desktop },
+              ...(desktop ? [{ label: 'Open Plugins folder', onSelect: () => run('open-plugins') }] : []),
             ]}
           />
           <MenuDrop
@@ -914,33 +851,44 @@ function EngineMenuBar({
             <Input
               value={platformUrl}
               onChange={(e) => onUrlChange(e.target.value)}
+              onBlur={onUrlCommit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
+                }
+              }}
               placeholder="https://kilrun.vercel.app"
-              className="h-7 w-[190px] bg-slate-950/80 border-red-500/20 text-[11px]"
+              className="h-8 w-[210px] bg-slate-950/80 border-slate-700/40 text-[11px]"
             />
             {liveUser ? (
               <>
-                <Badge className="bg-red-700/80 text-[10px] max-w-[160px] truncate">
-                  Live linked · {liveUser.username}
+                <Badge className="bg-red-700/80 text-[10px] max-w-[200px] truncate">
+                  Live linked{livePingMs != null ? ` · ${livePingMs}ms` : ''} · {liveUser.username}
                 </Badge>
-                <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={onDisconnect}>
+                <Button size="sm" variant="ghost" className="h-8 text-[11px]" onClick={onDisconnect}>
                   Unlink
                 </Button>
               </>
             ) : (
-              <Button
-                size="sm"
-                className="h-7 text-[11px] shadow-[0_0_16px_rgba(226,61,74,0.35)]"
-                disabled={liveBusy}
-                onClick={onConnect}
-              >
-                {liveBusy ? 'Opening Steam…' : 'Link live game'}
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  className="h-8 text-[11px] shadow-2xl"
+                  disabled={liveBusy}
+                  onClick={onConnect}
+                >
+                  {liveBusy ? 'Opening Steam…' : 'Link live game'}
+                </Button>
+                <span className="text-[11px] text-slate-400 shrink-0">{userName}</span>
+              </>
             )}
           </div>
         ) : (
-          <span className="text-[10px] uppercase tracking-[0.18em] text-red-300/80">Browser</span>
+          <>
+            <span className="text-[10px] uppercase tracking-[0.18em] text-red-300/80">Browser</span>
+            <span className="text-[11px] text-slate-400 shrink-0">{userName}</span>
+          </>
         )}
-        <span className="text-[11px] text-slate-400 shrink-0">{userName}</span>
       </div>
     </div>
   );

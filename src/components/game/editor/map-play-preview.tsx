@@ -8,6 +8,7 @@ import type { MapDocument } from './map-document';
 import { ensureCombatSettings, ensurePlatformMotion, DEFAULT_WEAPON_DEF } from './map-document';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from '@shared/sim-constants';
 import { isPlayerOverlappingObstacle } from '@shared/obstacle-hit';
+import { emitPlaytest, runEntityPluginScripts } from '@/lib/engine/plugin-sdk';
 import {
   HAMMER_SOLID_MODEL,
   ensureEnvironment,
@@ -267,6 +268,10 @@ export function MapPlayPreview({
   playTestRole?: 'runner' | 'trapper' | 'team_a' | 'team_b';
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    emitPlaytest('ready', { mapId });
+    return () => emitPlaytest('exit', { mapId });
+  }, [mapId]);
   const joystickRef = useRef<DualJoystick | null>(null);
   // Admin-configured global scheme (Map Editor → Controls) — same source
   // live matches use (kilrun-engine.tsx), so Play Test never drifts.
@@ -1382,6 +1387,24 @@ export function MapPlayPreview({
             playSound('trap_trigger');
           }
         }
+
+        runEntityPluginScripts({
+          entities: playDoc.entities,
+          player: { x: body.x, y: body.y, z: body.z },
+          dt,
+          damage: (amount) => {
+            hpLocal = Math.max(0, hpLocal - amount);
+            setHp(hpLocal);
+          },
+        });
+        emitPlaytest('tick', {
+          dt,
+          hp: hpLocal,
+          x: body.x,
+          y: body.y,
+          z: body.z,
+          mapId,
+        });
 
         // Teleporters
         for (const t of teleports) {

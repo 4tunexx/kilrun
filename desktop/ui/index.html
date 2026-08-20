@@ -5,11 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Kilrun Engine</title>
     <link rel="icon" href="/K2.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+      }
+    </style>
     <script>
       window.__KILRUN_ENGINE__ = true;
     </script>
   </head>
-  <body class="dark min-h-screen bg-[#0d121a] text-white">
+  <body class="dark min-h-screen bg-[#0d121a] text-white font-sans antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

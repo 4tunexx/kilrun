@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ENGINE_BG, ENGINE_MARK, ENGINE_WORDMARK } from '@/lib/engine/brand';
+import { ENGINE_BG, ENGINE_MARK } from '@/lib/engine/brand';
 
 export function EngineBackdrop() {
   return (
@@ -13,6 +13,8 @@ export function EngineBackdrop() {
         className="absolute inset-0 h-full w-full object-cover"
       />
       <div className="absolute inset-0 bg-[#080b12]/80" />
+      <div className="absolute inset-0 bg-gradient-to-r from-slate-900/90 via-slate-900/45 to-slate-900/75" />
+      <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-transparent to-slate-900/40" />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(226,61,74,0.28),transparent_55%)]" />
       <div className="absolute inset-0 engine-grid opacity-20" />
     </>
@@ -33,12 +35,6 @@ export function EngineSplash({ visible }: { visible: boolean }) {
           src={ENGINE_MARK}
           alt=""
           className="h-36 w-36 object-contain drop-shadow-[0_0_32px_rgba(226,61,74,0.55)] animate-engine-mark"
-        />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={ENGINE_WORDMARK}
-          alt="Kilrun"
-          className="h-16 sm:h-20 w-auto max-w-[min(72vw,520px)] object-contain drop-shadow-[0_0_24px_rgba(226,61,74,0.35)]"
         />
         <p className="text-[11px] uppercase tracking-[0.42em] text-red-300/80">Engine</p>
         <div className="h-[3px] w-56 overflow-hidden rounded-full bg-white/10">

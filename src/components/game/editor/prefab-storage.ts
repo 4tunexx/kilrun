@@ -994,6 +994,36 @@ export function mapDocToSimHazards(doc: MapDocument): SimHazardBlueprint[] {
     });
 }
 
+export type MapPluginEntitySim = {
+  id: string;
+  pluginScript: string;
+  x: number;
+  y: number;
+  z: number;
+  hx: number;
+  hy: number;
+  hz: number;
+};
+
+/** Entities with a plugin script, already converted to sim-space AABBs. */
+export function mapDocPluginEntities(doc: MapDocument): MapPluginEntitySim[] {
+  return doc.entities
+    .filter((e) => e.visible !== false && Boolean(e.pluginScript))
+    .map((e) => {
+      const [tx, ty, tz] = e.position;
+      return {
+        id: e.id,
+        pluginScript: String(e.pluginScript),
+        x: tz,
+        y: tx,
+        z: ty,
+        hx: Math.max(0.4, Math.abs((e.collisionSize?.[2] ?? e.scale[2] * 2) / 2)),
+        hy: Math.max(0.4, Math.abs((e.collisionSize?.[0] ?? e.scale[0] * 2) / 2)),
+        hz: Math.max(0.4, Math.abs((e.collisionSize?.[1] ?? e.scale[1] * 2) / 2)),
+      };
+    });
+}
+
 export function mapDocToSimFinishes(doc: MapDocument): SimFinishBlueprint[] {
   return doc.entities
     .filter((e) => e.visible !== false && e.kind === 'finish')

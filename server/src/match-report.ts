@@ -37,6 +37,8 @@ export type MatchReportPayload = {
     scoreB?: number;
   };
   players: MatchReportPlayer[];
+  /** Plugin room slug (e.g. gauntlet) — XP still uses `mode`. */
+  pluginMode?: string;
   /** Clan Wars — present only when both teams were clan lobbies. */
   clanWar?: {
     lobbyAId: string;

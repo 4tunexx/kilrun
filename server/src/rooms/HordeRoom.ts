@@ -76,6 +76,9 @@ import {
   reportMatchResults,
 } from '../match-report.js';
 import { fetchActiveMapPayload } from '../active-map.js';
+import { RoomPluginRuntime } from '../plugin-runtime.js';
+import { mergeShopPool } from '../plugin-catalog.js';
+import { pluginRoomModeTag, publishedMapModeKey } from '../../../shared/plugin-source.js';
 import { ensurePowerDefinitionsLoaded } from '../power-defs.js';
 import {
   detectPlayerCommand,
@@ -251,6 +254,7 @@ export class HordeRoom extends Room<RoomState> {
   private customMapLoaded = false;
   /** Practice rooms set false — never load/replace with published MAIN. */
   protected usePublishedActiveMap = true;
+  private mapPlugins = new RoomPluginRuntime();
   private adminSessions = new Set<string>();
   /** Admin OR moderator sessions — eligible for the reserved staff join seat. */
   private staffSessions = new Set<string>();
@@ -344,7 +348,7 @@ export class HordeRoom extends Room<RoomState> {
     this.setState(new RoomState());
     // Match state stream to the sim tick (30 Hz) for smooth movement.
     this.setPatchRate(TICK_DT_MS);
-    this.state.modeTag = 'horde';
+    this.state.modeTag = pluginRoomModeTag(this.roomName, 'horde');
     // Small default arena until MAIN map loads
     this.state.platforms.push(
       ...createFromBlueprints([
@@ -782,6 +786,11 @@ export class HordeRoom extends Room<RoomState> {
       console.log(
         `[HordeRoom] map loaded: ${platforms.length} pads, ${this.monsterSpawnPoints.length} monster spawns`
       );
+      this.mapPlugins.load(data);
+      this.shopItems = mergeShopPool(
+        this.shopItems,
+        this.mapPlugins.shopPool() as any
+      );
     });
 
     void ensurePowerDefinitionsLoaded();
@@ -811,7 +820,7 @@ export class HordeRoom extends Room<RoomState> {
    */
   private syncActiveMapFromCloud(force = false) {
     if (!this.usePublishedActiveMap) return;
-    void fetchActiveMapPayload('horde').then((active) => {
+    void fetchActiveMapPayload(publishedMapModeKey(this.roomName)).then((active) => {
       if (!active) return;
       if (this.customMapLoaded && !force) return;
       const pads = active.payload.platforms as PlatformBlueprint[] | undefined;
@@ -890,6 +899,19 @@ export class HordeRoom extends Room<RoomState> {
         player.vz = 0;
       });
       console.log(`[HordeRoom] MAIN map loaded from server (${active.name}): ${pads.length} pads`);
+      const shopRaw = data.shopSettings as { items?: unknown[] } | undefined;
+      if (shopRaw?.items && Array.isArray(shopRaw.items)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.shopItems = shopRaw.items.filter(
+          (it) =>
+            !!it && typeof it === 'object' && typeof (it as { id?: unknown }).id === 'string'
+        ) as any;
+      }
+      this.mapPlugins.load(data as Record<string, unknown>);
+      this.shopItems = mergeShopPool(
+        this.shopItems,
+        this.mapPlugins.shopPool() as any
+      );
     });
   }
 
@@ -1529,6 +1551,8 @@ export class HordeRoom extends Room<RoomState> {
         this.damagePlayer(player, amount);
       }
 
+      this.mapPlugins.tickPlayer(player, dtSeconds, now, (n) => this.damagePlayer(player, n));
+
       if (player.z < VOID_Z) {
         this.damagePlayer(player, 100);
       }
@@ -1871,6 +1895,7 @@ export class HordeRoom extends Room<RoomState> {
     const awards = await reportMatchResults({
       matchId,
       mode: 'horde',
+      pluginMode: publishedMapModeKey(this.roomName),
       winnerRole,
       room: { wave: this.state.wave, teamKills: this.state.teamKills },
       players,

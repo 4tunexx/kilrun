@@ -49,13 +49,13 @@ Deploy to any host that supports an always-on Node process with WebSocket suppor
 ### Option B: Fly.io
 
 ```bash
-cd server
-fly launch --no-deploy
+# From the repo root so `shared/` is in the image
+fly launch --no-deploy --dockerfile server/Dockerfile
 fly secrets set CLIENT_ORIGIN=https://your-nextjs-app.vercel.app
 fly secrets set WEB_APP_URL=https://your-nextjs-app.vercel.app
 fly secrets set GAME_SERVER_ADMIN_SECRET=...
 fly secrets set GAME_JOIN_TOKEN_SECRET=...
-fly deploy
+fly deploy --dockerfile server/Dockerfile
 ```
 
 Expose internal port `2567` with TCP/HTTP+TLS handlers (see Dockerfile `EXPOSE 2567`).

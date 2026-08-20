@@ -261,6 +261,17 @@ export function applyDynamicWeaponDefinitions(records: CatalogWeaponDef[]): void
   CATALOG_WEAPONS.push(...merged);
 }
 
+export function registerCatalogWeapon(def: CatalogWeaponDef): void {
+  const next = {
+    ...def,
+    combat: { ...def.combat },
+    modes: [...def.modes],
+  };
+  const index = CATALOG_WEAPONS.findIndex((row) => row.id === next.id);
+  if (index >= 0) CATALOG_WEAPONS[index] = next;
+  else CATALOG_WEAPONS.push(next);
+}
+
 export function resetToStaticWeaponDefinitions(): void {
   CATALOG_WEAPONS.length = 0;
   CATALOG_WEAPONS.push(

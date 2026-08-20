@@ -10,7 +10,6 @@ export class CompetitivePracticeRoom extends CompetitiveRoom {
   onCreate() {
     super.onCreate({});
     this.setPrivate(true);
-    this.state.modeTag = 'competitive_practice';
   }
 
   async onLeave(client: Client, consented: boolean) {

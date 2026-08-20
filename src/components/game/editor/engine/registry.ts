@@ -29,6 +29,12 @@ export function getSidebarPlugins(): MapEditorPlugin[] {
     .sort((a, b) => a.order - b.order);
 }
 
+export function removeMapEditorPlugins(predicate: (plugin: MapEditorPlugin) => boolean) {
+  for (let i = extraPlugins.length - 1; i >= 0; i--) {
+    if (predicate(extraPlugins[i])) extraPlugins.splice(i, 1);
+  }
+}
+
 /** True for panels that replace the map sidebar (Player Model, Weapon, etc). */
 export function isStudioPluginTab(tabId: string): boolean {
   return Boolean(getSidebarPlugin(tabId)?.studio);

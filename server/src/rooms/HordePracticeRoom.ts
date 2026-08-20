@@ -10,7 +10,6 @@ export class HordePracticeRoom extends HordeRoom {
   onCreate() {
     super.onCreate();
     this.setPrivate(true);
-    this.state.modeTag = 'horde_practice';
   }
 
   async onLeave(client: Client, consented: boolean) {

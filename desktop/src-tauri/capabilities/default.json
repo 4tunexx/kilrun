@@ -9,7 +9,9 @@
       "http://localhost:1420/*",
       "http://localhost:3000/*",
       "http://127.0.0.1:3000/*",
-      "https://kilrun.vercel.app/*"
+      "https://kilrun.vercel.app/*",
+      "https://fonts.googleapis.com/*",
+      "https://fonts.gstatic.com/*"
     ]
   },
   "permissions": [

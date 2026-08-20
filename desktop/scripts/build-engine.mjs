@@ -49,6 +49,8 @@ const cap = JSON.parse(fs.readFileSync(capPath, 'utf8'));
 const urls = new Set(cap.remote?.urls ?? []);
 urls.add('http://localhost:3000/*');
 urls.add('http://127.0.0.1:3000/*');
+urls.add('https://fonts.googleapis.com/*');
+urls.add('https://fonts.gstatic.com/*');
 try {
   const parsed = new URL(platformUrl);
   urls.add(`${parsed.origin}/*`);

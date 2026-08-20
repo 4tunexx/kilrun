@@ -46,6 +46,7 @@ type Body = {
     scoreB?: number;
   };
   players?: BodyPlayer[];
+  pluginMode?: string;
   clanWar?: {
     lobbyAId?: string;
     lobbyBId?: string;
@@ -91,6 +92,13 @@ export async function POST(req: NextRequest) {
     );
   }
   const mode = modeRaw as MatchRewardMode;
+  const pluginMode =
+    typeof body.pluginMode === 'string' && body.pluginMode.trim()
+      ? body.pluginMode.trim().slice(0, 64)
+      : '';
+  if (pluginMode && pluginMode !== mode) {
+    console.info('[match-result]', matchId, mode, 'pluginMode=', pluginMode);
+  }
   const winnerRole = typeof body.winnerRole === 'string' ? body.winnerRole : '';
   const queue =
     body.queue === 'ranked' || body.queue === 'casual'

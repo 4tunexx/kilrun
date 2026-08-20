@@ -3,12 +3,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import KilrunEngine from '../kilrun-engine';
 import { mintMyGameJoinToken, getSessionUser } from '@/lib/actions';
-import type { KilrunMode } from '@/lib/game-modes';
+import type { CoreKilrunMode, KilrunMode } from '@/lib/game-modes';
+import { isCoreKilrunMode, resolveModeBase } from '@/lib/game-modes';
 import type { MapDocument } from './map-document';
 import { prepareDocForPlayTest } from './prefab-storage';
 import type { GameRoomName } from '../net/connection';
 
-const PRACTICE_ROOM: Record<KilrunMode, GameRoomName> = {
+const PRACTICE_ROOM: Record<CoreKilrunMode, GameRoomName> = {
   deathrun: 'deathrun_practice',
   horde: 'horde_practice',
   competitive: 'competitive_practice',
@@ -37,6 +38,10 @@ export function PlayTestEngine({
     isAdmin: boolean;
   } | null>(null);
   const [ready, setReady] = useState(false);
+  const simMode = resolveModeBase(mode);
+  const practiceRoom: GameRoomName = isCoreKilrunMode(mode)
+    ? PRACTICE_ROOM[simMode]
+    : `${mode}_practice`;
 
   useEffect(() => {
     let cancelled = false;
@@ -73,11 +78,11 @@ export function PlayTestEngine({
       avatarUrl: sessionUser?.avatarUrl,
       ...(joinToken ? { token: joinToken } : {}),
       isAdmin: sessionUser?.isAdmin ?? false,
-      ...(mode === 'competitive' && (playTestRole === 'team_a' || playTestRole === 'team_b')
+      ...(simMode === 'competitive' && (playTestRole === 'team_a' || playTestRole === 'team_b')
         ? { teamRequest: playTestRole as 'team_a' | 'team_b' }
         : {}),
     }),
-    [sessionUser, joinToken, mode, playTestRole]
+    [sessionUser, joinToken, simMode, playTestRole]
   );
 
   if (!ready || !sessionUser) {
@@ -91,13 +96,13 @@ export function PlayTestEngine({
   return (
     <KilrunEngine
       mode={mode}
-      roomNameOverride={PRACTICE_ROOM[mode]}
+      roomNameOverride={practiceRoom}
       draftDoc={draftDoc}
       joinOptions={joinOptions}
       onExit={onClose}
       isAdmin={sessionUser.isAdmin}
       practiceRole={
-        mode === 'deathrun' && (playTestRole === 'runner' || playTestRole === 'trapper')
+        simMode === 'deathrun' && (playTestRole === 'runner' || playTestRole === 'trapper')
           ? playTestRole
           : undefined
       }

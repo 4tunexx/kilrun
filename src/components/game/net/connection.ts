@@ -60,16 +60,21 @@ export interface JoinOptions {
   clanLobbyId?: string;
 }
 
-export type GameRoomName =
-  | 'deathrun'
-  | 'deathrun_practice'
-  | 'horde'
-  | 'horde_practice'
-  | 'competitive'
-  | 'competitive_practice'
-  | 'competitive_ranked';
+export type GameRoomName = string;
 
+const CORE_JOIN_ROOMS = new Set([
+  'deathrun',
+  'deathrun_practice',
+  'horde',
+  'horde_practice',
+  'competitive',
+  'competitive_practice',
+  'competitive_ranked',
+]);
 
+async function sleep(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export interface RoomCallbacks {
   onPlayerAdd?: (player: NetPlayerState, sessionId: string) => void;
@@ -267,10 +272,25 @@ export class GameConnection {
       return;
     }
 
-    const room = await this.client.joinOrCreate(roomName, {
+    const joinPayloadWithRank = {
       ...joinPayload,
       rankKey: preferredKey ?? 'open',
-    });
+    };
+    const attempts = CORE_JOIN_ROOMS.has(roomName) ? 1 : 5;
+    let room: Room | null = null;
+    let lastErr: unknown;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        room = await this.client.joinOrCreate(roomName, joinPayloadWithRank);
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (this.disposed || i === attempts - 1) break;
+        await sleep(700 * (i + 1));
+      }
+    }
+    if (!room) throw lastErr ?? new Error(`Could not join ${roomName}`);
     if (this.disposed) {
       room.leave();
       return;
@@ -866,6 +886,8 @@ export class GameConnection {
     combatSettings?: Record<string, unknown>;
     shopSettings?: Record<string, unknown>;
     customMoves?: Record<string, unknown>[];
+    pluginRuntime?: unknown;
+    pluginEntities?: unknown;
   }): void {
     this.safeSend('loadCustomMap', payload);
   }

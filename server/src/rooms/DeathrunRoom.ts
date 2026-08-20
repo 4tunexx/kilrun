@@ -70,6 +70,8 @@ import {
   reportMatchResults,
 } from '../match-report.js';
 import { fetchActiveMapPayload } from '../active-map.js';
+import { RoomPluginRuntime } from '../plugin-runtime.js';
+import { pluginRoomModeTag, publishedMapModeKey } from '../../../shared/plugin-source.js';
 import { ensurePowerDefinitionsLoaded } from '../power-defs.js';
 import {
   detectPlayerCommand,
@@ -252,13 +254,14 @@ export class DeathrunRoom extends Room<RoomState> {
    * pushes the in-editor draft via loadCustomMap.
    */
   protected usePublishedActiveMap = true;
+  private mapPlugins = new RoomPluginRuntime();
 
   onCreate() {
     this.setState(new RoomState());
     // Stream state at the sim rate (30 Hz) instead of Colyseus' 20 Hz default
     // so clients get a steady position feed and movement doesn't stutter.
     this.setPatchRate(TICK_DT_MS);
-    this.state.modeTag = 'deathrun';
+    this.state.modeTag = pluginRoomModeTag(this.roomName, 'deathrun');
     // Soft lobby pad only — NEVER seed DEATHRUN_TRACK hazards here.
     // Those used to linger whenever loadCustomMap failed (non-host, late join, etc.)
     // and showed up as "hardcoded" saws/lasers on top of the Active custom map.
@@ -494,6 +497,8 @@ export class DeathrunRoom extends Room<RoomState> {
           modeSettings?: Record<string, unknown>;
           combatSettings?: Record<string, unknown>;
           customMoves?: Record<string, unknown>[];
+          pluginRuntime?: unknown;
+          pluginEntities?: unknown;
         }
       ) => {
         if (this.state.phase !== 'lobby' && this.state.phase !== 'countdown') return;
@@ -515,7 +520,7 @@ export class DeathrunRoom extends Room<RoomState> {
     void ensurePowerDefinitionsLoaded();
 
     if (this.usePublishedActiveMap) {
-      void fetchActiveMapPayload('deathrun').then((active) => {
+      void fetchActiveMapPayload(publishedMapModeKey(this.roomName)).then((active) => {
         if (!active || this.customMapLoaded) return;
         this.bootstrapCustomMap(
           active.payload as Parameters<DeathrunRoom['bootstrapCustomMap']>[0],
@@ -555,6 +560,8 @@ export class DeathrunRoom extends Room<RoomState> {
       combatSettings?: Record<string, unknown>;
       customMoves?: Record<string, unknown>[];
       shopSettings?: Record<string, unknown>;
+      pluginRuntime?: unknown;
+      pluginEntities?: unknown;
     },
     source = 'client',
     force = false
@@ -713,6 +720,7 @@ export class DeathrunRoom extends Room<RoomState> {
     console.log(
       `[DeathrunRoom] MAIN map loaded (${source}): ${platforms.length} platforms, ${hazards.length} hazards`
     );
+    this.mapPlugins.load(data as Record<string, unknown>);
   }
 
   onAuth(_client: Client, options: JoinOptions): GameJoinClaims {
@@ -1153,6 +1161,13 @@ export class DeathrunRoom extends Room<RoomState> {
           this.damagePlayer(player, amount);
         }
 
+        this.mapPlugins.tickPlayer(
+          player,
+          dtSeconds,
+          now,
+          (n) => this.damagePlayer(player, n)
+        );
+
         // Checkpoint touch → save respawn
         for (const platform of this.state.platforms) {
           if (platform.kind !== 'checkpoint') continue;
@@ -1587,6 +1602,7 @@ export class DeathrunRoom extends Room<RoomState> {
     const awards = await reportMatchResults({
       matchId,
       mode: 'deathrun',
+      pluginMode: publishedMapModeKey(this.roomName),
       winnerRole,
       players,
     });
@@ -1634,7 +1650,7 @@ export class DeathrunRoom extends Room<RoomState> {
       // (e.g. taller walls) never reaches players until an admin manually
       // restarts Colyseus. Every new round now re-checks the cloud MAIN doc.
       if (this.usePublishedActiveMap) {
-        void fetchActiveMapPayload('deathrun').then((active) => {
+        void fetchActiveMapPayload(publishedMapModeKey(this.roomName)).then((active) => {
           if (!active) return;
           this.bootstrapCustomMap(
             active.payload as Parameters<DeathrunRoom['bootstrapCustomMap']>[0],

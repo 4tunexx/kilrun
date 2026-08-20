@@ -1,3 +1,4 @@
+import { resolveModeBase } from '@/lib/game-modes';
 import type { MapDocument } from './map-document';
 import {
   entityExportsAsPlatform,
@@ -12,9 +13,9 @@ export interface MapValidationIssue {
 }
 
 export function validateMapForPublish(doc: MapDocument): MapValidationIssue[] {
-  const mode = getMapGameMode(doc);
-  if (mode === 'horde') return validateHordeMap(doc);
-  if (mode === 'competitive') return validateCompetitiveMap(doc);
+  const base = resolveModeBase(getMapGameMode(doc));
+  if (base === 'horde') return validateHordeMap(doc);
+  if (base === 'competitive') return validateCompetitiveMap(doc);
   return validateDeathrunMap(doc);
 }
 

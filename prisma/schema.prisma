@@ -706,6 +706,20 @@ model GameMap {
   @@index([updatedAt])
 }
 
+/// Staff-published plugin catalog (Engine live-link upsert). Latest source per pluginId.
+model GamePlugin {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  pluginId     String   @unique
+  version      String
+  source       String
+  manifestJson String
+  createdById  String?  @db.ObjectId
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
 /// Staff-shared map editor prefab stamps (multi-entity layouts).
 model GamePrefab {
   id           String   @id @default(auto()) @map("_id") @db.ObjectId

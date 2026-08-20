@@ -1,0 +1,21 @@
+{
+  "id": "kilrun-example",
+  "name": "Kilrun Example",
+  "version": "1.2.0",
+  "author": "Kilrun",
+  "description": "Map Stats sidebar, Pulse Bat weapon, kilrun-example.pulse touch script, and a Gauntlet game mode (Deathrun tools).",
+  "engine": "0.1.1",
+  "entry": "index.js",
+  "permissions": ["editor", "map", "playtest", "weapons", "modes", "server"],
+  "modes": [
+    {
+      "id": "gauntlet",
+      "title": "Gauntlet",
+      "shortTitle": "Gauntlet",
+      "description": "Deathrun variant shipped by the example plugin. Same course tools, with Pulse hazards on the live server.",
+      "players": "Up to 8",
+      "editorBlurb": "Same as Deathrun. Put kilrun-example.pulse on a hazard for extra touch damage.",
+      "base": "deathrun"
+    }
+  ]
+}
