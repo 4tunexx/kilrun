@@ -246,20 +246,87 @@ export function EngineApp({
     }
   }, [platformUrl, toast]);
 
+  const pullCloudMaps = React.useCallback(
+    async (mode: KilrunMode) => {
+      try {
+        const rows = await listCloudMapDocuments(mode);
+        const { pulled } = hydrateCloudMapsIntoLocal(rows, mode, setActivePlayMapIdForMode, {
+          force: true,
+        });
+        refresh();
+        await refreshCloud();
+        if (!rows.length) {
+          toast({
+            title: `No ${KILRUN_MODE_INFO[mode].shortTitle} maps on the live site`,
+            description: 'Create or upload a map, then Pull again.',
+          });
+          return;
+        }
+        toast({
+          title: pulled
+            ? `Pulled ${pulled} ${KILRUN_MODE_INFO[mode].shortTitle} map${pulled === 1 ? '' : 's'}`
+            : `${KILRUN_MODE_INFO[mode].shortTitle} maps already in Engine`,
+          description: `From ${siteHost}`,
+        });
+      } catch (err) {
+        toast({
+          title: 'Could not pull maps',
+          description: err instanceof Error ? err.message : 'Staff live-link required',
+          variant: 'destructive',
+        });
+      }
+    },
+    [refresh, refreshCloud, siteHost, toast]
+  );
+
+  const runLiveAction = React.useCallback(
+    async (action: PendingLiveAction) => {
+      switch (action.kind) {
+        case 'command':
+          window.dispatchEvent(new CustomEvent('kilrun-engine-command', { detail: { type: action.type } }));
+          return;
+        case 'hub-upload':
+          await uploadHubMap(action.mapId, action.setActive);
+          return;
+        case 'pull':
+          await pullCloudMaps(action.mode);
+          return;
+        default: {
+          const _exhaustive: never = action;
+          return _exhaustive;
+        }
+      }
+    },
+    [pullCloudMaps, uploadHubMap]
+  );
+
   const requireLiveThen = React.useCallback(
     (action: PendingLiveAction) => {
       if (liveUser) {
-        if (action.kind === 'command') {
-          window.dispatchEvent(new CustomEvent('kilrun-engine-command', { detail: { type: action.type } }));
-        } else {
-          void uploadHubMap(action.mapId, action.setActive);
-        }
+        void runLiveAction(action);
         return;
       }
       pendingLiveActionRef.current = action;
       void connectLiveGame();
     },
-    [connectLiveGame, liveUser, uploadHubMap]
+    [connectLiveGame, liveUser, runLiveAction]
+  );
+
+  const syncCloud = React.useCallback(
+    async (mode: KilrunMode) => {
+      if (!hasEngineSession()) {
+        pendingLiveActionRef.current = { kind: 'pull', mode };
+        toast({
+          title: 'Link live game first',
+          description: 'Pull copies maps from the website. Sign in with a staff Steam account.',
+          variant: 'destructive',
+        });
+        void connectLiveGame();
+        return;
+      }
+      await pullCloudMaps(mode);
+    },
+    [connectLiveGame, pullCloudMaps, toast]
   );
 
   React.useEffect(() => {
@@ -281,15 +348,7 @@ export function EngineApp({
             });
             const pending = pendingLiveActionRef.current;
             pendingLiveActionRef.current = null;
-            if (pending?.kind === 'hub-upload') {
-              await uploadHubMap(pending.mapId, pending.setActive);
-            } else if (pending?.kind === 'pull') {
-              await syncCloud(pending.mode, { alreadyLinked: true });
-            } else if (pending?.kind === 'command') {
-              window.dispatchEvent(
-                new CustomEvent('kilrun-engine-command', { detail: { type: pending.type } })
-              );
-            }
+            if (pending) await runLiveAction(pending);
           } catch (err) {
             toast({
               title: 'Live game login failed',
@@ -321,7 +380,7 @@ export function EngineApp({
       window.removeEventListener('kilrun-engine-deep-link', onDeep as EventListener);
       unlisten?.();
     };
-  }, [desktop, toast, uploadHubMap]);
+  }, [desktop, runLiveAction, toast]);
 
   React.useEffect(() => {
     if (!editorMapId) return;
@@ -341,46 +400,6 @@ export function EngineApp({
   const filtered = maps.filter(
     (m) => !query.trim() || m.name.toLowerCase().includes(query.trim().toLowerCase())
   );
-
-  const syncCloud = async (mode: KilrunMode, opts?: { alreadyLinked?: boolean }) => {
-    if (!opts?.alreadyLinked && !hasEngineSession()) {
-      pendingLiveActionRef.current = { kind: 'pull', mode };
-      toast({
-        title: 'Link live game first',
-        description: 'Pull copies maps from the website. Sign in with a staff Steam account.',
-        variant: 'destructive',
-      });
-      void connectLiveGame();
-      return;
-    }
-    try {
-      const rows = await listCloudMapDocuments(mode);
-      const { pulled } = hydrateCloudMapsIntoLocal(rows, mode, setActivePlayMapIdForMode, {
-        force: true,
-      });
-      refresh();
-      await refreshCloud();
-      if (!rows.length) {
-        toast({
-          title: `No ${KILRUN_MODE_INFO[mode].shortTitle} maps on the live site`,
-          description: 'Create or upload a map, then Pull again.',
-        });
-        return;
-      }
-      toast({
-        title: pulled
-          ? `Pulled ${pulled} ${KILRUN_MODE_INFO[mode].shortTitle} map${pulled === 1 ? '' : 's'}`
-          : `${KILRUN_MODE_INFO[mode].shortTitle} maps already in Engine`,
-        description: `From ${siteHost}`,
-      });
-    } catch (err) {
-      toast({
-        title: 'Could not pull maps',
-        description: err instanceof Error ? err.message : 'Staff live-link required',
-        variant: 'destructive',
-      });
-    }
-  };
 
   const disconnectLiveGame = async () => {
     configureEnginePlatform({ token: null });
