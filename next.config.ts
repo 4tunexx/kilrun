@@ -121,6 +121,17 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async rewrites() {
+    return [
+      // Hobby plan: extra /api/engine/* route files become extra lambdas.
+      // Keep public URLs, serve them from the existing session function.
+      { source: '/api/engine/sounds', destination: '/api/engine/session?engineResource=sounds' },
+      { source: '/api/engine/powers', destination: '/api/engine/session?engineResource=powers' },
+      { source: '/api/engine/prefabs', destination: '/api/engine/session?engineResource=prefabs' },
+      { source: '/api/engine/shop', destination: '/api/engine/session?engineResource=shop' },
+      { source: '/api/engine/join-token', destination: '/api/engine/session?engineResource=join-token' },
+    ];
+  },
   async headers() {
     return [
       {
