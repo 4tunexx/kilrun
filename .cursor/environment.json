@@ -1,0 +1,21 @@
+{
+  "name": "Kilrun",
+  "install": "bash scripts/cloud-agent/install.sh",
+  "start": "bash scripts/cloud-agent/mongo-up.sh",
+  "terminals": [
+    {
+      "name": "game-server",
+      "command": "cd server && set -a && . ./.env 2>/dev/null; set +a; npm run dev",
+      "description": "Colyseus authoritative realtime game server on ws://localhost:2567 (health: GET /healthz)."
+    },
+    {
+      "name": "hub",
+      "command": "bash scripts/cloud-agent/mongo-up.sh && npm run dev",
+      "description": "Next.js hub on http://localhost:3000. Ensures the local MongoDB replica set is up before starting."
+    }
+  ],
+  "ports": [
+    { "name": "Next.js hub", "port": 3000 },
+    { "name": "Colyseus game server", "port": 2567 }
+  ]
+}
