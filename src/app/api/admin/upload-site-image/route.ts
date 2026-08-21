@@ -2,17 +2,18 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { canAccessAdmin } from '@/lib/roles';
 import { prisma } from '@/lib/prisma';
-import { persistSiteImage } from '@/lib/site-asset-upload';
+import {
+  persistUploadedImageFile,
+  SITE_IMAGE_KINDS,
+  type SiteImageKind,
+} from '@/lib/site-asset-upload';
 
 export const runtime = 'nodejs';
 
-type Kind = 'mark' | 'wordmark' | 'hero' | 'bg' | 'misc';
-
-const KINDS = new Set<Kind>(['mark', 'wordmark', 'hero', 'bg', 'misc']);
-
 /**
  * Multipart upload for admin site images. Saves under /public/uploads/site
- * and returns a short public URL — never store megabyte data URLs in Mongo.
+ * (or Vercel Blob) and returns a short public URL — never store megabyte
+ * data URLs in Mongo.
  */
 export async function POST(req: Request) {
   try {
@@ -29,24 +30,15 @@ export async function POST(req: Request) {
     const form = await req.formData();
     const file = form.get('file');
     const kindRaw = String(form.get('kind') ?? 'misc');
-    const kind: Kind = KINDS.has(kindRaw as Kind) ? (kindRaw as Kind) : 'misc';
+    const kind: SiteImageKind = SITE_IMAGE_KINDS.has(kindRaw as SiteImageKind)
+      ? (kindRaw as SiteImageKind)
+      : 'misc';
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: 'Missing file' }, { status: 400 });
     }
-    if (!file.type.startsWith('image/')) {
-      return NextResponse.json({ error: 'File must be an image' }, { status: 400 });
-    }
-    if (file.size > 2_500_000) {
-      return NextResponse.json(
-        { error: 'Image too large (max ~2.5MB)' },
-        { status: 400 }
-      );
-    }
 
-    const buf = Buffer.from(await file.arrayBuffer());
-    const dataUrl = `data:${file.type};base64,${buf.toString('base64')}`;
-    const url = await persistSiteImage(dataUrl, kind);
+    const url = await persistUploadedImageFile(file, kind);
     return NextResponse.json({ url });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Upload failed';

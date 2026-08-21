@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
+import { engineJson, engineOptions } from '@/lib/engine/engine-api';
 import { loadPowerDefinitions } from '@/lib/power-definitions';
 import {
   createPowerDefinition,
@@ -21,13 +22,17 @@ export const runtime = 'nodejs';
  * the definitions. Mutations require admin.
  */
 
-export async function GET() {
+export function OPTIONS(req: NextRequest) {
+  return engineOptions(req);
+}
+
+export async function GET(req: NextRequest) {
   try {
     const powers = await loadPowerDefinitions();
-    return NextResponse.json({ ok: true, powers });
+    return engineJson(req, { ok: true, powers });
   } catch (err) {
     console.error('[api/game/power-definitions GET]', err);
-    return NextResponse.json({ ok: true, powers: STATIC_FALLBACK_POWERS });
+    return engineJson(req, { ok: true, powers: STATIC_FALLBACK_POWERS });
   }
 }
 

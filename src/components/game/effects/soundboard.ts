@@ -11,6 +11,7 @@
  */
 
 import { getAudioContext, getProcessedBuffer, type SoundFxParams } from '@/lib/audio-fx';
+import { absolutizeSiteAssetUrl, publicSiteUrl } from '@/lib/engine/runtime';
 
 interface SoundEntry extends SoundFxParams {
   fileUrl: string;
@@ -40,13 +41,26 @@ function mixedVolume(optsVolume: number | undefined, entryVolume: number): numbe
   return Math.max(0, Math.min(1, (optsVolume ?? 1) * entryVolume * masterVolume));
 }
 
+export function normalizeSoundEntries<T extends { fileUrl: string }>(
+  sounds: Record<string, T>
+): Record<string, T> {
+  const next: Record<string, T> = {};
+  for (const [key, entry] of Object.entries(sounds)) {
+    next[key] = {
+      ...entry,
+      fileUrl: absolutizeSiteAssetUrl(entry.fileUrl) ?? entry.fileUrl,
+    };
+  }
+  return next;
+}
+
 function ensureLoaded(): Promise<void> {
   if (loaded && Date.now() - loadedAt < CACHE_TTL_MS) return Promise.resolve();
   if (loadingPromise) return loadingPromise;
-  loadingPromise = fetch('/api/admin/sound-definitions')
+  loadingPromise = fetch(publicSiteUrl('/api/admin/sound-definitions'))
     .then((r) => (r.ok ? r.json() : null))
     .then((data: { ok?: boolean; sounds?: Record<string, SoundEntry> } | null) => {
-      if (data?.ok && data.sounds) cache = data.sounds;
+      if (data?.ok && data.sounds) cache = normalizeSoundEntries(data.sounds);
       loaded = true;
       loadedAt = Date.now();
     })

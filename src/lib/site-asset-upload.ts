@@ -3,6 +3,16 @@ import { mkdir } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 
+export type SiteImageKind = 'mark' | 'wordmark' | 'hero' | 'bg' | 'misc' | 'sky';
+export const SITE_IMAGE_KINDS = new Set<SiteImageKind>([
+  'mark',
+  'wordmark',
+  'hero',
+  'bg',
+  'misc',
+  'sky',
+]);
+
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads', 'site');
 
 /**
@@ -12,7 +22,7 @@ const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads', 'site');
  */
 export async function persistSiteImage(
   source: string,
-  kind: 'mark' | 'wordmark' | 'hero' | 'bg' | 'misc' = 'misc'
+  kind: SiteImageKind = 'misc'
 ): Promise<string> {
   const trimmed = source.trim();
   if (!trimmed) return '';
@@ -72,6 +82,13 @@ export async function persistSiteImage(
       fit: 'inside',
       withoutEnlargement: true,
     });
+  } else if (kind === 'sky') {
+    pipeline = pipeline.resize({
+      width: 4096,
+      height: 2048,
+      fit: 'inside',
+      withoutEnlargement: true,
+    });
   }
 
   const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
@@ -115,10 +132,29 @@ export async function persistSiteImage(
     return `data:image/png;base64,${pngBuffer.toString('base64')}`;
   }
 
+  if (isServerless) {
+    throw new Error(
+      kind === 'sky'
+        ? 'Sky upload needs Vercel Blob (BLOB_READ_WRITE_TOKEN). This file is too large to keep as a data URL.'
+        : 'Image too large for serverless without Blob storage. Set BLOB_READ_WRITE_TOKEN or use a smaller file.'
+    );
+  }
+
   await mkdir(UPLOAD_DIR, { recursive: true });
   await sharp(pngBuffer).png({ compressionLevel: 9 }).toFile(abs);
 
   return `/uploads/site/${filename}`;
+}
+
+export async function persistUploadedImageFile(
+  file: File,
+  kind: SiteImageKind = 'misc'
+): Promise<string> {
+  if (!file.type.startsWith('image/')) throw new Error('File must be an image');
+  if (file.size > 2_500_000) throw new Error('Image too large (max ~2.5MB)');
+  const buf = Buffer.from(await file.arrayBuffer());
+  const dataUrl = `data:${file.type};base64,${buf.toString('base64')}`;
+  return persistSiteImage(dataUrl, kind);
 }
 
 /**

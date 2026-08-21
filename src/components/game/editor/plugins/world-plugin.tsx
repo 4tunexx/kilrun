@@ -6,6 +6,8 @@ import type { FloorPreset, SkyPreset } from '../map-document';
 import { MOOD_PRESETS } from '../map-storage';
 import { DEFAULT_EDITOR_PERF_MODE } from '../editor-viewport';
 import type { MapEditorBrains, MapEditorPlugin } from '../engine/types';
+import { hasEngineSession, uploadSiteImageFile } from '@/lib/engine/platform-client';
+import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
 
 function WorldPanel({ brains }: { brains: MapEditorBrains }) {
   const { env, patchEnv, skyFileRef, toast, editorPerf, setEditorPerf, apiRef } = brains;
@@ -75,27 +77,20 @@ function WorldPanel({ brains }: { brains: MapEditorBrains }) {
                     // "work" until the next Save + reload, then vanish.
                     void (async () => {
                       try {
-                        const form = new FormData();
-                        form.append('file', f);
-                        form.append('kind', 'bg');
-                        const res = await fetch('/api/admin/upload-site-image', {
-                          method: 'POST',
-                          body: form,
-                        });
-                        const data = (await res.json()) as { url?: string; error?: string };
-                        if (!res.ok || !data.url) {
+                        if (isKilrunEngineDesktop() && !hasEngineSession()) {
                           toast({
-                            title: 'Sky upload failed',
-                            description: data.error || 'Try a smaller image.',
+                            title: 'Link live game first',
+                            description: 'Sky images save on the website. Build → Link live game, then upload.',
                             variant: 'destructive',
                           });
                           return;
                         }
-                        patchEnv({ sky: 'custom', skyTextureUrl: data.url });
-                      } catch {
+                        const url = await uploadSiteImageFile(f, 'sky');
+                        patchEnv({ sky: 'custom', skyTextureUrl: url });
+                      } catch (err) {
                         toast({
                           title: 'Sky upload failed',
-                          description: 'Network error, try again.',
+                          description: err instanceof Error ? err.message : 'Try a smaller image.',
                           variant: 'destructive',
                         });
                       }

@@ -5,6 +5,7 @@
 
 import type { WeaponCombatConfig, WeaponCombatKind } from '@/lib/weapons';
 import { defaultCombatForKind } from '@/lib/weapons';
+import { absolutizeSiteAssetUrl, publicSiteUrl } from '@/lib/engine/runtime';
 
 export type CatalogWeaponId =
   | 'axe_001'
@@ -291,11 +292,16 @@ let weaponCatalogHydrated = false;
 export async function hydrateWeaponCatalogFromApi(): Promise<void> {
   if (weaponCatalogHydrated) return;
   try {
-    const res = await fetch('/api/game/weapon-definitions', { cache: 'no-store' });
+    const res = await fetch(publicSiteUrl('/api/game/weapon-definitions'), { cache: 'no-store' });
     if (!res.ok) return;
     const data = await res.json();
     if (Array.isArray(data?.weapons) && data.weapons.length > 0) {
-      applyDynamicWeaponDefinitions(data.weapons);
+      applyDynamicWeaponDefinitions(
+        (data.weapons as CatalogWeaponDef[]).map((weapon) => ({
+          ...weapon,
+          modelUrl: absolutizeSiteAssetUrl(weapon.modelUrl) ?? weapon.modelUrl,
+        }))
+      );
       weaponCatalogHydrated = true;
     }
   } catch {

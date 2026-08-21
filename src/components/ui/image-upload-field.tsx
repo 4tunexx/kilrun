@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { uploadSiteImageFile } from '@/lib/engine/platform-client';
 
 const MAX_BYTES = 2_500_000; // ~2.5MB — files are written to disk, not Mongo
 
@@ -26,7 +27,7 @@ export function ImageUploadField({
   onChange: (value: string) => void;
   className?: string;
   /** Controls resize/strip pipeline on the server. */
-  kind?: 'mark' | 'wordmark' | 'hero' | 'bg' | 'misc';
+  kind?: 'mark' | 'wordmark' | 'hero' | 'bg' | 'misc' | 'sky';
   /** Use a wider preview box (wordmarks / heroes). */
   widePreview?: boolean;
 }) {
@@ -51,21 +52,8 @@ export function ImageUploadField({
 
     setUploading(true);
     try {
-      const form = new FormData();
-      form.append('file', file);
-      form.append('kind', kind);
-      const res = await fetch('/api/admin/upload-site-image', {
-        method: 'POST',
-        body: form,
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        url?: string;
-        error?: string;
-      };
-      if (!res.ok || !data.url) {
-        throw new Error(data.error || 'Upload failed');
-      }
-      onChange(data.url);
+      const url = await uploadSiteImageFile(file, kind);
+      onChange(url);
       toast({
         title: 'Image uploaded',
         description: 'Click Save on this tab so it survives a reload.',

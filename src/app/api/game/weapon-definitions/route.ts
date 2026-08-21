@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
+import { engineJson, engineOptions } from '@/lib/engine/engine-api';
 import {
   loadWeaponDefinitions,
   recordToRowData,
@@ -19,13 +20,17 @@ export const runtime = 'nodejs';
  * /api/game/power-definitions. Mutations require admin.
  */
 
-export async function GET() {
+export function OPTIONS(req: NextRequest) {
+  return engineOptions(req);
+}
+
+export async function GET(req: NextRequest) {
   try {
     const weapons = await loadWeaponDefinitions();
-    return NextResponse.json({ ok: true, weapons });
+    return engineJson(req, { ok: true, weapons });
   } catch (err) {
     console.error('[api/game/weapon-definitions GET]', err);
-    return NextResponse.json({ ok: true, weapons: STATIC_FALLBACK_WEAPONS });
+    return engineJson(req, { ok: true, weapons: STATIC_FALLBACK_WEAPONS });
   }
 }
 

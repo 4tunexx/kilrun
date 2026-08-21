@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { SOUND_EVENTS, type SoundEventDef, type SoundEventCategory } from '@shared/sound-events';
 import { getAudioContext, getProcessedBuffer, playProcessedBuffer, clearProcessedAudioCache, type SoundFxParams } from '@/lib/audio-fx';
-import { refreshSoundboard } from '@/components/game/effects/soundboard';
+import { normalizeSoundEntries, refreshSoundboard } from '@/components/game/effects/soundboard';
 import { getCustomMoveSoundEvents } from '@/lib/custom-move-sound-events';
 import { customMoveSoundKey, type CustomMoveDef } from '@shared/custom-moves';
 import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
@@ -132,7 +132,7 @@ export function SoundBoardEditor({
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || 'Failed to load Sound Board');
       }
-      if (data?.ok) setSounds(data.sounds ?? {});
+      if (data?.ok) setSounds(normalizeSoundEntries(data.sounds ?? {}));
       const fromEngine = Array.isArray(data?.customMoveEvents) ? data.customMoveEvents : [];
       setCustomMoveEvents(fromEngine.length ? fromEngine : moveEvents);
     } catch (err) {

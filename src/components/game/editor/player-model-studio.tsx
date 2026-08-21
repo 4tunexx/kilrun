@@ -33,6 +33,7 @@ import {
   suggestPlayerBindings,
 } from './map-document';
 import { CharacterAssetPicker } from './character-asset-picker';
+import { siteOrEngineFetch } from '@/lib/engine/platform-client';
 import {
   applyClipsToPlayerEntity,
   loadPlayerAvatar,
@@ -188,13 +189,13 @@ export function PlayerModelStudio({
       sortOrder: 0,
     };
     try {
-      const res = await fetch('/api/game/power-definitions', {
+      const res = await siteOrEngineFetch('/api/game/power-definitions', '/api/engine/powers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       if (res.status === 409) {
-        await fetch('/api/game/power-definitions', {
+        await siteOrEngineFetch('/api/game/power-definitions', '/api/engine/powers', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -220,9 +221,11 @@ export function PlayerModelStudio({
 
   const deleteMovePower = async (moveId: string) => {
     try {
-      await fetch(`/api/game/power-definitions?key=${encodeURIComponent(movePowerKey(moveId))}`, {
-        method: 'DELETE',
-      });
+      await siteOrEngineFetch(
+        `/api/game/power-definitions?key=${encodeURIComponent(movePowerKey(moveId))}`,
+        `/api/engine/powers?key=${encodeURIComponent(movePowerKey(moveId))}`,
+        { method: 'DELETE' }
+      );
     } catch (err) {
       console.warn('[PlayerModelStudio] skill-tree delete failed for move', moveId, err);
     }

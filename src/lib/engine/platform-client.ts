@@ -379,3 +379,18 @@ export async function deleteEnginePrefabModel(id: string) {
   if (!res.ok) throw new Error(await readError(res));
   return { ok: true as const };
 }
+
+export async function uploadSiteImageFile(file: File, kind = 'misc'): Promise<string> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('kind', kind);
+  const res = await siteOrEngineFetch('/api/admin/upload-site-image', '/api/engine/images', {
+    method: 'POST',
+    body: form,
+  });
+  const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+  if (!res.ok || !data.url) {
+    throw new Error(data.error || (res.ok ? 'Upload failed' : `Website returned ${res.status}`));
+  }
+  return absolutizeSiteUrl(data.url) ?? data.url;
+}

@@ -6,6 +6,7 @@ describe('parseStaffEngineResource', () => {
     expect(parseStaffEngineResource('sounds')).toBe('sounds');
     expect(parseStaffEngineResource('join-token')).toBe('join-token');
     expect(parseStaffEngineResource('models')).toBe('models');
+    expect(parseStaffEngineResource('images')).toBe('images');
   });
 
   it('returns null for the plain session GET', () => {

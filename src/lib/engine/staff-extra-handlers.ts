@@ -37,6 +37,11 @@ import { getSiteSettings } from '@/lib/progression-actions';
 import { KP_DEFAULT } from '@/lib/kp';
 
 import { parseStaffEngineResource, type StaffEngineResource } from '@/lib/engine/staff-resource';
+import {
+  persistUploadedImageFile,
+  SITE_IMAGE_KINDS,
+  type SiteImageKind,
+} from '@/lib/site-asset-upload';
 
 export type { StaffEngineResource };
 
@@ -61,6 +66,7 @@ export async function handleStaffEngineResource(
   if (resource === 'prefabs') return handlePrefabs(req, method);
   if (resource === 'shop') return handleShop(req, method);
   if (resource === 'models') return handleModels(req, method);
+  if (resource === 'images') return handleImages(req, method);
   return handleJoinToken(req, method);
 }
 
@@ -230,6 +236,27 @@ async function handleModels(req: NextRequest, method: string) {
     return engineJson(req, { ok: false, error: 'Method not allowed' }, 405);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Prefab model request failed';
+    return engineJson(req, { ok: false, error: message }, staffStatus(message));
+  }
+}
+
+async function handleImages(req: NextRequest, method: string) {
+  if (method !== 'POST') return engineJson(req, { ok: false, error: 'Method not allowed' }, 405);
+  try {
+    await requireEngineStaff(req);
+    const form = await req.formData();
+    const file = form.get('file');
+    const kindRaw = String(form.get('kind') ?? 'misc');
+    const kind: SiteImageKind = SITE_IMAGE_KINDS.has(kindRaw as SiteImageKind)
+      ? (kindRaw as SiteImageKind)
+      : 'misc';
+    if (!(file instanceof File)) {
+      return engineJson(req, { ok: false, error: 'Missing file' }, 400);
+    }
+    const url = await persistUploadedImageFile(file, kind);
+    return engineJson(req, { ok: true, url });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Image upload failed';
     return engineJson(req, { ok: false, error: message }, staffStatus(message));
   }
 }

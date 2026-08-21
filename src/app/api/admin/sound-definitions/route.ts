@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
+import { engineJson, engineOptions } from '@/lib/engine/engine-api';
 import { loadSoundDefinitions } from '@/lib/sound-definitions';
 import { deleteSoundDefinition, patchSoundDefinition, uploadSoundDefinition } from '@/lib/sound-definitions-write';
 
@@ -15,15 +16,19 @@ export const runtime = 'nodejs';
  * load to know which events have a sound bound. Mutations require admin.
  */
 
-export async function GET() {
+export function OPTIONS(req: NextRequest) {
+  return engineOptions(req);
+}
+
+export async function GET(req: NextRequest) {
   try {
     const rows = await loadSoundDefinitions();
     const sounds: Record<string, (typeof rows)[number]> = {};
     for (const r of rows) sounds[r.eventKey] = r;
-    return NextResponse.json({ ok: true, sounds });
+    return engineJson(req, { ok: true, sounds });
   } catch (err) {
     console.error('[api/admin/sound-definitions GET]', err);
-    return NextResponse.json({ ok: true, sounds: {} });
+    return engineJson(req, { ok: true, sounds: {} });
   }
 }
 

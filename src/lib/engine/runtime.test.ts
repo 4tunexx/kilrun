@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { buildEngineDeepLink, parseEngineDeepLink, parseEngineLoopbackUrl } from './protocol';
-import { detectEngineEnv, isKilrunEngineDesktop, isWindowsClient } from './runtime';
+import {
+  absolutizeSiteAssetUrl,
+  detectEngineEnv,
+  isKilrunEngineDesktop,
+  isWindowsClient,
+  publicSiteUrl,
+} from './runtime';
 import { shouldOfferEngineLaunch } from './launch-pref';
 
 describe('kilrun engine protocol', () => {
@@ -54,6 +60,12 @@ describe('kilrun engine runtime', () => {
 
   it('defaults env to local without a browser host', () => {
     expect(detectEngineEnv()).toBe('local');
+  });
+
+  it('keeps public API paths relative off desktop', () => {
+    expect(publicSiteUrl('/api/admin/sound-definitions')).toBe('/api/admin/sound-definitions');
+    expect(absolutizeSiteAssetUrl('/uploads/sounds/jump.mp3')).toBe('/uploads/sounds/jump.mp3');
+    expect(absolutizeSiteAssetUrl('/game/weapons/pistol.glb')).toBe('/game/weapons/pistol.glb');
   });
 });
 

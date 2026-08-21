@@ -131,6 +131,7 @@ const nextConfig: NextConfig = {
       { source: '/api/engine/shop', destination: '/api/engine/session?engineResource=shop' },
       { source: '/api/engine/join-token', destination: '/api/engine/session?engineResource=join-token' },
       { source: '/api/engine/models', destination: '/api/engine/session?engineResource=models' },
+      { source: '/api/engine/images', destination: '/api/engine/session?engineResource=images' },
     ];
   },
   async headers() {
@@ -141,6 +142,11 @@ const nextConfig: NextConfig = {
           // Allow forums / Twitch / Discord-style embeds to iframe this card.
           { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
         ],
+      },
+      {
+        // Engine WebView fetches Sound Board clips from the live site.
+        source: '/uploads/:path*',
+        headers: [{ key: 'Access-Control-Allow-Origin', value: '*' }],
       },
     ];
   },

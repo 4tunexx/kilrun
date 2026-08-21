@@ -41,6 +41,26 @@ export function resolvePlatformOrigin(): string {
   return 'http://localhost:3000';
 }
 
+/** Same-origin path in the browser; live-site URL inside Kilrun Engine.exe. */
+export function publicSiteUrl(path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`;
+  if (!isKilrunEngineDesktop()) return p;
+  return `${resolvePlatformOrigin()}${p}`;
+}
+
+/**
+ * Keep website-relative asset URLs working in the Engine WebView. Leave
+ * `/game/...` paths alone — those ship inside the exe.
+ */
+export function absolutizeSiteAssetUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (/^(https?:|data:|blob:)/i.test(url)) return url;
+  if (!isKilrunEngineDesktop()) return url;
+  if (url.startsWith('/game/') || url.startsWith('game/')) return url;
+  const origin = resolvePlatformOrigin();
+  return `${origin}${url.startsWith('/') ? url : `/${url}`}`;
+}
+
 export function detectEngineEnv(): KilrunEngineEnv {
   if (typeof window === 'undefined') return 'local';
   const host = window.location.hostname;
