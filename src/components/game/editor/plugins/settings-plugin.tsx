@@ -23,7 +23,9 @@ function SettingsPanel({ brains }: { brains: MapEditorBrains }) {
           Editor UI
         </p>
         <p className="text-[10px] text-white/45 mt-1 leading-snug">
-          Toggle on-canvas tools that sit over the viewport.
+          Toggle on-canvas tools that sit over the viewport. Editor bloom, pixel ratio, and
+          hide-floor/sky/fog live in the top <span className="text-white/70">Settings → Graphics</span> menu
+          (also View → Graphics) and do not save into the map.
         </p>
         <label className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-xs text-white/80">
           <span>

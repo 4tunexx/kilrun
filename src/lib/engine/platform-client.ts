@@ -7,6 +7,7 @@ import type { MapDocument } from '@/components/game/editor/map-document';
 import type { KilrunMode } from '@/lib/game-modes';
 import type { MapPluginBundle } from '@/lib/engine/plugin-runtime-store';
 import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
+import { buildEngineFetchHeaders } from '@/lib/engine/engine-fetch-headers';
 
 export type CloudMapListItem = {
   id: string;
@@ -20,10 +21,22 @@ export type CloudMapListItem = {
 
 export type CloudMapDocumentRow = CloudMapListItem & { document: MapDocument };
 
+export type EnginePrefabRow = {
+  id: string;
+  localId: string | null;
+  name: string;
+  mode: string;
+  updatedAt: string;
+  entityCount: number;
+  thumbnailUrl?: string | null;
+};
+
 export type EngineSessionUser = {
+  id?: string;
   username: string;
   role: string;
   steamId: string;
+  avatarUrl?: string;
 };
 
 type PlatformState = {
@@ -67,13 +80,25 @@ export function hasEngineSession(): boolean {
   return Boolean(platform.token);
 }
 
-async function engineFetch(path: string, init: RequestInit = {}): Promise<Response> {
+export async function engineFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const origin = enginePlatformOrigin();
-  const headers = new Headers(init.headers);
-  headers.set('Accept', 'application/json');
-  if (platform.token) headers.set('Authorization', `Bearer ${platform.token}`);
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  const headers = buildEngineFetchHeaders(init, platform.token);
   return fetch(`${origin}${path}`, { ...init, headers });
+}
+
+/** Website path in the browser; Engine staff path on desktop when live game is linked. */
+export async function siteOrEngineFetch(
+  sitePath: string,
+  enginePath: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  if (isKilrunEngineDesktop()) {
+    if (!platform.token) {
+      throw new Error('Link live game first (Build → Link live game)');
+    }
+    return engineFetch(enginePath, init);
+  }
+  return fetch(sitePath, init);
 }
 
 async function readError(res: Response): Promise<string> {
@@ -93,6 +118,22 @@ export async function fetchEngineSession(): Promise<EngineSessionUser | null> {
   if (!res.ok) throw new Error(await readError(res));
   const data = (await res.json()) as { user?: EngineSessionUser };
   return data.user ?? null;
+}
+
+/** Short-lived Colyseus join token for desktop Play Test (Live). Needs a linked staff session. */
+export async function mintEngineJoinToken(): Promise<{
+  token: string | null;
+  user: { id: string; username: string; avatarUrl?: string; role: string } | null;
+}> {
+  if (!platform.token) return { token: null, user: null };
+  const res = await engineFetch('/api/engine/join-token', { method: 'POST' });
+  if (res.status === 404) return { token: null, user: null };
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as {
+    token?: string | null;
+    user?: { id: string; username: string; avatarUrl?: string; role: string };
+  };
+  return { token: data.token ?? null, user: data.user ?? null };
 }
 
 /** 404 means /api/engine is not deployed on the live site yet. */
@@ -208,4 +249,58 @@ export async function deleteCloudMapsMatching(_input: unknown) {
 
 export async function forkCloudMap(_id: string) {
   return null;
+}
+
+export async function listEnginePrefabs(mode?: string) {
+  if (!platform.token) throw new Error('Link live game first — Pull needs a staff Steam session');
+  const qs = mode ? `?mode=${encodeURIComponent(mode)}` : '';
+  const res = await engineFetch(`/api/engine/prefabs${qs}`);
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { prefabs?: EnginePrefabRow[] };
+  return data.prefabs ?? [];
+}
+
+export async function getEnginePrefabEntities(id: string) {
+  if (!platform.token) throw new Error('Link live game first');
+  const res = await engineFetch(`/api/engine/prefabs?id=${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { entities?: unknown[] };
+  return data.entities ?? [];
+}
+
+export async function publishEnginePrefab(input: {
+  localId?: string;
+  name: string;
+  mode?: string;
+  entities: unknown[];
+  thumbnailDataUrl?: string | null;
+}) {
+  if (!platform.token) throw new Error('Link live game first');
+  const res = await engineFetch('/api/engine/prefabs', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { prefab?: EnginePrefabRow };
+  if (!data.prefab) throw new Error('Publish failed');
+  return data.prefab;
+}
+
+export async function upsertEngineShopItem(input: Record<string, unknown>) {
+  if (!platform.token) throw new Error('Link live game first');
+  const res = await engineFetch('/api/engine/shop', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as { ok: boolean; item?: unknown };
+}
+
+export async function deleteEnginePrefab(id: string) {
+  if (!platform.token) throw new Error('Link live game first');
+  const res = await engineFetch(`/api/engine/prefabs?id=${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return { ok: true as const };
 }

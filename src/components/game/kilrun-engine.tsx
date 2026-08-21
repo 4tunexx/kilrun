@@ -13,7 +13,7 @@ import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
 import type { FollowCameraOpts } from './renderer/three-world';
 import { SprintParticles } from './effects/sprint-particles';
 import { DamageNumberFx } from './effects/damage-numbers';
-import { playSound, playLoopedSound, stopLoopedSound, preloadSoundboard } from './effects/soundboard';
+import { playSound, playLoopedSound, stopLoopedSound, preloadSoundboard, setMasterVolume } from './effects/soundboard';
 import { ThreeCharacter } from './entities/three-character';
 import { ThreeMap } from './entities/three-map';
 import { CustomMapOverlay } from './entities/custom-map-overlay';
@@ -54,6 +54,12 @@ import {
 } from './tps/tps-view-settings';
 import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
 import { getKeyBindings } from '@/lib/key-bindings-config';
+import { DEFAULT_KEY_BINDINGS, eventMatchesBind, formatBindKey, type KeyBindAction } from '@shared/key-bindings';
+import {
+  loadPlayerMatchSettings,
+  savePlayerMatchSettings,
+  type PlayerMatchSettings,
+} from './player-match-settings';
 import dynamic from 'next/dynamic';
 import {
   findWeaponAttachment,
@@ -228,6 +234,12 @@ export default function KilrunEngine({
   const [scoreboardOpen, setScoreboardOpen] = useState(false);
   const [mouseFree, setMouseFree] = useState(false);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  const [keyBindings, setKeyBindings] = useState<Record<KeyBindAction, string>>(DEFAULT_KEY_BINDINGS);
+  const [matchSettings, setMatchSettings] = useState<PlayerMatchSettings>(() => loadPlayerMatchSettings());
+  const [slideCooldownMs, setSlideCooldownMs] = useState(800);
+  const matchSettingsRef = useRef(matchSettings);
+  matchSettingsRef.current = matchSettings;
+  const worldApiRef = useRef<{ setBloomEnabled: (on: boolean) => void } | null>(null);
   useEffect(() => {
     gameMenuOpenRef.current = gameMenuOpen;
   }, [gameMenuOpen]);
@@ -526,14 +538,14 @@ export default function KilrunEngine({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (!eventMatchesBind(e, keyBindings.pause)) return;
       e.preventDefault();
       if (editorOpen) return; // editor handles its own Esc
       setPaused((p) => !p);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editorOpen]);
+  }, [editorOpen, keyBindings.pause]);
 
   // In-game leveling / power upgrade menu (separate from Esc pause menu).
   useEffect(() => {
@@ -547,13 +559,11 @@ export default function KilrunEngine({
     return () => window.removeEventListener('keydown', onKey);
   }, [editorOpen, paused]);
 
-  // Admin panel — press X to open (admin-only). Guard against stealing the
-  // keystroke while the chat box (or any other input) is focused, same as
-  // the live-chat overlay's own Enter guard.
+  // Admin panel — F2 (admin-only). X is Fly by default and must stay a power bind.
   useEffect(() => {
     if (!isAdmin) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== 'x') return;
+      if (e.key !== 'F2') return;
       if (editorOpen || paused) return;
       const active = document.activeElement as HTMLElement | null;
       const tag = active?.tagName;
@@ -569,13 +579,13 @@ export default function KilrunEngine({
   // Tab so Tab can be the free-mouse toggle players expect.
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
-      if (e.code !== 'Backquote') return;
+      if (!eventMatchesBind(e, keyBindings.scoreboard)) return;
       if (editorOpen || paused || gameMenuOpen) return;
       e.preventDefault();
       setScoreboardOpen(true);
     };
     const onUp = (e: KeyboardEvent) => {
-      if (e.code !== 'Backquote') return;
+      if (!eventMatchesBind(e, keyBindings.scoreboard)) return;
       e.preventDefault();
       setScoreboardOpen(false);
     };
@@ -585,13 +595,13 @@ export default function KilrunEngine({
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
     };
-  }, [editorOpen, paused, gameMenuOpen]);
+  }, [editorOpen, paused, gameMenuOpen, keyBindings.scoreboard]);
 
   // Tab: quick tap toggles a free mouse cursor (release/re-request pointer
   // lock) without opening the pause menu, so players can e.g. glance at chat.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab' || e.repeat) return;
+      if (!eventMatchesBind(e, keyBindings.freeMouse) || e.repeat) return;
       if (editorOpen || paused || gameMenuOpen) return;
       e.preventDefault();
       const freed = !mouseFreeRef.current;
@@ -606,7 +616,7 @@ export default function KilrunEngine({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editorOpen, paused, gameMenuOpen]);
+  }, [editorOpen, paused, gameMenuOpen, keyBindings.freeMouse]);
 
   useEffect(() => {
     if (!cloudReady) return;
@@ -616,6 +626,9 @@ export default function KilrunEngine({
     let disposed = false;
     let raf = 0;
     const world = createThreeWorld(hostElement);
+    world.setBloomEnabled(matchSettingsRef.current.bloom);
+    setMasterVolume(matchSettingsRef.current.masterVolume);
+    worldApiRef.current = world;
     const activeId = getActivePlayMapIdForMode(mode);
     const localDoc = activeId ? loadMapPlayable(activeId) : null;
     const rawDoc = cloudDocRef.current ?? localDoc;
@@ -656,7 +669,10 @@ export default function KilrunEngine({
     // so match start never blocks on it; defaults apply until it resolves.
     getKeyBindings()
       .then((bindings) => {
-        if (!disposed) inputManager.setBindings(bindings);
+        if (!disposed) {
+          inputManager.setBindings(bindings);
+          setKeyBindings(bindings);
+        }
       })
       .catch(() => {});
     const damageNumbers = new DamageNumberFx(hostElement);
@@ -668,6 +684,7 @@ export default function KilrunEngine({
 
     if (playDoc) {
       customDocRef.current = playDoc;
+      setSlideCooldownMs(ensureCombatSettings(playDoc).slideCooldownMs);
       map.clearHardcodedDecor();
       const env = ensureEnvironment(playDoc);
       envFloor = new THREE.Mesh(
@@ -913,7 +930,7 @@ export default function KilrunEngine({
 
       if (!frozen) {
         const tps = tpsRef.current;
-        const lookSens = mouseSensRadians(tps);
+        const lookSens = mouseSensRadians(tps) * matchSettingsRef.current.mouseSensMult;
         // Mouse / stick always orbit camera (GTA free look + aim look)
         cameraYaw += inputManager.getCameraTurnIntent() * CAMERA_YAW_KEY_SPEED * dt;
         cameraYaw -= inputManager.consumeMouseLookDeltaX() * lookSens;
@@ -1475,6 +1492,7 @@ export default function KilrunEngine({
         (envFloor.material as THREE.Material).dispose();
       }
       world.destroy();
+      worldApiRef.current = null;
       joystickRef.current = null;
       inputManagerRef.current = null;
       inputManager.destroy();
@@ -1563,6 +1581,8 @@ export default function KilrunEngine({
                 resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind
               }
               customMoveDefs={customDocRef.current?.customMoves}
+              keyBindings={keyBindings}
+              slideCooldownMs={slideCooldownMs}
             />
             <ModeStatusHud mode={mode} room={room} />
             <KillStreakBanner killStreak={localPlayer.killStreak ?? 0} />
@@ -1788,6 +1808,7 @@ export default function KilrunEngine({
           open={scoreboardOpen && !paused && !editorOpen}
           playersRef={playersRef}
           localSessionIdRef={localSessionRef}
+          holdHint={formatBindKey(keyBindings.scoreboard)}
         />
 
         {isAdmin && (
@@ -1832,6 +1853,14 @@ export default function KilrunEngine({
             connectionRef.current?.sendAbandonMatch();
             onExit();
           }}
+          matchSettings={matchSettings}
+          onMatchSettingsChange={(next) => {
+            const saved = savePlayerMatchSettings(next);
+            setMatchSettings(saved);
+            setMasterVolume(saved.masterVolume);
+            worldApiRef.current?.setBloomEnabled(saved.bloom);
+          }}
+          pauseHint={formatBindKey(keyBindings.pause)}
         />
 
         {editorOpen && isAdmin && (

@@ -19,9 +19,10 @@ import {
   PUBLIC_USER_COSMETIC_SELECT,
   isSkinCosmeticSlot,
 } from '@/lib/cosmetics';
-import { flattenEquippedSkinsMap, parseSkinConfig } from '@/lib/player-skins';
+import { flattenEquippedSkinsMap } from '@/lib/player-skins';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { persistSiteImage } from '@/lib/site-asset-upload';
+import { upsertStoreItemAsStaff } from '@/lib/store-item-core';
 import { getLevelFromXp } from '@/lib/progression';
 import { getInventorySlotCap } from '@/lib/inventory-slots';
 import { sanitizeDashboardPanelPrefs } from '@/lib/dashboard-panels';
@@ -2329,123 +2330,7 @@ export async function adminUpsertStoreItem(input: {
   cosmeticConfig?: Record<string, unknown> | null;
 }) {
   await requireStaff();
-
-  const isSkin =
-    input.itemCategory === 'Skins' || isSkinCosmeticSlot(input.cosmeticSlot ?? undefined);
-  if (isSkin) {
-    if (!input.cosmeticConfig) {
-      throw new Error(
-        'Skins require a mesh config. Use Cosmetics Studio → Skins or Model Editor → Publish to shop.'
-      );
-    }
-    const parsed = parseSkinConfig(input.cosmeticConfig);
-    if (!parsed?.attachments?.length) {
-      throw new Error(
-        'Skin cosmeticConfig must include at least one attachment (primitive / model).'
-      );
-    }
-  }
-
-  let imageUrl = input.imageUrl;
-  // Editor thumbnails arrive as data URLs — persist to a short public path when possible.
-  if (imageUrl && /^data:image\//i.test(imageUrl)) {
-    try {
-      imageUrl = await persistSiteImage(imageUrl, 'misc');
-    } catch (err) {
-      console.warn('[adminUpsertStoreItem] thumbnail persist failed, keeping data URL', err);
-    }
-  }
-
-  // Persist data-URL textures / custom models inside skin configs to short public URLs.
-  let cosmeticConfig = input.cosmeticConfig;
-  if (cosmeticConfig && typeof cosmeticConfig === 'object') {
-    cosmeticConfig = await persistSkinAssetUrls(cosmeticConfig);
-  }
-
-  const cosmeticData =
-    input.cosmeticSlot !== undefined
-      ? {
-          cosmeticSlot: input.cosmeticSlot,
-          bannerConfig:
-            input.bannerConfig === null
-              ? null
-              : input.bannerConfig !== undefined
-                ? (input.bannerConfig as unknown as Prisma.InputJsonValue)
-                : undefined,
-          cosmeticConfig:
-            cosmeticConfig === null
-              ? null
-              : cosmeticConfig !== undefined
-                ? (cosmeticConfig as unknown as Prisma.InputJsonValue)
-                : undefined,
-        }
-      : {};
-  if (input.id) {
-    return prisma.storeItem.update({
-      where: { id: input.id },
-      data: {
-        itemName: input.itemName,
-        itemCategory: input.itemCategory,
-        itemSku: input.itemSku,
-        vpPrice: input.vpPrice,
-        imageUrl,
-        isAvailable: input.isAvailable ?? true,
-        ...cosmeticData,
-      },
-    });
-  }
-  return prisma.storeItem.create({
-    data: {
-      itemName: input.itemName,
-      itemCategory: input.itemCategory,
-      itemSku: input.itemSku,
-      vpPrice: input.vpPrice,
-      imageUrl,
-      isAvailable: input.isAvailable ?? true,
-      ...cosmeticData,
-    },
-  });
-}
-
-/** Walk skin preset JSON and upload data: URLs for textures / custom models. */
-async function persistSkinAssetUrls(
-  config: Record<string, unknown>
-): Promise<Record<string, unknown>> {
-  const next = { ...config };
-  const atts = Array.isArray(next.attachments) ? [...(next.attachments as unknown[])] : null;
-  if (!atts) return next;
-
-  const mapped = [];
-  for (const raw of atts) {
-    if (!raw || typeof raw !== 'object') {
-      mapped.push(raw);
-      continue;
-    }
-    const att = { ...(raw as Record<string, unknown>) };
-    for (const key of ['textureUrl', 'customModelUrl'] as const) {
-      const val = att[key];
-      if (typeof val === 'string' && val.startsWith('data:image/')) {
-        try {
-          att[key] = await persistSiteImage(val, 'misc');
-        } catch {
-          /* keep data URL */
-        }
-      }
-    }
-    if (Array.isArray(att.bonded)) {
-      att.bonded = await Promise.all(
-        (att.bonded as unknown[]).map(async (b) => {
-          if (!b || typeof b !== 'object') return b;
-          const part = { ...(b as Record<string, unknown>) };
-          // bonded parts use materials only today
-          return part;
-        })
-      );
-    }
-    mapped.push(att);
-  }
-  next.attachments = mapped;
-  return next;
+  return upsertStoreItemAsStaff(input);
 }
 
 export async function adminDeleteStoreItem(id: string) {

@@ -520,6 +520,10 @@ export interface EntityAnimation {
    * Also auto-wires their listenToEntityId when set from the UI.
    */
   activatesEntityIds?: string[];
+  /**
+   * Button / Action: cooldown between presses (ms). Omitted = 600 (button) or 500 (action).
+   */
+  cooldownMs?: number;
   /** Player only: crossfade time (ms) between locomotion/combat clips. Default 120. */
   blendMs?: number;
 }
@@ -2122,6 +2126,21 @@ export function getEntityWarnings(
       : allEntities.some((o) => o.animation?.listenToEntityId === ent.id);
     if (!hasTargets && !hasListeners) {
       warnings.push('This button doesn\'t activate anything yet — set "Activates trap / door" below.');
+    }
+  }
+
+  if (ent.kind === 'door') {
+    const anim = ent.animation;
+    const trigger = anim?.trigger;
+    const hasSelfTrigger = Boolean(trigger && trigger !== 'none');
+    const hasListen = Boolean(anim?.listenToEntityId);
+    const activatedBy = allEntities.some((o) =>
+      (o.animation?.activatesEntityIds ?? []).includes(ent.id)
+    );
+    if (!hasSelfTrigger && !hasListen && !activatedBy) {
+      warnings.push(
+        'This door has no Trigger and no Button wired — it will stay closed. Set Trigger (Interact / Proximity) or wire a Button.'
+      );
     }
   }
 

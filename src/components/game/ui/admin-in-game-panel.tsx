@@ -13,7 +13,7 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 /**
- * Press-X in-game admin panel — view connected players + kick/mute/ban.
+ * Press-F2 in-game admin panel — view connected players + kick/mute/ban.
  * Admin-only (gated by the isAdmin prop the caller already checks before
  * rendering); the server independently re-checks adminSessions on every
  * action regardless, so this is a convenience gate, not the real boundary.

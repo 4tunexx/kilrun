@@ -180,6 +180,16 @@ describe('getEntityWarnings', () => {
     });
     expect(getEntityWarnings(button, [button, door])).toEqual([]);
   });
+
+  it('flags a door with no trigger and no button', () => {
+    const e = stub('d', { kind: 'door', animation: { availableClips: [], trigger: 'none', radius: 1.5, loopActive: false, loopDefault: false } });
+    expect(getEntityWarnings(e, [e]).some((w) => w.includes('will stay closed'))).toBe(true);
+  });
+
+  it('does not flag a door with an interact trigger', () => {
+    const e = stub('d', { kind: 'door', animation: { availableClips: [], trigger: 'interact', radius: 1.5, loopActive: false, loopDefault: false } });
+    expect(getEntityWarnings(e, [e])).toEqual([]);
+  });
 });
 
 describe('getAllEntityWarnings', () => {

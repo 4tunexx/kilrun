@@ -21,6 +21,9 @@ import { SOUND_EVENTS, type SoundEventDef, type SoundEventCategory } from '@shar
 import { getAudioContext, getProcessedBuffer, playProcessedBuffer, clearProcessedAudioCache, type SoundFxParams } from '@/lib/audio-fx';
 import { refreshSoundboard } from '@/components/game/effects/soundboard';
 import { getCustomMoveSoundEvents } from '@/lib/custom-move-sound-events';
+import { customMoveSoundKey, type CustomMoveDef } from '@shared/custom-moves';
+import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
+import { hasEngineSession, siteOrEngineFetch } from '@/lib/engine/platform-client';
 
 interface SoundEntry extends SoundFxParams {
   fileUrl: string;
@@ -60,7 +63,37 @@ function fxFromBound(bound: SoundEntry | undefined): FxDraft {
   };
 }
 
-export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; embedded?: boolean }) {
+function localCustomMoveEvents(
+  moves: CustomMoveDef[] | undefined,
+  mapName: string
+): SoundEventDef[] {
+  const out: SoundEventDef[] = [];
+  const seen = new Set<string>();
+  for (const move of moves ?? []) {
+    const key = customMoveSoundKey(move.id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      key,
+      label: `${move.name} (${mapName})`,
+      category: 'Custom Moves',
+      description: `Custom move on this map — upload a clip here; Play Test uses this key immediately.`,
+    });
+  }
+  return out;
+}
+
+export function SoundBoardEditor({
+  onClose,
+  embedded,
+  customMoves,
+  mapName,
+}: {
+  onClose: () => void;
+  embedded?: boolean;
+  customMoves?: CustomMoveDef[];
+  mapName?: string;
+}) {
   const { toast } = useToast();
   const [sounds, setSounds] = useState<Record<string, SoundEntry>>({});
   const [customMoveEvents, setCustomMoveEvents] = useState<SoundEventDef[]>([]);
@@ -72,23 +105,42 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
-  // Every map-authored custom move auto-registers its own row here (no
-  // per-move opt-in needed) — see src/lib/custom-move-sound-events.ts.
-  const allEvents = [...SOUND_EVENTS, ...customMoveEvents];
+  const desktop = isKilrunEngineDesktop();
+  const mapMoveEvents = localCustomMoveEvents(customMoves, mapName?.trim() || 'This map');
+  const seenMoveKeys = new Set(mapMoveEvents.map((e) => e.key));
+  const allEvents = [
+    ...SOUND_EVENTS,
+    ...mapMoveEvents,
+    ...customMoveEvents.filter((e) => !seenMoveKeys.has(e.key)),
+  ];
   const categories = Array.from(new Set(allEvents.map((e) => e.category))) as SoundEventCategory[];
 
   const load = useCallback(async () => {
+    if (isKilrunEngineDesktop() && !hasEngineSession()) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [res, moveEvents] = await Promise.all([
-        fetch('/api/admin/sound-definitions', { cache: 'no-store' }),
-        getCustomMoveSoundEvents().catch(() => []),
+        siteOrEngineFetch('/api/admin/sound-definitions', '/api/engine/sounds', { cache: 'no-store' }),
+        isKilrunEngineDesktop()
+          ? Promise.resolve([])
+          : getCustomMoveSoundEvents().catch(() => []),
       ]);
       const data = await res.json();
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Failed to load Sound Board');
+      }
       if (data?.ok) setSounds(data.sounds ?? {});
-      setCustomMoveEvents(moveEvents);
-    } catch {
-      toast({ title: 'Failed to load Sound Board', variant: 'destructive' });
+      const fromEngine = Array.isArray(data?.customMoveEvents) ? data.customMoveEvents : [];
+      setCustomMoveEvents(fromEngine.length ? fromEngine : moveEvents);
+    } catch (err) {
+      toast({
+        title: 'Failed to load Sound Board',
+        description: err instanceof Error ? err.message : undefined,
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -116,7 +168,10 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
       form.append('eventKey', selectedKey);
       form.append('file', file);
       form.append('volume', String(volumeDraft));
-      const res = await fetch('/api/admin/sound-definitions', { method: 'POST', body: form });
+      const res = await siteOrEngineFetch('/api/admin/sound-definitions', '/api/engine/sounds', {
+        method: 'POST',
+        body: form,
+      });
       const data = await res.json();
       if (!data.ok) {
         toast({ title: data.error ?? 'Upload failed', variant: 'destructive' });
@@ -126,8 +181,12 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
       refreshSoundboard();
       toast({ title: 'Sound uploaded', description: selectedDef.label });
       await load();
-    } catch {
-      toast({ title: 'Upload failed', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Upload failed',
+        description: err instanceof Error ? err.message : undefined,
+        variant: 'destructive',
+      });
     } finally {
       setUploading(false);
     }
@@ -149,7 +208,7 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
       const seq = ++commitSeq.current;
       commitTimer.current = setTimeout(async () => {
         try {
-          const res = await fetch('/api/admin/sound-definitions', {
+          const res = await siteOrEngineFetch('/api/admin/sound-definitions', '/api/engine/sounds', {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ eventKey: selectedKey, ...patch }),
@@ -182,9 +241,11 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
     if (!bound) return;
     if (!confirm(`Remove the sound bound to "${selectedDef.label}"?`)) return;
     try {
-      const res = await fetch(`/api/admin/sound-definitions?eventKey=${encodeURIComponent(selectedKey)}`, {
-        method: 'DELETE',
-      });
+      const res = await siteOrEngineFetch(
+        `/api/admin/sound-definitions?eventKey=${encodeURIComponent(selectedKey)}`,
+        `/api/engine/sounds?eventKey=${encodeURIComponent(selectedKey)}`,
+        { method: 'DELETE' }
+      );
       const data = await res.json();
       if (!data.ok) {
         toast({ title: data.error ?? 'Remove failed', variant: 'destructive' });
@@ -205,8 +266,8 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
       const ctx = getAudioContext();
       if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
       previewSourceRef.current?.stop();
-      const buffer = await getProcessedBuffer(bound.fileUrl, bound);
-      previewSourceRef.current = playProcessedBuffer(ctx, buffer, bound.volume);
+      const buffer = await getProcessedBuffer(bound.fileUrl, { ...bound, ...fxDraft });
+      previewSourceRef.current = playProcessedBuffer(ctx, buffer, volumeDraft);
     } catch {
       // Autoplay policy before first user gesture, or decode failure — ignore.
     }
@@ -250,6 +311,11 @@ export function SoundBoardEditor({ onClose, embedded }: { onClose: () => void; e
           </button>
         </div>
       </div>
+      {desktop && !hasEngineSession() && (
+        <p className="px-4 py-2 text-[11px] text-amber-200/90 bg-amber-500/10 border-b border-amber-400/20">
+          Link live game (Build menu) to upload and save Sound Board clips to the website.
+        </p>
+      )}
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* Event list, grouped by category */}

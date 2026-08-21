@@ -590,6 +590,66 @@ describe('mapDoc spawn / finish / hazards / bounds', () => {
     expect(buttons[0].activatesObstacleIds).toContain('armed');
   });
 
+  it('exports authored button and action press cooldowns', () => {
+    const doc = baseDoc([
+      {
+        id: 'btn',
+        name: 'Btn',
+        kind: 'button',
+        layerId: 'l1',
+        position: [0, 0, 2],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        animation: {
+          availableClips: [],
+          trigger: 'interact',
+          radius: 2,
+          loopActive: false,
+          loopDefault: true,
+          activatesEntityIds: ['trap'],
+          cooldownMs: 1800,
+        },
+      },
+      {
+        id: 'act',
+        name: 'Action',
+        kind: 'action',
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        animation: {
+          availableClips: [],
+          trigger: 'proximity',
+          radius: 2,
+          loopActive: false,
+          loopDefault: true,
+          activatesEntityIds: ['trap'],
+          cooldownMs: 900,
+        },
+      },
+      {
+        id: 'trap',
+        name: 'Trap',
+        kind: 'trap',
+        layerId: 'l1',
+        position: [0, 0, 8],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        hazard: {
+          enabled: true,
+          damage: 40,
+          intervalMs: 500,
+          mode: 'button',
+          activeMs: 1000,
+          instantKill: false,
+        },
+      },
+    ]);
+    expect(mapDocToSimButtons(doc)[0].cooldownMs).toBe(1800);
+    expect(mapDocToSimActions(doc)[0].cooldownMs).toBe(900);
+  });
+
   it('tags a Solid door wired to a Button as doorControlled; an unwired door is not', () => {
     const doc = baseDoc([
       {
@@ -863,5 +923,54 @@ describe('mapDoc spawn / finish / hazards / bounds', () => {
     // size W=4, D=0.3 → sim width uses W * scaleZ, depth uses D * scaleX; sweep maxes both.
     expect(hazards[0].width).toBeCloseTo(4, 5);
     expect(hazards[0].depth).toBeCloseTo(4, 5);
+  });
+
+  it('sizes teleports and hazards from collisionSize, not scale*2', () => {
+    const doc = baseDoc([
+      {
+        id: 'pad',
+        name: 'Big portal',
+        kind: 'prop',
+        model: 'floor-square',
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        collisionSize: [8, 0.4, 6],
+        teleport: { enabled: true, targetEntityId: 'exit', cooldownMs: 500 },
+      },
+      {
+        id: 'exit',
+        name: 'Exit',
+        kind: 'prop',
+        layerId: 'l1',
+        position: [0, 1, 10],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+      {
+        id: 'lava',
+        name: 'Wide lava',
+        kind: 'hazard',
+        layerId: 'l1',
+        position: [0, 0, 5],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        collisionSize: [10, 0.5, 4],
+        hazard: { enabled: true, damage: 20, intervalMs: 400, instantKill: false },
+      },
+    ]);
+    const teles = mapDocToSimTeleports(doc);
+    expect(teles).toHaveLength(1);
+    // sim width = Three Z, sim depth = Three X
+    expect(teles[0].width).toBeCloseTo(6, 5);
+    expect(teles[0].depth).toBeCloseTo(8, 5);
+    expect(teles[0].height).toBeGreaterThanOrEqual(1.4);
+
+    const hazards = mapDocToSimHazards(doc);
+    const lava = hazards.find((h) => h.id === 'lava');
+    expect(lava?.width).toBeCloseTo(4, 5);
+    expect(lava?.depth).toBeCloseTo(10, 5);
+    expect(lava?.height).toBeCloseTo(0.5, 5);
   });
 });

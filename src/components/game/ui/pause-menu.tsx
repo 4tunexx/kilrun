@@ -2,8 +2,12 @@
 
 import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Map, Maximize, Play, LogOut, AlertTriangle } from 'lucide-react';
+import { Map, Maximize, Play, LogOut, AlertTriangle, Settings, ChevronLeft } from 'lucide-react';
 import { playSound } from '../effects/soundboard';
+import {
+  DEFAULT_PLAYER_MATCH_SETTINGS,
+  type PlayerMatchSettings,
+} from '../player-match-settings';
 
 interface PauseMenuProps {
   open: boolean;
@@ -17,6 +21,10 @@ interface PauseMenuProps {
   /** Escalating cooldown tier (in minutes) the player would incur next. */
   nextAbandonPenaltyMin?: number;
   onAbandon?: () => void;
+  matchSettings?: PlayerMatchSettings;
+  onMatchSettingsChange?: (next: PlayerMatchSettings) => void;
+  /** Bound pause key label (Controls panel). */
+  pauseHint?: string;
 }
 
 export function PauseMenu({
@@ -29,11 +37,18 @@ export function PauseMenu({
   showAbandon,
   nextAbandonPenaltyMin,
   onAbandon,
+  matchSettings = DEFAULT_PLAYER_MATCH_SETTINGS,
+  onMatchSettingsChange,
+  pauseHint = 'Esc',
 }: PauseMenuProps) {
   const [confirmingAbandon, setConfirmingAbandon] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
-    if (!open) setConfirmingAbandon(false);
+    if (!open) {
+      setConfirmingAbandon(false);
+      setSettingsOpen(false);
+    }
   }, [open]);
 
   if (!open) return null;
@@ -45,6 +60,10 @@ export function PauseMenu({
    */
   const onPanelClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('button')) playSound('ui_click');
+  };
+
+  const patchSettings = (partial: Partial<PlayerMatchSettings>) => {
+    onMatchSettingsChange?.({ ...matchSettings, ...partial });
   };
 
   if (confirmingAbandon) {
@@ -93,6 +112,62 @@ export function PauseMenu({
     );
   }
 
+  if (settingsOpen) {
+    return (
+      <div className="absolute inset-0 z-[250] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
+        <div
+          onClick={onPanelClick}
+          className="w-full max-w-sm mx-4 rounded-2xl border border-white/15 bg-[#0f1724]/95 p-6 shadow-2xl"
+        >
+          <h2 className="text-2xl font-black tracking-wide text-white mb-1">Settings</h2>
+          <p className="text-sm text-white/50 mb-5">This device only · stored in the browser</p>
+          <div className="space-y-4 mb-5">
+            <label className="flex items-center justify-between text-sm text-white/80">
+              Bloom
+              <input
+                type="checkbox"
+                checked={matchSettings.bloom}
+                onChange={(e) => patchSettings({ bloom: e.target.checked })}
+              />
+            </label>
+            <label className="block text-sm text-white/80">
+              Volume ({Math.round(matchSettings.masterVolume * 100)}%)
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                className="mt-1 w-full"
+                value={matchSettings.masterVolume}
+                onChange={(e) => patchSettings({ masterVolume: Number(e.target.value) })}
+              />
+            </label>
+            <label className="block text-sm text-white/80">
+              Look sensitivity ({matchSettings.mouseSensMult.toFixed(2)}×)
+              <input
+                type="range"
+                min={0.25}
+                max={2.5}
+                step={0.05}
+                className="mt-1 w-full"
+                value={matchSettings.mouseSensMult}
+                onChange={(e) => patchSettings({ mouseSensMult: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+          <Button
+            className="w-full justify-start"
+            size="lg"
+            variant="secondary"
+            onClick={() => setSettingsOpen(false)}
+          >
+            <ChevronLeft className="w-4 h-4 mr-2" /> Back
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="absolute inset-0 z-[250] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
       <div
@@ -100,13 +175,23 @@ export function PauseMenu({
         className="w-full max-w-sm mx-4 rounded-2xl border border-white/15 bg-[#0f1724]/95 p-6 shadow-2xl"
       >
         <h2 className="text-2xl font-black tracking-wide text-white mb-1">Paused</h2>
-        <p className="text-sm text-white/50 mb-6">ESC resumes · mouse unlocked</p>
+        <p className="text-sm text-white/50 mb-6">
+          {pauseHint} resumes · mouse unlocked{isAdmin ? ' · F2 admin' : ''}
+        </p>
         <div className="space-y-2">
           <Button className="w-full justify-start" size="lg" onClick={onResume}>
             <Play className="w-4 h-4 mr-2" /> Resume
           </Button>
           <Button className="w-full justify-start" size="lg" variant="secondary" onClick={onToggleFullscreen}>
             <Maximize className="w-4 h-4 mr-2" /> Toggle Fullscreen
+          </Button>
+          <Button
+            className="w-full justify-start"
+            size="lg"
+            variant="secondary"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <Settings className="w-4 h-4 mr-2" /> Graphics & audio
           </Button>
           {isAdmin && (
             <Button className="w-full justify-start" size="lg" variant="secondary" onClick={onOpenEditor}>

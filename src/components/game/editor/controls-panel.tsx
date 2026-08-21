@@ -24,6 +24,7 @@ import {
   DEFAULT_KEY_BINDINGS,
   KEY_BIND_ACTIONS,
   findConflicts,
+  formatBindKey,
   isValidBindKey,
   type KeyBindAction,
   type KeyBindGroup,
@@ -31,11 +32,10 @@ import {
 import type { CustomMoveDef } from './map-document';
 
 function displayKey(key: string): string {
-  if (key === ' ') return 'SPACE';
-  return key.toUpperCase();
+  return formatBindKey(key).toUpperCase();
 }
 
-const GROUPS: KeyBindGroup[] = ['Movement', 'Actions', 'Powers'];
+const GROUPS: KeyBindGroup[] = ['Movement', 'Actions', 'Interface', 'Powers'];
 
 export function ControlsPanel({
   onClose,
@@ -75,11 +75,18 @@ export function ControlsPanel({
     if (!listeningFor) return;
     const onKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && listeningFor !== 'pause') {
         setListeningFor(null);
         return;
       }
-      const normalized = e.key.toLowerCase();
+      const normalized =
+        e.key === 'Escape'
+          ? 'escape'
+          : e.key === 'Tab'
+            ? 'tab'
+            : e.key === '`'
+              ? '`'
+              : e.key.toLowerCase();
       if (!isValidBindKey(normalized)) {
         toast({ title: `"${e.key}" can't be bound`, variant: 'destructive' });
         setListeningFor(null);

@@ -51,11 +51,41 @@ import { EngineSplash } from './engine-splash';
 import { EngineHome, type CloudBadge } from './engine-home';
 import { PluginManagerDialog } from './plugin-manager';
 import { loadDesktopPlugins } from '@/lib/engine/plugin-loader';
+import { DEFAULT_EDITOR_PERF_MODE, type EditorPerfMode, type EditorViewLayout } from '@/components/game/editor/editor-viewport';
+import { getSidebarPlugins } from '@/components/game/editor/engine/registry';
+import '@/components/game/editor/engine/builtins';
+import { shortcutKeys } from '@/components/game/editor/editor-shortcuts';
 
 export type EngineUser = {
   username: string;
   role: string;
   avatarUrl?: string | null;
+};
+
+type EngineEditorUiState = {
+  uiCollapsed: boolean;
+  sidebarOpen: boolean;
+  toolsOpen: boolean;
+  propsOpen: boolean;
+  gridVisible: boolean;
+  showAllCollisionGizmos: boolean;
+  viewLayout: EditorViewLayout;
+  freeFly: boolean;
+  editorPerf: EditorPerfMode;
+  showHelp: boolean;
+};
+
+const DEFAULT_EDITOR_UI: EngineEditorUiState = {
+  uiCollapsed: false,
+  sidebarOpen: true,
+  toolsOpen: true,
+  propsOpen: true,
+  gridVisible: true,
+  showAllCollisionGizmos: false,
+  viewLayout: 'single',
+  freeFly: false,
+  editorPerf: { ...DEFAULT_EDITOR_PERF_MODE },
+  showHelp: false,
 };
 
 type PendingLiveAction =
@@ -84,6 +114,7 @@ export function EngineApp({
   const [showPerfHud, setShowPerfHud] = React.useState(false);
   const [showAbout, setShowAbout] = React.useState(false);
   const [showPlugins, setShowPlugins] = React.useState(false);
+  const [editorUi, setEditorUi] = React.useState<EngineEditorUiState>(DEFAULT_EDITOR_UI);
   const [livePingMs, setLivePingMs] = React.useState<number | null>(null);
   const [projectsRoot, setProjectsRoot] = React.useState<string | null>(null);
   const [dataRoot, setDataRoot] = React.useState<string | null>(null);
@@ -539,6 +570,20 @@ export function EngineApp({
     runCommand(type);
   };
 
+  React.useEffect(() => {
+    const onUi = (event: Event) => {
+      const detail = (event as CustomEvent<EngineEditorUiState>).detail;
+      if (!detail) return;
+      setEditorUi(detail);
+    };
+    window.addEventListener('kilrun-engine-ui-state', onUi);
+    return () => window.removeEventListener('kilrun-engine-ui-state', onUi);
+  }, []);
+
+  React.useEffect(() => {
+    if (!editorMapId) setEditorUi(DEFAULT_EDITOR_UI);
+  }, [editorMapId]);
+
   const showSplash = splash || !ready;
   const shell = (
     <>
@@ -548,6 +593,8 @@ export function EngineApp({
         desktop={desktop}
         connected={connected}
         inEditor={Boolean(editorMapId)}
+        editorUi={editorUi}
+        showPerfHud={showPerfHud}
         liveUser={liveUser}
         liveBusy={liveBusy}
         livePingMs={livePingMs}
@@ -674,6 +721,7 @@ type MenuItem = {
   onSelect?: () => void;
   separator?: boolean;
   disabled?: boolean;
+  checked?: boolean;
 };
 
 function EngineMenuBar({
@@ -681,6 +729,8 @@ function EngineMenuBar({
   desktop,
   connected,
   inEditor,
+  editorUi,
+  showPerfHud,
   liveUser,
   liveBusy,
   livePingMs,
@@ -696,6 +746,8 @@ function EngineMenuBar({
   desktop: boolean;
   connected: boolean;
   inEditor: boolean;
+  editorUi: EngineEditorUiState;
+  showPerfHud: boolean;
   liveUser: EngineSessionUser | null;
   liveBusy: boolean;
   livePingMs: number | null;
@@ -741,7 +793,7 @@ function EngineMenuBar({
         <span className="font-black tracking-[0.22em] text-red-200">ENGINE</span>
         <span className="text-[10px] text-slate-500">{KILRUN_ENGINE_VERSION}</span>
         <div className="h-5 w-px bg-slate-700/50 mx-1" />
-        <nav className="flex items-center gap-0.5 text-slate-200">
+        <nav className="flex items-center gap-0.5 text-slate-200 overflow-x-auto">
           <MenuDrop
             label="File"
             open={openMenu === 'File'}
@@ -754,7 +806,7 @@ function EngineMenuBar({
               { label: 'Open maps', onSelect: () => { setOpenMenu(null); onBack(); } },
               ...(desktop ? [{ label: 'Open Projects folder', onSelect: () => run('open-folder') }] : []),
               { separator: true },
-              { label: 'Save', shortcut: 'Ctrl+S', onSelect: () => run('save'), disabled: !inEditor },
+              { label: 'Save', shortcut: shortcutKeys('save'), onSelect: () => run('save'), disabled: !inEditor },
               { label: 'Import JSON', onSelect: () => run('import') },
               { label: 'Export JSON', onSelect: () => run('export'), disabled: !inEditor },
             ]}
@@ -764,8 +816,16 @@ function EngineMenuBar({
             open={openMenu === 'Edit'}
             onOpen={() => setOpenMenu((m) => (m === 'Edit' ? null : 'Edit'))}
             items={[
-              { label: 'Undo', shortcut: 'Ctrl+Z', onSelect: () => run('undo'), disabled: !inEditor },
-              { label: 'Redo', shortcut: 'Ctrl+Y', onSelect: () => run('redo'), disabled: !inEditor },
+              { label: 'Undo', shortcut: shortcutKeys('undo'), onSelect: () => run('undo'), disabled: !inEditor },
+              { label: 'Redo', shortcut: shortcutKeys('redo'), onSelect: () => run('redo'), disabled: !inEditor },
+              { separator: true },
+              { label: 'Duplicate', shortcut: shortcutKeys('duplicate'), onSelect: () => run('duplicate'), disabled: !inEditor },
+              { label: 'Duplicate +Z', shortcut: shortcutKeys('duplicate-z'), onSelect: () => run('duplicate-z'), disabled: !inEditor },
+              { label: 'Delete', shortcut: shortcutKeys('delete'), onSelect: () => run('delete'), disabled: !inEditor },
+              { separator: true },
+              { label: 'Group', shortcut: shortcutKeys('group'), onSelect: () => run('group'), disabled: !inEditor },
+              { label: 'Ungroup', shortcut: shortcutKeys('ungroup'), onSelect: () => run('ungroup'), disabled: !inEditor },
+              { label: 'Select none', shortcut: shortcutKeys('select-none'), onSelect: () => run('select-none'), disabled: !inEditor },
             ]}
           />
           <MenuDrop
@@ -773,9 +833,33 @@ function EngineMenuBar({
             open={openMenu === 'View'}
             onOpen={() => setOpenMenu((m) => (m === 'View' ? null : 'View'))}
             items={[
+              {
+                label: editorUi.uiCollapsed ? 'Show UI' : 'Hide UI',
+                shortcut: shortcutKeys('toggle-ui'),
+                onSelect: () => run('toggle-ui'),
+                disabled: !inEditor,
+                checked: editorUi.uiCollapsed,
+              },
+              { label: 'Sidebar', onSelect: () => run('toggle-sidebar'), disabled: !inEditor, checked: inEditor && editorUi.sidebarOpen && !editorUi.uiCollapsed },
+              { label: 'Tool bar', onSelect: () => run('toggle-tools'), disabled: !inEditor, checked: inEditor && editorUi.toolsOpen && !editorUi.uiCollapsed },
+              { label: 'Properties', onSelect: () => run('toggle-props'), disabled: !inEditor, checked: inEditor && editorUi.propsOpen && !editorUi.uiCollapsed },
+              { separator: true },
+              { label: 'Editing grid', onSelect: () => run('toggle-grid'), disabled: !inEditor, checked: inEditor && editorUi.gridVisible },
+              { label: 'Collision gizmos', onSelect: () => run('toggle-collision-gizmos'), disabled: !inEditor, checked: inEditor && editorUi.showAllCollisionGizmos },
+              { label: 'Free fly', onSelect: () => run('toggle-free-fly'), disabled: !inEditor, checked: inEditor && editorUi.freeFly },
+              { separator: true },
               { label: 'Reset camera', onSelect: () => run('reset-camera'), disabled: !inEditor },
-              { label: 'Hide UI', onSelect: () => run('hide-ui'), disabled: !inEditor },
-              { label: 'Toggle perf HUD', onSelect: () => run('toggle-perf-hud') },
+              { label: 'Top view', onSelect: () => run('camera-top'), disabled: !inEditor },
+              { label: 'Side view', onSelect: () => run('camera-side'), disabled: !inEditor },
+              { label: 'Front view', onSelect: () => run('camera-front'), disabled: !inEditor },
+              { label: 'Focus selection', shortcut: shortcutKeys('focus'), onSelect: () => run('focus-selected'), disabled: !inEditor },
+              { separator: true },
+              { label: 'Layout: single', onSelect: () => run('layout-single'), disabled: !inEditor, checked: inEditor && editorUi.viewLayout === 'single' },
+              { label: 'Layout: split', onSelect: () => run('layout-split'), disabled: !inEditor, checked: inEditor && editorUi.viewLayout === 'split' },
+              { label: 'Layout: triple', onSelect: () => run('layout-triple'), disabled: !inEditor, checked: inEditor && editorUi.viewLayout === 'triple' },
+              { separator: true },
+              { label: 'Perf HUD', onSelect: () => run('toggle-perf-hud'), checked: showPerfHud },
+              { label: 'Graphics…', onSelect: () => run('graphics'), disabled: !inEditor },
             ]}
           />
           <MenuDrop
@@ -794,14 +878,32 @@ function EngineMenuBar({
             onOpen={() => setOpenMenu((m) => (m === 'Assets' ? null : 'Assets'))}
             items={[
               { label: 'Asset sidebar', onSelect: () => run('tab-assets'), disabled: !inEditor },
+              { label: 'Layers', onSelect: () => run('tab-layers'), disabled: !inEditor },
+              { label: 'Outliner', onSelect: () => run('tab-outliner'), disabled: !inEditor },
+              { label: 'World', onSelect: () => run('tab-world'), disabled: !inEditor },
+              { label: 'Prefabs', onSelect: () => run('tab-prefabs'), disabled: !inEditor },
+              { label: 'Textures', onSelect: () => run('tab-textures'), disabled: !inEditor },
               ...(desktop
                 ? [
+                    { separator: true } as MenuItem,
                     { label: 'Open Assets folder', onSelect: () => run('open-assets') },
                     { label: 'Open Prefabs folder', onSelect: () => run('open-prefabs') },
                     { label: 'Open Plugins folder', onSelect: () => run('open-plugins') },
                   ]
                 : []),
             ]}
+          />
+          <MenuDrop
+            label="Studios"
+            open={openMenu === 'Studios'}
+            onOpen={() => setOpenMenu((m) => (m === 'Studios' ? null : 'Studios'))}
+            items={getSidebarPlugins()
+              .filter((p) => p.studio)
+              .map((p) => ({
+                label: p.label,
+                onSelect: () => run(`tab-${p.id}`),
+                disabled: !inEditor,
+              }))}
           />
           <MenuDrop
             label="Build"
@@ -835,11 +937,75 @@ function EngineMenuBar({
             ]}
           />
           <MenuDrop
+            label="Settings"
+            open={openMenu === 'Settings'}
+            onOpen={() => setOpenMenu((m) => (m === 'Settings' ? null : 'Settings'))}
+            items={[
+              { label: 'Graphics…', onSelect: () => run('graphics'), disabled: !inEditor },
+              { separator: true },
+              {
+                label: 'Disable bloom',
+                onSelect: () => run('perf-disableBloom'),
+                disabled: !inEditor,
+                checked: inEditor && editorUi.editorPerf.disableBloom,
+              },
+              {
+                label: '1× pixel ratio',
+                onSelect: () => run('perf-capPixelRatio'),
+                disabled: !inEditor,
+                checked: inEditor && editorUi.editorPerf.capPixelRatio,
+              },
+              {
+                label: 'Skip collision wires',
+                onSelect: () => run('perf-skipCollisionGizmos'),
+                disabled: !inEditor,
+                checked: inEditor && editorUi.editorPerf.skipCollisionGizmos,
+              },
+              {
+                label: 'Hide floor',
+                onSelect: () => run('perf-hideFloor'),
+                disabled: !inEditor,
+                checked: inEditor && editorUi.editorPerf.hideFloor,
+              },
+              {
+                label: 'Hide sky texture',
+                onSelect: () => run('perf-hideSkyTexture'),
+                disabled: !inEditor,
+                checked: inEditor && editorUi.editorPerf.hideSkyTexture,
+              },
+              {
+                label: 'Hide void effects',
+                onSelect: () => run('perf-hideVoidEffects'),
+                disabled: !inEditor,
+                checked: inEditor && editorUi.editorPerf.hideVoidEffects,
+              },
+              {
+                label: 'Hide fog',
+                onSelect: () => run('perf-hideFog'),
+                disabled: !inEditor,
+                checked: inEditor && editorUi.editorPerf.hideFog,
+              },
+              { separator: true },
+              {
+                label: 'Show tool bar',
+                onSelect: () => run('toggle-tools'),
+                disabled: !inEditor,
+                checked: inEditor && editorUi.toolsOpen && !editorUi.uiCollapsed,
+              },
+              { label: 'World panel', onSelect: () => run('tab-world'), disabled: !inEditor },
+              { label: 'Match settings', onSelect: () => run('tab-settings'), disabled: !inEditor },
+            ]}
+          />
+          <MenuDrop
             label="Help"
             open={openMenu === 'Help'}
             onOpen={() => setOpenMenu((m) => (m === 'Help' ? null : 'Help'))}
             items={[
-              { label: 'Editor help', onSelect: () => run('help'), disabled: !inEditor },
+              { label: 'Editor guide', onSelect: () => run('help'), disabled: !inEditor },
+              { label: 'Keyboard shortcuts', onSelect: () => run('shortcuts'), disabled: !inEditor },
+              { label: 'Quick tips', onSelect: () => run('tips'), disabled: !inEditor, checked: inEditor && editorUi.showHelp },
+              { label: 'Restart tutorial', onSelect: () => run('tutorial'), disabled: !inEditor },
+              { separator: true },
               { label: 'About Kilrun Engine', onSelect: () => run('about') },
             ]}
           />
@@ -917,21 +1083,24 @@ function MenuDrop({
         {label}
       </button>
       {open ? (
-        <div className="absolute left-0 top-full z-[210] min-w-[240px] origin-top rounded-xl border border-red-500/30 bg-[#10151e] py-1 shadow-[0_12px_40px_rgba(0,0,0,0.55),0_0_24px_rgba(226,61,74,0.15)]">
+        <div className="absolute left-0 top-full z-[210] min-w-[240px] max-h-[min(70vh,560px)] overflow-y-auto origin-top rounded-xl border border-red-500/30 bg-[#10151e] py-1 shadow-[0_12px_40px_rgba(0,0,0,0.55),0_0_24px_rgba(226,61,74,0.15)]">
           {items.map((item, index) =>
             item.separator ? (
               <div key={`sep-${index}`} className="my-1 h-px bg-red-500/20" />
             ) : (
               <button
-                key={item.label}
+                key={`${item.label}-${index}`}
                 type="button"
                 disabled={item.disabled}
                 className="w-full text-left px-3 py-1.5 hover:bg-red-600/25 hover:text-white transition border-l-2 border-transparent hover:border-red-400 disabled:opacity-40 disabled:pointer-events-none flex items-center justify-between gap-6"
                 onClick={() => item.onSelect?.()}
               >
-                <span>{item.label}</span>
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className={`w-3 text-[10px] ${item.checked ? 'text-red-300' : 'text-transparent'}`}>✓</span>
+                  <span className="truncate">{item.label}</span>
+                </span>
                 {item.shortcut ? (
-                  <span className="text-[10px] text-slate-500">{item.shortcut}</span>
+                  <span className="text-[10px] text-slate-500 shrink-0">{item.shortcut}</span>
                 ) : null}
               </button>
             )

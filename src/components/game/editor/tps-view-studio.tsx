@@ -192,6 +192,11 @@ export function TpsViewStudio({
 
   const persistGlobal = () => {
     saveTpsViewSettings(settings);
+  };
+
+  const persistAll = () => {
+    persistGlobal();
+    onSaveToMap?.(settings);
     setDirty(false);
   };
 
@@ -907,10 +912,7 @@ export function TpsViewStudio({
           <Button
             size="sm"
             className="flex-1 bg-violet-600 hover:bg-violet-500 text-white h-8 text-[11px]"
-            onClick={() => {
-              persistGlobal();
-              onSaveToMap?.(settings);
-            }}
+            onClick={persistAll}
             title="Save camera / crosshair. On Deathrun MAIN this map override wins for all modes."
           >
             <Save className="w-3.5 h-3.5 mr-1" />
@@ -920,7 +922,15 @@ export function TpsViewStudio({
             size="sm"
             variant="secondary"
             className="h-8 text-[11px]"
-            onClick={persistGlobal}
+            onClick={() => {
+              persistGlobal();
+              toast({
+                title: 'Saved globally',
+                description: dirty
+                  ? 'This map still has unsaved camera overrides — use Save → all modes to write them.'
+                  : 'Account camera defaults updated.',
+              });
+            }}
             title="Write global localStorage only (ignored in matches when Deathrun MAIN has map override)"
           >
             Global only
@@ -965,8 +975,7 @@ export function TpsViewStudio({
               size="sm"
               className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white h-8 text-[11px]"
               onClick={() => {
-                persistGlobal();
-                onSaveToMap?.(settings);
+                persistAll();
                 onPlayTest(settings);
               }}
             >

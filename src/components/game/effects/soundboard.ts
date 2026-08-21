@@ -25,10 +25,20 @@ let loadingPromise: Promise<void> | null = null;
 // unboundedly loud/overlapping voices for the same event.
 const activeVoices = new Map<string, number>();
 const MAX_CONCURRENT_PER_EVENT = 6;
-// Safety-net TTL mirroring the 15s server-side cache in
-// src/lib/sound-definitions.ts, in case an admin-edit call site forgets to
-// invalidate explicitly.
 const CACHE_TTL_MS = 15_000;
+let masterVolume = 1;
+
+export function getMasterVolume(): number {
+  return masterVolume;
+}
+
+export function setMasterVolume(volume: number): void {
+  masterVolume = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
+}
+
+function mixedVolume(optsVolume: number | undefined, entryVolume: number): number {
+  return Math.max(0, Math.min(1, (optsVolume ?? 1) * entryVolume * masterVolume));
+}
 
 function ensureLoaded(): Promise<void> {
   if (loaded && Date.now() - loadedAt < CACHE_TTL_MS) return Promise.resolve();
@@ -93,7 +103,7 @@ export function playLoopedSound(eventKey: string, opts?: { volume?: number }): v
       src.buffer = buffer;
       src.loop = true;
       const gain = ctx.createGain();
-      gain.gain.value = Math.max(0, Math.min(1, (opts?.volume ?? 1) * entry.volume));
+      gain.gain.value = mixedVolume(opts?.volume, entry.volume);
       src.connect(gain).connect(ctx.destination);
       src.onended = () => {
         if (loopVoices.get(eventKey) === src) loopVoices.delete(eventKey);
@@ -150,7 +160,7 @@ export function playSound(eventKey: string, opts?: { volume?: number }): void {
       const src = ctx.createBufferSource();
       src.buffer = buffer;
       const gain = ctx.createGain();
-      gain.gain.value = Math.max(0, Math.min(1, (opts?.volume ?? 1) * entry.volume));
+      gain.gain.value = mixedVolume(opts?.volume, entry.volume);
       src.connect(gain).connect(ctx.destination);
       activeVoices.set(eventKey, active + 1);
       src.onended = () => {

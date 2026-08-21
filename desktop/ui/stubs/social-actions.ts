@@ -1,3 +1,6 @@
-export async function adminUpsertStoreItem(_input: unknown) {
-  throw new Error('Store items are edited on the Kilrun website, not in the Windows editor.');
+import { upsertEngineShopItem } from '@/lib/engine/platform-client';
+
+export async function adminUpsertStoreItem(input: Record<string, unknown>) {
+  const result = await upsertEngineShopItem(input);
+  return result.item;
 }

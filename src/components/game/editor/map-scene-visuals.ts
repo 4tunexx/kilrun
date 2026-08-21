@@ -20,17 +20,73 @@ export function resolveFogColor(env: MapEnvironment): string {
   return env.fogColor || env.horizonColor || resolveSkyColor(env);
 }
 
+const GLOW_HALO_NAME = '__glow_halo__';
+const GLOW_LIGHT_NAME = '__glow_point_light__';
+const GLOW_BASELINE_SAVED = '__glowBaselineSaved';
+
+/** THREE.Color.toJSON() is a hex number — Material.clone() JSON-round-trips userData. */
+function colorFromStored(value: unknown): THREE.Color | null {
+  if (value instanceof THREE.Color) return value;
+  if (value && typeof value === 'object' && (value as THREE.Color).isColor) {
+    return value as THREE.Color;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new THREE.Color().setHex(value);
+  }
+  if (typeof value === 'string' && value.length > 0) {
+    try {
+      return new THREE.Color(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function origAlbedo(mat: THREE.MeshStandardMaterial): THREE.Color | null {
+  return colorFromStored(mat.userData.__origColorHex) ?? colorFromStored(mat.userData.__origColor);
+}
+
+function origEmissive(mat: THREE.MeshStandardMaterial): THREE.Color | null {
+  return (
+    colorFromStored(mat.userData.__origEmissiveHex) ?? colorFromStored(mat.userData.__origEmissive)
+  );
+}
+
+function snapshotGlowBaseline(mat: THREE.MeshStandardMaterial) {
+  if (mat.userData[GLOW_BASELINE_SAVED] === true) return;
+  const em = mat.emissive?.clone?.() ?? new THREE.Color(0, 0, 0);
+  mat.userData.__origEmissiveHex = em.getHex();
+  mat.userData.__origEmissiveIntensity = mat.emissiveIntensity;
+  if ('color' in mat && mat.color) {
+    const albedoHex = mat.color.getHex();
+    mat.userData.__meshAlbedoHex = albedoHex;
+    mat.userData.__origColorHex = albedoHex;
+  }
+  if ('roughness' in mat) mat.userData.__origRoughness = mat.roughness;
+  mat.userData.__origToneMapped = mat.toneMapped;
+  mat.userData[GLOW_BASELINE_SAVED] = true;
+}
+
+function nativeAlbedo(mat: THREE.MeshStandardMaterial): THREE.Color | null {
+  return colorFromStored(mat.userData.__meshAlbedoHex) ?? origAlbedo(mat);
+}
+
 /** Apply authored opacity to all mesh materials under a root. */
 export function applyEntityOpacity(root: THREE.Object3D, opacity: number | undefined | null) {
-  if (typeof opacity !== 'number' || Number.isNaN(opacity)) return;
-  const o = Math.min(1, Math.max(0, opacity));
+  const hasAuthored = typeof opacity === 'number' && Number.isFinite(opacity);
+  const authored = hasAuthored ? Math.min(1, Math.max(0, opacity as number)) : null;
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !child.material) return;
-    if (child.name === '__glow_halo__') return;
+    if (child.name === GLOW_HALO_NAME) return;
     const mats = Array.isArray(child.material) ? child.material : [child.material];
     for (const m of mats) {
       if (!m || !('opacity' in m)) continue;
       const mat = m as THREE.MeshStandardMaterial;
+      if (typeof mat.userData.__origOpacity !== 'number') {
+        mat.userData.__origOpacity = typeof mat.opacity === 'number' ? mat.opacity : 1;
+      }
+      const o = authored ?? mat.userData.__origOpacity;
       mat.transparent = o < 0.999;
       mat.opacity = o;
       mat.needsUpdate = true;
@@ -38,8 +94,45 @@ export function applyEntityOpacity(root: THREE.Object3D, opacity: number | undef
   });
 }
 
-const GLOW_HALO_NAME = '__glow_halo__';
-const GLOW_LIGHT_NAME = '__glow_point_light__';
+/**
+ * Tint mesh albedo from Properties → Color. Native GLB albedo is snapshotted
+ * once; clearing `color` restores it. Glow lerps from the authored tint (or
+ * native albedo when color is cleared).
+ */
+export function applyEntityColor(root: THREE.Object3D, color?: string) {
+  const tint = color ? new THREE.Color(color) : null;
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !child.material) return;
+    if (child.name === GLOW_HALO_NAME) return;
+    const mats = Array.isArray(child.material) ? child.material : [child.material];
+    for (const m of mats) {
+      if (!m || !('color' in m) || !(m as THREE.MeshStandardMaterial).color) continue;
+      const mat = m as THREE.MeshStandardMaterial;
+      snapshotGlowBaseline(mat);
+      if (tint) {
+        mat.color.copy(tint);
+        mat.userData.__origColorHex = tint.getHex();
+      } else {
+        const native = nativeAlbedo(mat);
+        if (native) {
+          mat.color.copy(native);
+          mat.userData.__origColorHex = native.getHex();
+        }
+      }
+      mat.needsUpdate = true;
+    }
+  });
+}
+
+/** Re-apply opacity, albedo, and glow after an async material clone. */
+export function applyEntitySurfaceStyle(
+  root: THREE.Object3D,
+  ent: { opacity?: number; color?: string; glow?: EntityGlow }
+) {
+  applyEntityOpacity(root, ent.opacity);
+  applyEntityColor(root, ent.color);
+  applyEntityGlow(root, ent.glow, ent.color);
+}
 
 function clampGlow(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
@@ -98,13 +191,7 @@ export function applyEntityGlow(
     for (const m of mats) {
       if (!m || !('emissive' in m)) continue;
       const mat = m as THREE.MeshStandardMaterial;
-      if (!mat.userData.__origEmissive) {
-        mat.userData.__origEmissive = mat.emissive.clone();
-        mat.userData.__origEmissiveIntensity = mat.emissiveIntensity;
-        if ('color' in mat && mat.color) mat.userData.__origColor = mat.color.clone();
-        if ('roughness' in mat) mat.userData.__origRoughness = mat.roughness;
-        mat.userData.__origToneMapped = mat.toneMapped;
-      }
+      snapshotGlowBaseline(mat);
       if (isGlowing) {
         child.userData.bloom = bloomAmt > 0.01;
         child.userData.bloomStrength = bloomAmt;
@@ -113,7 +200,7 @@ export function applyEntityGlow(
         mat.emissiveIntensity = surface;
         mat.toneMapped = true;
         if ('color' in mat && mat.color) {
-          const orig = mat.userData.__origColor as THREE.Color | undefined;
+          const orig = origAlbedo(mat);
           if (orig) mat.color.copy(orig).lerp(glowColor, 0.28);
           else mat.color.copy(glowColor).multiplyScalar(0.65);
         }
@@ -122,14 +209,16 @@ export function applyEntityGlow(
         child.userData.bloom = false;
         child.userData.bloomStrength = 0;
         child.userData.bloomColor = undefined;
-        if (mat.userData.__origEmissive) {
-          mat.emissive.copy(mat.userData.__origEmissive);
+        const em = origEmissive(mat);
+        if (em) {
+          mat.emissive.copy(em);
           mat.emissiveIntensity = mat.userData.__origEmissiveIntensity ?? 0;
         } else {
           mat.emissive.set(0x000000);
           mat.emissiveIntensity = 0;
         }
-        if (mat.userData.__origColor) mat.color.copy(mat.userData.__origColor);
+        const albedo = origAlbedo(mat);
+        if (albedo) mat.color.copy(albedo);
         if (typeof mat.userData.__origRoughness === 'number') {
           mat.roughness = mat.userData.__origRoughness;
         }

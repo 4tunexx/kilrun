@@ -43,11 +43,8 @@ function RingGlyph({ icon }: { icon: string | LucideIcon }) {
   return <span aria-hidden>{icon}</span>;
 }
 
-/** Default slide cooldown — mirrors movement.ts's `effSlideCooldownMs` default.
- * The actual per-map value (CombatSettings.slideCooldownMs) isn't synced to
- * the client, so this ring's fill duration is an approximation when a map
- * author overrides it; the ring still starts/clears at the right times either way. */
-const SLIDE_COOLDOWN_MS_DEFAULT = 1000;
+/** Default slide cooldown when the HUD was not passed CombatSettings.slideCooldownMs. */
+const SLIDE_COOLDOWN_MS_DEFAULT = 800;
 
 export const SLOT_FIELDS: Record<AbilitySlotKind, { endsAt: keyof NetAbilityLoadoutState; cooldownEndsAt: keyof NetAbilityLoadoutState }> = {
   visibility: { endsAt: 'visibilityEndsAt', cooldownEndsAt: 'visibilityCooldownEndsAt' },
@@ -211,13 +208,21 @@ export const MovementCooldownRow: React.FC<{
   /** Map-authored custom moves (Player Model Studio → Moves tab), if any. */
   customMoveDefs?: CustomMoveDef[];
   customMoveState?: { cooldownEndsAt: { get(key: string): number | undefined } };
-}> = ({ slideCooldownEndsAt, flipCooldownEndsAt, playerEnergy, customMoveDefs, customMoveState }) => {
+  slideCooldownMs?: number;
+}> = ({
+  slideCooldownEndsAt,
+  flipCooldownEndsAt,
+  playerEnergy,
+  customMoveDefs,
+  customMoveState,
+  slideCooldownMs = SLIDE_COOLDOWN_MS_DEFAULT,
+}) => {
   const canDoubleJump = playerEnergy >= JUMP_ENERGY_COST;
   return (
     <div className="flex items-end gap-2">
       <AbilityRingIcon
         icon={Waves}
-        cooldownMs={SLIDE_COOLDOWN_MS_DEFAULT}
+        cooldownMs={slideCooldownMs}
         cooldownEndsAt={slideCooldownEndsAt ?? 0}
         buffEndsAt={0}
         energyCost={SLIDE_ENERGY_COST}

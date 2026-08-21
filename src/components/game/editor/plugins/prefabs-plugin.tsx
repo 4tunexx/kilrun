@@ -6,6 +6,8 @@ import { getMapGameMode } from '../map-document';
 import { deletePrefab, instantiatePrefab, listPrefabs, savePrefab } from '../prefab-storage';
 import { SNAP_FACE_LABELS, SnapFacePicker } from '../snap-face-picker';
 import type { MapEditorBrains, MapEditorPlugin } from '../engine/types';
+import { hasEngineSession } from '@/lib/engine/platform-client';
+import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
 
 function PrefabsPanel({ brains }: { brains: MapEditorBrains }) {
   const {
@@ -212,6 +214,11 @@ function PrefabsPanel({ brains }: { brains: MapEditorBrains }) {
           Pull cloud
         </Button>
       </div>
+      {isKilrunEngineDesktop() && !hasEngineSession() && (
+        <p className="text-[10px] text-amber-300/90 px-0.5">
+          Link live game (Build menu) to pull or publish the website prefab library.
+        </p>
+      )}
       {cloudPrefabs.length > 0 && (
         <div className="space-y-1">
           <p className="text-[10px] uppercase tracking-widest text-cyan-300/70">Cloud library</p>

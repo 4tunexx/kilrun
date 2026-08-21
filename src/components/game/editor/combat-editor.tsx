@@ -39,6 +39,7 @@ import {
   type CombatSettings,
   type MapDocument,
   ensureCombatSettings,
+  parsePowerUpPool,
 } from './map-document';
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
@@ -466,8 +467,9 @@ export function CombatEditor({
               <InfoBox>
                 Arms-only hides the local body (arms + weapon stay visible). Power-up Pool
                 filters the Deathrun warmup shop to those IDs — leave blank for no shop.
-                Heal / Shield / Energy / Speed / Super Jump are the effects the live sim
-                applies. For Horde/Competitive loadouts, use Map Editor → Buy Menu.
+                Live sim applies heal, shield, energy, speed (energy + small shield), super
+                jump (+35% jump, no timer), invisibility, extra jump, checkpoint, and slow
+                trapper. For Horde/Competitive loadouts, use Map Editor → Buy Menu.
               </InfoBox>
               <Section title="Arms Mode" accent="red" icon={<Target className="w-3.5 h-3.5" />}>
                 <Toggle
@@ -487,23 +489,19 @@ export function CombatEditor({
                   type="text"
                   value={settings.powerUpPool}
                   onChange={(e) => patch({ powerUpPool: e.target.value })}
-                  placeholder="speed_boost, shield, heal, super_jump"
+                  placeholder="speed, shield, heal, super_jump"
                   className="w-full rounded-lg bg-black/40 border border-white/10 px-2.5 py-1.5 text-[11px] text-white/80"
                 />
                 <div className="grid grid-cols-2 gap-1 mt-2">
                   {POWER_UP_PRESETS.map((pu) => {
-                    const active = settings.powerUpPool.includes(pu.id);
+                    const active = new Set(parsePowerUpPool(settings.powerUpPool)).has(pu.id);
                     return (
                       <button
                         key={pu.id}
                         type="button"
                         onClick={() => {
-                          const ids = settings.powerUpPool
-                            ? settings.powerUpPool.split(',').map((s) => s.trim()).filter(Boolean)
-                            : [];
-                          const next = active
-                            ? ids.filter((id) => id !== pu.id)
-                            : [...ids, pu.id];
+                          const ids = parsePowerUpPool(settings.powerUpPool);
+                          const next = active ? ids.filter((id) => id !== pu.id) : [...ids, pu.id];
                           patch({ powerUpPool: next.join(', ') });
                         }}
                         className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left text-[10px] transition-colors ${
@@ -531,7 +529,8 @@ export function CombatEditor({
       {/* ── Bottom status bar ─────────────────────────────────────────── */}
       <div className="border-t border-white/10 bg-slate-900/50 px-4 py-2 flex items-center gap-3 shrink-0">
         <p className="text-[10px] text-white/30 flex-1">
-          Changes saved to map document → applied in Play Test and live match via loadCustomMap.
+          Changes saved to map document → movement applies in local Play Test; recoil / shake
+          apply there too. Live match uses the same combat settings via loadCustomMap.
         </p>
         {dirty && (
           <p className="text-[10px] text-amber-300/70 font-semibold animate-pulse">
@@ -564,11 +563,12 @@ function PhysicsNote({ text }: { text: string }) {
 // ── Power-up presets ─────────────────────────────────────────────────────────
 
 const POWER_UP_PRESETS = [
-  { id: 'speed_boost', label: 'Speed Boost', icon: '⚡', hint: 'Temporary +50% run speed' },
+  { id: 'speed', label: 'Speed Boost', icon: '⚡', hint: 'Refills energy + small shield' },
+  { id: 'energy', label: 'Energy Drink', icon: '🔋', hint: 'Full sprint energy' },
   { id: 'double_jump', label: 'Double Jump', icon: '🦘', hint: 'Grants one extra jump' },
   { id: 'shield', label: 'Shield', icon: '🛡️', hint: 'Absorbs next 50 damage' },
   { id: 'invisibility', label: 'Invisible', icon: '👻', hint: 'Hide from trapper for 5s' },
-  { id: 'super_jump', label: 'Super Jump', icon: '🚀', hint: '3× jump height for 8s' },
+  { id: 'super_jump', label: 'Super Jump', icon: '🚀', hint: '+35% jump height (no timer) + energy' },
   { id: 'heal', label: 'Heal', icon: '❤️', hint: 'Restore 50 HP instantly' },
   { id: 'slow_trapper', label: 'Slow Trap', icon: '🕸️', hint: 'Slow trapper for 5s' },
   { id: 'checkpoint', label: 'Checkpoint', icon: '📍', hint: 'Set respawn here instantly' },

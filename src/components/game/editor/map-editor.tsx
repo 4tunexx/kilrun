@@ -66,6 +66,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
 import type {
@@ -190,8 +191,12 @@ import { AnimationPropsPanel } from './animation-props-panel';
 import {
   EditorTutorial,
   hasCompletedTutorial,
+  KeyboardShortcutsOverlay,
+  resetTutorialFlag,
   type TutorialStep,
 } from './editor-help';
+import { shortcutKeys, shortcutTitle } from './editor-shortcuts';
+import { EditorTip } from './editor-tooltip';
 import {
   getActivePlayMapIdForMode,
   listPrefabs,
@@ -411,6 +416,8 @@ export function MapEditor({
   }, [cloudActive]);
   const [measureMode, setMeasureMode] = useState(false);
   const [measureDist, setMeasureDist] = useState<number | null>(null);
+  const [showGraphics, setShowGraphics] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   /** Master hide: collapses top bar, side menus, tools, and properties for a clear canvas. */
   const [uiCollapsed, setUiCollapsed] = useState(mobileFirst);
   /** Mobile left asset/library drawer (overlay). Desktop keeps the panel in-flow. */
@@ -471,6 +478,10 @@ export function MapEditor({
 
   const docRef = useRef(doc);
   const uiCollapsedRef = useRef(mobileFirst);
+  const playTestRef = useRef(false);
+  const playTestLiveRef = useRef(false);
+  const freeFlyRef = useRef(false);
+  const handleEngineCommandRef = useRef<(type: string) => void>(() => {});
   const undoStack = useRef<MapDocument[]>([]);
   /** Serialized size of each undoStack entry, same index — see pushUndoSnapshot. */
   const undoStackBytes = useRef<number[]>([]);
@@ -483,6 +494,9 @@ export function MapEditor({
     })
   );
   docRef.current = doc;
+  playTestRef.current = playTest;
+  playTestLiveRef.current = playTestLive;
+  freeFlyRef.current = freeFly;
 
   const selected = doc.entities.find((e) => e.id === selectedId) ?? null;
   const env = ensureEnvironment(doc);
@@ -658,6 +672,18 @@ export function MapEditor({
       setToolsOpen(true);
       setPropsOpen(true);
     }
+  };
+
+  const openEditorTab = (id: SidebarTab) => {
+    setUiCollapsed(false);
+    setSidebarOpen(true);
+    setRailOpen(true);
+    setTab(id);
+  };
+
+  const toggleEditorUi = () => {
+    if (uiCollapsedRef.current) expandMenus();
+    else collapseAllMenus();
   };
 
   useEffect(() => {
@@ -1208,18 +1234,64 @@ export function MapEditor({
     }
   }, [scaleFromSide]);
 
+  const applyMagnetSnap = () => {
+    // 2+ selected: join them face-to-face (pick which side).
+    // 1 selected: attach to the nearest neighbor if close, else floor.
+    if (selectedIds.length >= 2) {
+      setSnapFaceAnchorRect(snapMagnetBtnRef.current?.getBoundingClientRect() ?? null);
+      setSnapFaceMenuOpen((v) => !v);
+      return;
+    }
+    const attached = apiRef.current?.snapSelectionToNearestNeighbor();
+    if (attached) {
+      toast({
+        title: 'Attached',
+        description: 'Clicked onto the nearest object’s closest face.',
+      });
+      return;
+    }
+    const ok = apiRef.current?.snapSelectedToFloor(
+      selectedIds.length ? selectedIds : selectedId ? [selectedId] : undefined
+    );
+    toast({
+      title: ok ? 'Snapped to floor' : 'Select an object first',
+      description: ok
+        ? 'Nothing close enough to attach — sat on the floor / surface under it.'
+        : undefined,
+    });
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if ((e.target as HTMLElement)?.isContentEditable) return;
+      const inField =
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        !!(e.target as HTMLElement)?.isContentEditable;
       // playTestLive mounts the real KilrunEngine (gameplay's own keyboard
       // handling) over the editor — without this guard, ordinary gameplay
       // keys (WASD, E, R, V, H, B, …) also drove the hidden editor
       // underneath: switching tools/gizmo mode, toggling grid snap, and
       // Delete/Escape could delete the prior selection or pop the exit-editor
       // confirm dialog mid-test.
-      if (playTest || playTestLive) return;
+      if (playTestRef.current || playTestLiveRef.current) return;
+
+      // Save / Hide UI must win over the browser even while a Properties
+      // field is focused — otherwise Ctrl+S downloads the page and Ctrl+H
+      // opens History.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleManualSave();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        if (!e.repeat) toggleEditorUi();
+        return;
+      }
+
+      if (inField) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -1234,18 +1306,25 @@ export function MapEditor({
         redo();
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        handleManualSave();
-        return;
-      }
 
       if (e.key === 'Escape') {
         e.preventDefault();
+        if (showShortcuts) {
+          setShowShortcuts(false);
+          return;
+        }
+        if (showGraphics) {
+          setShowGraphics(false);
+          return;
+        }
         if (apiRef.current?.getPendingPlaceKind()) {
           apiRef.current.clearPendingPlace();
           setPendingPlaceKind(null);
           toast({ title: 'Placement cancelled', description: 'Back to Select.' });
+          return;
+        }
+        if (uiCollapsedRef.current) {
+          expandMenus();
           return;
         }
         if (freeFly) {
@@ -1294,6 +1373,7 @@ export function MapEditor({
         if (freeFly) apiRef.current?.setFreeFly(false);
       }
       if (e.key === 'h' || e.key === 'H') {
+        if (e.ctrlKey || e.metaKey) return;
         setEditTool('hammer');
         setMode('scale');
         if (freeFly) apiRef.current?.setFreeFly(false);
@@ -1301,14 +1381,8 @@ export function MapEditor({
       if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey) {
         if (e.repeat) {
           // OS key auto-repeat would otherwise flap this toggle rapidly while held.
-        } else if (selectedIds.length >= 2) {
-          setSnapFaceMenuOpen((v) => !v);
         } else {
-          toast({
-            title: 'Select 2 objects first',
-            description: 'Click one, then Shift+click another, then press M.',
-            variant: 'destructive',
-          });
+          applyMagnetSnap();
         }
       }
       if (e.key === 'g' || e.key === 'G') {
@@ -1337,7 +1411,7 @@ export function MapEditor({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onClose, selectedId, selectedIds, freeFly, playTest, mapId, brush]);
+  }, [onClose, selectedId, selectedIds, freeFly, playTest, mapId, brush, showShortcuts, showGraphics]);
 
   const filtered = useMemo(() => {
     if (libraryCategory !== 'all' && libraryCategory !== 'built-in') return [];
@@ -2021,7 +2095,7 @@ export function MapEditor({
    * Brings existing maps in line with newly-placed props without making
    * the user re-toggle the Material dropdown on each one by hand. */
   const bakeAllSolidMeshCollision = async (opts?: { silent?: boolean; force?: boolean }) => {
-    const targets = doc.entities.filter(
+    const targets = (apiRef.current?.getDoc() ?? docRef.current).entities.filter(
       (e) =>
         resolveCollideMaterial(e) === 'solid' &&
         !isHammerSolidEntity(e) &&
@@ -2070,7 +2144,20 @@ export function MapEditor({
     // is persisted, so it must be up to date before persist() runs.
     await bakeAllSolidMeshCollision(PLAY_TEST_MESH_BAKE_OPTS);
     persist();
+    emitPlaytest('beforeStart', { live: true, mode: gameMode });
     setPlayTestLive(true);
+  };
+
+  const requestPlayTest = (target: 'preview' | 'live') => {
+    const mode = getMapGameMode(docRef.current);
+    if (mode === 'deathrun' || mode === 'competitive') {
+      setPlayTestPromptTarget(target);
+      setPlayTestRolePrompt(true);
+      return;
+    }
+    setPlayTestRole(undefined);
+    if (target === 'live') void startPlayLive();
+    else void startPlay();
   };
 
   const exitPlayTestLive = () => {
@@ -2190,39 +2277,159 @@ export function MapEditor({
   void pluginEpoch;
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(
+      new CustomEvent('kilrun-engine-ui-state', {
+        detail: {
+          uiCollapsed,
+          sidebarOpen,
+          toolsOpen,
+          propsOpen,
+          gridVisible: env.gridVisible !== false,
+          showAllCollisionGizmos,
+          viewLayout,
+          freeFly,
+          editorPerf,
+          showHelp,
+        },
+      })
+    );
+  }, [
+    uiCollapsed,
+    sidebarOpen,
+    toolsOpen,
+    propsOpen,
+    env.gridVisible,
+    showAllCollisionGizmos,
+    viewLayout,
+    freeFly,
+    editorPerf,
+    showHelp,
+  ]);
+
+  handleEngineCommandRef.current = (type: string) => {
+    if (type === 'save') handleManualSave();
+    else if (type === 'upload-draft') uploadDraftToLive();
+    else if (type === 'export') doExport();
+    else if (type === 'import') fileRef.current?.click();
+    else if (type === 'undo') undo();
+    else if (type === 'redo') redo();
+    else if (type === 'play') requestPlayTest('preview');
+    else if (type === 'play-live') requestPlayTest('live');
+    else if (type === 'publish') publishToMatch();
+    else if (type === 'hide-ui') collapseAllMenus();
+    else if (type === 'show-ui') expandMenus();
+    else if (type === 'toggle-ui') toggleEditorUi();
+    else if (type === 'help') {
+      openEditorTab('help');
+      setShowHelp(true);
+    }
+    else if (type === 'tips') setShowHelp((v) => !v);
+    else if (type === 'shortcuts') {
+      setShowGraphics(false);
+      setShowShortcuts(true);
+    }
+    else if (type === 'tutorial') {
+      resetTutorialFlag();
+      expandMenus();
+      setTutorialOpen(true);
+    }
+    else if (type === 'graphics') {
+      expandMenus();
+      setShowShortcuts(false);
+      setShowGraphics(true);
+    }
+    else if (type === 'tab-settings') openEditorTab('settings');
+    else if (type === 'tab-world') openEditorTab('world');
+    else if (type === 'tab-assets') openEditorTab('assets');
+    else if (type === 'tab-layers') openEditorTab('layers');
+    else if (type === 'tab-outliner') openEditorTab('outliner');
+    else if (type === 'tab-prefabs') openEditorTab('prefabs');
+    else if (type === 'tab-textures') openEditorTab('textures');
+    else if (type.startsWith('tab-')) {
+      const id = type.slice(4);
+      if (isStudioPluginTab(id)) openStudioPluginTab(id);
+      else openEditorTab(id);
+    }
+    else if (type === 'reset-camera') apiRef.current?.resetCamera();
+    else if (type === 'camera-top') apiRef.current?.setCameraPreset('top');
+    else if (type === 'camera-side') apiRef.current?.setCameraPreset('side');
+    else if (type === 'camera-front') apiRef.current?.setCameraPreset('front');
+    else if (type === 'focus-selected') apiRef.current?.focusSelected();
+    else if (type === 'layout-single') setViewLayout('single');
+    else if (type === 'layout-split') setViewLayout('split');
+    else if (type === 'layout-triple') setViewLayout('triple');
+    else if (type === 'toggle-sidebar') {
+      setUiCollapsed(false);
+      setSidebarOpen((v) => !v);
+      setRailOpen(true);
+    }
+    else if (type === 'toggle-tools') {
+      setUiCollapsed(false);
+      setToolsOpen((v) => !v);
+    }
+    else if (type === 'toggle-props') {
+      setUiCollapsed(false);
+      setPropsOpen((v) => !v);
+    }
+    else if (type === 'toggle-grid') {
+      const liveEnv = ensureEnvironment(apiRef.current?.getDoc() ?? docRef.current);
+      patchEnv({ gridVisible: liveEnv.gridVisible === false });
+    }
+    else if (type === 'toggle-collision-gizmos') {
+      setShowAllCollisionGizmos((prev) => {
+        const next = !prev;
+        apiRef.current?.setShowAllCollisionGizmos(next);
+        return next;
+      });
+    }
+    else if (type === 'toggle-free-fly') {
+      apiRef.current?.setFreeFly(!freeFlyRef.current);
+    }
+    else if (type === 'duplicate') apiRef.current?.duplicateSelected('x');
+    else if (type === 'duplicate-z') apiRef.current?.duplicateSelected('z');
+    else if (type === 'delete') apiRef.current?.deleteSelected();
+    else if (type === 'group') groupSelection();
+    else if (type === 'ungroup') ungroupSelection();
+    else if (type === 'select-none') {
+      apiRef.current?.setSelectedId(null);
+      setSelectedId(null);
+      setSelectedIds([]);
+    }
+    else if (type.startsWith('perf-')) {
+      const key = type.slice(5) as keyof EditorPerfMode;
+      setEditorPerf((prev) => {
+        if (!(key in prev)) return prev;
+        const next = { ...prev, [key]: !prev[key] };
+        apiRef.current?.setEditorPerfMode(next);
+        return next;
+      });
+    }
+    else if (type === 'validate') {
+      const issues = validateMapForPublish(workingDoc());
+      const errors = issues.filter((i) => i.level === 'error').length;
+      toast({
+        title: errors ? `Map has ${errors} error${errors === 1 ? '' : 's'}` : 'Validation passed',
+        description: formatValidationSummary(issues) || 'No issues.',
+        variant: errors ? 'destructive' : undefined,
+      });
+    }
+  };
+
+  useEffect(() => {
     if (variant !== 'engine' || typeof window === 'undefined') return;
     const onCommand = (event: Event) => {
       const type = (event as CustomEvent<{ type?: string }>).detail?.type;
       if (!type) return;
-      if (type === 'save') handleManualSave();
-      else if (type === 'upload-draft') uploadDraftToLive();
-      else if (type === 'export') doExport();
-      else if (type === 'import') fileRef.current?.click();
-      else if (type === 'undo') undo();
-      else if (type === 'redo') redo();
-      else if (type === 'play') void startPlay();
-      else if (type === 'play-live') void startPlayLive();
-      else if (type === 'publish') publishToMatch();
-      else if (type === 'hide-ui') collapseAllMenus();
-      else if (type === 'help') setShowHelp(true);
-      else if (type === 'tab-assets') setTab('assets');
-      else if (type === 'reset-camera') apiRef.current?.resetCamera();
-      else if (type === 'validate') {
-        const issues = validateMapForPublish(workingDoc());
-        const errors = issues.filter((i) => i.level === 'error').length;
-        toast({
-          title: errors ? `Map has ${errors} error${errors === 1 ? '' : 's'}` : 'Validation passed',
-          description: formatValidationSummary(issues) || 'No issues.',
-          variant: errors ? 'destructive' : undefined,
-        });
-      }
+      if ((playTestRef.current || playTestLiveRef.current) && type !== 'save') return;
+      handleEngineCommandRef.current(type);
     };
     window.addEventListener('kilrun-engine-command', onCommand);
     return () => window.removeEventListener('kilrun-engine-command', onCommand);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [variant]);
 
   const editorShell = (
+    <TooltipProvider delayDuration={350}>
     <div
       className={
         variant === 'engine'
@@ -2277,17 +2484,21 @@ export function MapEditor({
         </>
       )}
 
-      {/* Restored when chrome is hidden — one tap brings menus back */}
+      {/* Restored when chrome is hidden — below the Engine bar, above the touch layer */}
       {uiCollapsed && (
-        <div className="fixed top-3 left-3 z-[140] flex flex-col gap-2 pointer-events-auto">
+        <div
+          className={`fixed left-3 z-[150] flex flex-col gap-2 pointer-events-auto ${
+            variant === 'engine' ? 'top-14' : 'top-3'
+          }`}
+        >
           <button
             type="button"
             onClick={expandMenus}
             className="flex items-center gap-1.5 rounded-xl border border-cyan-400/70 bg-cyan-500/40 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg active:scale-95"
-            title="Show editor menus"
+            title={shortcutTitle('toggle-ui', 'Show editor UI')}
           >
             <Menu className="w-4 h-4" />
-            Menus
+            Show UI
           </button>
           <button
             type="button"
@@ -2539,17 +2750,7 @@ export function MapEditor({
         <Button
           size="sm"
           className="ml-2 bg-emerald-600 hover:bg-emerald-500 text-white shrink-0"
-          onClick={() => {
-            // Deathrun/Competitive have distinct spawn roles worth testing
-            // from both sides; Horde has no role split, so start directly.
-            if (gameMode === 'deathrun' || gameMode === 'competitive') {
-              setPlayTestPromptTarget('preview');
-              setPlayTestRolePrompt(true);
-            } else {
-              setPlayTestRole(undefined);
-              startPlay();
-            }
-          }}
+          onClick={() => requestPlayTest('preview')}
         >
           <Play className="w-4 h-4 mr-1" /> Play Test
         </Button>
@@ -2558,15 +2759,7 @@ export function MapEditor({
           variant="outline"
           className="ml-2 border-amber-500/60 text-amber-300 hover:bg-amber-500/10 shrink-0"
           title="Real game client — HUD, chat, admin panel, skill menu. Requires the game server (server/) running locally."
-          onClick={() => {
-            if (gameMode === 'deathrun' || gameMode === 'competitive') {
-              setPlayTestPromptTarget('live');
-              setPlayTestRolePrompt(true);
-            } else {
-              setPlayTestRole(undefined);
-              startPlayLive();
-            }
-          }}
+          onClick={() => requestPlayTest('live')}
         >
           <Play className="w-4 h-4 mr-1" /> Play Test (Live)
         </Button>
@@ -2623,15 +2816,21 @@ export function MapEditor({
         <Button size="sm" variant="secondary" className="shrink-0" disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Y)">
           <Redo2 className="w-4 h-4" />
         </Button>
-        <Button size="sm" variant="secondary" className="shrink-0" onClick={() => setShowHelp((v) => !v)} title="Tips">
+        <Button
+          size="sm"
+          variant="secondary"
+          className="shrink-0"
+          onClick={() => setShowHelp((v) => !v)}
+          title="Quick tips overlay"
+        >
           <HelpCircle className="w-4 h-4" />
         </Button>
         <Button
           size="sm"
           variant="secondary"
           className="shrink-0 border border-cyan-400/40 text-cyan-100"
-          onClick={collapseAllMenus}
-          title="Hide all menus for placing"
+          onClick={toggleEditorUi}
+          title={shortcutTitle('toggle-ui', 'Hide all menus for placing — Ctrl+H / Esc / Show UI to restore')}
         >
           <EyeOff className="w-4 h-4 mr-1" /> Hide UI
         </Button>
@@ -2966,6 +3165,34 @@ export function MapEditor({
             onClose={() => setTutorialOpen(false)}
             onStep={onTutorialStep}
           />
+          <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+          <EditorGraphicsOverlay
+            open={showGraphics}
+            perf={editorPerf}
+            toolsOpen={toolsOpen}
+            onClose={() => setShowGraphics(false)}
+            onToggleTools={() => setToolsOpen((v) => !v)}
+            onTogglePerf={(key) => {
+              setEditorPerf((prev) => {
+                const next = { ...prev, [key]: !prev[key] };
+                apiRef.current?.setEditorPerfMode(next);
+                return next;
+              });
+            }}
+            onRestorePerf={() => {
+              const next = { ...DEFAULT_EDITOR_PERF_MODE };
+              setEditorPerf(next);
+              apiRef.current?.setEditorPerfMode(next);
+            }}
+            onOpenWorld={() => {
+              setShowGraphics(false);
+              openEditorTab('world');
+            }}
+            onOpenSettings={() => {
+              setShowGraphics(false);
+              openEditorTab('settings');
+            }}
+          />
 
           {!uiCollapsed && (
           <div className="absolute bottom-14 left-3 text-[10px] text-white/45 bg-black/50 px-2 py-1 rounded pointer-events-none z-[40] max-w-[55vw] truncate">
@@ -3256,32 +3483,7 @@ export function MapEditor({
               <ToolBtn
                 btnRef={snapMagnetBtnRef}
                 active={snapFaceMenuOpen}
-                onClick={() => {
-                  // 2+ selected: join them face-to-face (pick which side).
-                  // 1 selected: attach to the nearest neighbor if close, else floor.
-                  if (selectedIds.length >= 2) {
-                    setSnapFaceAnchorRect(snapMagnetBtnRef.current?.getBoundingClientRect() ?? null);
-                    setSnapFaceMenuOpen((v) => !v);
-                    return;
-                  }
-                  const attached = apiRef.current?.snapSelectionToNearestNeighbor();
-                  if (attached) {
-                    toast({
-                      title: 'Attached',
-                      description: 'Clicked onto the nearest object’s closest face.',
-                    });
-                    return;
-                  }
-                  const ok = apiRef.current?.snapSelectedToFloor(
-                    selectedIds.length ? selectedIds : selectedId ? [selectedId] : undefined
-                  );
-                  toast({
-                    title: ok ? 'Snapped to floor' : 'Select an object first',
-                    description: ok
-                      ? 'Nothing close enough to attach — sat on the floor / surface under it.'
-                      : undefined,
-                  });
-                }}
+                onClick={applyMagnetSnap}
                 title={
                   selectedIds.length >= 2
                     ? 'Snap (magnet) — choose which side to join'
@@ -3707,7 +3909,9 @@ export function MapEditor({
               }`}
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] tracking-widest text-white/50 uppercase">Properties</p>
+                <EditorTip content="Inspector for the selected object — transform, color, glow, solid, wiring.">
+                  <p className="text-[10px] tracking-widest text-white/50 uppercase cursor-help">Properties</p>
+                </EditorTip>
                 <button
                   type="button"
                   className="w-7 h-7 rounded-lg flex items-center justify-center text-white/70 hover:bg-white/10"
@@ -3747,11 +3951,16 @@ export function MapEditor({
               ))}
 
               <div className="rounded-lg border border-white/10 bg-black/30 p-2 space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-white/50">
-                  Selection
-                  {selectionMeta.count > 1 ? ` · ${selectionMeta.count}` : ''}
-                  {selectionMeta.anyGrouped ? ' · grouped' : ''}
-                </p>
+                <EditorTip
+                  content="Show, lock, or group the current selection. Multi-select with Shift+click."
+                  shortcut={shortcutKeys('group')}
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-white/50 cursor-help">
+                    Selection
+                    {selectionMeta.count > 1 ? ` · ${selectionMeta.count}` : ''}
+                    {selectionMeta.anyGrouped ? ' · grouped' : ''}
+                  </p>
+                </EditorTip>
                 {selectionMeta.count > 1 && (
                   <p className="text-[10px] text-white/45 leading-snug">
                     Move / rotate / scale the gizmo to transform the whole selection as one.
@@ -4100,12 +4309,12 @@ export function MapEditor({
                 />
               )}
 
-              {/* Interaction: anim / damage / push on props, traps, doors — not hammer / markers */}
-              {!isHammerSolidEntity(selected) &&
-                (selected.kind === 'prop' ||
-                  selected.kind === 'trap' ||
-                  selected.kind === 'door' ||
-                  selected.kind === 'hazard') && (
+              {/* Interaction: anim / damage / push on props, traps, doors, hammer solids */}
+              {(isHammerSolidEntity(selected) ||
+                selected.kind === 'prop' ||
+                selected.kind === 'trap' ||
+                selected.kind === 'door' ||
+                selected.kind === 'hazard') && (
                 <div className="space-y-2 border-t border-white/10 pt-2">
                   <p className="text-[10px] tracking-widest text-white/50 uppercase">
                     Interaction
@@ -4348,7 +4557,11 @@ export function MapEditor({
                         pulled face grows. Collision matches these dimensions.
                       </p>
                       <div className="grid grid-cols-3 gap-1">
-                        {(['W', 'H', 'D'] as const).map((axis, i) => (
+                        {(['W', 'H', 'D'] as const).map((axis, i) => {
+                          const sizeFallback = defaultSizeForHammer(
+                            (selected.primitive as HammerPrimitive) || 'box'
+                          );
+                          return (
                           <label key={axis} className="text-[9px] text-white/50">
                             {axis}
                             <input
@@ -4357,11 +4570,11 @@ export function MapEditor({
                               step={0.1}
                               className="w-full bg-black/40 border border-white/10 rounded px-1 py-0.5 text-xs"
                               value={Number(
-                                (selected.collisionSize?.[i] ?? [2, 0.25, 2][i]).toFixed(2)
+                                (selected.collisionSize?.[i] ?? sizeFallback[i]).toFixed(2)
                               )}
                               onChange={(e) => {
                                 const next: [number, number, number] = [
-                                  ...(selected.collisionSize ?? [2, 0.25, 2]),
+                                  ...(selected.collisionSize ?? sizeFallback),
                                 ] as [number, number, number];
                                 next[i] = Math.max(0.1, Number(e.target.value) || 0.1);
                                 const shape = (selected.primitive as HammerPrimitive) || 'box';
@@ -4373,13 +4586,12 @@ export function MapEditor({
                               }}
                             />
                           </label>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
 
-                  {!isHammerSolidEntity(selected) && (
-                  <>
                   <label className="flex items-center gap-2 text-xs text-white/70">
                     <input
                       type="checkbox"
@@ -4556,6 +4768,7 @@ export function MapEditor({
                     Teleporter
                   </label>
                   {ensureTeleport(selected).enabled && (
+                    <>
                     <label className="block text-xs text-white/60">
                       Target entity
                       <select
@@ -4581,8 +4794,27 @@ export function MapEditor({
                           ))}
                       </select>
                     </label>
-                  )}
-                  </>
+                    <label className="block text-xs text-white/60">
+                      Cooldown ({ensureTeleport(selected).cooldownMs ?? 800}ms)
+                      <input
+                        type="range"
+                        min={200}
+                        max={5000}
+                        step={50}
+                        className="w-full"
+                        value={ensureTeleport(selected).cooldownMs ?? 800}
+                        onChange={(e) =>
+                          patchSelected({
+                            teleport: {
+                              ...ensureTeleport(selected),
+                              enabled: true,
+                              cooldownMs: Number(e.target.value),
+                            },
+                          })
+                        }
+                      />
+                    </label>
+                    </>
                   )}
                 </div>
               )}
@@ -5493,10 +5725,9 @@ export function MapEditor({
                 </div>
               )}
 
-              {/* Death / trap damage — not for spawn markers, lights, player, hammer solids */}
+              {/* Death / trap damage — not for spawn markers, lights, player */}
               {!isInvisibleMarkerKind(selected.kind) &&
                 !isPlatformPlayerKind(selected.kind) &&
-                !isHammerSolidEntity(selected) &&
                 selected.kind !== 'light' &&
                 selected.kind !== 'start' &&
                 selected.kind !== 'finish' &&
@@ -5722,26 +5953,52 @@ export function MapEditor({
               {!isInvisibleMarkerKind(selected.kind) &&
                 !isPlatformPlayerKind(selected.kind) && (
               <label className="block text-xs text-white/60">
-                Opacity
-                <input
-                  type="range"
-                  min={0.1}
-                  max={1}
-                  step={0.05}
-                  className="w-full"
-                  value={selected.opacity ?? 1}
-                  onChange={(e) => patchSelected({ opacity: Number(e.target.value) })}
-                />
+                <EditorTip content="Mesh fade in the editor and in play. 0 is invisible. Reset restores the model's original material opacity.">
+                  <span className="cursor-help">Opacity</span>
+                </EditorTip>
+                <div className="mt-0.5 flex items-center gap-1.5">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    className="w-full"
+                    value={selected.opacity ?? 1}
+                    onChange={(e) => patchSelected({ opacity: Number(e.target.value) })}
+                  />
+                  {selected.opacity != null && selected.opacity < 0.999 ? (
+                    <button
+                      type="button"
+                      className="shrink-0 text-[10px] uppercase tracking-wide text-white/50 hover:text-white px-1.5 py-1 rounded border border-white/10"
+                      onClick={() => patchSelected({ opacity: undefined })}
+                    >
+                      Reset
+                    </button>
+                  ) : null}
+                </div>
               </label>
               )}
               <label className="block text-xs text-white/60">
-                Color
-                <input
-                  type="color"
-                  className="mt-0.5 w-full h-8 bg-transparent"
-                  value={selected.color ?? '#ffffff'}
-                  onChange={(e) => patchSelected({ color: e.target.value })}
-                />
+                <EditorTip content="Tints the mesh. Works with Glow — each change replaces the tint instead of stacking darker. Reset restores the original model color.">
+                  <span className="cursor-help">Color</span>
+                </EditorTip>
+                <div className="mt-0.5 flex items-center gap-1.5">
+                  <input
+                    type="color"
+                    className="flex-1 h-8 bg-transparent"
+                    value={selected.color ?? '#ffffff'}
+                    onChange={(e) => patchSelected({ color: e.target.value })}
+                  />
+                  {selected.color ? (
+                    <button
+                      type="button"
+                      className="shrink-0 text-[10px] uppercase tracking-wide text-white/50 hover:text-white px-1.5 py-1 rounded border border-white/10"
+                      onClick={() => patchSelected({ color: undefined })}
+                    >
+                      Reset
+                    </button>
+                  ) : null}
+                </div>
               </label>
               {/* ── Glow / Emissive Effects ───────────────────────────── */}
               {!isInvisibleMarkerKind(selected.kind) &&
@@ -5764,7 +6021,9 @@ export function MapEditor({
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                           <Sparkles className={`w-4 h-4 transition-colors ${isGlowOn ? 'text-cyan-400 animate-pulse' : 'text-white/40'}`} />
-                          <span className="text-xs font-semibold text-white/90">Glow & Emissive</span>
+                          <EditorTip content="Self-lit surface plus optional bloom and a point light. Turn off to restore the base Color. Does not stack darker when you re-pick a color.">
+                            <span className="text-xs font-semibold text-white/90 cursor-help">Glow & Emissive</span>
+                          </EditorTip>
                         </div>
                         <button
                           type="button"
@@ -6321,10 +6580,97 @@ export function MapEditor({
         </div>
       )}
     </div>
+    </TooltipProvider>
   );
 
   if (variant === 'engine') return editorShell;
   return createPortal(editorShell, document.body);
+}
+
+function EditorGraphicsOverlay({
+  open,
+  perf,
+  toolsOpen,
+  onClose,
+  onToggleTools,
+  onTogglePerf,
+  onRestorePerf,
+  onOpenWorld,
+  onOpenSettings,
+}: {
+  open: boolean;
+  perf: EditorPerfMode;
+  toolsOpen: boolean;
+  onClose: () => void;
+  onToggleTools: () => void;
+  onTogglePerf: (key: keyof EditorPerfMode) => void;
+  onRestorePerf: () => void;
+  onOpenWorld: () => void;
+  onOpenSettings: () => void;
+}) {
+  if (!open) return null;
+  const rows: { key: keyof EditorPerfMode; label: string }[] = [
+    { key: 'disableBloom', label: 'Disable bloom (biggest GPU saving)' },
+    { key: 'capPixelRatio', label: 'Render at 1× pixel ratio' },
+    { key: 'skipCollisionGizmos', label: 'Skip collision wireframes' },
+    { key: 'hideFloor', label: 'Hide floor / void disc' },
+    { key: 'hideSkyTexture', label: 'Hide sky texture (solid color)' },
+    { key: 'hideVoidEffects', label: 'Hide void glow / shadow' },
+    { key: 'hideFog', label: 'Hide fog' },
+  ];
+  const dirty = rows.some(({ key }) => perf[key] !== DEFAULT_EDITOR_PERF_MODE[key]);
+  return (
+    <div className="fixed inset-0 z-[400] grid place-items-center bg-black/55 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-2xl border border-amber-400/30 bg-[#0f1724] p-4 shadow-2xl space-y-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-black tracking-wide text-white">Editor graphics</p>
+          <button
+            type="button"
+            className="w-8 h-8 rounded-lg grid place-items-center text-white/70 hover:bg-white/10"
+            onClick={onClose}
+            aria-label="Close graphics"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <p className="text-[11px] text-white/50 leading-snug">
+          Cuts rendering work while editing. Play Test and live matches stay at full quality and
+          these flags are not saved into the map.
+        </p>
+        <label className="flex items-center justify-between gap-3 text-xs text-white/80">
+          <span>Show tool bar</span>
+          <input type="checkbox" className="h-4 w-4 accent-cyan-400" checked={toolsOpen} onChange={onToggleTools} />
+        </label>
+        {rows.map(({ key, label }) => (
+          <label key={key} className="flex items-center justify-between gap-3 text-xs text-white/80">
+            <span>{label}</span>
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-amber-400"
+              checked={perf[key]}
+              onChange={() => onTogglePerf(key)}
+            />
+          </label>
+        ))}
+        {dirty && (
+          <Button size="sm" variant="ghost" className="w-full text-xs text-amber-200" onClick={onRestorePerf}>
+            Restore all editor visuals
+          </Button>
+        )}
+        <div className="flex gap-2 pt-1">
+          <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={onOpenWorld}>
+            World panel
+          </Button>
+          <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={onOpenSettings}>
+            Match settings
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ToolBtn({
@@ -6342,11 +6688,11 @@ function ToolBtn({
   disabled?: boolean;
   btnRef?: React.Ref<HTMLButtonElement>;
 }) {
-  return (
+  const btn = (
     <button
       ref={btnRef}
       type="button"
-      title={title}
+      aria-label={title}
       disabled={disabled}
       onClick={onClick}
       className={`w-8 h-8 rounded-lg flex items-center justify-center ${
@@ -6360,6 +6706,8 @@ function ToolBtn({
       {children}
     </button>
   );
+  if (!title) return btn;
+  return <EditorTip content={title}>{btn}</EditorTip>;
 }
 
 function RotatePresetPicker({

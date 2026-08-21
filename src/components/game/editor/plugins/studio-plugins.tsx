@@ -226,7 +226,15 @@ export const studioPlugins: MapEditorPlugin[] = [
     icon: Volume2,
     order: 130,
     studio: {},
-    render: (brains) => wrap(<SoundBoardEditor embedded onClose={brains.closeStudioPanels} />),
+    render: (brains) =>
+      wrap(
+        <SoundBoardEditor
+          embedded
+          onClose={brains.closeStudioPanels}
+          customMoves={brains.doc.customMoves}
+          mapName={brains.doc.name}
+        />
+      ),
   },
   {
     id: 'controls',

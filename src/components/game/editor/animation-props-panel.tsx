@@ -224,6 +224,18 @@ export function AnimationPropsPanel({
                 Active clip.
               </p>
               <label className="block text-xs text-white/60">
+                Press cooldown ({anim.cooldownMs ?? 600}ms)
+                <input
+                  type="range"
+                  min={200}
+                  max={4000}
+                  step={50}
+                  className="w-full"
+                  value={anim.cooldownMs ?? 600}
+                  onChange={(e) => setAnim({ cooldownMs: Number(e.target.value) })}
+                />
+              </label>
+              <label className="block text-xs text-white/60">
                 Signal channel (optional)
                 <input
                   className="mt-0.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1"
@@ -233,6 +245,36 @@ export function AnimationPropsPanel({
                 />
               </label>
             </>
+          )}
+
+          {entity.kind === 'action' && (
+            <label className="block text-xs text-white/60">
+              Trigger cooldown ({anim.cooldownMs ?? 500}ms)
+              <input
+                type="range"
+                min={200}
+                max={4000}
+                step={50}
+                className="w-full"
+                value={anim.cooldownMs ?? 500}
+                onChange={(e) => setAnim({ cooldownMs: Number(e.target.value) })}
+              />
+            </label>
+          )}
+
+          {entity.kind === 'action' && (
+            <label className="block text-xs text-white/60">
+              Trigger cooldown ({anim.cooldownMs ?? 500}ms)
+              <input
+                type="range"
+                min={200}
+                max={4000}
+                step={50}
+                className="w-full"
+                value={anim.cooldownMs ?? 500}
+                onChange={(e) => setAnim({ cooldownMs: Number(e.target.value) })}
+              />
+            </label>
           )}
 
           <div className="flex gap-2 text-[11px]">

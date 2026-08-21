@@ -15,6 +15,7 @@ export interface ThreeWorld {
   destroy: () => void;
   setSize: (w: number, h: number) => void;
   render: () => void;
+  setBloomEnabled: (on: boolean) => void;
 }
 
 /** Dark cavern base — ThreeMap layers the glowing void + platforms on top. */
@@ -65,6 +66,7 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
 
   const clock = new THREE.Clock();
   const bloom = createBloomComposer(renderer, scene, camera);
+  let bloomEnabled = true;
 
   const setSize = (w: number, h: number) => {
     const width = Math.max(1, w);
@@ -88,7 +90,13 @@ export function createThreeWorld(host: HTMLElement): ThreeWorld {
     sun,
     hemi,
     setSize,
-    render: () => bloom.render(),
+    render: () => {
+      if (bloomEnabled) bloom.render();
+      else renderer.render(scene, camera);
+    },
+    setBloomEnabled: (on: boolean) => {
+      bloomEnabled = on;
+    },
     destroy: () => {
       window.removeEventListener('resize', onResize);
       bloom.dispose();

@@ -38,6 +38,8 @@ import {
   type BurstEffectParams,
 } from '@shared/power-definitions';
 import { getLucideIcon } from '@/lib/move-icons';
+import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
+import { hasEngineSession, siteOrEngineFetch } from '@/lib/engine/platform-client';
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -186,9 +188,15 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
   const bgFileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
+    if (isKilrunEngineDesktop() && !hasEngineSession()) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const res = await fetch('/api/game/power-definitions', { cache: 'no-store' });
+      const res = await siteOrEngineFetch('/api/game/power-definitions', '/api/engine/powers', {
+        cache: 'no-store',
+      });
       const data = await res.json();
       if (data?.ok) setPowers(data.powers ?? []);
     } catch {
@@ -236,7 +244,7 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
       if (!record) return;
       const updated: PowerDefinitionRecord = { ...record, posX: x, posY: y };
       try {
-        const res = await fetch('/api/game/power-definitions', {
+        const res = await siteOrEngineFetch('/api/game/power-definitions', '/api/engine/powers', {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(updated),
@@ -328,7 +336,7 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
     setSaving(true);
     try {
       const isNew = !selectedKey;
-      const res = await fetch('/api/game/power-definitions', {
+      const res = await siteOrEngineFetch('/api/game/power-definitions', '/api/engine/powers', {
         method: isNew ? 'POST' : 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(draft),
@@ -352,7 +360,11 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
     if (p.isCore) return;
     if (!confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
     try {
-      const res = await fetch(`/api/game/power-definitions?key=${encodeURIComponent(p.key)}`, { method: 'DELETE' });
+      const res = await siteOrEngineFetch(
+        `/api/game/power-definitions?key=${encodeURIComponent(p.key)}`,
+        `/api/engine/powers?key=${encodeURIComponent(p.key)}`,
+        { method: 'DELETE' }
+      );
       const data = await res.json();
       if (!data.ok) {
         toast({ title: data.error ?? 'Delete failed', variant: 'destructive' });
@@ -426,6 +438,11 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
           </button>
         </div>
       </div>
+      {isKilrunEngineDesktop() && !hasEngineSession() && (
+        <p className="px-4 py-2 text-[11px] text-amber-200/90 bg-amber-500/10 border-b border-amber-400/20">
+          Link live game (Build menu) to load and save the account-wide power tree.
+        </p>
+      )}
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* Tree view */}

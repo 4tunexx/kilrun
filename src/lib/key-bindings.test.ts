@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { isValidBindKey, keyBindToCodes, normalizeBindings } from '@shared/key-bindings';
+import {
+  DEFAULT_KEY_BINDINGS,
+  eventMatchesBind,
+  formatBindKey,
+  isValidBindKey,
+  keyBindToCodes,
+  normalizeBindings,
+} from '@shared/key-bindings';
 
 describe('key-bindings', () => {
   it('correctly maps space key to ["Space"]', () => {
@@ -17,9 +24,34 @@ describe('key-bindings', () => {
     expect(keyBindToCodes('control')).toEqual(['ControlLeft', 'ControlRight']);
   });
 
-  it('normalizes bindings preserving space for jump', () => {
+  it('maps pause / scoreboard / free-mouse keys', () => {
+    expect(keyBindToCodes('escape')).toEqual(['Escape']);
+    expect(keyBindToCodes('esc')).toEqual(['Escape']);
+    expect(keyBindToCodes('tab')).toEqual(['Tab']);
+    expect(keyBindToCodes('`')).toEqual(['Backquote']);
+    expect(keyBindToCodes('backquote')).toEqual(['Backquote']);
+    expect(isValidBindKey('escape')).toBe(true);
+    expect(isValidBindKey('tab')).toBe(true);
+    expect(isValidBindKey('`')).toBe(true);
+    expect(eventMatchesBind({ code: 'Escape' }, 'escape')).toBe(true);
+    expect(eventMatchesBind({ code: 'Tab' }, 'tab')).toBe(true);
+    expect(eventMatchesBind({ code: 'Backquote' }, '`')).toBe(true);
+    expect(eventMatchesBind({ code: 'KeyW' }, 'escape')).toBe(false);
+  });
+
+  it('formats HUD labels for interface binds', () => {
+    expect(formatBindKey('escape')).toBe('Esc');
+    expect(formatBindKey('tab')).toBe('Tab');
+    expect(formatBindKey('`')).toBe('`');
+    expect(formatBindKey(' ')).toBe('Space');
+  });
+
+  it('normalizes bindings preserving space for jump and interface defaults', () => {
     const normalized = normalizeBindings({ jump: ' ' });
     expect(normalized.jump).toBe(' ');
     expect(keyBindToCodes(normalized.jump)).toEqual(['Space']);
+    expect(normalized.pause).toBe(DEFAULT_KEY_BINDINGS.pause);
+    expect(normalized.scoreboard).toBe(DEFAULT_KEY_BINDINGS.scoreboard);
+    expect(normalized.freeMouse).toBe(DEFAULT_KEY_BINDINGS.freeMouse);
   });
 });

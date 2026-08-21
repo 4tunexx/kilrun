@@ -32,18 +32,26 @@ import {
 import {
   applyAuthoredEnvironment,
   applyEntityOpacity,
+  applyEntityColor,
   applyEntityGlow,
+  applyEntitySurfaceStyle,
   tickEntityGlow,
   tickSpinHazardVisual,
   makeAuthoredLight,
   makeGameplayFallback,
   shouldUseGameplayFallback,
 } from './map-scene-visuals';
-import { makeHammerSolidObject, type HammerPrimitive } from './hammer-shapes';
+import { makeHammerSolidObject, defaultSizeForHammer, type HammerPrimitive } from './hammer-shapes';
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
-import { playSound, playLoopedSound, stopLoopedSound, preloadSoundboard } from '../effects/soundboard';
+import { playSound, playLoopedSound, stopLoopedSound, preloadSoundboard, setMasterVolume } from '../effects/soundboard';
+import { PauseMenu, useGameFullscreen } from '../ui/pause-menu';
+import {
+  loadPlayerMatchSettings,
+  savePlayerMatchSettings,
+  type PlayerMatchSettings,
+} from '../player-match-settings';
 import {
   createSimScratch,
   invalidatePadSpatialCache,
@@ -105,7 +113,7 @@ import {
 } from '@shared/power-definitions';
 import { AbilityRingIcon } from '../ui/ability-hud';
 import { getKeyBindings } from '@/lib/key-bindings-config';
-import { DEFAULT_KEY_BINDINGS, keyBindToCodes, type KeyBindAction } from '@shared/key-bindings';
+import { DEFAULT_KEY_BINDINGS, eventMatchesBind, formatBindKey, keyBindToCodes, type KeyBindAction } from '@shared/key-bindings';
 import { customMoveSoundKey } from '@shared/custom-moves';
 
 const ABILITY_UI_FIELDS: Record<AbilitySlotKind, { endsAt: string; cooldownEndsAt: string }> = {
@@ -268,6 +276,14 @@ export function MapPlayPreview({
   playTestRole?: 'runner' | 'trapper' | 'team_a' | 'team_b';
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
+  const [matchSettings, setMatchSettings] = useState<PlayerMatchSettings>(() => loadPlayerMatchSettings());
+  const matchSettingsRef = useRef(matchSettings);
+  matchSettingsRef.current = matchSettings;
+  const { toggle: toggleFullscreen } = useGameFullscreen(shellRef, false);
   useEffect(() => {
     emitPlaytest('ready', { mapId });
     return () => emitPlaytest('exit', { mapId });
@@ -276,18 +292,27 @@ export function MapPlayPreview({
   // Admin-configured global scheme (Map Editor → Controls) — same source
   // live matches use (kilrun-engine.tsx), so Play Test never drifts.
   // Defaults apply until the async fetch resolves.
+  const [bindings, setBindings] = useState<Record<KeyBindAction, string>>(DEFAULT_KEY_BINDINGS);
   const bindingsRef = useRef<Record<KeyBindAction, string>>(DEFAULT_KEY_BINDINGS);
+  bindingsRef.current = bindings;
   useEffect(() => {
     let cancelled = false;
     getKeyBindings()
       .then((b) => {
-        if (!cancelled) bindingsRef.current = b;
+        if (!cancelled) setBindings(b);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
+  useEffect(() => {
+    setMasterVolume(matchSettings.masterVolume);
+  }, [matchSettings.masterVolume]);
+
+  useEffect(() => {
+    if (paused && document.pointerLockElement) document.exitPointerLock?.();
+  }, [paused]);
   const physOpts = useMemo<SimPhysicsOpts>(() => {
     const cs = ensureCombatSettings(doc);
     return {
@@ -645,6 +670,10 @@ export function MapPlayPreview({
     let lastCustomMoveId = '';
     let landUntil = 0;
     let meleeUntil = 0;
+    let recoilPitch = 0;
+    let shakeAmp = 0;
+    let weaponKick = 0;
+    let lastHpForShake = hpLocal;
     const avatarEntity = getMapPlayerAvatar(playDoc) ?? null;
     let avatarBindings = avatarEntity?.playerAnims;
     let worldReady = false;
@@ -765,9 +794,11 @@ export function MapPlayPreview({
               repeat: resolveEntityTextureRepeat(ent),
               offset: ent.textureOffset,
               rotation: ent.textureRotation,
+              onApplied: () => applyEntitySurfaceStyle(planted, ent),
             }
           );
           applyEntityOpacity(planted, ent.opacity);
+          applyEntityColor(planted, ent.color);
           applyEntityGlow(planted, ent.glow, ent.color);
           planted.position.set(...ent.position);
           planted.rotation.set(
@@ -802,8 +833,8 @@ export function MapPlayPreview({
         };
 
         if (isHammerSolidEntity(ent) || ent.model === HAMMER_SOLID_MODEL) {
-          const size = ent.collisionSize ?? [2, 0.25, 2];
           const shape = (ent.primitive as HammerPrimitive) || 'box';
+          const size = ent.collisionSize ?? defaultSizeForHammer(shape);
           const hammerVisual = makeHammerSolidObject(shape, size, ent.color || '#64748b');
           markOwnsGpuResources(hammerVisual);
           placeVisual(hammerVisual);
@@ -917,10 +948,15 @@ export function MapPlayPreview({
       // stray re-click) makes it look like the action "did nothing".
       if (tag === 'BUTTON' || tag === 'A') active?.blur();
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+      if (!embedded && eventMatchesBind(e, bindingsRef.current.pause)) {
+        e.preventDefault();
+        setPaused((p) => !p);
+        return;
+      }
+      if (pausedRef.current) return;
       keys.add(e.code);
       if (keyBindToCodes(bindingsRef.current.interact).includes(e.code)) interactPulse = true;
       if (e.code === 'KeyF' || e.code === 'Mouse0') attackPulse = true;
-      if (e.key === 'Escape') onCloseRef.current?.();
     };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
     const onMove = (e: MouseEvent) => {
@@ -929,7 +965,7 @@ export function MapPlayPreview({
         return;
       }
       const liveTps = tpsRef.current;
-      const mouseSens = mouseSensRadians(liveTps);
+      const mouseSens = mouseSensRadians(liveTps) * matchSettingsRef.current.mouseSensMult;
       yaw -= (e.movementX || 0) * mouseSens;
       pitch -= (e.movementY || 0) * mouseSens;
       pitch = THREE.MathUtils.clamp(pitch, liveTps.camera.pitchMin, liveTps.camera.pitchMax);
@@ -1005,6 +1041,11 @@ export function MapPlayPreview({
       clock.update();
       const frameDt = Math.min(clock.getDelta(), 0.05);
       const now = performance.now();
+      if (pausedRef.current) {
+        if (matchSettingsRef.current.bloom) bloom.render();
+        else renderer.render(scene, camera);
+        return;
+      }
 
       for (const ent of playDoc.entities) {
         if (ent.glow?.enabled && ent.glow.pulse && ent.glow.pulse !== 'none') {
@@ -1508,11 +1549,23 @@ export function MapPlayPreview({
       }
       pitch = THREE.MathUtils.clamp(pitch, liveTps.camera.pitchMin, liveTps.camera.pitchMax);
 
+      const combatFeel = ensureCombatSettings(playDoc);
+      const justLanded = !wasGrounded && body.isGrounded;
+      if (justLanded) shakeAmp = Math.max(shakeAmp, combatFeel.shakeOnLand ?? 0);
+      if (hpLocal < lastHpForShake) shakeAmp = Math.max(shakeAmp, combatFeel.shakeOnHit ?? 0);
+      lastHpForShake = hpLocal;
+      const recover = (combatFeel.recoilRecoverySpeed * Math.PI) / 180;
+      recoilPitch = Math.max(0, recoilPitch - recover * frameDt);
+      shakeAmp *= Math.max(0, 1 - frameDt * 8);
+      weaponKick *= Math.max(0, 1 - frameDt * 12);
+      const shakeX = (Math.random() - 0.5) * 2 * shakeAmp;
+      const shakeY = (Math.random() - 0.5) * 2 * shakeAmp;
+
       updateFollowCamera(
         camera,
         playerPos,
-        yaw,
-        pitch,
+        yaw + shakeX * 0.35,
+        pitch + recoilPitch + shakeY * 0.5,
         frameDt,
         aimNow
           ? {
@@ -1569,16 +1622,19 @@ export function MapPlayPreview({
             }
           });
         }
-        const justLanded = !wasGrounded && body.isGrounded;
-        if (justLanded) playSound('land');
+        const justLandedVis = justLanded;
+        if (justLandedVis) playSound('land');
         else if (wasGrounded && !body.isGrounded && body.vz > 0.5) playSound('jump');
         wasGrounded = body.isGrounded;
-        if (justLanded) landUntil = performance.now() + 280;
+        if (justLandedVis) landUntil = performance.now() + 280;
         if (hpLocal <= 0 && wasAliveForSound) playSound('player_death');
         wasAliveForSound = hpLocal > 0;
 
         const weaponAtt = findWeaponAttachment(previewSkins ? avatarEntity?.playerSkins : undefined);
         const combat = resolveWeaponCombat(weaponAtt);
+        const wepDef = playDoc.weaponDef
+          ? { ...DEFAULT_WEAPON_DEF, ...playDoc.weaponDef }
+          : null;
         let attackThisFrame = false;
 
         if (joy?.consumeAttackPulse()) attackPulse = true;
@@ -1595,6 +1651,13 @@ export function MapPlayPreview({
             attackThisFrame = true;
             playSound(combat.kind === 'melee' ? 'melee_punch' : 'weapon_fire');
             if (combat.kind === 'melee') meleeUntil = now + 500;
+            const kickDeg = wepDef?.recoilKickDeg || combatFeel.recoilKickDeg || 2;
+            recoilPitch += (kickDeg * Math.PI) / 180;
+            shakeAmp = Math.max(shakeAmp, combatFeel.shakeOnFire ?? 0.015);
+            weaponKick = Math.max(
+              weaponKick,
+              wepDef?.weaponKickZ ?? combatFeel.weaponKickZ ?? 0
+            );
             if (combat.kind !== 'cosmetic') {
               // Foundry: melee_direction = direction_to(camera aim point)
               const cosP = Math.cos(pitch);
@@ -1623,14 +1686,12 @@ export function MapPlayPreview({
           }
         }
 
-        const wepDef = playDoc.weaponDef
-          ? { ...DEFAULT_WEAPON_DEF, ...playDoc.weaponDef }
-          : null;
         if (wepDef) {
           const drawn = aimNow || attackThisFrame || now < meleeUntil;
+          const [hx, hy, hz] = drawn ? wepDef.holdPosition : wepDef.backPosition;
           applyWeaponSlotPose(
             playerRoot,
-            drawn ? wepDef.holdPosition : wepDef.backPosition,
+            drawn ? [hx, hy, hz + weaponKick] : [hx, hy, hz],
             drawn ? wepDef.holdRotation : wepDef.backRotation,
             drawn ? wepDef.holdScale : wepDef.backScale
           );
@@ -1673,7 +1734,8 @@ export function MapPlayPreview({
         });
       }
 
-      bloom.render();
+      if (matchSettingsRef.current.bloom) bloom.render();
+      else renderer.render(scene, camera);
     };
     raf = requestAnimationFrame(tick);
 
@@ -1724,7 +1786,10 @@ export function MapPlayPreview({
   }, [doc, previewSkins, embedded, mapId, playTestRole]);
 
   return (
-    <div className={`${embedded ? 'absolute inset-0 z-0' : 'fixed inset-0 z-[9999]'} bg-black flex flex-col`}>
+    <div
+      ref={shellRef}
+      className={`${embedded ? 'absolute inset-0 z-0' : 'fixed inset-0 z-[9999]'} bg-black flex flex-col`}
+    >
       <div className={`${embedded ? 'h-9 px-3' : 'h-11 px-4'} flex items-center gap-3 bg-black/80 border-b border-white/10 relative z-[60]`}>
         <span className="text-sm font-bold text-emerald-300 tracking-wide uppercase shrink-0">
           {embedded ? 'Map Preview' : 'Play Test'}
@@ -1732,7 +1797,7 @@ export function MapPlayPreview({
         <span className="text-[10px] sm:text-xs text-white/50 truncate min-w-0">
           {isTouch
             ? '3rd person · Left move · Right look · Jump / Use / Attack'
-            : 'RMB aim · Mouse look · WASD / arrows · Space jump · Shift sprint · E use'}
+            : `RMB aim · Mouse look · ${formatBindKey(bindings.pause)} pause`}
         </span>
         <div className="ml-4 flex items-center gap-2 text-xs">
           <span className="text-white/50">HP</span>
@@ -1881,6 +1946,23 @@ export function MapPlayPreview({
           </>
         )}
       </div>
+      <PauseMenu
+        open={!embedded && paused}
+        onResume={() => {
+          setPaused(false);
+          hostRef.current?.requestPointerLock?.().catch(() => {});
+        }}
+        onOpenEditor={() => setPaused(false)}
+        onToggleFullscreen={toggleFullscreen}
+        onExit={() => onClose?.()}
+        matchSettings={matchSettings}
+        onMatchSettingsChange={(next) => {
+          const saved = savePlayerMatchSettings(next);
+          setMatchSettings(saved);
+          setMasterVolume(saved.masterVolume);
+        }}
+        pauseHint={formatBindKey(bindings.pause)}
+      />
       {hp <= 0 && (
         <div className="absolute inset-0 top-11 flex items-center justify-center bg-black/50 pointer-events-none px-4">
           <p className="text-xl sm:text-2xl font-black text-red-400 tracking-wide text-center">

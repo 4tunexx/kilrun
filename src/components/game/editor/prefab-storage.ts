@@ -331,6 +331,28 @@ export interface SimWorldBounds {
   maxY: number;
 }
 
+function entityScaledSize(e: EditorEntity): { sizeX: number; sizeY: number; sizeZ: number } {
+  const foot = e.collisionSize ?? modelFootprint(e.model) ?? ([2, 2, 2] as [number, number, number]);
+  return {
+    sizeX: Math.abs(foot[0] * Math.abs(e.scale[0])),
+    sizeY: Math.abs(foot[1] * Math.abs(e.scale[1])),
+    sizeZ: Math.abs(foot[2] * Math.abs(e.scale[2])),
+  };
+}
+
+/** Sim-space AABB extents (width along sim X = Three Z, depth along sim Y = Three X). */
+function entitySimAabb(
+  e: EditorEntity,
+  mins: { width?: number; depth?: number; height?: number } = {}
+) {
+  const { sizeX, sizeY, sizeZ } = entityScaledSize(e);
+  return {
+    width: Math.max(mins.width ?? 0.4, sizeZ),
+    depth: Math.max(mins.depth ?? 0.4, sizeX),
+    height: Math.max(mins.height ?? 0.4, sizeY),
+  };
+}
+
 function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   const [tx, ty, tz] = e.position;
   // Prefer measured GLB size, then catalog footprint, then a flat 2-unit
@@ -341,10 +363,7 @@ function entityToPad(e: EditorEntity): SimPlatformBlueprint {
   // effective scale (e.g. a prop scaled 3x got a collision box 9x too big —
   // "massive gap walking into any solid" for any custom/model-library prefab
   // that hadn't finished its async GLB measurement yet).
-  const foot = e.collisionSize ?? modelFootprint(e.model) ?? ([2, 2, 2] as [number, number, number]);
-  const rawX = Math.abs(foot[0] * Math.abs(e.scale[0]));
-  const rawY = Math.abs(foot[1] * Math.abs(e.scale[1]));
-  const rawZ = Math.abs(foot[2] * Math.abs(e.scale[2]));
+  const { sizeX: rawX, sizeY: rawY, sizeZ: rawZ } = entityScaledSize(e);
   const jump = e.jumpPad?.enabled || e.kind === 'jump_pad';
   const mat = resolveCollideMaterial(e);
   const ice = mat === 'ice' || !!e.surface?.ice;
@@ -971,9 +990,7 @@ export function mapDocToSimHazards(doc: MapDocument): SimHazardBlueprint[] {
       }
       const hz = ensureHazard(e);
       const [tx, ty, tz] = e.position;
-      const width = Math.max(0.4, Math.abs(e.scale[2]) * 2);
-      const depth = Math.max(0.4, Math.abs(e.scale[0]) * 2);
-      const height = Math.max(0.4, Math.abs(e.scale[1]) * 2);
+      const { width, depth, height } = entitySimAabb(e);
       const mode = hz.mode ?? (e.kind === 'trap' ? 'timed' : 'always');
       return {
         id: e.id,
@@ -1011,15 +1028,16 @@ export function mapDocPluginEntities(doc: MapDocument): MapPluginEntitySim[] {
     .filter((e) => e.visible !== false && Boolean(e.pluginScript))
     .map((e) => {
       const [tx, ty, tz] = e.position;
+      const { width, depth, height } = entitySimAabb(e, { width: 0.8, depth: 0.8, height: 0.8 });
       return {
         id: e.id,
         pluginScript: String(e.pluginScript),
         x: tz,
         y: tx,
         z: ty,
-        hx: Math.max(0.4, Math.abs((e.collisionSize?.[2] ?? e.scale[2] * 2) / 2)),
-        hy: Math.max(0.4, Math.abs((e.collisionSize?.[0] ?? e.scale[0] * 2) / 2)),
-        hz: Math.max(0.4, Math.abs((e.collisionSize?.[1] ?? e.scale[1] * 2) / 2)),
+        hx: width / 2,
+        hy: depth / 2,
+        hz: height / 2,
       };
     });
 }
@@ -1029,9 +1047,7 @@ export function mapDocToSimFinishes(doc: MapDocument): SimFinishBlueprint[] {
     .filter((e) => e.visible !== false && e.kind === 'finish')
     .map((e) => {
       const [tx, ty, tz] = e.position;
-      const width = Math.max(1.4, Math.abs(e.scale[0]) * 2);
-      const depth = Math.max(1.4, Math.abs(e.scale[2]) * 2);
-      const height = Math.max(1.6, Math.abs(e.scale[1]) * 2.5);
+      const { width, depth, height } = entitySimAabb(e, { width: 1.4, depth: 1.4, height: 1.6 });
       return {
         id: e.id,
         x: tz,
@@ -1095,7 +1111,7 @@ function resolveActivatorHoldMs(
   return authored > 0 ? authored : fallbackMs;
 }
 
-/** Cooldown between presses. Not author-controlled yet — no UI exposes it. */
+/** Default cooldown between presses when the author left the field blank. */
 const BUTTON_PRESS_COOLDOWN_MS = 600;
 const ACTION_TRIGGER_COOLDOWN_MS = 500;
 const BUTTON_DEFAULT_HOLD_MS = 2500;
@@ -1116,7 +1132,7 @@ export function mapDocToSimButtons(doc: MapDocument): SimButtonBlueprint[] {
         radius: Math.max(1.2, anim?.radius ?? 2.5),
         activatesObstacleIds,
         holdMs: resolveActivatorHoldMs(doc, activatesObstacleIds, BUTTON_DEFAULT_HOLD_MS),
-        cooldownMs: BUTTON_PRESS_COOLDOWN_MS,
+        cooldownMs: Math.max(200, anim?.cooldownMs ?? BUTTON_PRESS_COOLDOWN_MS),
       };
     })
     .filter((b) => b.activatesObstacleIds.length > 0);
@@ -1157,7 +1173,7 @@ export function mapDocToSimActions(doc: MapDocument): SimActionBlueprint[] {
         trigger,
         activatesObstacleIds,
         holdMs: resolveActivatorHoldMs(doc, activatesObstacleIds, ACTION_DEFAULT_HOLD_MS),
-        cooldownMs: ACTION_TRIGGER_COOLDOWN_MS,
+        cooldownMs: Math.max(200, anim?.cooldownMs ?? ACTION_TRIGGER_COOLDOWN_MS),
       };
     })
     .filter((a) => a.activatesObstacleIds.length > 0 || a.trigger === 'always');
@@ -1172,9 +1188,7 @@ export function mapDocToSimTeleports(doc: MapDocument): SimTeleportBlueprint[] {
       if (!target) return null;
       const [tx, ty, tz] = e.position;
       const [ox, oy, oz] = target.position;
-      const width = Math.max(1.2, Math.abs(e.scale[0]) * 2);
-      const depth = Math.max(1.2, Math.abs(e.scale[2]) * 2);
-      const height = Math.max(1.4, Math.abs(e.scale[1]) * 2);
+      const { width, depth, height } = entitySimAabb(e, { width: 1.2, depth: 1.2, height: 1.4 });
       return {
         id: e.id,
         x: tz,
@@ -1438,14 +1452,15 @@ function padZoneFromEntity(
   e: EditorEntity,
   extra: Record<string, number | undefined> = {}
 ) {
+  const { width, depth, height } = entitySimAabb(e, { width: 1.2, depth: 1.2, height: 1.2 });
   return {
     id: e.id,
     x: e.position[2],
     y: e.position[0],
     z: e.position[1],
-    width: Math.max(1.2, Math.abs(e.scale[0]) * 2),
-    depth: Math.max(1.2, Math.abs(e.scale[2]) * 2),
-    height: Math.max(1.2, Math.abs(e.scale[1]) * 2),
+    width,
+    depth,
+    height,
     ...extra,
   };
 }

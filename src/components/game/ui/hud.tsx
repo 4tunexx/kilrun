@@ -7,6 +7,7 @@ import { AbilityCooldownRow, MovementCooldownRow } from './ability-hud';
 import type { CustomMoveDef } from '@shared/custom-moves';
 import type { WeaponCombatKind } from '@/lib/weapons';
 import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
+import { DEFAULT_KEY_BINDINGS, formatBindKey, type KeyBindAction } from '@shared/key-bindings';
 
 function formatClock(ms: number): string {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
@@ -182,6 +183,10 @@ export const HUD: React.FC<{
   weaponKind?: WeaponCombatKind | null;
   /** Map-authored custom moves (Player Model Studio → Moves tab), if any. */
   customMoveDefs?: CustomMoveDef[];
+  /** Live Controls rebinds — HUD strip follows these, not hardcoded keys. */
+  keyBindings?: Record<KeyBindAction, string>;
+  /** Combat Editor slide cooldown — drives the slide ring duration. */
+  slideCooldownMs?: number;
 }> = ({
   player,
   room,
@@ -189,6 +194,8 @@ export const HUD: React.FC<{
   runnersLeft = 1,
   weaponKind = null,
   customMoveDefs,
+  keyBindings = DEFAULT_KEY_BINDINGS,
+  slideCooldownMs,
 }) => {
   const isTrapper = player.role === 'trapper';
   const level = gameProgress?.level ?? 1;
@@ -311,6 +318,7 @@ export const HUD: React.FC<{
           playerEnergy={energy}
           customMoveDefs={customMoveDefs}
           customMoveState={player.customMoves}
+          slideCooldownMs={slideCooldownMs}
         />
       </div>
 
@@ -322,7 +330,10 @@ export const HUD: React.FC<{
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-center px-3 hidden sm:block">
         <p className="text-[11px] font-bold tracking-widest text-white/55 uppercase">
-          • Space Jump // Shift Sprint // RMB Aim // R Reload // Tab Mouse // Esc Menu
+          • {formatBindKey(keyBindings.jump)} Jump // {formatBindKey(keyBindings.sprint)} Sprint //
+          RMB Aim // {formatBindKey(keyBindings.reload)} Reload // {formatBindKey(keyBindings.freeMouse)}{' '}
+          Mouse // {formatBindKey(keyBindings.scoreboard)} Scoreboard // {formatBindKey(keyBindings.pause)}{' '}
+          Menu
         </p>
       </div>
 
@@ -345,7 +356,9 @@ export const HUD: React.FC<{
             READY
           </p>
         )}
-        <p className="text-[8px] font-bold text-white/40 mt-1 tracking-wide">R RELOAD</p>
+        <p className="text-[8px] font-bold text-white/40 mt-1 tracking-wide">
+          {formatBindKey(keyBindings.reload)} RELOAD
+        </p>
       </div>
     </div>
   );

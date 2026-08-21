@@ -3,40 +3,17 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
 import { verifyEngineStaffToken } from '@/lib/engine/staff-token';
+import { engineCorsHeaders } from '@/lib/engine/engine-cors';
+
+export { engineCorsHeaders } from '@/lib/engine/engine-cors';
 
 export type EngineStaff = {
   id: string;
   steamId: string;
   username: string;
   role: string;
+  avatarUrl: string;
 };
-
-function isDesktopOrigin(origin: string): boolean {
-  try {
-    const url = new URL(origin);
-    const host = url.hostname;
-    return (
-      host === 'tauri.localhost' ||
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host === 'ipc.localhost'
-    );
-  } catch {
-    return false;
-  }
-}
-
-export function engineCorsHeaders(req: Request): Record<string, string> {
-  const origin = req.headers.get('origin') || '';
-  const allow = !origin || isDesktopOrigin(origin);
-  return {
-    'Access-Control-Allow-Origin': allow ? origin || '*' : 'null',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Access-Control-Max-Age': '86400',
-    Vary: 'Origin',
-  };
-}
 
 export function engineOptions(req: NextRequest) {
   return new NextResponse(null, { status: 204, headers: engineCorsHeaders(req) });
@@ -64,6 +41,7 @@ export async function requireEngineStaff(req: NextRequest): Promise<EngineStaff>
       steamId: user.steamId,
       username: user.username,
       role: user.role,
+      avatarUrl: user.avatarUrl || '',
     };
   }
 
@@ -79,5 +57,6 @@ export async function requireEngineStaff(req: NextRequest): Promise<EngineStaff>
     steamId: user.steamId,
     username: user.username,
     role: user.role,
+    avatarUrl: user.avatarUrl || '',
   };
 }

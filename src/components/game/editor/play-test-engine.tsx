@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import KilrunEngine from '../kilrun-engine';
 import { mintMyGameJoinToken, getSessionUser } from '@/lib/actions';
+import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
+import { hasEngineSession, mintEngineJoinToken } from '@/lib/engine/platform-client';
 import type { CoreKilrunMode, KilrunMode } from '@/lib/game-modes';
 import { isCoreKilrunMode, resolveModeBase } from '@/lib/game-modes';
 import type { MapDocument } from './map-document';
@@ -45,8 +47,26 @@ export function PlayTestEngine({
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([mintMyGameJoinToken().catch(() => null), getSessionUser().catch(() => null)])
-      .then(([token, user]) => {
+    void (async () => {
+      try {
+        if (isKilrunEngineDesktop() && hasEngineSession()) {
+          const minted = await mintEngineJoinToken();
+          if (cancelled) return;
+          setJoinToken(minted.token ?? undefined);
+          if (minted.user) {
+            setSessionUser({
+              userId: minted.user.id,
+              username: minted.user.username || 'Player',
+              avatarUrl: minted.user.avatarUrl,
+              isAdmin: minted.user.role === 'admin',
+            });
+          }
+          return;
+        }
+        const [token, user] = await Promise.all([
+          mintMyGameJoinToken().catch(() => null),
+          getSessionUser().catch(() => null),
+        ]);
         if (cancelled) return;
         setJoinToken(token ?? undefined);
         if (user) {
@@ -57,10 +77,12 @@ export function PlayTestEngine({
             isAdmin: user.role === 'admin',
           });
         }
-      })
-      .finally(() => {
+      } catch {
+        /* leave token/user empty — screens below explain */
+      } finally {
         if (!cancelled) setReady(true);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -88,7 +110,30 @@ export function PlayTestEngine({
   if (!ready || !sessionUser) {
     return (
       <div className="fixed inset-0 z-[9999] bg-black flex items-center justify-center text-white/60 text-sm">
-        {ready ? 'You must be signed in to Play Test.' : 'Starting Play Test…'}
+        {ready
+          ? isKilrunEngineDesktop()
+            ? 'Link the live game (Build → Link live game) with a staff Steam account, then try Play Test (Live) again. Local Play Test does not need a token.'
+            : 'You must be signed in to Play Test.'
+          : 'Starting Play Test…'}
+      </div>
+    );
+  }
+
+  if (!joinToken) {
+    return (
+      <div className="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center gap-3 text-white/70 text-sm px-6 text-center">
+        <p>
+          {isKilrunEngineDesktop()
+            ? 'Live Play Test needs a join token from the linked website. Use Build → Link live game, then try again — or use local Play Test from the Play menu.'
+            : 'Could not mint a join token. Sign in, then try Live Play Test again — or use local Play Test.'}
+        </p>
+        <button
+          type="button"
+          className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10"
+          onClick={onClose}
+        >
+          Back to editor
+        </button>
       </div>
     );
   }

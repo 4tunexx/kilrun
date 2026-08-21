@@ -24,6 +24,9 @@ export type KeyBindAction =
   | 'reload'
   | 'flip'
   | 'cameraTurnLeft'
+  | 'pause'
+  | 'scoreboard'
+  | 'freeMouse'
   | 'power_hook'
   | 'power_berserk'
   | 'power_bullet'
@@ -32,7 +35,7 @@ export type KeyBindAction =
   | 'power_fly'
   | 'power_backflip';
 
-export type KeyBindGroup = 'Movement' | 'Actions' | 'Powers';
+export type KeyBindGroup = 'Movement' | 'Actions' | 'Interface' | 'Powers';
 
 export interface KeyBindActionMeta {
   action: KeyBindAction;
@@ -61,6 +64,9 @@ export const DEFAULT_KEY_BINDINGS: Record<KeyBindAction, string> = {
   reload: 'r',
   flip: 'v',
   cameraTurnLeft: 'j',
+  pause: 'escape',
+  scoreboard: '`',
+  freeMouse: 'tab',
   power_hook: 'h',
   power_berserk: 'b',
   power_bullet: 'u',
@@ -83,6 +89,9 @@ export const KEY_BIND_ACTIONS: KeyBindActionMeta[] = [
   { action: 'reload', label: 'Reload', group: 'Actions' },
   { action: 'flip', label: 'Back Flip (free move)', group: 'Actions' },
   { action: 'cameraTurnLeft', label: 'Camera Turn Left (accessibility)', group: 'Actions' },
+  { action: 'pause', label: 'Pause / Menu', group: 'Interface' },
+  { action: 'scoreboard', label: 'Scoreboard (hold)', group: 'Interface' },
+  { action: 'freeMouse', label: 'Free mouse cursor', group: 'Interface' },
   { action: 'power_hook', label: 'Power: Grapple Hook', group: 'Powers' },
   { action: 'power_berserk', label: 'Power: Berserk', group: 'Powers' },
   { action: 'power_bullet', label: 'Power: Unlimited Ammo', group: 'Powers' },
@@ -94,12 +103,13 @@ export const KEY_BIND_ACTIONS: KeyBindActionMeta[] = [
 
 /**
  * A key is only bindable if `keyBindToCodes` (below) can actually resolve
- * it to a `KeyboardEvent.code` — a-z, 0-9, space, shift, control. Anything
- * else (arrows, function keys, Home/End, …) used to be accepted here and
- * saved successfully, but every consumer (map-play-preview.tsx's Play Test)
- * only ever checks `keyBindToCodes(...).some(...)`, which silently returns
- * `false` for an unresolvable key — so the rebind "succeeded" but the
- * action then never fired again, with no error surfaced anywhere.
+ * it to a `KeyboardEvent.code` — a-z, 0-9, space, shift, control, escape,
+ * tab, backtick. Anything else (arrows, function keys, Home/End, …) used
+ * to be accepted here and saved successfully, but every consumer
+ * (map-play-preview.tsx's Play Test) only ever checks
+ * `keyBindToCodes(...).some(...)`, which silently returns `false` for an
+ * unresolvable key — so the rebind "succeeded" but the action then never
+ * fired again, with no error surfaced anywhere.
  */
 export function isValidBindKey(key: string): boolean {
   if (typeof key !== 'string') return false;
@@ -136,7 +146,10 @@ export function keyBindToCodes(key: string): string[] {
   if (key === ' ' || key.trim().toLowerCase() === 'space') return ['Space'];
   const k = key.trim().toLowerCase();
   if (k === 'shift') return ['ShiftLeft', 'ShiftRight'];
-  if (k === 'control') return ['ControlLeft', 'ControlRight'];
+  if (k === 'control' || k === 'ctrl') return ['ControlLeft', 'ControlRight'];
+  if (k === 'escape' || k === 'esc') return ['Escape'];
+  if (k === 'tab') return ['Tab'];
+  if (k === '`' || k === 'backquote' || k === 'grave') return ['Backquote'];
   if (/^[0-9]$/.test(k)) return [`Digit${k}`];
   if (/^[a-z]$/.test(k)) return [`Key${k.toUpperCase()}`];
   return [];
@@ -153,4 +166,23 @@ export function findConflicts(
   return KEY_BIND_ACTIONS.filter(
     (meta) => meta.action !== ignoreAction && bindings[meta.action] === k
   );
+}
+
+/** HUD / pause labels for a stored bind (` `, `shift`, `r`). */
+export function formatBindKey(key: string): string {
+  if (key === ' ') return 'Space';
+  const k = key.trim().toLowerCase();
+  if (k === 'shift') return 'Shift';
+  if (k === 'control' || k === 'ctrl') return 'Ctrl';
+  if (k === 'alt') return 'Alt';
+  if (k === 'escape' || k === 'esc') return 'Esc';
+  if (k === 'tab') return 'Tab';
+  if (k === '`' || k === 'backquote' || k === 'grave') return '`';
+  if (k === 'mouse2' || k === 'rmb') return 'RMB';
+  if (k.length === 1) return k.toUpperCase();
+  return key;
+}
+
+export function eventMatchesBind(e: { code: string }, bind: string): boolean {
+  return keyBindToCodes(bind).includes(e.code);
 }

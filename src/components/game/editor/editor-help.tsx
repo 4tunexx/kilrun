@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, SkipForward, BookOpen } from 'lucide-react';
+import { ChevronLeft, ChevronRight, SkipForward, BookOpen, X } from 'lucide-react';
+import { EDITOR_SHORTCUTS, EDITOR_SHORTCUT_GROUPS } from './editor-shortcuts';
 
 export interface TutorialStep {
   id: string;
@@ -98,7 +99,45 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
       'Free Fly: click the Fly button (top toolbar) — WASD move, mouse look, Space up, C down. Placement disabled while flying. Click Fly (now labeled Edit) again to exit.',
       'W / E / R = translate / rotate / scale (also switches to Select so the gizmo can drag). Click Rotate on the toolbar for 90° turns and horizontal / vertical flips — groups rotate as one. Hold Shift = exact grid snap (move by cell, rotate 90°, scale to cell sizes, edges align). Properties: Visible / Lock / Group / Ungroup (works on multi-select). G = grid snap toggle. F = focus selection. Alt+drag = box select. Measure tool = click two ground points.',
       'Ctrl+D duplicate +X, Ctrl+Shift+D +Z. Ctrl+Z / Ctrl+Y undo/redo. Ctrl+S save. Red wire boxes = death zones; yellow lines = button→trap links.',
+      'Hide UI (View menu, toolbar, or Ctrl+H) clears chrome for placing. A Show UI chip appears at the top-left of the 3D view — the Engine menu bar stays visible, and View → Show UI / Esc / Ctrl+H also restore. Do not hunt under the Engine bar; the restore control lives in the viewport.',
       'Texture copy/paste: with the Paint tool active, right-click any textured solid to copy its exact texture, tile density, offset, and rotation, then left-click another solid to paste it — it lines up seam-free, matching the source exactly (no re-tiling or re-aligning by hand). A "Copied" chip appears in the Textures tab confirming what is loaded; Clear reverts to the plain paint brush.',
+    ],
+  },
+  {
+    id: 'menus',
+    title: 'Menus & UI',
+    paragraphs: [
+      'Top bar (Engine): File, Edit, View, Plugins, Assets, Studios (Weapon, Combat, Powers, Sound, Player Model, 3rd View, Buy Menu, Controls), Build, Play, Settings, Help.',
+      'Left rail: Assets, Layers, Outliner, World, Prefabs, Textures, then the same studios, then Settings (match timings) and Help.',
+      'View → Graphics / Settings → Graphics opens bloom, pixel ratio, collision wires, and hide-floor/sky/fog. These are editor-only and never saved into the map. Play Test and live matches still render full quality.',
+      'Hover any toolbar icon or Properties section header for a short explanation and its shortcut.',
+    ],
+  },
+  {
+    id: 'shortcuts',
+    title: 'Keyboard shortcuts',
+    paragraphs: [
+      'Shortcuts ignore the field you are typing in (name, numbers). During Play Test they are disabled so WASD is movement.',
+      'Help → Keyboard shortcuts (or F1 from the Help menu) shows the same list as a floating overlay.',
+    ],
+  },
+  {
+    id: 'properties',
+    title: 'Properties',
+    paragraphs: [
+      'Select an object to open Properties on the right (unless Hide UI is on). Top: Name, Visible, Lock, Group. Then Position / Rotation / Scale. Opacity (0–1, Reset restores the model default) and Color (Reset restores GLB albedo). Glow is emissive + bloom; it does not stack darker with Color.',
+      'Material (Solid / Water / Sand / Ice / Walkthrough) is what Play Test collides with. Jump pad, conveyor, moving platform, and Teleporter (target + cooldown) work on props and Hammer solids. Death zone / trap: always, timed pulse, or button-armed. Spinner, push rail, and push block have their own sections.',
+      'Buttons and Actions: Trigger (Interact / Proximity / Collide), Activates trap / door, and Press cooldown. Doors need a trigger or a Listen-To button. Lights: type (point / spot / flashlight / beam), color, intensity, pitch, beam length. Mesh collision bake is for non-hammer models with openings.',
+      'Amber banners warn when a trap will not damage, a button activates nothing, a door has no trigger, a teleporter has no destination, or a moving platform offset is zero. Fix the field the banner names before Set as MAIN.',
+      'Hammer solids: pick the shape on the toolbar (H), then set Material + size in Properties. Interaction and death-zone toggles are on the same panel. Player Model in the left rail (or Studios menu) is the platform avatar — it is not a spawn.',
+    ],
+  },
+  {
+    id: 'graphics',
+    title: 'World & graphics',
+    paragraphs: [
+      'World tab: sky, floor, fog, mood presets, grid overlay. Settings top menu → Graphics (or View → Graphics) toggles editor bloom, 1× pixel ratio, collision wireframes, and hiding floor/sky/fog while you edit a heavy map.',
+      'Those performance toggles do not change Play Test, live matches, or the saved JSON.',
     ],
   },
   {
@@ -287,6 +326,85 @@ export function HelpTabPanel({
             {p}
           </p>
         ))}
+        {section === 'shortcuts' && (
+          <div className="space-y-3 pt-1">
+            {EDITOR_SHORTCUT_GROUPS.map((group) => (
+              <div key={group.id}>
+                <p className="text-[10px] uppercase tracking-widest text-cyan-300/80 mb-1">{group.label}</p>
+                <ul className="space-y-0.5">
+                  {EDITOR_SHORTCUTS.filter((row) => row.group === group.id).map((row) => (
+                    <li key={row.id} className="flex items-baseline justify-between gap-3 text-xs">
+                      <span className="text-white/70">{row.action}</span>
+                      <kbd className="shrink-0 font-mono text-[10px] text-cyan-100/90 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">
+                        {row.keys}
+                      </kbd>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Floating overlay from Help → Keyboard shortcuts. */
+export function KeyboardShortcutsOverlay({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[460] grid place-items-center bg-black/55 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-lg max-h-[min(80vh,640px)] overflow-hidden rounded-2xl border border-cyan-400/30 bg-[#0f1724] shadow-2xl flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
+          <p className="text-sm font-black tracking-wide text-white">Keyboard shortcuts</p>
+          <button
+            type="button"
+            className="w-8 h-8 rounded-lg grid place-items-center text-white/70 hover:bg-white/10"
+            onClick={onClose}
+            aria-label="Close shortcuts"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="overflow-y-auto p-4 space-y-4">
+          {EDITOR_SHORTCUT_GROUPS.map((group) => (
+            <div key={group.id}>
+              <p className="text-[10px] uppercase tracking-widest text-cyan-300/80 mb-1.5">{group.label}</p>
+              <ul className="space-y-1">
+                {EDITOR_SHORTCUTS.filter((row) => row.group === group.id).map((row) => (
+                  <li key={row.id} className="flex items-baseline justify-between gap-3 text-xs">
+                    <span className="text-white/75">{row.action}</span>
+                    <kbd className="shrink-0 font-mono text-[10px] text-cyan-100 bg-white/5 border border-white/10 rounded px-1.5 py-0.5">
+                      {row.keys}
+                    </kbd>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

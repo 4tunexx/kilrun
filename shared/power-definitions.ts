@@ -43,9 +43,7 @@ export type StatBonusStat =
   | 'jump'
   | 'maxEnergy'
   | 'punchDamage'
-  /** New generic stats — schema/editor support them, but see the report:
-   * NOT yet consumed by the sim (no PlayerState field / reload or fall
-   * damage logic reads them). Safe to configure, cosmetically inert. */
+  /** Consumed by the sim: reloadSpeed → weaponReloadMs, fallDamageReduction → fall damage. */
   | 'reloadSpeed'
   | 'fallDamageReduction';
 
@@ -509,7 +507,6 @@ export interface GenericAbilityStatBonuses {
   jumpMultiplier: number;
   maxEnergyBonus: number;
   punchDamageMultiplier: number;
-  /** Configurable in the editor; not yet consumed by the sim (see report). */
   reloadSpeedMultiplier: number;
   fallDamageReduction: number;
 }

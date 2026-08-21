@@ -343,7 +343,7 @@ export function WeaponEditor({
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       renderer.dispose();
-      host.removeChild(renderer.domElement);
+      if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement);
       sceneRef.current = null;
       weaponGroupRef.current = null;
     };

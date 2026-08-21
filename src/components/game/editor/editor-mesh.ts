@@ -115,6 +115,8 @@ export type TextureApplyOpts = {
   repeat?: [number, number] | null;
   offset?: [number, number] | null;
   rotation?: number | null;
+  /** Fired after materials are cloned (TextureLoader is async). */
+  onApplied?: () => void;
 };
 
 /**
@@ -192,6 +194,7 @@ export function applyTextureToObject(
         }
       }
     });
+    opts?.onApplied?.();
   });
 }
 

@@ -6,6 +6,8 @@ import {
   FolderOpen,
   Link2,
   Monitor,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Puzzle,
   Unlink,
@@ -83,15 +85,80 @@ export function EngineHome({
     }
     return next;
   }, [maps, modeList]);
+  const [asideCollapsed, setAsideCollapsed] = React.useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem('kilrun.engineHomeAsideCollapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleAside = () => {
+    setAsideCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('kilrun.engineHomeAsideCollapsed', next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="relative flex h-full min-h-0 font-sans">
       <div className="absolute inset-0 pointer-events-none">
         <EngineBackdrop />
       </div>
+      {asideCollapsed ? (
+        <aside className="relative z-10 w-12 shrink-0 bg-slate-900/60 backdrop-blur-md border-r border-slate-700/30 flex flex-col items-center py-2 gap-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-9 w-9 p-0"
+            title="Expand side panel"
+            onClick={toggleAside}
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-9 w-9 p-0"
+            title={liveUser ? 'Unlink live game' : 'Link live game'}
+            onClick={liveUser ? onDisconnect : onConnect}
+          >
+            {liveUser ? <Unlink className="h-4 w-4" /> : <Link2 className="h-4 w-4" />}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-9 w-9 p-0" title="Import JSON" onClick={onImport}>
+            <Upload className="h-4 w-4" />
+          </Button>
+          {desktop ? (
+            <Button size="sm" variant="ghost" className="h-9 w-9 p-0" title="Open Projects" onClick={onOpenProjects}>
+              <FolderOpen className="h-4 w-4" />
+            </Button>
+          ) : null}
+          {desktop && onOpenPlugins ? (
+            <Button size="sm" variant="ghost" className="h-9 w-9 p-0" title="Plugins" onClick={onOpenPlugins}>
+              <Puzzle className="h-4 w-4" />
+            </Button>
+          ) : null}
+        </aside>
+      ) : (
       <aside className="relative z-10 w-[220px] shrink-0 bg-slate-900/60 backdrop-blur-md border-r border-slate-700/30 flex flex-col">
         <div className="px-4 py-4 border-b border-slate-700/40">
-          <p className="text-[10px] uppercase tracking-[0.28em] text-red-300/80">Live site</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] uppercase tracking-[0.28em] text-red-300/80">Live site</p>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              title="Collapse side panel"
+              onClick={toggleAside}
+            >
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </Button>
+          </div>
           <p className="mt-2 text-[12px] font-semibold text-slate-100 truncate" title={siteHost}>
             {siteHost}
           </p>
@@ -147,14 +214,17 @@ export function EngineHome({
                 <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
                 Open Projects
               </Button>
-              <Button size="sm" variant="ghost" className="h-8 w-full justify-start text-[11px]" onClick={onOpenPlugins}>
-                <Puzzle className="h-3.5 w-3.5 mr-1.5" />
-                Plugins
-              </Button>
+              {onOpenPlugins ? (
+                <Button size="sm" variant="ghost" className="h-8 w-full justify-start text-[11px]" onClick={onOpenPlugins}>
+                  <Puzzle className="h-3.5 w-3.5 mr-1.5" />
+                  Plugins
+                </Button>
+              ) : null}
             </>
           ) : null}
         </div>
       </aside>
+      )}
 
       <div className="relative min-w-0 flex-1 overflow-auto">
         <div

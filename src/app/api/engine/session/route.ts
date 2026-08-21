@@ -18,9 +18,11 @@ export async function GET(req: NextRequest) {
     return engineJson(req, {
       ok: true,
       user: {
+        id: staff.id,
         username: staff.username,
         role: staff.role,
         steamId: staff.steamId,
+        avatarUrl: staff.avatarUrl,
       },
     });
   } catch (err) {

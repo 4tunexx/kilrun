@@ -106,6 +106,11 @@ export function cloneSkinnedScene(source: THREE.Object3D): THREE.Object3D {
   const root = skeletonClone(source);
   root.traverse((obj) => {
     if (obj instanceof THREE.Mesh) {
+      if (Array.isArray(obj.material)) {
+        obj.material = obj.material.map((m) => m.clone());
+      } else if (obj.material) {
+        obj.material = obj.material.clone();
+      }
       obj.castShadow = true;
       obj.receiveShadow = true;
     }

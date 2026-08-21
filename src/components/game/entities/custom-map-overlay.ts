@@ -18,14 +18,16 @@ import {
 } from '../editor/editor-mesh';
 import {
   applyEntityOpacity,
+  applyEntityColor,
   applyEntityGlow,
+  applyEntitySurfaceStyle,
   tickEntityGlow,
   tickSpinHazardVisual,
   makeAuthoredLight,
   makeGameplayFallback,
   shouldUseGameplayFallback,
 } from '../editor/map-scene-visuals';
-import { makeHammerSolidObject, type HammerPrimitive } from '../editor/hammer-shapes';
+import { makeHammerSolidObject, defaultSizeForHammer, type HammerPrimitive } from '../editor/hammer-shapes';
 import { ensurePlatformMotion } from '../editor/map-document';
 import { movingPlatformU } from '../../../../shared/moving-platform';
 
@@ -34,6 +36,7 @@ function applyEntTexture(obj: THREE.Object3D, ent: EditorEntity, doc: MapDocumen
     repeat: resolveEntityTextureRepeat(ent),
     offset: ent.textureOffset,
     rotation: ent.textureRotation,
+    onApplied: () => applyEntitySurfaceStyle(obj, ent),
   });
 }
 
@@ -57,8 +60,8 @@ function disposeEntityTree(root: THREE.Object3D) {
 }
 
 function makeHammerSolid(ent: EditorEntity): THREE.Object3D {
-  const size = ent.collisionSize ?? [2, 0.25, 2];
   const shape = (ent.primitive as HammerPrimitive) || 'box';
+  const size = ent.collisionSize ?? defaultSizeForHammer(shape);
   const obj = makeHammerSolidObject(shape, size, ent.color || '#64748b');
   markOwnsGpuResources(obj);
   return obj;
@@ -182,6 +185,7 @@ export class CustomMapOverlay {
         );
         obj.scale.set(...ent.scale);
         applyEntityOpacity(obj, ent.opacity);
+        applyEntityColor(obj, ent.color);
         applyEntityGlow(obj, ent.glow, ent.color);
         obj.userData.entityId = ent.id;
         obj.userData.editorEntity = ent;
@@ -217,6 +221,7 @@ export class CustomMapOverlay {
           );
           placeholder.scale.set(...ent.scale);
           applyEntityOpacity(placeholder, ent.opacity);
+          applyEntityColor(placeholder, ent.color);
           applyEntityGlow(placeholder, ent.glow, ent.color);
           placeholder.userData.entityId = ent.id;
           placeholder.userData.editorEntity = ent;

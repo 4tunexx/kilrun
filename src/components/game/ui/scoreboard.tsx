@@ -27,10 +27,12 @@ export function Scoreboard({
   open,
   playersRef,
   localSessionIdRef,
+  holdHint = '`',
 }: {
   open: boolean;
   playersRef: React.MutableRefObject<Map<string, NetPlayerState>>;
   localSessionIdRef: React.MutableRefObject<string | null>;
+  holdHint?: string;
 }) {
   const [rows, setRows] = useState<NetPlayerState[]>([]);
   const [localSessionId, setLocalSessionId] = useState<string | null>(null);
@@ -115,7 +117,7 @@ export function Scoreboard({
         </div>
         <div className="px-5 py-2 border-t border-white/10 bg-white/[0.02] text-center">
           <p className="text-[10px] font-bold text-white/30 uppercase tracking-wide">
-            Hold Tab
+            Hold {holdHint}
           </p>
         </div>
       </div>

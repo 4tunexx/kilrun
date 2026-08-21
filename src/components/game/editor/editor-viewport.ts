@@ -62,7 +62,7 @@ import {
   disposeOwnedGeometry,
   markOwnsGpuResources,
 } from './editor-mesh';
-import { applyEntityOpacity, applyEntityGlow, tickEntityGlow, tickSpinHazardVisual, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
+import { applyEntityOpacity, applyEntityColor, applyEntityGlow, applyEntitySurfaceStyle, tickEntityGlow, tickSpinHazardVisual, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
 import {
   defaultSizeForHammer,
   hollowHammerCollisionPads,
@@ -214,6 +214,8 @@ function syncLightParams(root: THREE.Object3D, ent: EditorEntity) {
   if ((wantsSpot && !hasSpot) || (!wantsSpot && !hasPoint)) {
     // Caller should remesh; update what we can in place.
   }
+  const pitch = THREE.MathUtils.degToRad(cfg.pitchDeg ?? (type === 'flashlight' ? -8 : -25));
+  const aimLen = Math.max(0.5, cfg.beamLength ?? cfg.distance ?? 4);
   root.traverse((o) => {
     if (o instanceof THREE.SpotLight && o.userData.isEntityLight) {
       o.color.set(cfg.color);
@@ -222,6 +224,8 @@ function syncLightParams(root: THREE.Object3D, ent: EditorEntity) {
       o.angle = THREE.MathUtils.degToRad(cfg.angleDeg ?? 40);
       o.penumbra = cfg.penumbra ?? 0.35;
       o.castShadow = !!cfg.castShadow;
+      o.target.position.set(0, Math.sin(pitch) * aimLen, Math.cos(pitch) * aimLen);
+      o.target.updateMatrixWorld();
     }
     if (o instanceof THREE.PointLight && o.userData.isEntityLight) {
       o.color.set(cfg.color);
@@ -646,8 +650,28 @@ export function createEditorViewport(
   let skyTexture: THREE.Texture | null = null;
   let editorPerf: EditorPerfMode = { ...DEFAULT_EDITOR_PERF_MODE };
 
-  const grid = new THREE.GridHelper(80, 80, 0x4b9fff, 0x2a3a4a);
+  let grid = new THREE.GridHelper(80, 80, 0x4b9fff, 0x2a3a4a);
   scene.add(grid);
+
+  const disposeGridHelper = (helper: THREE.GridHelper) => {
+    helper.geometry.dispose();
+    const mats = helper.material;
+    if (Array.isArray(mats)) mats.forEach((m) => m.dispose());
+    else mats.dispose();
+  };
+  const rebuildGrid = () => {
+    const visible = grid.visible;
+    scene.remove(grid);
+    disposeGridHelper(grid);
+    const extent = 80;
+    const cell = Math.max(0.05, gridSize);
+    const divisions = Math.max(2, Math.min(400, Math.round(extent / cell)));
+    grid = new THREE.GridHelper(extent, divisions, 0x4b9fff, 0x2a3a4a);
+    grid.visible = visible;
+    scene.add(grid);
+    requestRender();
+  };
+  if (gridSize !== 1) rebuildGrid();
 
   const floorMesh = new THREE.Mesh(
     new THREE.PlaneGeometry(200, 200),
@@ -1654,10 +1678,17 @@ export function createEditorViewport(
 
   function applyEntityTexture(root: THREE.Object3D, ent: EditorEntity) {
     const url = ent.textureUrl || doc.environment?.defaultTextureUrl;
+    const entityId = ent.id;
     applyTextureToObject(root, url, {
       repeat: resolveEntityTextureRepeat(ent),
       offset: ent.textureOffset,
       rotation: ent.textureRotation,
+      onApplied: () => {
+        const live = doc.entities.find((e) => e.id === entityId);
+        if (!live) return;
+        applyEntitySurfaceStyle(root, live);
+        requestRender();
+      },
     });
   }
 
@@ -1938,9 +1969,8 @@ export function createEditorViewport(
     const layer = layerMeta(ent.layerId);
     root.visible = ent.visible !== false && layer?.visible !== false;
 
-    if (typeof ent.opacity === 'number') {
-      applyEntityOpacity(root, ent.opacity);
-    }
+    applyEntityOpacity(root, ent.opacity);
+    applyEntityColor(root, ent.color);
     applyEntityTexture(root, ent);
     applyEntityGlow(root, ent.glow, ent.color);
     if (ent.kind === 'light') syncLightParams(root, ent);
@@ -2019,15 +2049,19 @@ export function createEditorViewport(
               flattenY: !hammerVol,
             })) ||
           (() => {
-            const foot = ent.collisionSize ?? [2, 0.25, 2];
+            const foot =
+              ent.collisionSize ??
+              (hammerVol
+                ? defaultSizeForHammer((ent.primitive as HammerPrimitive) || 'box')
+                : ([2, 2, 2] as [number, number, number]));
             const hy = hammerVol
               ? Math.max(0.4, Math.abs(foot[1] * (ent.scale?.[1] ?? 1)))
               : 0.08;
             const m = new THREE.Mesh(
               new THREE.BoxGeometry(
-                Math.max(0.5, Math.abs((ent.collisionSize?.[0] ?? ent.scale[0]) * (hammerVol ? 1 : 2))),
+                Math.max(0.5, Math.abs(foot[0] * (ent.scale?.[0] ?? 1))),
                 hy,
-                Math.max(0.5, Math.abs((ent.collisionSize?.[2] ?? ent.scale[2]) * (hammerVol ? 1 : 2)))
+                Math.max(0.5, Math.abs(foot[2] * (ent.scale?.[2] ?? 1)))
               ),
               new THREE.MeshBasicMaterial({
                 color,
@@ -3329,6 +3363,8 @@ export function createEditorViewport(
     const w = host.clientWidth || 1;
     const h = host.clientHeight || 1;
     if (viewLayout === 'single') {
+      camera.aspect = w / Math.max(1, h);
+      camera.updateProjectionMatrix();
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, w, h);
       if (editorPerf.disableBloom) renderer.render(scene, camera);
@@ -3481,6 +3517,7 @@ export function createEditorViewport(
     setGridSize: (n) => {
       gridSize = n;
       doc = { ...doc, gridSize: n };
+      rebuildGrid();
       syncTransformSnaps();
       handlers.onDocChange(doc);
     },
@@ -4407,13 +4444,12 @@ export function createEditorViewport(
     },
     getViewLayout: () => viewLayout,
     setCameraPreset: (preset) => {
+      if (freeFly) setFreeFly(false);
       const t = orbit.target.clone();
       if (preset === 'top') {
         camera.position.set(t.x, t.y + 40, t.z + 0.01);
         camera.up.set(0, 0, -1);
         camera.lookAt(t);
-        freeFly = false;
-        handlers.onFreeFlyChange?.(false);
         applyToolCameraLock();
       } else if (preset === 'front') {
         camera.up.set(0, 1, 0);
@@ -4497,6 +4533,8 @@ export function createEditorViewport(
       }
       floorMesh.geometry.dispose();
       (floorMesh.material as THREE.Material).dispose();
+      scene.remove(grid);
+      disposeGridHelper(grid);
       voidShadowMesh.geometry.dispose();
       voidShadowMat.dispose();
       voidShadowInner.geometry.dispose();
