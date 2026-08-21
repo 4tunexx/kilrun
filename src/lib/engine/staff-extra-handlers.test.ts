@@ -5,6 +5,7 @@ describe('parseStaffEngineResource', () => {
   it('accepts rewrite resource names', () => {
     expect(parseStaffEngineResource('sounds')).toBe('sounds');
     expect(parseStaffEngineResource('join-token')).toBe('join-token');
+    expect(parseStaffEngineResource('models')).toBe('models');
   });
 
   it('returns null for the plain session GET', () => {

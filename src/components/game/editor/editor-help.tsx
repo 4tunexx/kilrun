@@ -111,6 +111,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
       'Left rail: Assets, Layers, Outliner, World, Prefabs, Textures, then the same studios, then Settings (match timings) and Help.',
       'View → Graphics / Settings → Graphics opens bloom, pixel ratio, collision wires, and hide-floor/sky/fog. These are editor-only and never saved into the map. Play Test and live matches still render full quality.',
       'Hover any toolbar icon or Properties section header for a short explanation and its shortcut.',
+      'From Engine home, Help → Editor guide and Keyboard shortcuts open even without a map. Settings still lists Projects, Plugins, and Perf HUD. Graphics and map panels need a map open.',
     ],
   },
   {
@@ -164,6 +165,7 @@ export const HELP_SECTIONS: { id: string; title: string; paragraphs: string[] }[
     paragraphs: [
       'Select multiple objects with Shift+click, open Prefabs tab, name and Save Prefab. Click a prefab then click ground to stamp copies.',
       'Prefabs store relative offsets so stamps keep the same layout.',
+      'Assets → Upload adds a 3D model to the website library for every mapper. In the Windows app, Build → Link live game first (staff Steam). Local files in Documents/Kilrun still place without linking.',
     ],
   },
   {
@@ -291,7 +293,7 @@ export function EditorTutorial({
 export function HelpTabPanel({
   onStartTutorial,
 }: {
-  onStartTutorial: () => void;
+  onStartTutorial?: () => void;
 }) {
   const [section, setSection] = useState(HELP_SECTIONS[0].id);
   const current = HELP_SECTIONS.find((s) => s.id === section) ?? HELP_SECTIONS[0];
@@ -299,9 +301,15 @@ export function HelpTabPanel({
   return (
     <div className="flex-1 overflow-hidden flex flex-col min-h-0">
       <div className="p-2 border-b border-white/10 space-y-2">
-        <Button size="sm" className="w-full" onClick={onStartTutorial}>
-          <BookOpen className="w-4 h-4 mr-1" /> Start interactive tutorial
-        </Button>
+        {onStartTutorial ? (
+          <Button size="sm" className="w-full" onClick={onStartTutorial}>
+            <BookOpen className="w-4 h-4 mr-1" /> Start interactive tutorial
+          </Button>
+        ) : (
+          <p className="text-[11px] text-white/50 px-1">
+            Open a map to start the interactive tutorial. This guide works from the Engine home screen.
+          </p>
+        )}
         <div className="flex flex-wrap gap-1">
           {HELP_SECTIONS.map((s) => (
             <button
@@ -405,6 +413,50 @@ export function KeyboardShortcutsOverlay({
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Full editor guide overlay — works from Engine home without a map open. */
+export function HelpGuideOverlay({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[510] grid place-items-center bg-black/55 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-2xl h-[min(80vh,720px)] overflow-hidden rounded-2xl border border-red-500/30 bg-[#0f1724] shadow-2xl flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10 shrink-0">
+          <p className="text-sm font-black tracking-wide text-white">Editor guide</p>
+          <button
+            type="button"
+            className="w-8 h-8 rounded-lg grid place-items-center text-white/70 hover:bg-white/10"
+            onClick={onClose}
+            aria-label="Close guide"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <HelpTabPanel />
       </div>
     </div>
   );

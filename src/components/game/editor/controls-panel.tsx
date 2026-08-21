@@ -23,6 +23,7 @@ import { getKeyBindings, updateKeyBindings } from '@/lib/key-bindings-config';
 import {
   DEFAULT_KEY_BINDINGS,
   KEY_BIND_ACTIONS,
+  canonicalBindKey,
   findConflicts,
   formatBindKey,
   isValidBindKey,
@@ -70,25 +71,13 @@ export function ControlsPanel({
     load();
   }, [load]);
 
-  // Capture the next physical keypress while rebinding a slot.
+  // Capture the next physical keypress or mouse button while rebinding a slot.
   useEffect(() => {
     if (!listeningFor) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      e.preventDefault();
-      if (e.key === 'Escape' && listeningFor !== 'pause') {
-        setListeningFor(null);
-        return;
-      }
-      const normalized =
-        e.key === 'Escape'
-          ? 'escape'
-          : e.key === 'Tab'
-            ? 'tab'
-            : e.key === '`'
-              ? '`'
-              : e.key.toLowerCase();
+    const applyBind = (raw: string) => {
+      const normalized = canonicalBindKey(raw);
       if (!isValidBindKey(normalized)) {
-        toast({ title: `"${e.key}" can't be bound`, variant: 'destructive' });
+        toast({ title: `"${raw}" can't be bound`, variant: 'destructive' });
         setListeningFor(null);
         return;
       }
@@ -103,7 +92,9 @@ export function ControlsPanel({
           variant: 'destructive',
         });
       }
-      const customConflict = (customMoves ?? []).find((m) => m.key.toLowerCase() === normalized);
+      const customConflict = (customMoves ?? []).find(
+        (m) => canonicalBindKey(m.key) === normalized
+      );
       if (customConflict) {
         toast({
           title: 'Key already in use',
@@ -113,8 +104,29 @@ export function ControlsPanel({
       }
       setListeningFor(null);
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      if (e.key === 'Escape' && listeningFor !== 'pause') {
+        setListeningFor(null);
+        return;
+      }
+      applyBind(e.key === ' ' ? ' ' : e.key);
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (e.button === 0 && target?.closest('button, input, a, [data-rebind]')) return;
+      e.preventDefault();
+      applyBind(`mouse${e.button}`);
+    };
+    const onContextMenu = (e: Event) => e.preventDefault();
     window.addEventListener('keydown', onKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
+    window.addEventListener('mousedown', onMouseDown, { capture: true });
+    window.addEventListener('contextmenu', onContextMenu, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, { capture: true });
+      window.removeEventListener('mousedown', onMouseDown, { capture: true });
+      window.removeEventListener('contextmenu', onContextMenu, { capture: true });
+    };
   }, [listeningFor, draft, customMoves, toast]);
 
   const dirty = GROUPS.flatMap((g) => KEY_BIND_ACTIONS.filter((a) => a.group === g)).some(
@@ -211,7 +223,9 @@ export function ControlsPanel({
                   {KEY_BIND_ACTIONS.filter((meta) => meta.group === group).map((meta) => {
                     const key = draft[meta.action];
                     const conflicts = findConflicts(draft, key, meta.action);
-                    const customConflict = (customMoves ?? []).find((m) => m.key.toLowerCase() === key);
+                    const customConflict = (customMoves ?? []).find(
+                      (m) => canonicalBindKey(m.key) === canonicalBindKey(key)
+                    );
                     const hasConflict = conflicts.length > 0 || Boolean(customConflict);
                     const isListening = listeningFor === meta.action;
                     return (
@@ -225,6 +239,7 @@ export function ControlsPanel({
                         <button
                           type="button"
                           onClick={() => setListeningFor(meta.action)}
+                          data-rebind=""
                           title={hasConflict ? 'Key conflict — click to rebind' : 'Click to rebind'}
                           className={`shrink-0 min-w-[64px] text-center rounded px-2 py-1 text-[11px] font-bold uppercase tracking-wide border ${
                             isListening
@@ -234,7 +249,7 @@ export function ControlsPanel({
                                 : 'border-white/15 bg-white/5 text-white/70 hover:border-cyan-400/40 hover:text-white'
                           }`}
                         >
-                          {isListening ? 'Press key…' : displayKey(key)}
+                          {isListening ? 'Press key or mouse…' : displayKey(key)}
                         </button>
                       </div>
                     );

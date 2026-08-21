@@ -1,9 +1,12 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Box, MousePointer2, PaintBucket, Package, Paintbrush, Trash2, Upload } from 'lucide-react';
 import { HAMMER_SOLID_MODEL } from '../map-document';
 import { previewUrl } from '../prototype-catalog';
 import { adminDeletePrefabModel } from '@/lib/prefab-library-actions';
+import { hasEngineSession } from '@/lib/engine/platform-client';
+import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
 import type { MapEditorBrains, MapEditorPlugin } from '../engine/types';
 
 function AssetsPanel({ brains }: { brains: MapEditorBrains }) {
@@ -31,9 +34,22 @@ function AssetsPanel({ brains }: { brains: MapEditorBrains }) {
     reloadPrefabLibrary,
     toast,
   } = brains;
+  const desktop = isKilrunEngineDesktop();
+  const [liveLinked, setLiveLinked] = useState(() => hasEngineSession());
+  useEffect(() => {
+    const sync = () => setLiveLinked(hasEngineSession());
+    sync();
+    window.addEventListener('kilrun-engine-live-session', sync);
+    return () => window.removeEventListener('kilrun-engine-live-session', sync);
+  }, []);
 
   return (
             <>
+              {desktop && !liveLinked ? (
+                <p className="px-2 pt-2 text-[11px] text-amber-200/90 leading-relaxed">
+                  Link live game (Build menu) to list, upload, or delete website library models.
+                </p>
+              ) : null}
               <div className="p-2 border-b border-white/10 space-y-1">
                 <div className="flex gap-1">
                   <input

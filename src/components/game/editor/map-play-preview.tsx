@@ -113,7 +113,7 @@ import {
 } from '@shared/power-definitions';
 import { AbilityRingIcon } from '../ui/ability-hud';
 import { getKeyBindings } from '@/lib/key-bindings-config';
-import { DEFAULT_KEY_BINDINGS, eventMatchesBind, formatBindKey, keyBindToCodes, type KeyBindAction } from '@shared/key-bindings';
+import { DEFAULT_KEY_BINDINGS, eventMatchesBind, formatBindKey, keyBindToCodes, mouseButtonFromBind, type KeyBindAction } from '@shared/key-bindings';
 import { customMoveSoundKey } from '@shared/custom-moves';
 
 const ABILITY_UI_FIELDS: Record<AbilitySlotKind, { endsAt: string; cooldownEndsAt: string }> = {
@@ -609,7 +609,7 @@ export function MapPlayPreview({
     let playerId: string | null = null;
     let playerBaseScale: [number, number, number] = [1, 1, 1];
     let bodyYaw = 0;
-    let aimHeld = false;
+    let mouseButtons = new Set<number>();
     let aimHeldUi = false;
     let hpLocal = 100;
     // Set every frame inside the powers block below, read by the void-fall
@@ -983,16 +983,16 @@ export function MapPlayPreview({
         attackPulse = true;
         host.requestPointerLock?.().catch(() => {});
       }
-      if (e.button === 2) {
-        aimHeld = true;
+      mouseButtons.add(e.button);
+      if (mouseButtonFromBind(bindingsRef.current.aim) === e.button) {
         host.requestPointerLock?.().catch(() => {});
       }
     };
     const onMouseUp = (e: MouseEvent) => {
-      if (e.button === 2) aimHeld = false;
+      mouseButtons.delete(e.button);
     };
     const onBlur = () => {
-      aimHeld = false;
+      mouseButtons.clear();
     };
     const onContextMenu = (e: Event) => e.preventDefault();
     window.addEventListener('keydown', onKeyDown);
@@ -1065,7 +1065,13 @@ export function MapPlayPreview({
         pitch = THREE.MathUtils.clamp(pitch, liveTps.camera.pitchMin, liveTps.camera.pitchMax);
       }
       // Mobile: holding look stick = aim focus (same as RMB)
-      const aimNow = joy ? Math.hypot(lookStick.x, lookStick.y) > 0.25 : aimHeld;
+      const aimBind = bindingsRef.current.aim;
+      const mouseAim = mouseButtonFromBind(aimBind);
+      const desktopAim =
+        mouseAim != null
+          ? mouseButtons.has(mouseAim)
+          : keyBindToCodes(aimBind).some((c) => keys.has(c));
+      const aimNow = joy ? Math.hypot(lookStick.x, lookStick.y) > 0.25 : desktopAim;
       if (aimNow !== aimHeldUi) {
         aimHeldUi = aimNow;
         setAimingHud(aimNow);
@@ -1797,7 +1803,7 @@ export function MapPlayPreview({
         <span className="text-[10px] sm:text-xs text-white/50 truncate min-w-0">
           {isTouch
             ? '3rd person · Left move · Right look · Jump / Use / Attack'
-            : `RMB aim · Mouse look · ${formatBindKey(bindings.pause)} pause`}
+            : `${formatBindKey(bindings.aim)} aim · Mouse look · ${formatBindKey(bindings.pause)} pause`}
         </span>
         <div className="ml-4 flex items-center gap-2 text-xs">
           <span className="text-white/50">HP</span>

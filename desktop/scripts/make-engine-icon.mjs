@@ -106,3 +106,4 @@ const ico = await pngToIco([layer32, layer16, layer24, layer48, layer64, layer25
 fs.writeFileSync(path.join(outDir, 'icon.ico'), ico);
 
 console.log('Wrote transparent Kilrun Engine icons to', outDir);
+await import('./make-installer-art.mjs');

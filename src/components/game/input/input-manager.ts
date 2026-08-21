@@ -2,7 +2,7 @@ import { KeyboardHandler } from './keyboard';
 import { MouseHandler } from './mouse';
 import { DualJoystick } from './dual-joystick';
 import { Vector2 } from '../types';
-import { DEFAULT_KEY_BINDINGS, type KeyBindAction } from '@shared/key-bindings';
+import { DEFAULT_KEY_BINDINGS, mouseButtonFromBind, type KeyBindAction } from '@shared/key-bindings';
 
 /**
  * Owns every input subsystem for a single game session and normalizes them
@@ -141,13 +141,16 @@ export class InputManager {
   }
 
   /**
-   * GTA-style aim focus: hold RMB (desktop) or right look-stick (mobile).
+   * GTA-style aim focus: hold the bound Aim control (default RMB) on desktop,
+   * or the right look-stick on mobile.
    * While aiming: body faces camera, WASD strafes, crosshair on.
    * Released: free orbit look, body faces walk direction.
    */
   public isAimHeld(): boolean {
     if (this.isMobile) return this.joystick.isAiming();
-    return this.mouse.isRightHeld();
+    const mouseBtn = mouseButtonFromBind(this.bindings.aim);
+    if (mouseBtn != null) return this.mouse.isButtonHeld(mouseBtn);
+    return this.keyboard.isPressed(this.bindings.aim);
   }
 
   /** Reload (default R). Edge-triggered via consumeReloadPulse preferred. */

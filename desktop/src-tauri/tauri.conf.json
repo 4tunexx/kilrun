@@ -76,7 +76,11 @@
         "installMode": "currentUser",
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico",
-        "startMenuFolder": "Kilrun"
+        "headerImage": "icons/installer-header.bmp",
+        "sidebarImage": "icons/installer-sidebar.bmp",
+        "uninstallerHeaderImage": "icons/installer-header.bmp",
+        "startMenuFolder": "Kilrun",
+        "installerHooks": "windows/installer-hooks.nsh"
       }
     }
   }

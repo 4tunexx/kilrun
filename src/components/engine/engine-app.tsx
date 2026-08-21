@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Globe } from 'lucide-react';
 import MapEditor from '@/components/game/editor/map-editor';
 import { Button } from '@/components/ui/button';
@@ -48,6 +49,7 @@ import {
 } from '@/lib/engine/platform-client';
 import { EnginePerfHud } from './engine-perf-hud';
 import { EngineSplash } from './engine-splash';
+import { HelpGuideOverlay, KeyboardShortcutsOverlay } from '@/components/game/editor/editor-help';
 import { EngineHome, type CloudBadge } from './engine-home';
 import { PluginManagerDialog } from './plugin-manager';
 import { loadDesktopPlugins } from '@/lib/engine/plugin-loader';
@@ -114,6 +116,8 @@ export function EngineApp({
   const [showPerfHud, setShowPerfHud] = React.useState(false);
   const [showAbout, setShowAbout] = React.useState(false);
   const [showPlugins, setShowPlugins] = React.useState(false);
+  const [showGuide, setShowGuide] = React.useState(false);
+  const [showShortcuts, setShowShortcuts] = React.useState(false);
   const [editorUi, setEditorUi] = React.useState<EngineEditorUiState>(DEFAULT_EDITOR_UI);
   const [livePingMs, setLivePingMs] = React.useState<number | null>(null);
   const [projectsRoot, setProjectsRoot] = React.useState<string | null>(null);
@@ -545,6 +549,16 @@ export function EngineApp({
       setShowAbout(true);
       return;
     }
+    if (type === 'shortcuts') {
+      if (editorMapId) runCommand(type);
+      else setShowShortcuts(true);
+      return;
+    }
+    if (type === 'help' || type === 'tips' || type === 'tutorial') {
+      if (editorMapId) runCommand(type);
+      else setShowGuide(true);
+      return;
+    }
     if (type === 'plugins-manage') {
       setShowPlugins(true);
       return;
@@ -646,6 +660,8 @@ export function EngineApp({
           platformUrl={platformUrl}
         />
         <PluginManagerDialog open={showPlugins} onClose={() => setShowPlugins(false)} />
+        <HelpGuideOverlay open={showGuide} onClose={() => setShowGuide(false)} />
+        <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       </div>
     );
   }
@@ -711,6 +727,8 @@ export function EngineApp({
         platformUrl={platformUrl}
       />
       <PluginManagerDialog open={showPlugins} onClose={() => setShowPlugins(false)} />
+      <HelpGuideOverlay open={showGuide} onClose={() => setShowGuide(false)} />
+      <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>
   );
 }
@@ -793,7 +811,7 @@ function EngineMenuBar({
         <span className="font-black tracking-[0.22em] text-red-200">ENGINE</span>
         <span className="text-[10px] text-slate-500">{KILRUN_ENGINE_VERSION}</span>
         <div className="h-5 w-px bg-slate-700/50 mx-1" />
-        <nav className="flex items-center gap-0.5 text-slate-200 overflow-x-auto">
+        <nav className="flex items-center gap-0.5 text-slate-200">
           <MenuDrop
             label="File"
             open={openMenu === 'File'}
@@ -941,6 +959,14 @@ function EngineMenuBar({
             open={openMenu === 'Settings'}
             onOpen={() => setOpenMenu((m) => (m === 'Settings' ? null : 'Settings'))}
             items={[
+              { label: 'Perf HUD', onSelect: () => run('toggle-perf-hud'), checked: showPerfHud },
+              ...(desktop
+                ? [
+                    { label: 'Open Projects folder', onSelect: () => run('open-folder') },
+                    { label: 'Manage plugins…', onSelect: () => run('plugins-manage') },
+                  ]
+                : []),
+              { separator: true },
               { label: 'Graphics…', onSelect: () => run('graphics'), disabled: !inEditor },
               { separator: true },
               {
@@ -1001,9 +1027,9 @@ function EngineMenuBar({
             open={openMenu === 'Help'}
             onOpen={() => setOpenMenu((m) => (m === 'Help' ? null : 'Help'))}
             items={[
-              { label: 'Editor guide', onSelect: () => run('help'), disabled: !inEditor },
-              { label: 'Keyboard shortcuts', onSelect: () => run('shortcuts'), disabled: !inEditor },
-              { label: 'Quick tips', onSelect: () => run('tips'), disabled: !inEditor, checked: inEditor && editorUi.showHelp },
+              { label: 'Editor guide', onSelect: () => run('help') },
+              { label: 'Keyboard shortcuts', onSelect: () => run('shortcuts') },
+              { label: 'Quick tips', onSelect: () => run('tips'), checked: inEditor && editorUi.showHelp },
               { label: 'Restart tutorial', onSelect: () => run('tutorial'), disabled: !inEditor },
               { separator: true },
               { label: 'About Kilrun Engine', onSelect: () => run('about') },
@@ -1012,7 +1038,7 @@ function EngineMenuBar({
         </nav>
         <div className="flex-1" />
         {desktop ? (
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="relative z-0 flex items-center gap-2 min-w-0 shrink-0">
             <Globe className="h-3.5 w-3.5 text-red-300 shrink-0" />
             <Input
               value={platformUrl}
@@ -1071,9 +1097,23 @@ function MenuDrop({
   onOpen: () => void;
   items: MenuItem[];
 }) {
+  const btnRef = React.useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = React.useState({ top: 0, left: 0 });
+
+  React.useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    const width = 260;
+    const alignRight = r.left > window.innerWidth * 0.42;
+    let left = alignRight ? r.right - width : r.left;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+    setPos({ top: r.bottom + 4, left });
+  }, [open]);
+
   return (
     <div className="relative">
       <button
+        ref={btnRef}
         type="button"
         className={`px-2.5 py-1.5 rounded-md transition ${
           open ? 'bg-red-600/20 text-white' : 'hover:bg-white/10 hover:text-white'
@@ -1082,31 +1122,40 @@ function MenuDrop({
       >
         {label}
       </button>
-      {open ? (
-        <div className="absolute left-0 top-full z-[210] min-w-[240px] max-h-[min(70vh,560px)] overflow-y-auto origin-top rounded-xl border border-red-500/30 bg-[#10151e] py-1 shadow-[0_12px_40px_rgba(0,0,0,0.55),0_0_24px_rgba(226,61,74,0.15)]">
-          {items.map((item, index) =>
-            item.separator ? (
-              <div key={`sep-${index}`} className="my-1 h-px bg-red-500/20" />
-            ) : (
-              <button
-                key={`${item.label}-${index}`}
-                type="button"
-                disabled={item.disabled}
-                className="w-full text-left px-3 py-1.5 hover:bg-red-600/25 hover:text-white transition border-l-2 border-transparent hover:border-red-400 disabled:opacity-40 disabled:pointer-events-none flex items-center justify-between gap-6"
-                onClick={() => item.onSelect?.()}
-              >
-                <span className="flex items-center gap-2 min-w-0">
-                  <span className={`w-3 text-[10px] ${item.checked ? 'text-red-300' : 'text-transparent'}`}>✓</span>
-                  <span className="truncate">{item.label}</span>
-                </span>
-                {item.shortcut ? (
-                  <span className="text-[10px] text-slate-500 shrink-0">{item.shortcut}</span>
-                ) : null}
-              </button>
-            )
-          )}
-        </div>
-      ) : null}
+      {open && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              className="fixed z-[5000] min-w-[260px] max-h-[min(70vh,560px)] overflow-y-auto origin-top rounded-xl border border-red-500/30 bg-[#10151e] py-1 shadow-[0_12px_40px_rgba(0,0,0,0.55),0_0_24px_rgba(226,61,74,0.15)]"
+              style={{ top: pos.top, left: pos.left }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              {items.map((item, index) =>
+                item.separator ? (
+                  <div key={`sep-${index}`} className="my-1 h-px bg-red-500/20" />
+                ) : (
+                  <button
+                    key={`${item.label}-${index}`}
+                    type="button"
+                    disabled={item.disabled}
+                    className="w-full text-left px-3 py-1.5 hover:bg-red-600/25 hover:text-white transition border-l-2 border-transparent hover:border-red-400 disabled:opacity-40 disabled:pointer-events-none flex items-center justify-between gap-6"
+                    onClick={() => item.onSelect?.()}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className={`w-3 text-[10px] ${item.checked ? 'text-red-300' : 'text-transparent'}`}>
+                        ✓
+                      </span>
+                      <span className="truncate">{item.label}</span>
+                    </span>
+                    {item.shortcut ? (
+                      <span className="text-[10px] text-slate-500 shrink-0">{item.shortcut}</span>
+                    ) : null}
+                  </button>
+                )
+              )}
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

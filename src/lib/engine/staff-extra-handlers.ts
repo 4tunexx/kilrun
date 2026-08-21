@@ -22,6 +22,12 @@ import {
   publishCloudPrefabAsStaff,
 } from '@/lib/game-prefab-core';
 import { upsertStoreItemAsStaff, type UpsertStoreItemInput } from '@/lib/store-item-core';
+import {
+  deletePrefabModelAsStaff,
+  listPrefabModelCategoriesForStaff,
+  listPrefabModelsForStaff,
+  uploadPrefabModelAsStaff,
+} from '@/lib/prefab-library-core';
 import { prisma } from '@/lib/prisma';
 import { mintGameJoinToken } from '@/lib/game-join-token';
 import { canAccessAdmin } from '@/lib/roles';
@@ -54,6 +60,7 @@ export async function handleStaffEngineResource(
   if (resource === 'powers') return handlePowers(req, method);
   if (resource === 'prefabs') return handlePrefabs(req, method);
   if (resource === 'shop') return handleShop(req, method);
+  if (resource === 'models') return handleModels(req, method);
   return handleJoinToken(req, method);
 }
 
@@ -182,6 +189,48 @@ async function handleShop(req: NextRequest, method: string) {
     const message = err instanceof Error ? err.message : 'Publish failed';
     const status = /staff only|not authenticated|session expired/i.test(message) ? 401 : 400;
     return engineJson(req, { ok: false, error: message }, status);
+  }
+}
+
+async function handleModels(req: NextRequest, method: string) {
+  try {
+    if (method === 'GET') {
+      await requireEngineStaff(req);
+      const [models, categories] = await Promise.all([
+        listPrefabModelsForStaff(),
+        listPrefabModelCategoriesForStaff(),
+      ]);
+      return engineJson(req, { ok: true, models, categories });
+    }
+    if (method === 'POST') {
+      const staff = await requireEngineStaff(req);
+      const body = (await req.json().catch(() => null)) as {
+        name?: string;
+        category?: string;
+        modelDataUrl?: string;
+        originalFilename?: string;
+        previewDataUrl?: string;
+      } | null;
+      const model = await uploadPrefabModelAsStaff(staff.id, {
+        name: body?.name ?? '',
+        category: body?.category ?? '',
+        modelDataUrl: body?.modelDataUrl ?? '',
+        originalFilename: body?.originalFilename,
+        previewDataUrl: body?.previewDataUrl,
+      });
+      return engineJson(req, { ok: true, model });
+    }
+    if (method === 'DELETE') {
+      const staff = await requireEngineStaff(req);
+      const id = req.nextUrl.searchParams.get('id') ?? '';
+      if (!id) return engineJson(req, { ok: false, error: 'id is required' }, 400);
+      await deletePrefabModelAsStaff(id, staff.id);
+      return engineJson(req, { ok: true });
+    }
+    return engineJson(req, { ok: false, error: 'Method not allowed' }, 405);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Prefab model request failed';
+    return engineJson(req, { ok: false, error: message }, staffStatus(message));
   }
 }
 

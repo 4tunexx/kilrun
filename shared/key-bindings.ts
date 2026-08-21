@@ -27,6 +27,7 @@ export type KeyBindAction =
   | 'pause'
   | 'scoreboard'
   | 'freeMouse'
+  | 'aim'
   | 'power_hook'
   | 'power_berserk'
   | 'power_bullet'
@@ -67,6 +68,7 @@ export const DEFAULT_KEY_BINDINGS: Record<KeyBindAction, string> = {
   pause: 'escape',
   scoreboard: '`',
   freeMouse: 'tab',
+  aim: 'mouse2',
   power_hook: 'h',
   power_berserk: 'b',
   power_bullet: 'u',
@@ -92,6 +94,7 @@ export const KEY_BIND_ACTIONS: KeyBindActionMeta[] = [
   { action: 'pause', label: 'Pause / Menu', group: 'Interface' },
   { action: 'scoreboard', label: 'Scoreboard (hold)', group: 'Interface' },
   { action: 'freeMouse', label: 'Free mouse cursor', group: 'Interface' },
+  { action: 'aim', label: 'Aim (hold)', group: 'Interface' },
   { action: 'power_hook', label: 'Power: Grapple Hook', group: 'Powers' },
   { action: 'power_berserk', label: 'Power: Berserk', group: 'Powers' },
   { action: 'power_bullet', label: 'Power: Unlimited Ammo', group: 'Powers' },
@@ -101,20 +104,40 @@ export const KEY_BIND_ACTIONS: KeyBindActionMeta[] = [
   { action: 'power_backflip', label: 'Power: Backflip (dash)', group: 'Powers' },
 ];
 
+export function canonicalBindKey(key: string): string {
+  if (typeof key !== 'string') return '';
+  if (key === ' ' || key.trim().toLowerCase() === 'space') return ' ';
+  const k = key.trim().toLowerCase();
+  if (k === 'rmb' || k === 'mouse2') return 'mouse2';
+  if (k === 'lmb' || k === 'mouse0') return 'mouse0';
+  if (k === 'mmb' || k === 'middle' || k === 'mouse1') return 'mouse1';
+  if (k === 'esc') return 'escape';
+  if (k === 'ctrl') return 'control';
+  if (k === 'backquote' || k === 'grave') return '`';
+  return k;
+}
+
+export function mouseButtonFromBind(bind: string): number | null {
+  const k = canonicalBindKey(bind);
+  if (k === 'mouse0') return 0;
+  if (k === 'mouse1') return 1;
+  if (k === 'mouse2') return 2;
+  return null;
+}
+
 /**
  * A key is only bindable if `keyBindToCodes` (below) can actually resolve
  * it to a `KeyboardEvent.code` — a-z, 0-9, space, shift, control, escape,
- * tab, backtick. Anything else (arrows, function keys, Home/End, …) used
- * to be accepted here and saved successfully, but every consumer
- * (map-play-preview.tsx's Play Test) only ever checks
- * `keyBindToCodes(...).some(...)`, which silently returns `false` for an
- * unresolvable key — so the rebind "succeeded" but the action then never
- * fired again, with no error surfaced anywhere.
+ * tab, backtick — or it is a mouse button (mouse0/1/2). Anything else
+ * (arrows, function keys, Home/End, …) used to be accepted here and saved
+ * successfully, but every consumer only ever checks `keyBindToCodes`, which
+ * silently returns `false` for an unresolvable key.
  */
 export function isValidBindKey(key: string): boolean {
   if (typeof key !== 'string') return false;
-  if (key === ' ') return true;
-  const k = key.trim().toLowerCase();
+  const k = canonicalBindKey(key);
+  if (mouseButtonFromBind(k) != null) return true;
+  if (k === ' ') return true;
   return keyBindToCodes(k).length > 0;
 }
 
@@ -126,7 +149,7 @@ export function normalizeBindings(
   for (const meta of KEY_BIND_ACTIONS) {
     const raw = input[meta.action];
     if (typeof raw === 'string' && isValidBindKey(raw)) {
-      result[meta.action] = raw === ' ' ? ' ' : raw.trim().toLowerCase();
+      result[meta.action] = canonicalBindKey(raw);
     }
   }
   return result;
@@ -161,10 +184,10 @@ export function findConflicts(
   key: string,
   ignoreAction?: KeyBindAction
 ): KeyBindActionMeta[] {
-  const k = key.trim().toLowerCase();
+  const k = canonicalBindKey(key);
   if (!k) return [];
   return KEY_BIND_ACTIONS.filter(
-    (meta) => meta.action !== ignoreAction && bindings[meta.action] === k
+    (meta) => meta.action !== ignoreAction && canonicalBindKey(bindings[meta.action]) === k
   );
 }
 
@@ -179,10 +202,16 @@ export function formatBindKey(key: string): string {
   if (k === 'tab') return 'Tab';
   if (k === '`' || k === 'backquote' || k === 'grave') return '`';
   if (k === 'mouse2' || k === 'rmb') return 'RMB';
+  if (k === 'mouse0' || k === 'lmb') return 'LMB';
+  if (k === 'mouse1' || k === 'mmb' || k === 'middle') return 'MMB';
   if (k.length === 1) return k.toUpperCase();
   return key;
 }
 
 export function eventMatchesBind(e: { code: string }, bind: string): boolean {
   return keyBindToCodes(bind).includes(e.code);
+}
+
+export function eventMatchesMouseBind(button: number, bind: string): boolean {
+  return mouseButtonFromBind(bind) === button;
 }

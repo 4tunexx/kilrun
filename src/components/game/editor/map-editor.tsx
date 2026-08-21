@@ -336,6 +336,9 @@ export function MapEditor({
   };
   useEffect(() => {
     reloadPrefabLibrary();
+    const onLive = () => reloadPrefabLibrary();
+    window.addEventListener('kilrun-engine-live-session', onLive);
+    return () => window.removeEventListener('kilrun-engine-live-session', onLive);
   }, []);
   const [activeLayerId, setActiveLayerId] = useState(starter.doc.layers[0]?.id ?? '');
   const [freeFly, setFreeFly] = useState(false);

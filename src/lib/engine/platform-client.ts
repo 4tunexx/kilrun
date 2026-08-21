@@ -54,10 +54,18 @@ function envSiteUrl(): string {
 }
 
 export function configureEnginePlatform(next: { origin?: string; token?: string | null }) {
+  const prevToken = platform.token;
   if (next.origin) platform.origin = next.origin.replace(/\/$/, '');
   if (next.token !== undefined) platform.token = next.token;
   if (typeof window !== 'undefined') {
     if (platform.origin) window.__KILRUN_PLATFORM_URL__ = platform.origin;
+    if (next.token !== undefined && next.token !== prevToken) {
+      window.dispatchEvent(
+        new CustomEvent('kilrun-engine-live-session', {
+          detail: { linked: Boolean(platform.token) },
+        })
+      );
+    }
   }
 }
 
@@ -299,6 +307,73 @@ export async function upsertEngineShopItem(input: Record<string, unknown>) {
 export async function deleteEnginePrefab(id: string) {
   if (!platform.token) throw new Error('Link live game first');
   const res = await engineFetch(`/api/engine/prefabs?id=${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return { ok: true as const };
+}
+
+export type EnginePrefabModelRow = {
+  id: string;
+  name: string;
+  category: string;
+  modelUrl: string;
+  previewUrl: string | null;
+  createdAt: string;
+};
+
+function absolutizeSiteUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (/^(https?:|data:|blob:)/i.test(url)) return url;
+  const origin = enginePlatformOrigin();
+  return `${origin}${url.startsWith('/') ? url : `/${url}`}`;
+}
+
+export async function listEnginePrefabModels(): Promise<EnginePrefabModelRow[]> {
+  if (!platform.token) throw new Error('Link live game first');
+  const res = await engineFetch('/api/engine/models');
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { models?: EnginePrefabModelRow[]; categories?: string[] };
+  return (data.models ?? []).map((row) => ({
+    ...row,
+    modelUrl: absolutizeSiteUrl(row.modelUrl) ?? row.modelUrl,
+    previewUrl: absolutizeSiteUrl(row.previewUrl),
+  }));
+}
+
+export async function listEnginePrefabModelCategories(): Promise<string[]> {
+  if (!platform.token) throw new Error('Link live game first');
+  const res = await engineFetch('/api/engine/models');
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { categories?: string[] };
+  return data.categories ?? [];
+}
+
+export async function uploadEnginePrefabModel(input: {
+  name: string;
+  category: string;
+  modelDataUrl: string;
+  originalFilename?: string;
+  previewDataUrl?: string;
+}): Promise<EnginePrefabModelRow> {
+  if (!platform.token) throw new Error('Link live game first');
+  const res = await engineFetch('/api/engine/models', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { model?: EnginePrefabModelRow };
+  if (!data.model) throw new Error('Upload failed');
+  return {
+    ...data.model,
+    modelUrl: absolutizeSiteUrl(data.model.modelUrl) ?? data.model.modelUrl,
+    previewUrl: absolutizeSiteUrl(data.model.previewUrl),
+  };
+}
+
+export async function deleteEnginePrefabModel(id: string) {
+  if (!platform.token) throw new Error('Link live game first');
+  const res = await engineFetch(`/api/engine/models?id=${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
   if (!res.ok) throw new Error(await readError(res));

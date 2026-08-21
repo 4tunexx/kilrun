@@ -130,6 +130,7 @@ const nextConfig: NextConfig = {
       { source: '/api/engine/prefabs', destination: '/api/engine/session?engineResource=prefabs' },
       { source: '/api/engine/shop', destination: '/api/engine/session?engineResource=shop' },
       { source: '/api/engine/join-token', destination: '/api/engine/session?engineResource=join-token' },
+      { source: '/api/engine/models', destination: '/api/engine/session?engineResource=models' },
     ];
   },
   async headers() {

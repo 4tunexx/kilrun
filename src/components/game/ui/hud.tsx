@@ -331,7 +331,7 @@ export const HUD: React.FC<{
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-center px-3 hidden sm:block">
         <p className="text-[11px] font-bold tracking-widest text-white/55 uppercase">
           • {formatBindKey(keyBindings.jump)} Jump // {formatBindKey(keyBindings.sprint)} Sprint //
-          RMB Aim // {formatBindKey(keyBindings.reload)} Reload // {formatBindKey(keyBindings.freeMouse)}{' '}
+          {formatBindKey(keyBindings.aim)} Aim // {formatBindKey(keyBindings.reload)} Reload // {formatBindKey(keyBindings.freeMouse)}{' '}
           Mouse // {formatBindKey(keyBindings.scoreboard)} Scoreboard // {formatBindKey(keyBindings.pause)}{' '}
           Menu
         </p>

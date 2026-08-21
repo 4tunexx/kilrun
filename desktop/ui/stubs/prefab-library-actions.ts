@@ -1,15 +1,28 @@
+import {
+  deleteEnginePrefabModel,
+  listEnginePrefabModelCategories,
+  listEnginePrefabModels,
+  uploadEnginePrefabModel,
+} from '@/lib/engine/platform-client';
+
 export async function getPrefabLibrary() {
-  return [];
+  return listEnginePrefabModels();
 }
 
 export async function getPrefabLibraryCategories(): Promise<string[]> {
-  return [];
+  return listEnginePrefabModelCategories();
 }
 
-export async function adminUploadPrefabModel(_input: unknown) {
-  throw new Error('Cloud prefab upload lives on the website. Place local models from your project folder.');
+export async function adminUploadPrefabModel(input: {
+  name: string;
+  category: string;
+  modelDataUrl: string;
+  originalFilename?: string;
+  previewDataUrl?: string;
+}) {
+  return uploadEnginePrefabModel(input);
 }
 
-export async function adminDeletePrefabModel(_id: string) {
-  throw new Error('Cloud prefab delete lives on the website.');
+export async function adminDeletePrefabModel(id: string) {
+  return deleteEnginePrefabModel(id);
 }

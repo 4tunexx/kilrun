@@ -53,5 +53,16 @@ describe('key-bindings', () => {
     expect(normalized.pause).toBe(DEFAULT_KEY_BINDINGS.pause);
     expect(normalized.scoreboard).toBe(DEFAULT_KEY_BINDINGS.scoreboard);
     expect(normalized.freeMouse).toBe(DEFAULT_KEY_BINDINGS.freeMouse);
+    expect(normalized.aim).toBe('mouse2');
+  });
+
+  it('accepts mouse buttons for aim and formats HUD labels', () => {
+    expect(isValidBindKey('mouse2')).toBe(true);
+    expect(isValidBindKey('rmb')).toBe(true);
+    expect(isValidBindKey('mouse0')).toBe(true);
+    expect(formatBindKey('mouse2')).toBe('RMB');
+    expect(formatBindKey('mouse0')).toBe('LMB');
+    const rebound = normalizeBindings({ aim: 'mouse0' });
+    expect(rebound.aim).toBe('mouse0');
   });
 });

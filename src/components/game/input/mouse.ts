@@ -10,7 +10,7 @@ import { Vector2 } from '../types';
 export class MouseHandler {
   private position: Vector2 = { x: 0, y: 0 };
   private leftDown = false;
-  private rightDown = false;
+  private buttons = new Set<number>();
   private lookDeltaX = 0;
   private lookDeltaY = 0;
   private host: HTMLElement | null = null;
@@ -33,18 +33,18 @@ export class MouseHandler {
   private onMouseDown = (e: Event) => {
     const evt = e as MouseEvent;
     if (evt.button === 0) this.leftDown = true;
-    if (evt.button === 2) this.rightDown = true;
+    this.buttons.add(evt.button);
     this.tryLock();
   };
   private onMouseUp = (e: Event) => {
     const evt = e as MouseEvent;
     if (evt.button === 0) this.leftDown = false;
-    if (evt.button === 2) this.rightDown = false;
+    this.buttons.delete(evt.button);
   };
   // Lost focus / leave — release buttons so aim doesn't stick
   private onBlur = () => {
     this.leftDown = false;
-    this.rightDown = false;
+    this.buttons.clear();
   };
   private onPointerEnter = () => this.tryLock();
   private onContextMenu = (e: Event) => e.preventDefault();
@@ -102,9 +102,13 @@ export class MouseHandler {
     return this.leftDown;
   }
 
-  /** GTA aim focus — hold RMB. */
+  /** GTA aim focus — hold the bound mouse button (default RMB). */
+  public isButtonHeld(button: number): boolean {
+    return this.buttons.has(button);
+  }
+
   public isRightHeld(): boolean {
-    return this.rightDown;
+    return this.isButtonHeld(2);
   }
 
   public consumeLookDeltaX(): number {
