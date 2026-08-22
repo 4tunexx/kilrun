@@ -61,6 +61,7 @@ import {
   disposeClonedMaterials,
   disposeOwnedGeometry,
   markOwnsGpuResources,
+  MAX_GIZMO_DIMENSION,
 } from './editor-mesh';
 import { applyEntityOpacity, applyEntityColor, applyEntityGlow, applyEntitySurfaceStyle, tickEntityGlow, tickSpinHazardVisual, MAP_SKY_COLORS, makeGameplayFallback } from './map-scene-visuals';
 import {
@@ -2017,9 +2018,9 @@ export function createEditorViewport(
           (() => {
             const m = new THREE.Mesh(
               new THREE.BoxGeometry(
-                Math.max(0.5, Math.abs(ent.scale[0]) * 1.6),
-                Math.max(0.2, Math.abs(ent.scale[1]) * 0.4),
-                Math.max(0.5, Math.abs(ent.scale[2]) * 1.6)
+                Math.min(MAX_GIZMO_DIMENSION, Math.max(0.5, Math.abs(ent.scale[0]) * 1.6)),
+                Math.min(MAX_GIZMO_DIMENSION, Math.max(0.2, Math.abs(ent.scale[1]) * 0.4)),
+                Math.min(MAX_GIZMO_DIMENSION, Math.max(0.5, Math.abs(ent.scale[2]) * 1.6))
               ),
               new THREE.MeshBasicMaterial({
                 color: 0xff2244,
@@ -2059,9 +2060,9 @@ export function createEditorViewport(
               : 0.08;
             const m = new THREE.Mesh(
               new THREE.BoxGeometry(
-                Math.max(0.5, Math.abs(foot[0] * (ent.scale?.[0] ?? 1))),
-                hy,
-                Math.max(0.5, Math.abs(foot[2] * (ent.scale?.[2] ?? 1)))
+                Math.min(MAX_GIZMO_DIMENSION, Math.max(0.5, Math.abs(foot[0] * (ent.scale?.[0] ?? 1)))),
+                Math.min(MAX_GIZMO_DIMENSION, hy),
+                Math.min(MAX_GIZMO_DIMENSION, Math.max(0.5, Math.abs(foot[2] * (ent.scale?.[2] ?? 1))))
               ),
               new THREE.MeshBasicMaterial({
                 color,

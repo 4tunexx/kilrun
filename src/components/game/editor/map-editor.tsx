@@ -1304,6 +1304,15 @@ export function MapEditor({
         if (!e.repeat) toggleEditorUi();
         return;
       }
+      // F5 starts Play Test, matching the convention almost every game
+      // engine/editor uses. Must win over the browser's own F5 (page
+      // reload) the same way Ctrl+S/Ctrl+H already do above, or the whole
+      // app reloads (losing unsaved work) instead of starting a test.
+      if (e.key === 'F5') {
+        e.preventDefault();
+        if (!e.repeat) void startPlay();
+        return;
+      }
 
       if (inField) return;
 
@@ -2682,9 +2691,14 @@ export function MapEditor({
         <button
           type="button"
           onClick={() => setSidebarOpen(true)}
-          className={`fixed top-16 z-[140] flex h-12 w-7 items-center justify-center rounded-r-lg border border-l-0 border-white/20 bg-[#121a24] text-white/80 shadow-lg hover:bg-cyan-500/20 hover:text-cyan-200 ${
-            railOpen ? 'left-10' : 'left-0'
-          }`}
+          className={`fixed z-[140] flex h-12 w-7 items-center justify-center rounded-r-lg border border-l-0 border-white/20 bg-[#121a24] text-white/80 shadow-lg hover:bg-cyan-500/20 hover:text-cyan-200 ${
+            // The Engine desktop app stacks a native title bar + menu bar +
+            // the map name/mode toolbar row above the viewport — three rows
+            // the plain website header doesn't have. A flat `top-16` (same
+            // offset either way) landed this chevron overlapping that
+            // toolbar row in the Engine app instead of sitting below it.
+            variant === 'engine' ? 'top-28' : 'top-16'
+          } ${railOpen ? 'left-10' : 'left-0'}`}
           title="Expand model library"
           aria-label="Expand model library"
         >

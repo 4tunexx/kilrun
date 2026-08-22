@@ -216,6 +216,14 @@ export function makeSelectionOutline(root: THREE.Object3D, color = 0x38bdf8): TH
 }
 
 /** Wireframe collision helper sized to the real mesh AABB (not scale heuristics). */
+// A solid/selection wire-box indicator has no legitimate reason to span
+// more than this in any dimension — a single prop's collision hint, not a
+// whole level. Caps a degenerate/huge box (e.g. `entityWorldBox` picking up
+// unexpected descendants after an array/mirror op, or a corrupted scale) so
+// the indicator can never balloon into a screen-filling colored plane
+// instead of quietly failing to render or rendering wrong-but-small.
+export const MAX_GIZMO_DIMENSION = 40;
+
 export function makeBoundsWireBox(
   root: THREE.Object3D,
   color: number,
@@ -227,6 +235,16 @@ export function makeBoundsWireBox(
   const center = new THREE.Vector3();
   box.getSize(size);
   box.getCenter(center);
+  if (
+    !Number.isFinite(size.x) ||
+    !Number.isFinite(size.y) ||
+    !Number.isFinite(size.z) ||
+    size.x > MAX_GIZMO_DIMENSION ||
+    size.y > MAX_GIZMO_DIMENSION ||
+    size.z > MAX_GIZMO_DIMENSION
+  ) {
+    return null;
+  }
   const h = opts?.flattenY ? Math.max(0.06, opts.yPad ?? 0.08) : Math.max(0.08, size.y);
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(Math.max(0.2, size.x), h, Math.max(0.2, size.z)),

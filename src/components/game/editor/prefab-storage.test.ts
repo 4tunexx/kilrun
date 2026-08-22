@@ -68,6 +68,48 @@ describe('mapDocToSimPlatforms', () => {
     expect(pad.height ?? 1).toBeLessThanOrEqual(0.35);
   });
 
+  it('fits the collision surface to whichever face is actually up after a 180° flip', () => {
+    // Same tilted plank as above (25° pitch), then flipped 180° around X —
+    // exactly what the toolbar's Flip button does. The face that WAS the
+    // top (local y=0.4) now rotates to point down; the face that WAS the
+    // bottom (local y=0) is the one now facing up — i.e. what the player
+    // actually sees and stands on. Fitting the plane to the old "always
+    // yMax" face put the collision surface at the wrong height entirely:
+    // solid to the eye, walk-through in practice.
+    const rotation: [number, number, number] = [25 + 180, 0, 0];
+    const doc = baseDoc([
+      {
+        id: 'ramp1f',
+        name: 'Tilted Ramp',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        collisionSize: [4, 0.4, 8],
+        layerId: 'l1',
+        position: [0, 2, 0],
+        rotation,
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads.length).toBe(1);
+    const pad = pads[0];
+    // Reproduce just the X-axis rotation (ry=rz=0 here) to know where each
+    // candidate local face actually lands in world space.
+    const rx = (rotation[0] * Math.PI) / 180;
+    const worldYIfTopIsYMax = 2 + 0.4 * Math.cos(rx);
+    const worldYIfTopIsYMin = 2 + 0 * Math.cos(rx);
+    const trueTopWorldY = Math.max(worldYIfTopIsYMax, worldYIfTopIsYMin);
+    // The fitted surface must sit at the face that's actually up...
+    expect(pad.z).toBeCloseTo(trueTopWorldY, 1);
+    // ...not the other one (this is what the bug produced: off by roughly
+    // the box's own thickness projected onto the tilt).
+    const wrongFaceWorldY = Math.min(worldYIfTopIsYMax, worldYIfTopIsYMin);
+    expect(Math.abs(pad.z - wrongFaceWorldY)).toBeGreaterThan(0.05);
+  });
+
   it('leaves a slightly-off-axis flat solid alone (tolerance, not over-subdividing walls)', () => {
     const doc = baseDoc([
       {

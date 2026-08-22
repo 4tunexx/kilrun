@@ -721,7 +721,20 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
   const bottomAligned = isHammerSolidEntity(e);
   const yMin = bottomAligned ? 0 : -halfY;
   const yMax = bottomAligned ? 2 * halfY : halfY;
-  const topLocalY = yMax;
+  // Which LOCAL face ends up facing up in world space depends on rotation —
+  // it's only yMax for anything short of upside-down. The toolbar's 180°
+  // Flip (or any hand rotation past vertical) inverts the box, so the local
+  // point that used to be the top now rotates to point DOWN, while the
+  // point that used to be the bottom is now the one facing up — i.e. the
+  // face the player actually stands on after the flip. This used to always
+  // fit the walkable plane to local yMax regardless, so a flipped ramp got
+  // its collision surface fitted to the face that's now pointing away from
+  // the player — wherever that ends up — while the real (now-topmost) face
+  // the player sees and walks onto had no matching collision at all: solid
+  // to the eye, walk-through in practice.
+  const yMaxWorldY = rotateLocalXYZ([0, yMax, 0], rotDeg)[1];
+  const yMinWorldY = rotateLocalXYZ([0, yMin, 0], rotDeg)[1];
+  const topLocalY = yMaxWorldY >= yMinWorldY ? yMax : yMin;
 
   // A rigid box's top face stays perfectly flat no matter how it's rotated —
   // approximating it with N discrete flat shelves (the old approach) always
