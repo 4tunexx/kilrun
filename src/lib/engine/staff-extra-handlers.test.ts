@@ -7,6 +7,7 @@ describe('parseStaffEngineResource', () => {
     expect(parseStaffEngineResource('join-token')).toBe('join-token');
     expect(parseStaffEngineResource('models')).toBe('models');
     expect(parseStaffEngineResource('images')).toBe('images');
+    expect(parseStaffEngineResource('meshes')).toBe('meshes');
   });
 
   it('returns null for the plain session GET', () => {

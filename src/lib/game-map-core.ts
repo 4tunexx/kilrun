@@ -22,7 +22,7 @@ export type CloudMapDocumentRow = CloudMapListItem & {
   document: MapDocument;
 };
 
-function stripInlineDataUrls(doc: MapDocument): { doc: MapDocument; strippedKeys: string[] } {
+export function stripInlineDataUrls(doc: MapDocument): { doc: MapDocument; strippedKeys: string[] } {
   const clone = JSON.parse(JSON.stringify(doc)) as MapDocument;
   const isStrippableDataUrl = (v: unknown): v is string =>
     typeof v === 'string' && v.startsWith('data:') && v.length > 8_000;
@@ -50,6 +50,14 @@ function stripInlineDataUrls(doc: MapDocument): { doc: MapDocument; strippedKeys
   return { doc: clone, strippedKeys: [...strippedKeys] };
 }
 
+export function throwIfInlineAssetsStripped(strippedKeys: string[]): void {
+  if (!strippedKeys.length) return;
+  const unique = [...new Set(strippedKeys)];
+  throw new Error(
+    `Map still has inline files (${unique.join(', ')}). Upload those GLBs/textures to the live site (Build → Link live game), then publish.`
+  );
+}
+
 export async function publishCloudMapAsStaff(
   staff: { id: string },
   input: {
@@ -63,13 +71,11 @@ export async function publishCloudMapAsStaff(
 ): Promise<CloudMapListItem> {
   const mode = normalizeKilrunMode(input.mode);
   const { doc: cleaned, strippedKeys } = stripInlineDataUrls(input.document);
+  throwIfInlineAssetsStripped(strippedKeys);
   const documentJson = JSON.stringify(cleaned);
   if (documentJson.length > 4_500_000) {
-    const hint = strippedKeys.length
-      ? ` Large inline data (${strippedKeys.join(', ')}) was already stripped from optional fields and it's still too big — some of those may be on required fields (e.g. shop skin textures) that couldn't be removed.`
-      : '';
     throw new Error(
-      `Map is too large to publish. Move custom GLBs/textures to /public/game/... URLs (not inline data URLs), then retry.${hint}`
+      'Map is too large to publish. Upload custom GLBs/textures to the live site (not inline data URLs), then retry.'
     );
   }
 

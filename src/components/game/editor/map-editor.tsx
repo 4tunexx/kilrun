@@ -136,6 +136,7 @@ import {
   adminUploadPrefabModel,
 } from '@/lib/prefab-library-actions';
 import { CharacterAssetPicker } from './character-asset-picker';
+import { persistEditorModelDataUrl, persistEditorModelFile, persistEditorImageFile } from '@/lib/engine/platform-client';
 import {
   ensureStarterMap,
   exportJson,
@@ -1547,6 +1548,18 @@ export function MapEditor({
     toast({ title: 'Ungrouped', description: 'Objects are independent again.' });
   };
 
+  const persistCsgOrWarn = async (dataUrl: string, filename: string) => {
+    const url = await persistEditorModelDataUrl(dataUrl, filename);
+    if (url.startsWith('data:')) {
+      toast({
+        title: 'CSG kept locally',
+        description:
+          'Link live game and keep the mesh under ~4 MB to publish it. Publish rejects inline meshes.',
+      });
+    }
+    return url;
+  };
+
   /** First selected = stays (base), last shift-clicked = cut off (cutter). */
   const runCsgSubtract = async () => {
     if (selectedIds.length !== 2) {
@@ -1576,6 +1589,9 @@ export function MapEditor({
         return;
       }
       const deleted = isCsgDeleteResult(result);
+      const meshUrl = isCsgDeleteResult(result)
+        ? ''
+        : await persistCsgOrWarn(result.customModelUrl, 'csg-subtract.glb');
       mutateLiveDoc((d) => {
         let entities = d.entities.filter((e) => e.id !== cutter.id);
         entities = deleted
@@ -1586,7 +1602,7 @@ export function MapEditor({
                     ...e,
                     model: undefined,
                     primitive: undefined,
-                    customModelUrl: result.customModelUrl,
+                    customModelUrl: meshUrl,
                     position: result.position,
                     rotation: result.rotation,
                     scale: result.scale,
@@ -1657,6 +1673,7 @@ export function MapEditor({
         return;
       }
       const newId = generateId('csg');
+      const meshUrl = await persistCsgOrWarn(result.customModelUrl, 'csg-union.glb');
       mutateLiveDoc((d) => {
         const entities = d.entities.filter((e) => !selectedIds.includes(e.id));
         const merged: EditorEntity = {
@@ -1668,7 +1685,7 @@ export function MapEditor({
           rotation: result.rotation,
           scale: result.scale,
           color: sources[0].color,
-          customModelUrl: result.customModelUrl,
+          customModelUrl: meshUrl,
           collisionSize: result.collisionSize,
           csgPads: result.csgPads,
           csgOp: result.csgOp,
@@ -1723,6 +1740,9 @@ export function MapEditor({
       }
       const deleted = isCsgDeleteResult(result);
       const newId = generateId('csg');
+      const meshUrl = isCsgDeleteResult(result)
+        ? ''
+        : await persistCsgOrWarn(result.customModelUrl, 'csg-intersect.glb');
       mutateLiveDoc((d) => {
         const entities = d.entities.filter((e) => e.id !== a.id && e.id !== b.id);
         if (deleted) return { ...d, entities };
@@ -1735,7 +1755,7 @@ export function MapEditor({
           rotation: result.rotation,
           scale: result.scale,
           color: a.color,
-          customModelUrl: result.customModelUrl,
+          customModelUrl: meshUrl,
           collisionSize: result.collisionSize,
           csgPads: result.csgPads,
           csgOp: result.csgOp,
@@ -4270,16 +4290,25 @@ export function MapEditor({
                       className="mt-0.5 w-full text-[10px]"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
+                        e.target.value = '';
                         if (!f) return;
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          patchSelected({
-                            customModelUrl: String(reader.result),
-                            model: undefined,
-                            name: selected.name || f.name.replace(/\.(glb|gltf|fbx)$/i, ''),
-                          });
-                        };
-                        reader.readAsDataURL(f);
+                        void (async () => {
+                          try {
+                            const url = await persistEditorModelFile(f);
+                            patchSelected({
+                              customModelUrl: url,
+                              model: undefined,
+                              name: selected.name || f.name.replace(/\.(glb|gltf|fbx)$/i, ''),
+                            });
+                            toast({ title: 'Model uploaded' });
+                          } catch (err) {
+                            toast({
+                              title: 'Model upload failed',
+                              description: err instanceof Error ? err.message : 'Link live game, then try again.',
+                              variant: 'destructive',
+                            });
+                          }
+                        })();
                       }}
                     />
                   </label>
@@ -6254,17 +6283,23 @@ export function MapEditor({
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (!f) return;
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      const dataUrl = String(reader.result);
-                      saveCustomTexture(f.name, dataUrl);
-                      setCustomTextures(listCustomTextures());
-                      patchSelected({ textureUrl: dataUrl });
-                      toast({ title: 'Texture applied to object' });
-                    };
-                    reader.readAsDataURL(f);
                     e.target.value = '';
+                    if (!f) return;
+                    void (async () => {
+                      try {
+                        const url = await persistEditorImageFile(f, 'misc');
+                        saveCustomTexture(f.name, url);
+                        setCustomTextures(listCustomTextures());
+                        patchSelected({ textureUrl: url });
+                        toast({ title: 'Texture applied to object' });
+                      } catch (err) {
+                        toast({
+                          title: 'Texture upload failed',
+                          description: err instanceof Error ? err.message : 'Link live game, then try again.',
+                          variant: 'destructive',
+                        });
+                      }
+                    })();
                   }}
                 />
                 <Button

@@ -5,7 +5,8 @@ export type StaffEngineResource =
   | 'shop'
   | 'join-token'
   | 'models'
-  | 'images';
+  | 'images'
+  | 'meshes';
 
 export function parseStaffEngineResource(raw: string | null | undefined): StaffEngineResource | null {
   if (
@@ -15,7 +16,8 @@ export function parseStaffEngineResource(raw: string | null | undefined): StaffE
     raw === 'shop' ||
     raw === 'join-token' ||
     raw === 'models' ||
-    raw === 'images'
+    raw === 'images' ||
+    raw === 'meshes'
   ) {
     return raw;
   }

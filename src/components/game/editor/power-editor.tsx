@@ -39,16 +39,7 @@ import {
 } from '@shared/power-definitions';
 import { getLucideIcon } from '@/lib/move-icons';
 import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
-import { hasEngineSession, siteOrEngineFetch } from '@/lib/engine/platform-client';
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
+import { hasEngineSession, siteOrEngineFetch, persistEditorImageFile } from '@/lib/engine/platform-client';
 
 /** Renders a power's `icon` as an uploaded image, a lucide icon (auto-
  * created custom-move powers use "lucide:Name"), or the legacy emoji glyph
@@ -164,9 +155,13 @@ function IconField({ icon, onChange }: { icon: string; onChange: (icon: string) 
             return;
           }
           try {
-            onChange(await fileToDataUrl(file));
-          } catch {
-            toast({ title: 'Could not read image', variant: 'destructive' });
+            onChange(await persistEditorImageFile(file, 'misc'));
+          } catch (err) {
+            toast({
+              title: 'Icon upload failed',
+              description: err instanceof Error ? err.message : 'Link live game, then try again.',
+              variant: 'destructive',
+            });
           }
         }}
       />
@@ -520,10 +515,14 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
                         return;
                       }
                       try {
-                        const dataUrl = await fileToDataUrl(file);
-                        await saveTreeConfig({ backgroundUrl: dataUrl });
-                      } catch {
-                        toast({ title: 'Could not read image', variant: 'destructive' });
+                        const url = await persistEditorImageFile(file, 'misc');
+                        await saveTreeConfig({ backgroundUrl: url });
+                      } catch (err) {
+                        toast({
+                          title: 'Background upload failed',
+                          description: err instanceof Error ? err.message : 'Link live game, then try again.',
+                          variant: 'destructive',
+                        });
                       }
                     }}
                   />

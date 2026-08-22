@@ -32,6 +32,8 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
+import { persistEditorImageFile, persistEditorModelFile } from '@/lib/engine/platform-client';
 import {
   DEFAULT_WEAPON_DEF,
   type MapWeaponDef,
@@ -175,6 +177,7 @@ export function WeaponEditor({
   /** Render inside map-editor left nav instead of fullscreen overlay. */
   embedded?: boolean;
 }) {
+  const { toast } = useToast();
   const hostRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>('model');
   const [dirty, setDirty] = useState(false);
@@ -533,9 +536,17 @@ export function WeaponEditor({
           onChange={async (e) => {
             const file = e.target.files?.[0];
             if (!file) return;
-            const url = await fileToDataUrl(file);
-            patch({ customModelUrl: url, model: undefined });
             e.target.value = '';
+            try {
+              const url = await persistEditorModelFile(file);
+              patch({ customModelUrl: url, model: undefined });
+            } catch (err) {
+              toast({
+                title: 'Model upload failed',
+                description: err instanceof Error ? err.message : 'Link live game, then try again.',
+                variant: 'destructive',
+              });
+            }
           }}
         />
       </div>
@@ -591,6 +602,7 @@ function ModelTab({
   patch: (p: Partial<MapWeaponDef>) => void;
   fileRef: React.RefObject<HTMLInputElement | null>;
 }) {
+  const { toast } = useToast();
   const texRef = React.useRef<HTMLInputElement>(null);
   return (
     <div className="space-y-3">
@@ -712,8 +724,16 @@ function ModelTab({
             const file = e.target.files?.[0];
             e.target.value = '';
             if (!file) return;
-            const url = await fileToDataUrl(file);
-            if (url) patch({ textureUrl: url });
+            try {
+              const url = await persistEditorImageFile(file, 'misc');
+              patch({ textureUrl: url });
+            } catch (err) {
+              toast({
+                title: 'Texture upload failed',
+                description: err instanceof Error ? err.message : 'Link live game, then try again.',
+                variant: 'destructive',
+              });
+            }
           }}
         />
       </Section>
@@ -1281,13 +1301,4 @@ async function loadWeaponModel(
     group.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.6, 0.08), mat));
     return [];
   }
-}
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }

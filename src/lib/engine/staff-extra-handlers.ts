@@ -42,6 +42,7 @@ import {
   SITE_IMAGE_KINDS,
   type SiteImageKind,
 } from '@/lib/site-asset-upload';
+import { persistUploadedModelFile } from '@/lib/model-asset-core';
 
 export type { StaffEngineResource };
 
@@ -67,6 +68,7 @@ export async function handleStaffEngineResource(
   if (resource === 'shop') return handleShop(req, method);
   if (resource === 'models') return handleModels(req, method);
   if (resource === 'images') return handleImages(req, method);
+  if (resource === 'meshes') return handleMeshes(req, method);
   return handleJoinToken(req, method);
 }
 
@@ -236,6 +238,24 @@ async function handleModels(req: NextRequest, method: string) {
     return engineJson(req, { ok: false, error: 'Method not allowed' }, 405);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Prefab model request failed';
+    return engineJson(req, { ok: false, error: message }, staffStatus(message));
+  }
+}
+
+async function handleMeshes(req: NextRequest, method: string) {
+  if (method !== 'POST') return engineJson(req, { ok: false, error: 'Method not allowed' }, 405);
+  try {
+    await requireEngineStaff(req);
+    const form = await req.formData();
+    const file = form.get('file');
+    if (!(file instanceof File)) {
+      return engineJson(req, { ok: false, error: 'Missing model' }, 400);
+    }
+    const originalFilename = String(form.get('originalFilename') ?? '').trim() || file.name;
+    const url = await persistUploadedModelFile(file, originalFilename);
+    return engineJson(req, { ok: true, url });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Model upload failed';
     return engineJson(req, { ok: false, error: message }, staffStatus(message));
   }
 }

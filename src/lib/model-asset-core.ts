@@ -3,7 +3,8 @@ import { mkdir, writeFile } from 'fs/promises';
 import path from 'path';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads', 'models');
-const MAX_BYTES = 50_000_000;
+/** Hobby session lambda body is ~4.5 MB; leave headroom for multipart headers. */
+export const LIVE_MODEL_MAX_BYTES = 4_000_000;
 const ALLOWED_EXT = new Set(['glb', 'gltf', 'fbx', 'obj']);
 const CONTENT_TYPES: Record<string, string> = {
   glb: 'model/gltf-binary',
@@ -30,9 +31,9 @@ export async function persistModelBuffer(
   originalFilename?: string,
   hintExt?: string | null
 ): Promise<string> {
-  if (buffer.length > MAX_BYTES) {
+  if (buffer.length > LIVE_MODEL_MAX_BYTES) {
     throw new Error(
-      `Model file is too large (${(buffer.length / 1_000_000).toFixed(1)} MB). Maximum is 50 MB.`
+      `Model file is too large (${(buffer.length / 1_000_000).toFixed(1)} MB). Live site max is about 4 MB.`
     );
   }
   const nameExt = originalFilename?.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
@@ -42,6 +43,7 @@ export async function persistModelBuffer(
   const hash = createHash('sha256').update(buffer).digest('hex').slice(0, 16);
   const filename = `model-${hash}.${ext}`;
 
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
   if (process.env.BLOB_READ_WRITE_TOKEN) {
     try {
       const { put } = await import('@vercel/blob');
@@ -53,7 +55,12 @@ export async function persistModelBuffer(
       return blob.url;
     } catch (err) {
       console.error('[persistModelBuffer] Vercel Blob upload failed, falling back to disk', err);
+      if (isServerless) {
+        throw new Error('Model upload to Blob failed. Check BLOB_READ_WRITE_TOKEN.');
+      }
     }
+  } else if (isServerless) {
+    throw new Error('Model upload needs Vercel Blob (BLOB_READ_WRITE_TOKEN).');
   }
 
   await mkdir(UPLOAD_DIR, { recursive: true });
@@ -70,4 +77,14 @@ export async function persistModelFromDataUrl(
   if (!dataUrl.startsWith('data:')) return dataUrl;
   const { buffer, hintExt } = bufferFromModelDataUrl(dataUrl);
   return persistModelBuffer(buffer, originalFilename, hintExt);
+}
+
+export async function persistUploadedModelFile(file: File, originalFilename?: string): Promise<string> {
+  if (file.size > LIVE_MODEL_MAX_BYTES) {
+    throw new Error(
+      `Model file is too large (${(file.size / 1_000_000).toFixed(1)} MB). Live site max is about 4 MB.`
+    );
+  }
+  const buffer = Buffer.from(await file.arrayBuffer());
+  return persistModelBuffer(buffer, originalFilename || file.name);
 }

@@ -394,3 +394,56 @@ export async function uploadSiteImageFile(file: File, kind = 'misc'): Promise<st
   }
   return absolutizeSiteUrl(data.url) ?? data.url;
 }
+
+function dataUrlToFile(dataUrl: string, filename: string): File {
+  const comma = dataUrl.indexOf(',');
+  if (comma < 0) throw new Error('Invalid model data');
+  const header = dataUrl.slice(0, comma);
+  const mime = /data:([^;]+)/i.exec(header)?.[1] || 'application/octet-stream';
+  const binary = atob(dataUrl.slice(comma + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new File([bytes], filename, { type: mime });
+}
+
+/** Persist a GLB/FBX/OBJ to Blob and return a public URL (website or Engine). */
+export async function persistEditorModelFile(file: File): Promise<string> {
+  if (file.size > 4_000_000) {
+    throw new Error(
+      `Model file is too large (${(file.size / 1_000_000).toFixed(1)} MB). Live site max is about 4 MB.`
+    );
+  }
+  const form = new FormData();
+  form.append('file', file);
+  form.append('originalFilename', file.name);
+  const res = await siteOrEngineFetch('/api/engine/meshes', '/api/engine/meshes', {
+    method: 'POST',
+    body: form,
+  });
+  const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+  if (!res.ok || !data.url) {
+    throw new Error(data.error || (res.ok ? 'Upload failed' : `Website returned ${res.status}`));
+  }
+  return absolutizeSiteUrl(data.url) ?? data.url;
+}
+
+export async function uploadModelFile(dataUrl: string, originalFilename?: string): Promise<string> {
+  return persistEditorModelFile(dataUrlToFile(dataUrl, originalFilename || 'model.glb'));
+}
+
+/** CSG / generated meshes: persist when linked, otherwise keep the data URL. */
+export async function persistEditorModelDataUrl(
+  dataUrl: string,
+  originalFilename = 'model.glb'
+): Promise<string> {
+  if (!dataUrl.startsWith('data:')) return dataUrl;
+  try {
+    return await uploadModelFile(dataUrl, originalFilename);
+  } catch {
+    return dataUrl;
+  }
+}
+
+export async function persistEditorImageFile(file: File, kind = 'misc'): Promise<string> {
+  return uploadSiteImageFile(file, kind);
+}

@@ -10,6 +10,7 @@ import {
   saveCustomTexture,
 } from '../texture-library';
 import type { MapEditorBrains, MapEditorPlugin } from '../engine/types';
+import { persistEditorImageFile } from '@/lib/engine/platform-client';
 
 function TexturesPanel({ brains }: { brains: MapEditorBrains }) {
   const {
@@ -31,6 +32,7 @@ function TexturesPanel({ brains }: { brains: MapEditorBrains }) {
     patchEnv,
     customTextures,
     setCustomTextures,
+    toast,
   } = brains;
 
   return (
@@ -150,14 +152,24 @@ function TexturesPanel({ brains }: { brains: MapEditorBrains }) {
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
+          e.target.value = '';
           if (!f) return;
-          const reader = new FileReader();
-          reader.onload = () => {
-            const dataUrl = String(reader.result);
-            saveCustomTexture(f.name, dataUrl);
-            setCustomTextures(listCustomTextures());
-          };
-          reader.readAsDataURL(f);
+          void (async () => {
+            try {
+              const url = await persistEditorImageFile(f, 'misc');
+              saveCustomTexture(f.name, url);
+              setCustomTextures(listCustomTextures());
+              setPaintTextureUrl(url);
+              apiRef.current?.setPaintTexture(url);
+              setEditTool('paint');
+            } catch (err) {
+              toast({
+                title: 'Texture upload failed',
+                description: err instanceof Error ? err.message : 'Link live game, then try again.',
+                variant: 'destructive',
+              });
+            }
+          })();
         }}
       />
       <p className="text-[10px] text-white/40">Built-in</p>

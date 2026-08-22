@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import { persistEditorModelFile } from '@/lib/engine/platform-client';
 import { Crosshair as CrosshairHud } from '../ui/crosshair';
 import { MapPlayPreview } from './map-play-preview';
 import { updateFollowCamera } from '../renderer/three-world';
@@ -806,18 +807,25 @@ export function TpsViewStudio({
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".glb,.gltf,model/gltf-binary"
+                  accept=".glb,.gltf,.fbx,model/gltf-binary"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      const url = String(reader.result || '');
-                      if (url) void selectModel('custom', url);
-                    };
-                    reader.readAsDataURL(file);
                     e.target.value = '';
+                    if (!file) return;
+                    void (async () => {
+                      try {
+                        const url = await persistEditorModelFile(file);
+                        await selectModel('custom', url);
+                      } catch (err) {
+                        toast({
+                          title: 'Model upload failed',
+                          description:
+                            err instanceof Error ? err.message : 'Link live game, then try again.',
+                          variant: 'destructive',
+                        });
+                      }
+                    })();
                   }}
                 />
                 <Button

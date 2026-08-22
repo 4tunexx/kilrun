@@ -34,6 +34,8 @@ import {
   sanitizeShopSkin,
 } from './map-document';
 import { CATALOG_WEAPONS } from '@/lib/weapon-catalog';
+import { useToast } from '@/hooks/use-toast';
+import { persistEditorImageFile } from '@/lib/engine/platform-client';
 
 const QUICK_PRESETS = [
   { id: 'pistol_001', label: 'Pistol' },
@@ -45,15 +47,6 @@ const QUICK_PRESETS = [
   { id: 'hockey_stick_001', label: 'Hockey Stick' },
   { id: 'knife_001', label: 'Knife' },
 ] as const;
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 function downloadUrl(url: string, filename: string) {
   const a = document.createElement('a');
@@ -72,6 +65,7 @@ export function MapShopPanel({
   onSave: (settings: MapShopSettings) => void;
   onClose: () => void;
 }) {
+  const { toast } = useToast();
   const [settings, setSettings] = React.useState<MapShopSettings>(() =>
     ensureShopSettings(mapDoc)
   );
@@ -874,18 +868,25 @@ export function MapShopPanel({
           const key = texTargetKey.current;
           e.target.value = '';
           if (!file || !key) return;
-          const url = await fileToDataUrl(file);
-          if (!url) return;
-          if (key === 'skin-new') {
-            addSkin(url);
-            return;
-          }
-          if (key.startsWith('skin:')) {
-            patchSkin(key.slice(5), { textureUrl: url });
-            return;
-          }
-          if (key.startsWith('item:')) {
-            patchItem(key.slice(5), { textureUrl: url });
+          try {
+            const url = await persistEditorImageFile(file, 'misc');
+            if (key === 'skin-new') {
+              addSkin(url);
+              return;
+            }
+            if (key.startsWith('skin:')) {
+              patchSkin(key.slice(5), { textureUrl: url });
+              return;
+            }
+            if (key.startsWith('item:')) {
+              patchItem(key.slice(5), { textureUrl: url });
+            }
+          } catch (err) {
+            toast({
+              title: 'Texture upload failed',
+              description: err instanceof Error ? err.message : 'Link live game, then try again.',
+              variant: 'destructive',
+            });
           }
         }}
       />

@@ -68,6 +68,8 @@ import {
   type SkinSculptBrush,
   type SkinShapeParams,
 } from '@/lib/player-skins';
+import { useToast } from '@/hooks/use-toast';
+import { persistEditorImageFile, persistEditorModelFile } from '@/lib/engine/platform-client';
 import {
   WEAPON_COMBAT_KINDS,
   defaultCombatForKind,
@@ -106,6 +108,7 @@ export function ModelSkinEditor({
   isMobile?: boolean;
   embedded?: boolean;
 }) {
+  const { toast } = useToast();
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<SkinPreview | null>(null);
   const glbFileRef = useRef<HTMLInputElement>(null);
@@ -456,28 +459,38 @@ export function ModelSkinEditor({
   };
 
   const onUploadGlb = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = String(reader.result || '');
-      if (!url) return;
-      patchActive({
-        customModelUrl: url,
-        model: undefined,
-        primitive: undefined,
-      });
-      setSourceMode('upload');
-    };
-    reader.readAsDataURL(file);
+    void (async () => {
+      try {
+        const url = await persistEditorModelFile(file);
+        patchActive({
+          customModelUrl: url,
+          model: undefined,
+          primitive: undefined,
+        });
+        setSourceMode('upload');
+      } catch (err) {
+        toast({
+          title: 'Model upload failed',
+          description: err instanceof Error ? err.message : 'Link live game, then try again.',
+          variant: 'destructive',
+        });
+      }
+    })();
   };
 
   const onUploadTex = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = String(reader.result || '');
-      if (!url) return;
-      patchActive({ textureUrl: url });
-    };
-    reader.readAsDataURL(file);
+    void (async () => {
+      try {
+        const url = await persistEditorImageFile(file, 'misc');
+        patchActive({ textureUrl: url });
+      } catch (err) {
+        toast({
+          title: 'Texture upload failed',
+          description: err instanceof Error ? err.message : 'Link live game, then try again.',
+          variant: 'destructive',
+        });
+      }
+    })();
   };
 
   return (

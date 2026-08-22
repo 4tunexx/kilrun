@@ -132,6 +132,7 @@ const nextConfig: NextConfig = {
       { source: '/api/engine/join-token', destination: '/api/engine/session?engineResource=join-token' },
       { source: '/api/engine/models', destination: '/api/engine/session?engineResource=models' },
       { source: '/api/engine/images', destination: '/api/engine/session?engineResource=images' },
+      { source: '/api/engine/meshes', destination: '/api/engine/session?engineResource=meshes' },
     ];
   },
   async headers() {

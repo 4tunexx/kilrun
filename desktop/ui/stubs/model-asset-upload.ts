@@ -1,3 +1,1 @@
-export async function uploadModelGlb(dataUrl: string) {
-  return dataUrl;
-}
+export { uploadModelFile as uploadModelGlb } from '@/lib/engine/platform-client';
