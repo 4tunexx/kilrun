@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Sparkles, Plus, Minus, Maximize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,7 +17,7 @@ import {
   type PowerDefinitionRecord,
 } from '@shared/power-definitions';
 import { getLucideIcon } from '@/lib/move-icons';
-import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
+import type { GameProgressionSnapshot } from '@shared/ability-progression';
 import { getPowerTreeConfig, type PowerTreeConfig } from '@/lib/power-tree-config';
 import { playSound } from '../effects/soundboard';
 import { MenuSfxRoot } from '../effects/menu-sfx';
@@ -56,7 +56,7 @@ interface GameMenuProps {
   loading: boolean;
   upgrading: AbilityKey | null;
   error?: string | null;
-  onUpgrade: (ability: AbilityKey) => void;
+  onUpgrade: (ability: AbilityKey) => void | Promise<void>;
   /** Data-driven power list (core + any custom powers from the Power
    * Editor), fetched at runtime — falls back to the static 12 on failure. */
   powers?: PowerDefinitionRecord[];
@@ -631,7 +631,7 @@ export function LevelUpPopup({
   event,
   onDismiss,
 }: {
-  event: { fromLevel: number; toLevel: number; unlocked: AbilityDefinition[] } | null;
+  event: { fromLevel: number; toLevel: number; pointsGained?: number; unlocked: AbilityDefinition[] } | null;
   onDismiss: () => void;
 }) {
   useEffect(() => {
@@ -649,6 +649,13 @@ export function LevelUpPopup({
           <p className="text-sm font-bold text-amber-300">
             Level {event.fromLevel} → {event.toLevel}
           </p>
+          {(event.pointsGained ?? event.toLevel - event.fromLevel) > 0 && (
+            <p className="text-sm font-black text-white">
+              +{event.pointsGained ?? event.toLevel - event.fromLevel} Skill Point
+              {(event.pointsGained ?? event.toLevel - event.fromLevel) === 1 ? '' : 's'} — press M
+              to upgrade
+            </p>
+          )}
         </div>
         {event.unlocked.length > 0 && (
           <div className="px-6 pb-2">
@@ -694,17 +701,14 @@ export function useGameProgression(userId: string | null | undefined) {
   const [levelUpEvent, setLevelUpEvent] = useState<{
     fromLevel: number;
     toLevel: number;
+    pointsGained: number;
     unlocked: ReturnType<typeof getNewlyUnlockedAbilities>;
   } | null>(null);
-  const [, startTransition] = useTransition();
 
-  // Fetch the data-driven power list once — core (tuned) + any custom
-  // powers created in the Power Editor. Falls back to the static 12 (the
-  // initial state above) on any failure, so the menu never breaks.
   useEffect(() => {
     let cancelled = false;
-    import('@/lib/game-progression-actions')
-      .then(({ getPowerDefinitionsForMenu }) => getPowerDefinitionsForMenu())
+    import('@/lib/game-progression-client')
+      .then(({ fetchPowerDefinitionsForMenu }) => fetchPowerDefinitionsForMenu())
       .then((list) => {
         if (!cancelled && Array.isArray(list) && list.length > 0) setPowers(list);
       })
@@ -716,17 +720,19 @@ export function useGameProgression(userId: string | null | undefined) {
     };
   }, []);
 
+  const seenLevelRef = useRef<number | null>(null);
   const checkLevelUp = React.useCallback(
     (snap: GameProgressionSnapshot | null) => {
       if (!snap || !userId || typeof window === 'undefined') return;
+      const prev = seenLevelRef.current;
+      seenLevelRef.current = snap.level;
       const key = `kilrun.gameLevel.lastSeen.${userId}`;
-      const stored = window.localStorage.getItem(key);
-      const lastSeen = stored ? parseInt(stored, 10) : snap.level;
-      if (Number.isFinite(lastSeen) && snap.level > lastSeen) {
+      if (prev !== null && snap.level > prev) {
         setLevelUpEvent({
-          fromLevel: lastSeen,
+          fromLevel: prev,
           toLevel: snap.level,
-          unlocked: getNewlyUnlockedAbilities(lastSeen, snap.level),
+          pointsGained: Math.max(0, snap.level - prev),
+          unlocked: getNewlyUnlockedAbilities(prev, snap.level),
         });
       }
       window.localStorage.setItem(key, String(snap.level));
@@ -737,8 +743,8 @@ export function useGameProgression(userId: string | null | undefined) {
   const refresh = React.useCallback(() => {
     if (!userId) return;
     setLoading(true);
-    import('@/lib/game-progression-actions')
-      .then(({ getGameProgression }) => getGameProgression(userId))
+    import('@/lib/game-progression-client')
+      .then(({ fetchGameProgression }) => fetchGameProgression(userId))
       .then((snap) => {
         setProgression(snap);
         checkLevelUp(snap);
@@ -751,21 +757,25 @@ export function useGameProgression(userId: string | null | undefined) {
     refresh();
   }, [refresh]);
 
-  const upgrade = (ability: AbilityKey) => {
-    if (!userId || upgrading) return;
+  useEffect(() => {
+    const onChanged = () => refresh();
+    window.addEventListener('kilrun-progression-changed', onChanged);
+    return () => window.removeEventListener('kilrun-progression-changed', onChanged);
+  }, [refresh]);
+
+  const upgrade = (ability: AbilityKey): Promise<void> => {
+    if (!userId || upgrading) return Promise.resolve();
     setUpgrading(ability);
     setError(null);
-    startTransition(() => {
-      import('@/lib/game-progression-actions')
-        .then(({ upgradeGameAbility }) => upgradeGameAbility(userId, ability))
-        .then((snap) => {
-          setProgression(snap);
-          checkLevelUp(snap);
-          playSound('skill_point_spent');
-        })
-        .catch((err) => setError(err instanceof Error ? err.message : 'Upgrade failed'))
-        .finally(() => setUpgrading(null));
-    });
+    return import('@/lib/game-progression-client')
+      .then(({ upgradeGameAbilityClient }) => upgradeGameAbilityClient(userId, ability))
+      .then((snap) => {
+        setProgression(snap);
+        checkLevelUp(snap);
+        playSound('skill_point_spent');
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Upgrade failed'))
+      .finally(() => setUpgrading(null));
   };
 
   const hasUnspentPoints = (progression?.skillPoints ?? 0) > 0;

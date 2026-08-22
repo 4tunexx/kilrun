@@ -19,6 +19,7 @@ import {
   TICK_DT_MS,
   VOID_Z,
   WORLD_HEIGHT,
+  resolveWallJumpEnabled,
 } from '../sim/constants.js';
 import {
   applyMovement,
@@ -55,6 +56,7 @@ import {
 } from '../sim/weapon-combat.js';
 import { fetchTrustedLoadout } from '../trusted-loadout.js';
 import { applyAbilityStatsToPlayer, getMaxHealth, getMaxEnergyFor } from '../sim/ability-stats.js';
+import { refreshPlayerAbilitiesFromTrustedLoadout } from '../sim/refresh-abilities.js';
 import {
   activateAbility,
   applyAbilityLevelsToPlayer,
@@ -217,6 +219,7 @@ export class CompetitiveRoom extends Room<RoomState> {
   protected minPlayersToStart = COMPETITIVE_MIN_PLAYERS_TO_START;
   private lastObstacleHitAt = new Map<string, number>();
   private lastShotAt = new Map<string, number>();
+  private lastAbilityRefreshAt = new Map<string, number>();
   /** Edge-detects shootPressed for semi/bolt fire modes — see the fire loop
    *  below. Without this, weaponFireMode was stored/synced but never
    *  actually enforced: holding the trigger fired a "semi-auto" or
@@ -559,6 +562,16 @@ export class CompetitiveRoom extends Room<RoomState> {
       client.leave(4002, 'abandoned');
     });
 
+    this.onMessage('refreshAbilities', (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) return;
+      const now = Date.now();
+      const last = this.lastAbilityRefreshAt.get(client.sessionId) ?? 0;
+      if (now - last < 750) return;
+      this.lastAbilityRefreshAt.set(client.sessionId, now);
+      void refreshPlayerAbilitiesFromTrustedLoadout(player);
+    });
+
     this.onMessage('activateAbility', (client, payload: { ability?: string } | undefined) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
@@ -801,7 +814,7 @@ export class CompetitiveRoom extends Room<RoomState> {
           slideMult: typeof cs.slideMult === 'number' ? cs.slideMult : undefined,
           slideDurationMs: typeof cs.slideDurationMs === 'number' ? cs.slideDurationMs : undefined,
           slideCooldownMs: typeof cs.slideCooldownMs === 'number' ? cs.slideCooldownMs : undefined,
-          wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
+          wallJumpEnabled: resolveWallJumpEnabled(cs),
           wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
           wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
           wallSlideGravMult: typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : undefined,
@@ -912,7 +925,7 @@ export class CompetitiveRoom extends Room<RoomState> {
           slideMult: typeof cs.slideMult === 'number' ? cs.slideMult : undefined,
           slideDurationMs: typeof cs.slideDurationMs === 'number' ? cs.slideDurationMs : undefined,
           slideCooldownMs: typeof cs.slideCooldownMs === 'number' ? cs.slideCooldownMs : undefined,
-          wallJumpEnabled: typeof cs.wallJumpEnabled === 'boolean' ? cs.wallJumpEnabled : undefined,
+          wallJumpEnabled: resolveWallJumpEnabled(cs),
           wallJumpHorizVel: typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : undefined,
           wallJumpVertVel: typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : undefined,
           wallSlideGravMult:
@@ -1048,6 +1061,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       if (key.startsWith(obstacleHitPrefix)) this.lastObstacleHitAt.delete(key);
     }
     this.lastShotAt.delete(client.sessionId);
+    this.lastAbilityRefreshAt.delete(client.sessionId);
     this.wasShootHeld.delete(client.sessionId);
     this.adminSessions.delete(client.sessionId);
     this.staffSessions.delete(client.sessionId);

@@ -6,7 +6,7 @@ import { RunnerHud } from '../modes/deathrun/runner-hud';
 import { AbilityCooldownRow, MovementCooldownRow } from './ability-hud';
 import type { CustomMoveDef } from '@shared/custom-moves';
 import type { WeaponCombatKind } from '@/lib/weapons';
-import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
+import type { GameProgressionSnapshot } from '@shared/ability-progression';
 import { DEFAULT_KEY_BINDINGS, formatBindKey, type KeyBindAction } from '@shared/key-bindings';
 
 function formatClock(ms: number): string {

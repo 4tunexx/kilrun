@@ -84,6 +84,7 @@ import {
 import { hydrateWeaponCatalogFromApi, catalogWeaponLabel } from '@/lib/weapon-catalog';
 import { getKeyBindings } from '@/lib/key-bindings-config';
 import { DEFAULT_KEY_BINDINGS, eventMatchesBind, formatBindKey, type KeyBindAction } from '@shared/key-bindings';
+import { resolveWallJumpEnabled } from '@shared/sim-constants';
 import {
   loadPlayerMatchSettings,
   savePlayerMatchSettings,
@@ -274,9 +275,20 @@ export default function KilrunEngine({
   }, [gameMenuOpen]);
   const gameProgression = useGameProgression(joinOptions.userId);
   useEffect(() => {
-    if (room.phase === 'results') gameProgression.refresh();
+    if (room.phase !== 'results') return;
+    gameProgression.refresh();
+    const timers = [800, 2500, 4200].map((ms) =>
+      window.setTimeout(() => gameProgression.refresh(), ms)
+    );
+    return () => {
+      for (const id of timers) window.clearTimeout(id);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room.phase]);
+  }, [room.phase, room.rewardsReady]);
+  useEffect(() => {
+    if (gameMenuOpen) gameProgression.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameMenuOpen]);
   const [editorOpen, setEditorOpen] = useState(false);
   const [aiming, setAiming] = useState(false);
   const aimingRef = useRef(false);
@@ -868,7 +880,7 @@ export default function KilrunEngine({
           slideMult: cs.slideMult,
           slideDurationMs: cs.slideDurationMs,
           slideCooldownMs: cs.slideCooldownMs,
-          wallJumpEnabled: cs.wallJumpEnabled,
+          wallJumpEnabled: resolveWallJumpEnabled(cs),
           wallJumpHorizVel: cs.wallJumpHorizVel,
           wallJumpVertVel: cs.wallJumpVertVel,
           wallSlideGravMult: cs.wallSlideGravMult,
@@ -2057,7 +2069,11 @@ export default function KilrunEngine({
           loading={gameProgression.loading}
           upgrading={gameProgression.upgrading}
           error={gameProgression.error}
-          onUpgrade={gameProgression.upgrade}
+          onUpgrade={(ability) => {
+            void gameProgression.upgrade(ability).then(() => {
+              connectionRef.current?.sendRefreshAbilities();
+            });
+          }}
           powers={gameProgression.powers}
         />
 

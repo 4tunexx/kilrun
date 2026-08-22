@@ -5,6 +5,7 @@ import { Trophy, Skull, Coins, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { NetPlayerState, NetRoomState } from '../../net/types';
 import { recordDeathrunResult } from '@/lib/actions';
+import { notifyProgressionChanged } from '@/lib/game-progression-client';
 
 interface ResultsScreenProps {
   room: NetRoomState;
@@ -45,7 +46,10 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ room, player, onCo
         xpEarned: player.xpEarned ?? 0,
         vpEarned: player.vpEarned ?? 0,
       });
-      if (room.rewardsReady) hasRecordedRef.current = true;
+      if (room.rewardsReady) {
+        hasRecordedRef.current = true;
+        notifyProgressionChanged();
+      }
       // Display-only preview from room — still fall through to timed persist.
     }
   }, [player.userId, player.xpEarned, player.vpEarned, room.rewardsReady, room.wasCancelled]);
@@ -84,7 +88,10 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ room, player, onCo
         distance: p.distance ?? 0,
         matchId: r.matchId || undefined,
       })
-        .then((result) => setRewards(result))
+        .then((result) => {
+          setRewards(result);
+          notifyProgressionChanged();
+        })
         .catch(() => {});
     }, 2500);
 

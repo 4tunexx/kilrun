@@ -5,6 +5,7 @@ import { Skull, Trophy, Star, Coins } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { NetPlayerState, NetRoomState } from '../../net/types';
 import { recordHordeResult } from '@/lib/actions';
+import { notifyProgressionChanged } from '@/lib/game-progression-client';
 
 interface Props {
   room: NetRoomState;
@@ -49,7 +50,10 @@ export const HordeResultsScreen: React.FC<Props> = ({ room, player, onContinue }
         xpEarned: player.xpEarned ?? 0,
         vpEarned: player.vpEarned ?? 0,
       });
-      if (room.rewardsReady) hasRecordedRef.current = true;
+      if (room.rewardsReady) {
+        hasRecordedRef.current = true;
+        notifyProgressionChanged();
+      }
     }
   }, [player.userId, player.xpEarned, player.vpEarned, room.rewardsReady, room.wasCancelled]);
 
@@ -81,7 +85,10 @@ export const HordeResultsScreen: React.FC<Props> = ({ room, player, onContinue }
         kills: p.kills ?? 0,
         matchId: r.matchId || undefined,
       })
-        .then(setRewards)
+        .then((result) => {
+          setRewards(result);
+          notifyProgressionChanged();
+        })
         .catch(() => {});
     }, 2500);
 

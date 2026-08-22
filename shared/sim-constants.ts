@@ -52,6 +52,26 @@ export const WALL_SLIDE_GRAV_MULT = 0.35;
 export const WALL_JUMP_LOCKOUT_MS = 180;
 export const WALL_JUMP_SAME_WALL_COOLDOWN_MS = 300;
 
+/**
+ * Old maps saved `wallJumpEnabled: false` because that used to be the editor
+ * default. Enable parkour unless the map actually tuned wall-jump numbers
+ * while leaving the toggle off (a real opt-out).
+ */
+export function resolveWallJumpEnabled(cs?: {
+  wallJumpEnabled?: unknown;
+  wallJumpHorizVel?: unknown;
+  wallJumpVertVel?: unknown;
+  wallSlideGravMult?: unknown;
+} | null): boolean {
+  if (!cs || cs.wallJumpEnabled !== false) return WALL_JUMP_ENABLED_DEFAULT;
+  const horiz = typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : WALL_JUMP_HORIZ_VEL;
+  const vert = typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : WALL_JUMP_VERT_VEL;
+  const slide = typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : WALL_SLIDE_GRAV_MULT;
+  const tuned =
+    horiz !== WALL_JUMP_HORIZ_VEL || vert !== WALL_JUMP_VERT_VEL || slide !== WALL_SLIDE_GRAV_MULT;
+  return !tuned;
+}
+
 export const MAX_ENERGY = 100;
 export const ENERGY_DRAIN_RATE = 28;
 export const ENERGY_REGEN_RATE = 18;

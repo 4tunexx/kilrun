@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
 import type { MapDocument } from './map-document';
 import { ensureCombatSettings, ensurePlatformMotion, DEFAULT_WEAPON_DEF } from './map-document';
-import { PLAYER_HEIGHT, PLAYER_RADIUS } from '@shared/sim-constants';
+import { PLAYER_HEIGHT, PLAYER_RADIUS, resolveWallJumpEnabled } from '@shared/sim-constants';
 import { isPlayerOverlappingObstacle } from '@shared/obstacle-hit';
 import { emitPlaytest, runEntityPluginScripts } from '@/lib/engine/plugin-sdk';
 import {
@@ -348,7 +348,7 @@ export function MapPlayPreview({
       slideMult: cs.slideMult,
       slideDurationMs: cs.slideDurationMs,
       slideCooldownMs: cs.slideCooldownMs,
-      wallJumpEnabled: cs.wallJumpEnabled,
+      wallJumpEnabled: resolveWallJumpEnabled(cs),
       wallJumpHorizVel: cs.wallJumpHorizVel,
       wallJumpVertVel: cs.wallJumpVertVel,
       wallSlideGravMult: cs.wallSlideGravMult,
@@ -401,8 +401,8 @@ export function MapPlayPreview({
   // this fetch fails.
   useEffect(() => {
     let cancelled = false;
-    import('@/lib/game-progression-actions')
-      .then(({ getPowerDefinitionsForMenu }) => getPowerDefinitionsForMenu())
+    import('@/lib/game-progression-client')
+      .then(({ fetchPowerDefinitionsForMenu }) => fetchPowerDefinitionsForMenu())
       .then((records) => {
         if (!cancelled && Array.isArray(records) && records.length > 0) {
           applyDynamicPowerDefinitions(records);

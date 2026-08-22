@@ -1,29 +1,24 @@
-export type GameProgressionSnapshot = {
-  userId: string;
-  level: number;
-  xp: number;
-  skillPoints: number;
-  abilities: Record<string, number>;
-};
+import {
+  fetchGameProgression,
+  fetchPowerDefinitionsForMenu,
+  upgradeGameAbilityClient,
+} from '@/lib/game-progression-client';
+import type { GameProgressionSnapshot } from '@shared/ability-progression';
 
-export async function getGameProgression(_userId: string): Promise<GameProgressionSnapshot | null> {
-  return {
-    userId: 'desktop-editor',
-    level: 1,
-    xp: 0,
-    skillPoints: 0,
-    abilities: {},
-  };
+export type { GameProgressionSnapshot };
+
+export async function getGameProgression(userId: string): Promise<GameProgressionSnapshot | null> {
+  return fetchGameProgression(userId);
 }
 
 export async function getPowerDefinitionsForMenu() {
-  return [];
+  return fetchPowerDefinitionsForMenu();
 }
 
 export async function grantGameXp(_userId: string, _amount: number) {
-  return getGameProgression('desktop-editor');
+  return fetchGameProgression(_userId);
 }
 
-export async function upgradeGameAbility(_userId: string, _ability: string) {
-  return getGameProgression('desktop-editor');
+export async function upgradeGameAbility(userId: string, ability: string) {
+  return upgradeGameAbilityClient(userId, ability as never);
 }

@@ -12,7 +12,7 @@ import {
   getSiteSettings,
 } from '@/lib/progression-actions';
 import { runAsTrustedServer } from '@/lib/trusted-server';
-import { grantGameXp } from '@/lib/game-progression-actions';
+import { grantGameXpToUser } from '@/lib/game-progression-core';
 import {
   DEFAULT_MATCH_REWARDS_CONFIG,
   parseMatchRewardsConfig,
@@ -118,6 +118,42 @@ function statsMatchId(stats: unknown): string | null {
   return typeof id === 'string' && id.length > 0 ? id : null;
 }
 
+type MatchRewardStats = {
+  matchId?: string;
+  kills?: number;
+  wavesCleared?: number;
+  gameXpAwarded?: boolean;
+  gameXp?: number;
+  [key: string]: unknown;
+};
+
+function readMatchStats(stats: unknown): MatchRewardStats {
+  if (!stats || typeof stats !== 'object' || Array.isArray(stats)) return {};
+  return { ...(stats as MatchRewardStats) };
+}
+
+async function markGameXpAwarded(resultId: string, stats: MatchRewardStats, amount: number) {
+  await prisma.matchResult.update({
+    where: { id: resultId },
+    data: { stats: { ...stats, gameXpAwarded: true, gameXp: amount } },
+  });
+}
+
+async function grantInGameXpForMatch(
+  resultId: string,
+  userId: string,
+  amount: number,
+  stats: MatchRewardStats
+): Promise<void> {
+  if (stats.gameXpAwarded) return;
+  try {
+    if (amount > 0) await grantGameXpToUser(userId, amount);
+    await markGameXpAwarded(resultId, stats, amount);
+  } catch (err) {
+    console.error('[match-rewards] in-game XP grant failed', userId, err);
+  }
+}
+
 /** Find an existing MatchResult for this user + matchId (idempotency). */
 export async function findMatchResultByMatchId(userId: string, matchId: string) {
   if (!matchId) return null;
@@ -132,11 +168,22 @@ export async function findMatchResultByMatchId(userId: string, matchId: string) 
 async function awardFromExisting(
   userId: string,
   existing: {
+    id: string;
     xpEarned: number;
     vpEarned: number;
     kpDelta: number;
+    stats: unknown;
   }
 ): Promise<PlayerAward> {
+  const stats = readMatchStats(existing.stats);
+  if (!stats.gameXpAwarded) {
+    const cfg = await getActiveMatchRewardsConfig();
+    const amount = computeInGameXp(
+      { xp: existing.xpEarned, kills: stats.kills, wavesCleared: stats.wavesCleared },
+      cfg
+    );
+    await grantInGameXpForMatch(existing.id, userId, amount, stats);
+  }
   const { KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
   const user = await prisma.user.findUnique({ where: { id: userId } });
   const kp =
@@ -171,7 +218,7 @@ async function applyDeathrunPlayer(
   const role =
     player.role === 'trapper' || player.role === 'runner' ? player.role : 'runner';
 
-  await prisma.matchResult.create({
+  const row = await prisma.matchResult.create({
     data: {
       userId: player.userId,
       mode: 'deathrun',
@@ -179,7 +226,7 @@ async function applyDeathrunPlayer(
       outcome,
       xpEarned: reward.xp,
       vpEarned: reward.vp,
-      stats: { matchId, score, distance, kills, deaths },
+      stats: { matchId, score, distance, kills, deaths, gameXpAwarded: false },
     },
   });
 
@@ -198,7 +245,12 @@ async function applyDeathrunPlayer(
   });
 
   await grantXp(player.userId, reward.xp, 'Deathrun match');
-  await grantGameXp(player.userId, computeInGameXp({ xp: reward.xp, kills }, cfg));
+  await grantInGameXpForMatch(
+    row.id,
+    player.userId,
+    computeInGameXp({ xp: reward.xp, kills }, cfg),
+    readMatchStats(row.stats)
+  );
   await processMatchProgression({
     userId: player.userId,
     mode: 'deathrun',
@@ -243,7 +295,7 @@ async function applyHordePlayer(
   const bonusXp = Math.min(cfg.hordeWaveBonusCap, wavesCleared * cfg.hordeWaveBonusPerWave);
   const xpEarned = reward.xp + bonusXp;
 
-  await prisma.matchResult.create({
+  const row = await prisma.matchResult.create({
     data: {
       userId: player.userId,
       mode: 'horde',
@@ -251,7 +303,7 @@ async function applyHordePlayer(
       outcome,
       xpEarned,
       vpEarned: reward.vp,
-      stats: { matchId, wavesCleared, kills, deaths },
+      stats: { matchId, wavesCleared, kills, deaths, gameXpAwarded: false },
     },
   });
 
@@ -263,7 +315,12 @@ async function applyHordePlayer(
   });
 
   await grantXp(player.userId, xpEarned, 'Horde match');
-  await grantGameXp(player.userId, computeInGameXp({ xp: xpEarned, kills, wavesCleared }, cfg));
+  await grantInGameXpForMatch(
+    row.id,
+    player.userId,
+    computeInGameXp({ xp: xpEarned, kills, wavesCleared }, cfg),
+    readMatchStats(row.stats)
+  );
   await processMatchProgression({
     userId: player.userId,
     mode: 'horde',
@@ -364,7 +421,7 @@ async function applyCompetitivePlayer(
   const roundsWon = clampNonNegInt(player.roundsWon, 50);
   const roundsLost = clampNonNegInt(player.roundsLost, 50);
 
-  await prisma.matchResult.create({
+  const row = await prisma.matchResult.create({
     data: {
       userId: player.userId,
       mode: modeTag,
@@ -381,6 +438,7 @@ async function applyCompetitivePlayer(
         kills,
         deaths,
         opponentAvgKp: player.opponentAvgKp ?? KP_DEFAULT,
+        gameXpAwarded: false,
       },
     },
   });
@@ -397,7 +455,12 @@ async function applyCompetitivePlayer(
     reward.xp,
     queue === 'ranked' ? 'Competitive Ranked' : 'Competitive Casual'
   );
-  await grantGameXp(player.userId, computeInGameXp({ xp: reward.xp, kills }, cfg));
+  await grantInGameXpForMatch(
+    row.id,
+    player.userId,
+    computeInGameXp({ xp: reward.xp, kills }, cfg),
+    readMatchStats(row.stats)
+  );
 
   let nextKp = playerKp;
   let rank = user.currentRank || getRankForKp(playerKp);

@@ -631,6 +631,10 @@ export class GameConnection {
     this.safeSend('activateAbility', { ability });
   }
 
+  public sendRefreshAbilities(): void {
+    this.safeSend('refreshAbilities', {});
+  }
+
   public sendChat(text: string, scope: 'all' | 'team'): void {
     this.safeSend('chat', { text, scope });
   }

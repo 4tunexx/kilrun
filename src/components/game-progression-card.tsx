@@ -6,8 +6,8 @@ import { STATIC_FALLBACK_POWERS, type PowerDefinitionRecord } from '@shared/abil
 import {
   getGameProgression,
   getPowerDefinitionsForMenu,
-  type GameProgressionSnapshot,
 } from '@/lib/game-progression-actions';
+import type { GameProgressionSnapshot } from '@shared/ability-progression';
 import { costForLevelFormula, isImageIcon } from '@shared/power-definitions';
 import { getLucideIcon } from '@/lib/move-icons';
 import {

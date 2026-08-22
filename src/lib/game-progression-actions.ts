@@ -11,19 +11,23 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { isTrustedServerContext } from '@/lib/trusted-server';
 import {
-  ABILITY_DEFINITIONS,
-  ABILITY_KEYS,
-  arePrerequisitesMet,
   type AbilityKey,
-  type AbilityLevels,
   getGameLevelProgress,
-  parseAbilityLevels,
   skillPointsForLevel,
   type PowerDefinitionRecord,
-  STATIC_FALLBACK_POWERS,
 } from '@shared/ability-progression';
-import { loadPowerDefinitions } from '@/lib/power-definitions';
 import { writeAuditLog } from '@/lib/audit';
+import {
+  buildGameProgressionSnapshot,
+  grantGameXpToUser,
+  loadGameProgressionForUser,
+  loadPowerDefinitionsForMenu,
+  reconcileUnspentSkillPoints,
+  upgradeGameAbilityForUser,
+  type GameProgressionSnapshot,
+} from '@/lib/game-progression-core';
+
+export type { GameProgressionSnapshot };
 
 async function requireAdminStaff() {
   const session = await auth();
@@ -51,52 +55,23 @@ async function assertCanMutateUser(userId: string) {
   throw new Error('Forbidden');
 }
 
-export type GameProgressionSnapshot = {
-  gameXp: number;
-  level: number;
-  xpIntoLevel: number;
-  xpForNextLevel: number;
-  percent: number;
-  skillPoints: number;
-  abilities: AbilityLevels;
-};
-
-function buildSnapshot(user: { gameXp: number; gameSkillPoints: number; gameAbilities: unknown }): GameProgressionSnapshot {
-  const progress = getGameLevelProgress(user.gameXp ?? 0);
-  return {
-    gameXp: user.gameXp ?? 0,
-    level: progress.level,
-    xpIntoLevel: progress.xpIntoLevel,
-    xpForNextLevel: progress.xpForNextLevel,
-    percent: progress.percent,
-    skillPoints: Math.max(0, user.gameSkillPoints ?? 0),
-    abilities: parseAbilityLevels(user.gameAbilities),
-  };
-}
-
 /** Fetch a player's in-game progression (own profile or public read). */
 export async function getGameProgression(userId: string): Promise<GameProgressionSnapshot | null> {
-  // force: true — see getPowerDefinitionsForMenu below: this rebuilds the
-  // ABILITY_DEFINITIONS shim (icons included) that GameProgressionCard
-  // reads, and must not serve a stale per-instance cache after an admin edit.
-  await loadPowerDefinitions({ force: true }).catch(() => null);
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) return null;
-  return buildSnapshot(user);
+  let reconcile = false;
+  try {
+    await assertCanMutateUser(userId);
+    reconcile = true;
+  } catch {
+    // Public profile reads must not mutate another player's points.
+  }
+  return loadGameProgressionForUser(userId, { reconcile });
 }
 
 /** Serializable power list (functions can't cross the server-action boundary
  * — the client re-derives cost/effect labels with the pure helpers exported
  * from `shared/power-definitions.ts`). Falls back to the static 12 on error. */
 export async function getPowerDefinitionsForMenu(): Promise<PowerDefinitionRecord[]> {
-  // force: true — this is called once per menu open (not a hot path), and
-  // admin icon/stat edits need to show up immediately. Without `force`,
-  // this can serve up to CACHE_TTL_MS of stale data, and on serverless
-  // (each invocation may land on a different instance with its own
-  // in-memory cache) a request can stay stale well past that TTL since
-  // invalidatePowerDefinitionsCache() only clears the instance that
-  // handled the admin save.
-  return loadPowerDefinitions({ force: true }).catch(() => STATIC_FALLBACK_POWERS);
+  return loadPowerDefinitionsForMenu();
 }
 
 /**
@@ -106,24 +81,7 @@ export async function getPowerDefinitionsForMenu(): Promise<PowerDefinitionRecor
 export async function grantGameXp(userId: string, amount: number): Promise<GameProgressionSnapshot | null> {
   if (amount <= 0) return null;
   await assertCanMutateUser(userId);
-  const before = await prisma.user.findUnique({ where: { id: userId } });
-  if (!before) return null;
-
-  const prevProgress = getGameLevelProgress(before.gameXp ?? 0);
-  const nextXp = (before.gameXp ?? 0) + Math.floor(amount);
-  const nextProgress = getGameLevelProgress(nextXp);
-  const pointsGained =
-    skillPointsForLevel(nextProgress.level) - skillPointsForLevel(prevProgress.level);
-
-  const updated = await prisma.user.update({
-    where: { id: userId },
-    data: {
-      gameXp: nextXp,
-      gameSkillPoints: { increment: Math.max(0, pointsGained) },
-    },
-  });
-
-  return buildSnapshot(updated);
+  return grantGameXpToUser(userId, amount);
 }
 
 /** Spend one Skill Point to raise an ability by one level. */
@@ -132,43 +90,7 @@ export async function upgradeGameAbility(
   ability: AbilityKey
 ): Promise<GameProgressionSnapshot> {
   await assertCanMutateUser(userId);
-  await loadPowerDefinitions().catch(() => null);
-  if (!ABILITY_KEYS.includes(ability)) throw new Error('Unknown ability');
-
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw new Error('User not found');
-
-  const levels = parseAbilityLevels(user.gameAbilities);
-  const def = ABILITY_DEFINITIONS[ability];
-  const currentLevel = levels[ability];
-  if (currentLevel >= def.maxLevel) throw new Error('Ability already at max level');
-
-  const accountLevel = getGameLevelProgress(user.gameXp ?? 0).level;
-  if (accountLevel < def.unlockLevel) {
-    throw new Error(`${def.name} unlocks at level ${def.unlockLevel}`);
-  }
-
-  if (!arePrerequisitesMet(def, levels)) {
-    const missing = def.prerequisites.find((p) => (levels[p.key] ?? 0) < p.level);
-    const reqName = missing ? ABILITY_DEFINITIONS[missing.key]?.name ?? missing.key : 'a prerequisite power';
-    throw new Error(`${def.name} requires ${reqName} at level ${missing?.level ?? '?'}`);
-  }
-
-  const cost = def.costForLevel(currentLevel);
-  const skillPoints = Math.max(0, user.gameSkillPoints ?? 0);
-  if (skillPoints < cost) throw new Error('Not enough Skill Points');
-
-  const nextLevels: AbilityLevels = { ...levels, [ability]: currentLevel + 1 };
-
-  const updated = await prisma.user.update({
-    where: { id: userId },
-    data: {
-      gameSkillPoints: { decrement: cost },
-      gameAbilities: nextLevels,
-    },
-  });
-
-  return buildSnapshot(updated);
+  return upgradeGameAbilityForUser(userId, ability);
 }
 
 /**
@@ -209,7 +131,7 @@ export async function adminGrantGameXp(
     detail: `${delta > 0 ? '+' : ''}${delta} in-game XP → ${nextXp}`,
   });
 
-  return buildSnapshot(updated);
+  return buildGameProgressionSnapshot(await reconcileUnspentSkillPoints(updated));
 }
 
 /** Admin-only: directly grant/remove unspent in-game Skill Points. */
@@ -238,7 +160,7 @@ export async function adminAdjustGameSkillPoints(
     detail: `${amount > 0 ? '+' : ''}${amount} Skill Points → ${next}`,
   });
 
-  return buildSnapshot(updated);
+  return buildGameProgressionSnapshot(updated);
 }
 
 /**
@@ -272,5 +194,5 @@ export async function adminResetGameAbilities(
     detail: `Abilities cleared, Skill Points refunded to ${fullPool}`,
   });
 
-  return buildSnapshot(updated);
+  return buildGameProgressionSnapshot(updated);
 }

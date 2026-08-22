@@ -5,7 +5,7 @@ import { GameMenu, useGameProgression } from '@/components/game/ui/game-menu';
 /**
  * Profile-page entry point for the power skill tree — same GameMenu
  * component the in-game "press M" menu uses (it already talks to
- * upgradeGameAbility as a plain server action, not a Colyseus room message,
+ * upgradeGameAbility via /api/game/progression (same menu as in-match M),
  * so it works unmodified outside a live match). Rendered inline in the page
  * flow (no launcher button / modal) so the tree is visible immediately.
  */

@@ -5,6 +5,7 @@ import { Trophy, Skull, Star, Coins, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { NetPlayerState, NetRoomState } from '../../net/types';
 import { recordCompetitiveResult } from '@/lib/actions';
+import { notifyProgressionChanged } from '@/lib/game-progression-client';
 import { KP_DEFAULT } from '@/lib/kp';
 
 interface Props {
@@ -87,7 +88,10 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
         kp: typeof player.kp === 'number' ? player.kp : KP_DEFAULT,
         rank: '',
       });
-      if (room.rewardsReady) hasRecordedRef.current = true;
+      if (room.rewardsReady) {
+        hasRecordedRef.current = true;
+        notifyProgressionChanged();
+      }
     }
   }, [
     player.userId,
@@ -134,7 +138,10 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
         queue: rk ? 'ranked' : 'casual',
         matchId: r.matchId || undefined,
       })
-        .then(setRewards)
+        .then((result) => {
+          setRewards(result);
+          notifyProgressionChanged();
+        })
         .catch(() => {});
     }, 2500);
 

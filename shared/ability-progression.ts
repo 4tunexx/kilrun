@@ -220,6 +220,21 @@ export function skillPointsForLevel(level: number): number {
   return Math.max(0, Math.floor(level) - 1);
 }
 
+/** Unspent points that should exist: earned from level minus spent on powers. */
+export function expectedUnspentSkillPoints(level: number, abilities: AbilityLevels): number {
+  return Math.max(0, skillPointsForLevel(level) - totalSpentSkillPoints(abilities));
+}
+
+export type GameProgressionSnapshot = {
+  gameXp: number;
+  level: number;
+  xpIntoLevel: number;
+  xpForNextLevel: number;
+  percent: number;
+  skillPoints: number;
+  abilities: AbilityLevels;
+};
+
 // ---------------------------------------------------------------------------
 // Live gameplay stat bonuses derived from ability levels (consumed by the
 // Colyseus room sim when spawning/updating a player). Signature unchanged

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use zip::ZipArchive;
 
-const ENGINE_VERSION: &str = "0.1.1";
+const ENGINE_VERSION: &str = "0.1.2";
 
 fn default_platform_origin() -> String {
     option_env!("KILRUN_PLATFORM_URL")
@@ -1117,7 +1117,7 @@ pub fn run() {
             Ok(())
         })
         .on_page_load(|window, _payload| {
-            let _ = window.eval("window.__KILRUN_ENGINE__=true;window.__KILRUN_ENGINE_VERSION__='0.1.1';");
+            let _ = window.eval("window.__KILRUN_ENGINE__=true;window.__KILRUN_ENGINE_VERSION__='0.1.2';");
         })
         .run(tauri::generate_context!())
         .expect("error while running Kilrun Engine");
