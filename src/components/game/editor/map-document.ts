@@ -1180,7 +1180,7 @@ export interface CombatSettings {
   slideCooldownMs: number;
 
   // ── Wall-jump ──────────────────────────────────────────────────────────────
-  /** Enable wall-jump (grab wall + jump). Default false. */
+  /** Enable wall-jump (grab wall + jump). Default true. */
   wallJumpEnabled: boolean;
   /** Horizontal velocity away from wall on wall-jump. Default 5. */
   wallJumpHorizVel: number;
@@ -1244,7 +1244,7 @@ export const DEFAULT_COMBAT_SETTINGS: CombatSettings = {
   slideMult: 2.2,
   slideDurationMs: 1800,
   slideCooldownMs: 800,
-  wallJumpEnabled: false,
+  wallJumpEnabled: true,
   wallJumpHorizVel: 5,
   wallJumpVertVel: 9,
   wallSlideGravMult: 0.35,

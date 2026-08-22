@@ -102,6 +102,8 @@ export interface NetPlayerState {
   reserveAmmo?: number;
   weaponReloadMs?: number;
   reloadEndsAt?: number;
+  /** Increments on mag-less / melee shots so remotes can hear and animate them. */
+  attackSeq?: number;
   /** Temporary shield from power-up. */
   shieldHp?: number;
   /** Per-match telemetry / server-authored rewards. */
@@ -251,3 +253,5 @@ export interface HitFxMessage {
   amount: number;
   kind: 'player' | 'monster';
 }
+
+export type { KillFeedEvent as KillFeedMessage } from '@shared/kill-feed';

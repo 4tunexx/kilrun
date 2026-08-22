@@ -45,7 +45,7 @@ export const LEDGE_ASSIST = 0.12;
 export const COLLISION_SKIN = 0.02;
 export const VOID_Z = -4;
 
-export const WALL_JUMP_ENABLED_DEFAULT = false;
+export const WALL_JUMP_ENABLED_DEFAULT = true;
 export const WALL_JUMP_HORIZ_VEL = 5;
 export const WALL_JUMP_VERT_VEL = 9;
 export const WALL_SLIDE_GRAV_MULT = 0.35;

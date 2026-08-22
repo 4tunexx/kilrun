@@ -29,6 +29,7 @@ import { ENGINE_BG, ENGINE_WORDMARK } from '@/lib/engine/brand';
 import { usePointerParallax } from '@/hooks/use-pointer-parallax';
 import type { EngineSessionUser } from '@/lib/engine/platform-client';
 import { EngineBackdrop } from './engine-splash';
+import { MenuSfxRoot } from '@/components/game/effects/menu-sfx';
 
 const PANEL = 'bg-slate-900/60 backdrop-blur-md border border-slate-700/30';
 
@@ -106,7 +107,7 @@ export function EngineHome({
   };
 
   return (
-    <div className="relative flex h-full min-h-0 font-sans">
+    <MenuSfxRoot music="menu" className="relative flex h-full min-h-0 font-sans">
       <div className="absolute inset-0 pointer-events-none">
         <EngineBackdrop />
       </div>
@@ -346,7 +347,7 @@ export function EngineHome({
           </section>
         </div>
       </div>
-    </div>
+    </MenuSfxRoot>
   );
 }
 

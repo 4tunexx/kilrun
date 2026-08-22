@@ -20,14 +20,14 @@ const ROLE_ACCENT: Record<string, string> = {
 };
 
 /**
- * Held-Tab scoreboard — classic FPS pattern: hold to show, release to hide.
+ * Held scoreboard (Tab by default) — classic FPS: hold to show, release to hide.
  * Glass/chrome panel treatment shared with GameMenu.
  */
 export function Scoreboard({
   open,
   playersRef,
   localSessionIdRef,
-  holdHint = '`',
+  holdHint = 'Tab',
 }: {
   open: boolean;
   playersRef: React.MutableRefObject<Map<string, NetPlayerState>>;

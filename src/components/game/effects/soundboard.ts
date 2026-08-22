@@ -28,17 +28,61 @@ const activeVoices = new Map<string, number>();
 const MAX_CONCURRENT_PER_EVENT = 6;
 const CACHE_TTL_MS = 15_000;
 let masterVolume = 1;
+let sfxVolume = 1;
+let musicVolume = 1;
+let musicDuck = 1;
 
 export function getMasterVolume(): number {
   return masterVolume;
 }
 
-export function setMasterVolume(volume: number): void {
-  masterVolume = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
+function clamp01(volume: number, fallback = 1): number {
+  return Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : fallback));
 }
 
-function mixedVolume(optsVolume: number | undefined, entryVolume: number): number {
-  return Math.max(0, Math.min(1, (optsVolume ?? 1) * entryVolume * masterVolume));
+export function setMasterVolume(volume: number): void {
+  masterVolume = clamp01(volume);
+  applyLoopGains();
+}
+
+export function setSfxVolume(volume: number): void {
+  sfxVolume = clamp01(volume);
+  applyLoopGains();
+}
+
+export function setMusicVolume(volume: number): void {
+  musicVolume = clamp01(volume);
+  applyLoopGains();
+}
+
+/** 1 = full music, ~0.22 ducks the bed under the pause menu. */
+export function setMusicDuck(factor: number): void {
+  musicDuck = clamp01(factor);
+  applyLoopGains();
+}
+
+export function applyPlayerMatchAudio(settings: {
+  masterVolume: number;
+  sfxVolume: number;
+  musicVolume: number;
+}): void {
+  masterVolume = clamp01(settings.masterVolume);
+  sfxVolume = clamp01(settings.sfxVolume);
+  musicVolume = clamp01(settings.musicVolume);
+  applyLoopGains();
+}
+
+function busFor(eventKey: string): 'music' | 'sfx' {
+  return eventKey.startsWith('music_') ? 'music' : 'sfx';
+}
+
+function mixedVolume(
+  optsVolume: number | undefined,
+  entryVolume: number,
+  bus: 'music' | 'sfx'
+): number {
+  const busVol = bus === 'music' ? musicVolume * musicDuck : sfxVolume;
+  return Math.max(0, Math.min(1, (optsVolume ?? 1) * entryVolume * masterVolume * busVol));
 }
 
 export function normalizeSoundEntries<T extends { fileUrl: string }>(
@@ -92,9 +136,27 @@ export function refreshSoundboard(): void {
   void ensureLoaded();
 }
 
+type LoopVoice = {
+  src: AudioBufferSourceNode;
+  gain: GainNode;
+  eventKey: string;
+  optsVolume: number;
+  entryVolume: number;
+};
+
 // Active looping voices (e.g. sprint-while-held), keyed by eventKey, so a
 // caller can start a loop once and stop it later without tracking the node.
-const loopVoices = new Map<string, AudioBufferSourceNode>();
+const loopVoices = new Map<string, LoopVoice>();
+
+function applyLoopGains(): void {
+  for (const voice of loopVoices.values()) {
+    voice.gain.gain.value = mixedVolume(
+      voice.optsVolume,
+      voice.entryVolume,
+      busFor(voice.eventKey)
+    );
+  }
+}
 
 /** Start looping playback for a game-engine event (see shared/sound-events.ts
  * for valid keys) and keep it playing until stopLoopedSound(eventKey) is
@@ -117,13 +179,20 @@ export function playLoopedSound(eventKey: string, opts?: { volume?: number }): v
       src.buffer = buffer;
       src.loop = true;
       const gain = ctx.createGain();
-      gain.gain.value = mixedVolume(opts?.volume, entry.volume);
+      const optsVolume = opts?.volume ?? 1;
+      gain.gain.value = mixedVolume(optsVolume, entry.volume, busFor(eventKey));
       src.connect(gain).connect(ctx.destination);
       src.onended = () => {
-        if (loopVoices.get(eventKey) === src) loopVoices.delete(eventKey);
+        if (loopVoices.get(eventKey)?.src === src) loopVoices.delete(eventKey);
       };
       src.start();
-      loopVoices.set(eventKey, src);
+      loopVoices.set(eventKey, {
+        src,
+        gain,
+        eventKey,
+        optsVolume,
+        entryVolume: entry.volume,
+      });
     } catch {
       // Never let audio playback break gameplay.
     }
@@ -133,15 +202,33 @@ export function playLoopedSound(eventKey: string, opts?: { volume?: number }): v
 /** Stop a loop previously started with playLoopedSound(eventKey). No-op if
  * nothing is currently looping for that event. */
 export function stopLoopedSound(eventKey: string): void {
-  const src = loopVoices.get(eventKey);
-  if (!src) return;
+  const voice = loopVoices.get(eventKey);
+  if (!voice) return;
   loopVoices.delete(eventKey);
   try {
-    src.onended = null;
-    src.stop();
+    voice.src.onended = null;
+    voice.src.stop();
   } catch {
     // Already stopped/ended — fine.
   }
+}
+
+export function playMenuMusic(): void {
+  stopLoopedSound('music_ingame');
+  playLoopedSound('music_menu');
+}
+
+export function stopMenuMusic(): void {
+  stopLoopedSound('music_menu');
+}
+
+export function playIngameMusic(): void {
+  stopLoopedSound('music_menu');
+  playLoopedSound('music_ingame');
+}
+
+export function stopIngameMusic(): void {
+  stopLoopedSound('music_ingame');
 }
 
 /** Play `eventKey`, falling back to `fallbackKey` when no clip is bound to it.
@@ -174,7 +261,7 @@ export function playSound(eventKey: string, opts?: { volume?: number }): void {
       const src = ctx.createBufferSource();
       src.buffer = buffer;
       const gain = ctx.createGain();
-      gain.gain.value = mixedVolume(opts?.volume, entry.volume);
+      gain.gain.value = mixedVolume(opts?.volume, entry.volume, busFor(eventKey));
       src.connect(gain).connect(ctx.destination);
       activeVoices.set(eventKey, active + 1);
       src.onended = () => {

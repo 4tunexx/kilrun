@@ -66,8 +66,8 @@ export const DEFAULT_KEY_BINDINGS: Record<KeyBindAction, string> = {
   flip: 'v',
   cameraTurnLeft: 'j',
   pause: 'escape',
-  scoreboard: '`',
-  freeMouse: 'tab',
+  scoreboard: 'tab',
+  freeMouse: 'alt',
   aim: 'mouse2',
   power_hook: 'h',
   power_berserk: 'b',
@@ -128,7 +128,7 @@ export function mouseButtonFromBind(bind: string): number | null {
 /**
  * A key is only bindable if `keyBindToCodes` (below) can actually resolve
  * it to a `KeyboardEvent.code` — a-z, 0-9, space, shift, control, escape,
- * tab, backtick — or it is a mouse button (mouse0/1/2). Anything else
+ * tab, backtick, alt — or it is a mouse button (mouse0/1/2). Anything else
  * (arrows, function keys, Home/End, …) used to be accepted here and saved
  * successfully, but every consumer only ever checks `keyBindToCodes`, which
  * silently returns `false` for an unresolvable key.
@@ -152,6 +152,12 @@ export function normalizeBindings(
       result[meta.action] = canonicalBindKey(raw);
     }
   }
+  // Older defaults put scoreboard on ` and free-mouse on Tab. Tab is the
+  // FPS scoreboard key; migrate that exact pair so existing saves match.
+  if (result.scoreboard === '`' && result.freeMouse === 'tab') {
+    result.scoreboard = 'tab';
+    result.freeMouse = 'alt';
+  }
   return result;
 }
 
@@ -170,6 +176,7 @@ export function keyBindToCodes(key: string): string[] {
   const k = key.trim().toLowerCase();
   if (k === 'shift') return ['ShiftLeft', 'ShiftRight'];
   if (k === 'control' || k === 'ctrl') return ['ControlLeft', 'ControlRight'];
+  if (k === 'alt') return ['AltLeft', 'AltRight'];
   if (k === 'escape' || k === 'esc') return ['Escape'];
   if (k === 'tab') return ['Tab'];
   if (k === '`' || k === 'backquote' || k === 'grave') return ['Backquote'];

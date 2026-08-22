@@ -59,6 +59,7 @@ import {
   SLIDE_HOLD_COAST_MS,
   SLIDE_HOLD_SNAP_AFTER_MS,
   SPRINT_MULTIPLIER,
+  WALL_JUMP_ENABLED_DEFAULT,
   WALL_JUMP_HORIZ_VEL,
   WALL_JUMP_LOCKOUT_MS,
   WALL_JUMP_SAME_WALL_COOLDOWN_MS,
@@ -730,7 +731,7 @@ export function stepSim(
   }
   scratch.wasJumpHeld = input.jumpPressed;
 
-  const wallJumpEnabled = physOpts?.wallJumpEnabled ?? false;
+  const wallJumpEnabled = physOpts?.wallJumpEnabled ?? WALL_JUMP_ENABLED_DEFAULT;
   const wallJumpHorizVel = physOpts?.wallJumpHorizVel ?? WALL_JUMP_HORIZ_VEL;
   const wallJumpVertVel = physOpts?.wallJumpVertVel ?? WALL_JUMP_VERT_VEL;
   const wallSlideGravMult = physOpts?.wallSlideGravMult ?? WALL_SLIDE_GRAV_MULT;

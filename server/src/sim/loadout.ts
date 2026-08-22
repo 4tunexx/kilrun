@@ -67,6 +67,7 @@ type WeaponPlayerFields = {
   reserveAmmo?: number;
   weaponReloadMs?: number;
   reloadEndsAt?: number;
+  attackSeq?: number;
   ability?: { reloadSpeedMult?: number };
 };
 
@@ -149,13 +150,22 @@ export function tryConsumeShotAmmo(player: WeaponPlayerFields, now: number): boo
   finishReloadIfDue(player, now);
   if ((player.reloadEndsAt ?? 0) > now) return false;
   if (isUnlimitedAmmoActive(player as never, now)) {
+    bumpNoMagAttack(player);
     return true;
   }
   const mag = player.weaponMagSize ?? 0;
-  if (mag <= 0) return true;
+  if (mag <= 0) {
+    bumpNoMagAttack(player);
+    return true;
+  }
   if ((player.ammoInMag ?? 0) <= 0) return false;
   player.ammoInMag = (player.ammoInMag ?? 0) - 1;
   return true;
+}
+
+/** Remote clients can't see melee/unlimited shots via ammo drop. */
+function bumpNoMagAttack(player: WeaponPlayerFields) {
+  player.attackSeq = (player.attackSeq ?? 0) + 1;
 }
 
 const MAX_SKIN_JSON_CHARS = 48_000;

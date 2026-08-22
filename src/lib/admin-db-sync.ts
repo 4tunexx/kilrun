@@ -14,6 +14,8 @@ import { Prisma } from '@/generated/prisma';
 import { writeAuditLog } from '@/lib/audit';
 import { STATIC_FALLBACK_POWERS } from '../../shared/power-definitions';
 import { STATIC_FALLBACK_WEAPONS } from '@/lib/weapon-catalog';
+import { seedMissingSoundDefinitions } from '@/lib/sound-pack-seed';
+import { invalidateSoundDefinitionsCache } from '@/lib/sound-definitions';
 
 const execFileAsync = promisify(execFile);
 
@@ -440,15 +442,21 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     );
   }
 
-  // Runtime verify: SoundDefinition (Sound Board admin panel). No static
-  // fallback data to seed — every row is an admin-uploaded clip, so this
-  // just confirms the collection is reachable/writable on this Mongo.
+  // Runtime verify + seed: SoundDefinition (Sound Board). Pack defaults
+  // fill missing event keys only — never overwrite volume/EQ/replaced clips.
   try {
     const before = await prisma.soundDefinition.count();
     steps.push(`SoundDefinition collection verified (count=${before})`);
+    const created = await seedMissingSoundDefinitions(prisma);
+    if (created > 0) invalidateSoundDefinitionsCache();
+    steps.push(
+      created > 0
+        ? `Seeded ${created} Sound Board clip(s) that were missing`
+        : 'All pack Sound Board bindings already present (no seeding needed)'
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown error';
-    steps.push(`SoundDefinition verify failed: ${msg}`);
+    steps.push(`SoundDefinition verify/seed failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — SoundDefinition not available. Run db push. (${msg})`
     );

@@ -36,7 +36,15 @@ describe('key-bindings', () => {
     expect(eventMatchesBind({ code: 'Escape' }, 'escape')).toBe(true);
     expect(eventMatchesBind({ code: 'Tab' }, 'tab')).toBe(true);
     expect(eventMatchesBind({ code: 'Backquote' }, '`')).toBe(true);
-    expect(eventMatchesBind({ code: 'KeyW' }, 'escape')).toBe(false);
+    expect(keyBindToCodes('alt')).toEqual(['AltLeft', 'AltRight']);
+    expect(isValidBindKey('alt')).toBe(true);
+    expect(eventMatchesBind({ code: 'AltLeft' }, 'alt')).toBe(true);
+    expect(formatBindKey('alt')).toBe('Alt');
+    expect(DEFAULT_KEY_BINDINGS.scoreboard).toBe('tab');
+    expect(DEFAULT_KEY_BINDINGS.freeMouse).toBe('alt');
+    const migrated = normalizeBindings({ scoreboard: '`', freeMouse: 'tab' });
+    expect(migrated.scoreboard).toBe('tab');
+    expect(migrated.freeMouse).toBe('alt');
   });
 
   it('formats HUD labels for interface binds', () => {

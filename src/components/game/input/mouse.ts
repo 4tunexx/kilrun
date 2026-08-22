@@ -15,7 +15,7 @@ export class MouseHandler {
   private lookDeltaY = 0;
   private host: HTMLElement | null = null;
   private el: HTMLElement | Window | null = null;
-  /** Set while the player has explicitly freed the cursor (Tab toggle) so
+  /** Set while the player has explicitly freed the cursor (Alt toggle) so
    *  click/pointerenter don't silently re-lock it out from under them. */
   private lockSuspended = false;
 
@@ -89,7 +89,7 @@ export class MouseHandler {
     this.host.requestPointerLock?.().catch(() => {});
   }
 
-  /** Tab-toggle hook: while suspended, clicks/hovers won't re-request pointer lock. */
+  /** Free-mouse toggle: while suspended, clicks/hovers won't re-request pointer lock. */
   public setLockSuspended(suspended: boolean) {
     this.lockSuspended = suspended;
   }

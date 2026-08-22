@@ -7,6 +7,7 @@ import {
 } from "../src/lib/progression-seed-data";
 import { STATIC_FALLBACK_POWERS } from "../shared/power-definitions";
 import { STATIC_FALLBACK_WEAPONS } from "../src/lib/weapon-catalog";
+import { seedMissingSoundDefinitions } from "../src/lib/sound-pack-seed";
 
 const prisma = new PrismaClient();
 
@@ -111,8 +112,10 @@ async function main() {
     });
   }
 
+  const soundsCreated = await seedMissingSoundDefinitions(prisma);
+
   console.log(
-    `Seeded ${missionTemplates.length} missions, ${achievements.length} achievements, ${badges.length} badges, ${STATIC_FALLBACK_POWERS.length} core powers, ${STATIC_FALLBACK_WEAPONS.length} core weapons, shop, and site settings.`
+    `Seeded ${missionTemplates.length} missions, ${achievements.length} achievements, ${badges.length} badges, ${STATIC_FALLBACK_POWERS.length} core powers, ${STATIC_FALLBACK_WEAPONS.length} core weapons, ${soundsCreated} sound pack bindings, shop, and site settings.`
   );
 }
 

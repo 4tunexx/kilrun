@@ -329,3 +329,16 @@ export const SHOP_PRESET_TO_CATALOG: Record<string, CatalogWeaponId> = {
   sword: 'axe_001',
   fists: 'knife_001',
 };
+
+/** Shop / HUD label for an equipped weapon id (catalog slug or shop preset). */
+export function catalogWeaponLabel(id: string | null | undefined): string | null {
+  if (!id) return null;
+  const direct = CATALOG_WEAPONS.find((w) => w.id === id);
+  if (direct) return direct.label;
+  const mapped = SHOP_PRESET_TO_CATALOG[id];
+  if (mapped) {
+    const hit = CATALOG_WEAPONS.find((w) => w.id === mapped);
+    if (hit) return hit.label;
+  }
+  return null;
+}

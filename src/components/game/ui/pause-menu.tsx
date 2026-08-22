@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Map, Maximize, Play, LogOut, AlertTriangle, Settings, ChevronLeft } from 'lucide-react';
+import { MenuSfxRoot } from '../effects/menu-sfx';
 import { playSound } from '../effects/soundboard';
 import {
   DEFAULT_PLAYER_MATCH_SETTINGS,
@@ -48,19 +49,12 @@ export function PauseMenu({
     if (!open) {
       setConfirmingAbandon(false);
       setSettingsOpen(false);
+    } else {
+      playSound('ui_transition');
     }
   }, [open]);
 
   if (!open) return null;
-
-  /**
-   * One delegated handler per panel instead of a playSound() in every onClick —
-   * fires the authored UI Click sound for any button in the pause menu, and
-   * keeps working as buttons are added or removed.
-   */
-  const onPanelClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest('button')) playSound('ui_click');
-  };
 
   const patchSettings = (partial: Partial<PlayerMatchSettings>) => {
     onMatchSettingsChange?.({ ...matchSettings, ...partial });
@@ -68,11 +62,8 @@ export function PauseMenu({
 
   if (confirmingAbandon) {
     return (
-      <div className="absolute inset-0 z-[250] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
-        <div
-          onClick={onPanelClick}
-          className="w-full max-w-sm mx-4 rounded-2xl border border-red-500/30 bg-[#0f1724]/95 p-6 shadow-2xl"
-        >
+      <MenuSfxRoot className="absolute inset-0 z-[250] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
+        <div className="w-full max-w-sm mx-4 rounded-2xl border border-red-500/30 bg-[#0f1724]/95 p-6 shadow-2xl">
           <div className="flex items-center gap-2 mb-2">
             <AlertTriangle className="w-5 h-5 text-red-400" />
             <h2 className="text-xl font-black tracking-wide text-white">Abandon Match?</h2>
@@ -108,17 +99,14 @@ export function PauseMenu({
             </Button>
           </div>
         </div>
-      </div>
+      </MenuSfxRoot>
     );
   }
 
   if (settingsOpen) {
     return (
-      <div className="absolute inset-0 z-[250] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
-        <div
-          onClick={onPanelClick}
-          className="w-full max-w-sm mx-4 rounded-2xl border border-white/15 bg-[#0f1724]/95 p-6 shadow-2xl"
-        >
+      <MenuSfxRoot className="absolute inset-0 z-[250] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
+        <div className="w-full max-w-sm mx-4 rounded-2xl border border-white/15 bg-[#0f1724]/95 p-6 shadow-2xl">
           <h2 className="text-2xl font-black tracking-wide text-white mb-1">Settings</h2>
           <p className="text-sm text-white/50 mb-5">This device only · stored in the browser</p>
           <div className="space-y-4 mb-5">
@@ -131,7 +119,7 @@ export function PauseMenu({
               />
             </label>
             <label className="block text-sm text-white/80">
-              Volume ({Math.round(matchSettings.masterVolume * 100)}%)
+              Master ({Math.round(matchSettings.masterVolume * 100)}%)
               <input
                 type="range"
                 min={0}
@@ -140,6 +128,30 @@ export function PauseMenu({
                 className="mt-1 w-full"
                 value={matchSettings.masterVolume}
                 onChange={(e) => patchSettings({ masterVolume: Number(e.target.value) })}
+              />
+            </label>
+            <label className="block text-sm text-white/80">
+              Sound effects ({Math.round(matchSettings.sfxVolume * 100)}%)
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                className="mt-1 w-full"
+                value={matchSettings.sfxVolume}
+                onChange={(e) => patchSettings({ sfxVolume: Number(e.target.value) })}
+              />
+            </label>
+            <label className="block text-sm text-white/80">
+              Music ({Math.round(matchSettings.musicVolume * 100)}%)
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                className="mt-1 w-full"
+                value={matchSettings.musicVolume}
+                onChange={(e) => patchSettings({ musicVolume: Number(e.target.value) })}
               />
             </label>
             <label className="block text-sm text-white/80">
@@ -164,16 +176,13 @@ export function PauseMenu({
             <ChevronLeft className="w-4 h-4 mr-2" /> Back
           </Button>
         </div>
-      </div>
+      </MenuSfxRoot>
     );
   }
 
   return (
-    <div className="absolute inset-0 z-[250] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
-      <div
-        onClick={onPanelClick}
-        className="w-full max-w-sm mx-4 rounded-2xl border border-white/15 bg-[#0f1724]/95 p-6 shadow-2xl"
-      >
+    <MenuSfxRoot className="absolute inset-0 z-[250] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto">
+      <div className="w-full max-w-sm mx-4 rounded-2xl border border-white/15 bg-[#0f1724]/95 p-6 shadow-2xl">
         <h2 className="text-2xl font-black tracking-wide text-white mb-1">Paused</h2>
         <p className="text-sm text-white/50 mb-6">
           {pauseHint} resumes · mouse unlocked{isAdmin ? ' · F2 admin' : ''}
@@ -213,7 +222,7 @@ export function PauseMenu({
           )}
         </div>
       </div>
-    </div>
+    </MenuSfxRoot>
   );
 }
 

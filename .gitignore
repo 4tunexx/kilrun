@@ -61,3 +61,6 @@ next-env.d.ts
 # Local weapon source copies. Runtime uses public/game/weapons/.
 /weapon_models/
 
+# Godot SFX dump. Runtime uses public/game/sounds/. Keep effects/ locally to re-run db:seed-sounds.
+/effects/
+

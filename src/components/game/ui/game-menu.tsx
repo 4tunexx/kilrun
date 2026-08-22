@@ -20,6 +20,7 @@ import { getLucideIcon } from '@/lib/move-icons';
 import type { GameProgressionSnapshot } from '@/lib/game-progression-actions';
 import { getPowerTreeConfig, type PowerTreeConfig } from '@/lib/power-tree-config';
 import { playSound } from '../effects/soundboard';
+import { MenuSfxRoot } from '../effects/menu-sfx';
 
 /** Flat-top hexagon — matches the shape used by the admin Power Editor so
  * both surfaces share a visual language. */
@@ -613,11 +614,11 @@ export function GameMenu({
   if (inline) return content;
 
   return (
-    <div
+    <MenuSfxRoot
       className={`${positioning === 'viewport' ? 'fixed' : 'absolute'} inset-0 z-[260] flex items-center justify-center bg-black/70 backdrop-blur-md pointer-events-auto p-4`}
     >
       {content}
-    </div>
+    </MenuSfxRoot>
   );
 }
 
@@ -640,7 +641,7 @@ export function LevelUpPopup({
 
   if (!event) return null;
   return (
-    <div className="absolute inset-0 z-[270] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto p-4">
+    <MenuSfxRoot className="absolute inset-0 z-[270] flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto p-4">
       <div className="w-full max-w-md rounded-2xl border border-amber-400/25 bg-gradient-to-b from-white/[0.09] to-white/[0.02] backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden">
         <div className="flex flex-col items-center gap-2 px-6 pt-8 pb-6 text-center">
           <Sparkles className="w-9 h-9 text-amber-300" />
@@ -676,7 +677,7 @@ export function LevelUpPopup({
           </Button>
         </div>
       </div>
-    </div>
+    </MenuSfxRoot>
   );
 }
 

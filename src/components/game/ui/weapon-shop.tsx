@@ -5,6 +5,7 @@ import { Sword, Crosshair, Zap, Shield, ShoppingCart, Coins } from 'lucide-react
 import { SHOP_PRESET_TO_CATALOG, catalogWeaponUrl } from '@/lib/weapon-catalog';
 import type { MapShopItem, MapShopPowerUp, MapShopSkin } from '@/components/game/editor/map-document';
 import { playSound } from '../effects/soundboard';
+import { MenuSfxRoot } from '../effects/menu-sfx';
 
 export interface WeaponPreset {
   id: string;
@@ -258,7 +259,7 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({
   const list = items === undefined ? WEAPON_PRESETS : items;
 
   return (
-    <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[135] w-full max-w-xl px-3 pointer-events-auto">
+    <MenuSfxRoot className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[135] w-full max-w-xl px-3 pointer-events-auto">
       <div className="rounded-2xl border border-white/20 bg-slate-950/85 backdrop-blur-md p-3 shadow-2xl">
         <div className="flex items-center justify-between mb-2">
           <p className="text-[11px] font-black uppercase tracking-widest text-amber-300 flex items-center gap-1.5">
@@ -288,9 +289,11 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({
               <button
                 key={preset.id}
                 type="button"
-                disabled={!canAfford}
                 onClick={() => {
-                  if (!canAfford) return;
+                  if (!canAfford) {
+                    playSound('ui_error');
+                    return;
+                  }
                   playSound('purchase');
                   onBuy(preset);
                 }}
@@ -336,9 +339,11 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({
                   <button
                     key={sk.id}
                     type="button"
-                    disabled={!canAfford}
                     onClick={() => {
-                      if (!canAfford) return;
+                      if (!canAfford) {
+                        playSound('ui_error');
+                        return;
+                      }
                       playSound('purchase');
                       onBuySkin(sk);
                     }}
@@ -382,9 +387,11 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({
                   <button
                     key={pu.id}
                     type="button"
-                    disabled={!canAfford}
                     onClick={() => {
-                      if (!canAfford) return;
+                      if (!canAfford) {
+                        playSound('ui_error');
+                        return;
+                      }
                       playSound('purchase');
                       onBuyPowerUp(pu);
                     }}
@@ -405,6 +412,6 @@ export const WeaponShop: React.FC<WeaponShopProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </MenuSfxRoot>
   );
 };

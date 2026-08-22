@@ -64,6 +64,7 @@ import {
 } from '../sim/active-abilities.js';
 import { getBurstEffectStatsByKey } from '../../../shared/ability-progression.js';
 import { nextHordeColor } from '../lib/body-colors.js';
+import { broadcastKillFeed } from '../../../shared/kill-feed.js';
 import {
   authenticateJoin,
   claimsFromAuth,
@@ -195,6 +196,15 @@ interface HordeModeSettings {
   difficultyScale?: number;
 }
 
+const MONSTER_STATS = {
+  basic: { hp: 40, speed: 2.4, damage: 12, radius: 0.55 },
+  fast: { hp: 28, speed: 3.6, damage: 10, radius: 0.45 },
+  brute: { hp: 90, speed: 1.7, damage: 22, radius: 0.75 },
+  boss: { hp: 220, speed: 2.0, damage: 30, radius: 1.0 },
+} as const;
+
+type MonsterKind = keyof typeof MONSTER_STATS;
+
 interface MonsterSim {
   id: string;
   x: number;
@@ -205,6 +215,8 @@ interface MonsterSim {
   damage: number;
   radius: number;
   obstacleIndex: number;
+  kind: MonsterKind;
+  strafeSign: number;
 }
 
 const RESULTS_DISPLAY_MS = 8000;
@@ -220,13 +232,6 @@ const SURRENDER_VOTE_DURATION_MS = 30_000;
  *  were the last one alive, ended the match instantly with no chance to
  *  reconnect. */
 const RECONNECT_WINDOW_SEC = 120;
-
-const MONSTER_STATS = {
-  basic: { hp: 40, speed: 2.4, damage: 12, radius: 0.55 },
-  fast: { hp: 28, speed: 3.6, damage: 10, radius: 0.45 },
-  brute: { hp: 90, speed: 1.7, damage: 22, radius: 0.75 },
-  boss: { hp: 220, speed: 2.0, damage: 30, radius: 1.0 },
-} as const;
 
 /**
  * Horde co-op — up to 4 survivors clear escalating waves from map monster spawns.
@@ -1268,6 +1273,8 @@ export class HordeRoom extends Room<RoomState> {
       damage: stats.damage,
       radius: stats.radius,
       obstacleIndex: this.state.obstacles.length - 1,
+      kind: type in MONSTER_STATS ? (type as MonsterKind) : 'basic',
+      strafeSign: Math.random() < 0.5 ? -1 : 1,
     });
     this.state.monstersAlive = this.monsters.length;
   }
@@ -1476,11 +1483,27 @@ export class HordeRoom extends Room<RoomState> {
       const dy = nearest.y - mon.y;
       const dist = Math.hypot(dx, dy) || 1;
       const attackRadius = ATTACK_PAD + mon.radius;
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const px = -ny * mon.strafeSign;
+      const py = nx * mon.strafeSign;
 
-      // Approach until within attack range — then stand and deal contact damage only.
       if (dist > attackRadius) {
-        mon.x += (dx / dist) * mon.speed * dtSec;
-        mon.y += (dy / dist) * mon.speed * dtSec;
+        const flank = dist > attackRadius * 3 ? 0.18 : 0.45;
+        const mx = nx * (1 - flank) + px * flank;
+        const my = ny * (1 - flank) + py * flank;
+        const mag = Math.hypot(mx, my) || 1;
+        mon.x += (mx / mag) * mon.speed * dtSec;
+        mon.y += (my / mag) * mon.speed * dtSec;
+      } else if (mon.kind === 'fast' || mon.kind === 'basic') {
+        const orbit = mon.speed * 0.85 * dtSec;
+        mon.x += px * orbit;
+        mon.y += py * orbit;
+        const dist2 = Math.hypot(nearest.x - mon.x, nearest.y - mon.y) || 1;
+        if (dist2 > attackRadius * 1.35) {
+          mon.x += ((nearest.x - mon.x) / dist2) * mon.speed * 0.4 * dtSec;
+          mon.y += ((nearest.y - mon.y) / dist2) * mon.speed * 0.4 * dtSec;
+        }
       }
 
       // Separation: push monsters apart so they don't stack on the same spot.
@@ -1690,6 +1713,8 @@ export class HordeRoom extends Room<RoomState> {
   }
 
   private killMonster(id: string, shooterSessionId?: string) {
+    const obs = this.state.obstacles.find((o) => o.id === id);
+    const victimName = obs?.displayName?.trim() || 'Monster';
     this.monsters = this.monsters.filter((m) => m.id !== id);
     const idx = this.state.obstacles.findIndex((o) => o.id === id);
     if (idx >= 0) this.state.obstacles.splice(idx, 1);
@@ -1703,6 +1728,14 @@ export class HordeRoom extends Room<RoomState> {
         shooter.killStreak += 1;
         shooter.score = shooter.kills;
         shooter.credits = (shooter.credits || 0) + this.creditsPerKill;
+        broadcastKillFeed(this, {
+          killer: shooter.username,
+          killerId: shooter.sessionId,
+          victim: victimName,
+          victimId: id,
+          kind: 'monster',
+          weaponId: shooter.weaponId || undefined,
+        });
       }
     }
   }

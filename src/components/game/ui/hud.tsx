@@ -181,6 +181,8 @@ export const HUD: React.FC<{
   runnersLeft?: number;
   /** Loadout weapon combat kind (from equipped skins). */
   weaponKind?: WeaponCombatKind | null;
+  /** Catalog / shop display name (Pistol, Sniper, …). */
+  weaponName?: string | null;
   /** Map-authored custom moves (Player Model Studio → Moves tab), if any. */
   customMoveDefs?: CustomMoveDef[];
   /** Live Controls rebinds — HUD strip follows these, not hardcoded keys. */
@@ -193,6 +195,7 @@ export const HUD: React.FC<{
   gameProgress = null,
   runnersLeft = 1,
   weaponKind = null,
+  weaponName = null,
   customMoveDefs,
   keyBindings = DEFAULT_KEY_BINDINGS,
   slideCooldownMs,
@@ -344,7 +347,9 @@ export const HUD: React.FC<{
         <p className="text-[8px] font-bold tracking-[0.2em] uppercase" style={{ color: 'rgba(209,230,250,0.78)' }}>
           WEAPON
         </p>
-        <p className="text-[18px] font-black text-white leading-tight">{weaponLabel(weaponKind)}</p>
+        <p className="text-[18px] font-black text-white leading-tight">
+          {(weaponName || weaponLabel(weaponKind)).toUpperCase()}
+        </p>
         {(player.weaponMagSize ?? 0) > 0 ? (
           <p className="text-[14px] font-black tabular-nums tracking-wide mt-0.5" style={{ color: 'rgba(255,220,140,0.95)' }}>
             {(player.reloadEndsAt ?? 0) > Date.now()

@@ -162,6 +162,8 @@ import {
   type TransformSpace,
 } from './editor-viewport';
 import { MapPlayPreview } from './map-play-preview';
+import { MenuSfxRoot } from '../effects/menu-sfx';
+import { playSound } from '../effects/soundboard';
 import { PlayTestEngine } from './play-test-engine';
 import { ensureMapPlayerEntity } from './player-avatar';
 import type { TpsViewSettings } from '../tps/tps-view-settings';
@@ -679,6 +681,7 @@ export function MapEditor({
   };
 
   const openEditorTab = (id: SidebarTab) => {
+    playSound('ui_transition');
     setUiCollapsed(false);
     setSidebarOpen(true);
     setRailOpen(true);
@@ -1969,6 +1972,7 @@ export function MapEditor({
       apiRef.current?.setSelectedId(null);
       setSelectedIds([]);
     }
+    playSound('ui_transition');
     setTab(id);
     setUiCollapsed(false);
     setPropsOpen(false);
@@ -2453,7 +2457,8 @@ export function MapEditor({
 
   const editorShell = (
     <TooltipProvider delayDuration={350}>
-    <div
+    <MenuSfxRoot
+      music={playTest || playTestLive ? 'none' : 'menu'}
       className={
         variant === 'engine'
           ? 'absolute inset-0 bg-[#0d121a] text-white flex flex-col'
@@ -6617,7 +6622,7 @@ export function MapEditor({
           />
         </div>
       )}
-    </div>
+    </MenuSfxRoot>
     </TooltipProvider>
   );
 

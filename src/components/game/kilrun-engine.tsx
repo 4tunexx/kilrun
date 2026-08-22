@@ -7,13 +7,40 @@ import { Button } from '@/components/ui/button';
 import { useRoomState } from './net/use-room-state';
 import type { JoinOptions } from './net/connection';
 import type { ChatMessage, NetObstacleState, NetPlatformState, NetPlayerState, PlayerInputMessage } from './net/types';
+import type { KillFeedEvent } from '@shared/kill-feed';
 import { InputManager } from './input/input-manager';
 import type { DualJoystick } from './input/dual-joystick';
 import { createThreeWorld, updateFollowCamera } from './renderer/three-world';
 import type { FollowCameraOpts } from './renderer/three-world';
 import { SprintParticles } from './effects/sprint-particles';
 import { DamageNumberFx } from './effects/damage-numbers';
-import { playSound, playLoopedSound, stopLoopedSound, preloadSoundboard, setMasterVolume } from './effects/soundboard';
+import {
+  playSound,
+  playLoopedSound,
+  stopLoopedSound,
+  preloadSoundboard,
+  applyPlayerMatchAudio,
+  setMusicDuck,
+  playIngameMusic,
+  stopIngameMusic,
+} from './effects/soundboard';
+import { playFootstepSfx, playMoveSfx, playTrapHitSfx, playWeaponFireSfx, playWeaponReloadSfx, supportPadKind } from './effects/weapon-sfx';
+import {
+  collectRemoteMonsterCues,
+  collectRemotePlayerCues,
+  playSpatialCues,
+  type MonsterSfxPrev,
+  type RemoteSfxPrev,
+} from './effects/spatial-sfx';
+import {
+  AFK_TIMEOUT_MS,
+  AFK_WARNING_MS,
+  inHorizontalRadius,
+  isVoidFall,
+  overlappingHazard,
+  overlappingPadOfKind,
+  pendingImpactCue,
+} from './effects/impact-sfx';
 import { ThreeCharacter } from './entities/three-character';
 import { ThreeMap } from './entities/three-map';
 import { CustomMapOverlay } from './entities/custom-map-overlay';
@@ -40,6 +67,8 @@ import { WeaponShop, type WeaponPreset, mapShopItemsToPresets, mapPowerUpsToPres
 import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
 import { Crosshair } from './ui/crosshair';
+import { HitMarker } from './ui/hit-marker';
+import { KillFeed } from './ui/kill-feed';
 import { LiveChatOverlay } from './ui/live-chat-overlay';
 import { AdminInGamePanel } from './ui/admin-in-game-panel';
 import { SLOT_FIELDS } from './ui/ability-hud';
@@ -52,7 +81,7 @@ import {
   TPS_VIEW_STORAGE_KEY,
   type TpsViewSettings,
 } from './tps/tps-view-settings';
-import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
+import { hydrateWeaponCatalogFromApi, catalogWeaponLabel } from '@/lib/weapon-catalog';
 import { getKeyBindings } from '@/lib/key-bindings-config';
 import { DEFAULT_KEY_BINDINGS, eventMatchesBind, formatBindKey, type KeyBindAction } from '@shared/key-bindings';
 import {
@@ -251,6 +280,13 @@ export default function KilrunEngine({
   const [editorOpen, setEditorOpen] = useState(false);
   const [aiming, setAiming] = useState(false);
   const aimingRef = useRef(false);
+  const [hitMarker, setHitMarker] = useState<{ token: number; kind: 'player' | 'monster' }>({
+    token: 0,
+    kind: 'player',
+  });
+  const [killFeedEvent, setKillFeedEvent] = useState<(KillFeedEvent & { token: number }) | null>(
+    null
+  );
   const [tpsHud, setTpsHud] = useState<TpsViewSettings>(() => loadTpsViewSettings());
   const tpsRef = useRef(tpsHud);
   tpsRef.current = tpsHud;
@@ -509,16 +545,25 @@ export default function KilrunEngine({
   }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode, practiceRole, draftDoc]);
 
   useEffect(() => {
+    applyPlayerMatchAudio(matchSettings);
+  }, [matchSettings.masterVolume, matchSettings.sfxVolume, matchSettings.musicVolume]);
+
+  useEffect(() => {
+    setMusicDuck(paused || editorOpen ? 0.22 : 1);
+    return () => setMusicDuck(1);
+  }, [paused, editorOpen]);
+
+  useEffect(() => {
     pausedRef.current = paused || editorOpen;
-    if (paused || editorOpen || gameMenuOpen || scoreboardOpen) {
+    if (paused || editorOpen || gameMenuOpen) {
       if (document.pointerLockElement) document.exitPointerLock?.();
-      // Don't let a Tab-freed cursor stay suspended once we leave gameplay —
+      // Don't let a freed cursor stay suspended once we leave gameplay —
       // menus already own the cursor, and resuming should re-lock normally.
       mouseFreeRef.current = false;
       setMouseFree(false);
       inputManagerRef.current?.mouse.setLockSuspended(false);
     }
-  }, [paused, editorOpen, gameMenuOpen, scoreboardOpen]);
+  }, [paused, editorOpen, gameMenuOpen]);
 
   useEffect(() => {
     const onTps = (ev: Event) => {
@@ -575,8 +620,7 @@ export default function KilrunEngine({
     return () => window.removeEventListener('keydown', onKey);
   }, [editorOpen, paused, isAdmin]);
 
-  // Scoreboard: hold backtick (show while held, hide on release). Moved off
-  // Tab so Tab can be the free-mouse toggle players expect.
+  // Scoreboard: hold (default Tab). Pointer lock stays on — classic FPS.
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
       if (!eventMatchesBind(e, keyBindings.scoreboard)) return;
@@ -589,16 +633,15 @@ export default function KilrunEngine({
       e.preventDefault();
       setScoreboardOpen(false);
     };
-    window.addEventListener('keydown', onDown);
-    window.addEventListener('keyup', onUp);
+    window.addEventListener('keydown', onDown, { capture: true });
+    window.addEventListener('keyup', onUp, { capture: true });
     return () => {
-      window.removeEventListener('keydown', onDown);
-      window.removeEventListener('keyup', onUp);
+      window.removeEventListener('keydown', onDown, { capture: true });
+      window.removeEventListener('keyup', onUp, { capture: true });
     };
   }, [editorOpen, paused, gameMenuOpen, keyBindings.scoreboard]);
 
-  // Tab: quick tap toggles a free mouse cursor (release/re-request pointer
-  // lock) without opening the pause menu, so players can e.g. glance at chat.
+  // Free mouse (default Alt): toggle pointer lock without opening pause.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!eventMatchesBind(e, keyBindings.freeMouse) || e.repeat) return;
@@ -614,8 +657,8 @@ export default function KilrunEngine({
         hostRef.current?.requestPointerLock?.().catch(() => {});
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
   }, [editorOpen, paused, gameMenuOpen, keyBindings.freeMouse]);
 
   useEffect(() => {
@@ -627,7 +670,7 @@ export default function KilrunEngine({
     let raf = 0;
     const world = createThreeWorld(hostElement);
     world.setBloomEnabled(matchSettingsRef.current.bloom);
-    setMasterVolume(matchSettingsRef.current.masterVolume);
+    applyPlayerMatchAudio(matchSettingsRef.current);
     worldApiRef.current = world;
     const activeId = getActivePlayMapIdForMode(mode);
     const localDoc = activeId ? loadMapPlayable(activeId) : null;
@@ -676,9 +719,20 @@ export default function KilrunEngine({
       })
       .catch(() => {});
     const damageNumbers = new DamageNumberFx(hostElement);
+    const pendingImpactRef: {
+      current: { at: number; kind: 'melee' | 'hitscan'; range: number } | null;
+    } = { current: null };
     const hitFxConnection = connectionRef.current;
-    hitFxConnection?.onHitFx((msg) => damageNumbers.spawn(msg.x, msg.y, msg.z, msg.amount, msg.kind));
+    hitFxConnection?.onHitFx((msg) => {
+      pendingImpactRef.current = null;
+      damageNumbers.spawn(msg.x, msg.y, msg.z, msg.amount, msg.kind);
+      setHitMarker((h) => ({ token: h.token + 1, kind: msg.kind }));
+    });
+    hitFxConnection?.onKillFeed((msg) => {
+      setKillFeedEvent((prev) => ({ ...msg, token: (prev?.token ?? 0) + 1 }));
+    });
     preloadSoundboard();
+    playIngameMusic();
     let envHandle: { dispose: () => void } | null = null;
     let envFloor: THREE.Mesh | null = null;
 
@@ -748,6 +802,18 @@ export default function KilrunEngine({
     let wasFlippingForSound = false;
     let wasCrouchingForSound = false;
     let lastFootstepAt = 0;
+    const remoteSfxPrev = new Map<string, RemoteSfxPrev>();
+    const monsterSfxPrev = new Map<string, MonsterSfxPrev>();
+    const liveButtons = playDoc ? mapDocToSimButtons(playDoc) : [];
+    const liveActions = playDoc ? mapDocToSimActions(playDoc) : [];
+    let insideButtonIds = new Set<string>();
+    let lastCheckpointId = '';
+    let wasFinishedForSound = false;
+    let lastTeleportAt: { x: number; y: number; z: number } | null = null;
+    let lastInputAt = Date.now();
+    let afkStage = 0;
+    const impactRay = new THREE.Raycaster();
+    const impactNdc = new THREE.Vector2(0, 0);
     /** Sprint/slide screen FX intensity, eased toward 0/1 each frame. */
     let sprintFx = 0;
     const sprintParticles = new SprintParticles(world.camera);
@@ -945,6 +1011,7 @@ export default function KilrunEngine({
         // RMB (or mobile look-stick) = aim focus — drives crosshair + body lock
         const nowAim = inputManager.isAimHeld();
         if (nowAim !== aimingRef.current) {
+          if (nowAim) playSound('weapon_zoom');
           aimingRef.current = nowAim;
           setAiming(nowAim);
         }
@@ -970,6 +1037,29 @@ export default function KilrunEngine({
       const wishFwd = -stick.y;
       const wishStrafe = stick.x;
       const aimHeld = !frozen && inputManager.isAimHeld();
+      if (
+        !frozen &&
+        (Math.abs(wishFwd) + Math.abs(wishStrafe) > 0.05 ||
+          inputManager.isJumpPressed() ||
+          inputManager.isShootPressed() ||
+          inputManager.isAttackPressed() ||
+          inputManager.isSprintPressed() ||
+          inputManager.isCrouchPressed() ||
+          aimHeld)
+      ) {
+        lastInputAt = Date.now();
+        afkStage = 0;
+      }
+      if (!frozen && roomPhaseRef.current === 'playing') {
+        const idleMs = Date.now() - lastInputAt;
+        if (idleMs >= AFK_TIMEOUT_MS && afkStage < 2) {
+          playSound('afk_timeout');
+          afkStage = 2;
+        } else if (idleMs >= AFK_WARNING_MS && afkStage < 1) {
+          playSound('afk_warning');
+          afkStage = 1;
+        }
+      }
 
       // --- Advance local-player prediction this frame (render-rate, not 30Hz) ---
       if (localState) {
@@ -1028,7 +1118,7 @@ export default function KilrunEngine({
                 predictedPhysOpts
               );
               if (predictedScratch.wallJumpLockoutMs > 0 && prevWallLock <= 0) {
-                playSound('wall_jump');
+                playMoveSfx('wall_jump');
               } else if (predictedScratch.jumpCount === 2 && prevJumpCount < 2) {
                 playSound('double_jump');
               }
@@ -1076,16 +1166,18 @@ export default function KilrunEngine({
         // Loop the sprint sound for as long as sprinting stays true (instead
         // of firing once on the rising edge) so it keeps playing while the
         // player holds sprint, and stop it the moment sprinting ends.
-        if (sprinting && !wasSprintingForSound) playLoopedSound('sprint_start');
-        else if (!sprinting && wasSprintingForSound) stopLoopedSound('sprint_start');
+        if (sprinting && !wasSprintingForSound) {
+          playSound('sprint_burst');
+          playLoopedSound('sprint_start');
+        } else if (!sprinting && wasSprintingForSound) stopLoopedSound('sprint_start');
         wasSprintingForSound = sprinting;
-        if (sliding && !wasSlidingForSound) playSound('slide');
+        if (sliding && !wasSlidingForSound) playMoveSfx('slide');
         wasSlidingForSound = sliding;
         const flipping = predictedScratch.flipMs > 0;
         if (flipping && !wasFlippingForSound) playSound('flip');
         wasFlippingForSound = flipping;
         const crouchNow = !frozen && inputManager.isCrouchPressed();
-        if (crouchNow && !wasCrouchingForSound) playSound('crouch');
+        if (crouchNow && !wasCrouchingForSound) playMoveSfx('crouch');
         wasCrouchingForSound = crouchNow;
         if (
           !frozen &&
@@ -1094,7 +1186,7 @@ export default function KilrunEngine({
           performance.now() - lastFootstepAt > (sprinting ? 280 : 420)
         ) {
           lastFootstepAt = performance.now();
-          playSound('footstep');
+          playFootstepSfx(supportPadKind(predictedPads, predictedScratch.supportPadId));
         }
         const targetFx = sliding ? 1 : sprinting ? Math.min(1, horizSpeed / 9) : 0;
         const rate = targetFx > sprintFx ? 7 : 3.2;
@@ -1107,6 +1199,40 @@ export default function KilrunEngine({
       }
 
       damageNumbers.update(dt, world.camera, hostElement.clientWidth, hostElement.clientHeight);
+      if (pendingImpactRef.current && performance.now() >= pendingImpactRef.current.at) {
+        const pending = pendingImpactRef.current;
+        pendingImpactRef.current = null;
+        const exclude: THREE.Object3D[] = [];
+        characters.forEach((c) => exclude.push(c.root));
+        let metalHit = false;
+        if (pending.kind === 'hitscan') {
+          impactRay.setFromCamera(impactNdc, world.camera);
+          impactRay.far = Math.max(1.2, pending.range);
+          const hits = impactRay.intersectObjects(cameraCollidables, true);
+          for (const h of hits) {
+            if (h.distance < 0.4) continue;
+            let skip = false;
+            let obj: THREE.Object3D | null = h.object;
+            while (obj) {
+              if (exclude.includes(obj)) {
+                skip = true;
+                break;
+              }
+              obj = obj.parent;
+            }
+            if (!skip) {
+              metalHit = true;
+              break;
+            }
+          }
+        }
+        const cue = pendingImpactCue({
+          fireKind: pending.kind,
+          hitConfirmed: false,
+          metalHit,
+        });
+        if (cue) playSound(cue);
+      }
 
       const swayCombat = ensureCombatSettings(
         customDocRef.current ?? ({ combatSettings: {} } as MapDocument)
@@ -1128,22 +1254,79 @@ export default function KilrunEngine({
         // Left the ground with upward velocity = jumped (vs. walking off an
         // edge, which leaves the ground with ~0 initial vz).
         if (wasGroundedForShake && !groundedNow && (predictedBody?.vz ?? 0) > 0.5) {
-          playSound('jump');
+          playMoveSfx('jump');
         }
         wasGroundedForShake = groundedNow;
 
         if (lastHealthForShake !== null && localState.health < lastHealthForShake) {
           shakeAmp = Math.max(shakeAmp, swayCombat.shakeOnHit ?? 0);
-          playSound('hit_taken');
+          const hurtAt = predictedBody
+            ? { x: predictedBody.x, y: predictedBody.y, z: predictedBody.z }
+            : { x: localState.x, y: localState.y, z: localState.z ?? 0 };
+          if (isVoidFall(hurtAt.z)) {
+            playSound('void_fall');
+          } else {
+            const trap = overlappingHazard(hurtAt, obstaclesRef.current.values());
+            if (trap) playTrapHitSfx(trap);
+            else playSound('hit_taken');
+          }
+        } else if (
+          lastHealthForShake !== null &&
+          localState.health > lastHealthForShake &&
+          lastHealthForShake > 0 &&
+          localState.isAlive
+        ) {
+          playSound('pickup_health');
         }
         lastHealthForShake = localState.health;
 
+        const justRespawned = !wasAliveForDeathSound && localState.isAlive;
         if (wasAliveForDeathSound && !localState.isAlive) {
-          playSound('player_death');
-        } else if (!wasAliveForDeathSound && localState.isAlive) {
+          const zNow = predictedBody?.z ?? localState.z ?? 0;
+          if (!isVoidFall(zNow)) playSound('player_death');
+        } else if (justRespawned) {
           playSound('respawn');
         }
         wasAliveForDeathSound = localState.isAlive;
+
+        const here = predictedBody
+          ? { x: predictedBody.x, y: predictedBody.y, z: predictedBody.z }
+          : { x: localState.x, y: localState.y, z: localState.z ?? 0 };
+        const cpId = overlappingPadOfKind(here, predictedPads, 'checkpoint');
+        if (cpId && cpId !== lastCheckpointId) playSound('checkpoint');
+        lastCheckpointId = cpId ?? '';
+        if (localState.hasFinished && !wasFinishedForSound) playSound('finish_line');
+        wasFinishedForSound = Boolean(localState.hasFinished);
+        if (
+          lastTeleportAt &&
+          localState.isAlive &&
+          !justRespawned &&
+          !isVoidFall(here.z)
+        ) {
+          const jumped = Math.hypot(
+            here.x - lastTeleportAt.x,
+            here.y - lastTeleportAt.y,
+            here.z - lastTeleportAt.z
+          );
+          if (jumped > 6) playSound('teleport');
+        }
+        lastTeleportAt = here;
+
+        if (!frozen) {
+          const nextInside = new Set<string>();
+          for (const btn of liveButtons) {
+            const inside = inHorizontalRadius(here, btn);
+            if (inside && !insideButtonIds.has(btn.id)) playSound('button_press');
+            if (inside) nextInside.add(btn.id);
+          }
+          for (const action of liveActions) {
+            if (action.trigger === 'interact') continue;
+            const inside = inHorizontalRadius(here, action);
+            if (inside && !insideButtonIds.has(action.id)) playSound('button_press');
+            if (inside) nextInside.add(action.id);
+          }
+          insideButtonIds = nextInside;
+        }
       }
       characters.forEach((view, sessionId) => {
         const player = playersRef.current.get(sessionId);
@@ -1249,6 +1432,55 @@ export default function KilrunEngine({
           view.setArmsOnly(armsOnly);
         }
       });
+
+      if (!frozen) {
+        const listener = predictedBody
+          ? { x: predictedBody.x, y: predictedBody.y, z: predictedBody.z }
+          : localState
+            ? { x: localState.x, y: localState.y, z: localState.z ?? 0 }
+            : null;
+        if (listener) {
+          const nowSfx = Date.now();
+          const seenRemote = new Set<string>();
+          playersRef.current.forEach((player, sessionId) => {
+            if (sessionId === localSessionId) return;
+            seenRemote.add(sessionId);
+            const { cues, next } = collectRemotePlayerCues(
+              remoteSfxPrev.get(sessionId),
+              player,
+              listener,
+              nowSfx
+            );
+            remoteSfxPrev.set(sessionId, next);
+            playSpatialCues(cues);
+            if (cues.some((c) => c.kind === 'fire')) {
+              characters
+                .get(sessionId)
+                ?.triggerAttack(player.weaponKind === 'melee' ? 'punch' : 'attack');
+            }
+          });
+          for (const id of remoteSfxPrev.keys()) {
+            if (!seenRemote.has(id)) remoteSfxPrev.delete(id);
+          }
+          const seenMon = new Set<string>();
+          obstaclesRef.current.forEach((o) => {
+            if (!o.id?.startsWith('mon_')) return;
+            seenMon.add(o.id);
+            const { cues, next } = collectRemoteMonsterCues(
+              monsterSfxPrev.get(o.id),
+              o,
+              listener,
+              nowSfx
+            );
+            monsterSfxPrev.set(o.id, next);
+            playSpatialCues(cues);
+          });
+          for (const id of monsterSfxPrev.keys()) {
+            if (!seenMon.has(id)) monsterSfxPrev.delete(id);
+          }
+        }
+      }
+
       map.update(dt);
 
       if (roomPhaseRef.current === 'playing') {
@@ -1259,8 +1491,24 @@ export default function KilrunEngine({
         overlay.tickMotion(0);
       }
 
-      if (!frozen && (inputManager.isInteractPressed() || inputManager.consumeInteractPulse())) {
+      const interactEdge = !frozen && inputManager.consumeInteractPulse();
+      if (!frozen && (inputManager.isInteractPressed() || interactEdge)) {
         interactPulse = true;
+        if (interactEdge) {
+          const here = predictedBody
+            ? { x: predictedBody.x, y: predictedBody.y, z: predictedBody.z }
+            : localState
+              ? { x: localState.x, y: localState.y, z: localState.z ?? 0 }
+              : null;
+          if (here) {
+            for (const action of liveActions) {
+              if (action.trigger === 'interact' && inHorizontalRadius(here, action)) {
+                playSound('button_press');
+                break;
+              }
+            }
+          }
+        }
       }
 
       if (localState) {
@@ -1326,7 +1574,7 @@ export default function KilrunEngine({
         const mapWeaponDef = customDocRef.current?.weaponDef;
         if (inputManager.consumeReloadPulse()) {
           connectionRef.current?.sendReload();
-          playSound('weapon_reload');
+          playWeaponReloadSfx(localState?.weaponId);
           const localView = localSessionId ? characters.get(localSessionId) : undefined;
           if (!localView?.triggerReload()) {
             // No dedicated reload clip authored for this avatar — fall back
@@ -1384,7 +1632,18 @@ export default function KilrunEngine({
           const combat = resolveWeaponCombat(weaponAtt);
           const localView = characters.get(localSessionId);
           localView?.triggerAttack(combat.attackStyle ?? 'attack');
-          playSound(combat.kind === 'melee' || localWep?.weaponKind === 'melee' ? 'melee_punch' : 'weapon_fire');
+          playWeaponFireSfx(
+            localWep?.weaponId,
+            combat.kind === 'melee' || localWep?.weaponKind === 'melee' ? 'melee' : combat.kind
+          );
+          const isMelee = combat.kind === 'melee' || localWep?.weaponKind === 'melee';
+          if (combat.kind !== 'cosmetic') {
+            pendingImpactRef.current = {
+              at: performance.now() + (isMelee ? 220 : 90),
+              kind: isMelee ? 'melee' : 'hitscan',
+              range: localWep?.weaponRange || combat.range || 14,
+            };
+          }
           // Weapon Editor's Recoil tab documents "0 = use Combat Editor
           // global setting" for these two fields, but nothing ever actually
           // read the per-weapon override — every weapon always used the
@@ -1478,7 +1737,9 @@ export default function KilrunEngine({
       cancelAnimationFrame(raf);
       window.clearInterval(syncTimer);
       hitFxConnection?.offHitFx();
+      hitFxConnection?.offKillFeed();
       stopLoopedSound('sprint_start');
+      stopIngameMusic();
       if (document.pointerLockElement) document.exitPointerLock?.();
       characters.forEach((c) => c.destroy());
       sprintParticles.dispose();
@@ -1580,6 +1841,7 @@ export default function KilrunEngine({
                 (localPlayer.weaponKind as WeaponCombatKind | undefined) ??
                 resolveWeaponCombat(findWeaponAttachment(equippedSkins)).kind
               }
+              weaponName={catalogWeaponLabel(localPlayer.weaponId)}
               customMoveDefs={customDocRef.current?.customMoves}
               keyBindings={keyBindings}
               slideCooldownMs={slideCooldownMs}
@@ -1763,6 +2025,8 @@ export default function KilrunEngine({
         {room.phase === 'playing' && !paused && !editorOpen && (
           <>
             <Crosshair visible={aiming && !paused && !editorOpen} style={tpsHud.crosshair} />
+            <HitMarker token={hitMarker.token} kind={hitMarker.kind} />
+            <KillFeed event={killFeedEvent} />
             {aiming && (localPlayer?.weaponAdsZoomFov ?? 0) > 20 && (
               <div
                 className="pointer-events-none absolute inset-0 z-[120]"
@@ -1857,7 +2121,7 @@ export default function KilrunEngine({
           onMatchSettingsChange={(next) => {
             const saved = savePlayerMatchSettings(next);
             setMatchSettings(saved);
-            setMasterVolume(saved.masterVolume);
+            applyPlayerMatchAudio(saved);
             worldApiRef.current?.setBloomEnabled(saved.bloom);
           }}
           pauseHint={formatBindKey(keyBindings.pause)}

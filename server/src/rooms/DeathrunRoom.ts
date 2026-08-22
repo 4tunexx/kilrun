@@ -58,6 +58,7 @@ import {
 } from '../sim/active-abilities.js';
 import { getBurstEffectStatsByKey } from '../../../shared/ability-progression.js';
 import { assignDeathrunColors, BODY_COLOR_NONE } from '../lib/body-colors.js';
+import { broadcastKillFeed } from '../../../shared/kill-feed.js';
 import {
   authenticateJoin,
   claimsFromAuth,
@@ -1382,11 +1383,18 @@ export class DeathrunRoom extends Room<RoomState> {
         player.deaths = (player.deaths || 0) + 1;
         player.killStreak = 0;
         // Trapper gets a kill credit when eliminating a runner.
-        if (player.role === 'runner') {
+                if (player.role === 'runner') {
           for (const p of this.state.players.values()) {
             if (p.role === 'trapper' && p.isAlive) {
               p.kills = (p.kills || 0) + 1;
               p.killStreak += 1;
+              broadcastKillFeed(this, {
+                killer: p.username,
+                killerId: p.sessionId,
+                victim: player.username,
+                victimId: player.sessionId,
+                kind: 'trap',
+              });
               break;
             }
           }

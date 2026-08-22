@@ -63,6 +63,7 @@ import {
 } from '../sim/active-abilities.js';
 import { getBurstEffectStatsByKey } from '../../../shared/ability-progression.js';
 import { assignCompetitiveColor } from '../lib/body-colors.js';
+import { broadcastKillFeed } from '../../../shared/kill-feed.js';
 import {
   authenticateJoin,
   claimsFromAuth,
@@ -1882,6 +1883,14 @@ export class CompetitiveRoom extends Room<RoomState> {
           shooter.killStreak += 1;
           shooter.score = shooter.kills;
           shooter.credits = (shooter.credits || 0) + this.creditsPerKill;
+          broadcastKillFeed(this, {
+            killer: shooter.username,
+            killerId: shooter.sessionId,
+            victim: player.username,
+            victimId: player.sessionId,
+            kind: 'player',
+            weaponId: shooter.weaponId || undefined,
+          });
         }
       } else {
         player.isAlive = false;
@@ -1890,6 +1899,21 @@ export class CompetitiveRoom extends Room<RoomState> {
           shooter.killStreak += 1;
           shooter.score = shooter.kills;
           shooter.credits = (shooter.credits || 0) + this.creditsPerKill;
+          broadcastKillFeed(this, {
+            killer: shooter.username,
+            killerId: shooter.sessionId,
+            victim: player.username,
+            victimId: player.sessionId,
+            kind: 'player',
+            weaponId: shooter.weaponId || undefined,
+          });
+        } else if (wasAlive) {
+          broadcastKillFeed(this, {
+            killer: '',
+            victim: player.username,
+            victimId: player.sessionId,
+            kind: 'world',
+          });
         }
       }
     }

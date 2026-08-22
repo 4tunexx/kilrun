@@ -2,6 +2,7 @@ import { Client, Room, getStateCallbacks } from 'colyseus.js';
 import type {
   ChatMessage,
   HitFxMessage,
+  KillFeedMessage,
   NetObstacleState,
   NetPlatformKind,
   NetPlatformState,
@@ -212,12 +213,13 @@ export class GameConnection {
   } | null = null;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  // Re-registered onto every new Room in bindRoom() — onChat/onHitFx used to
+  // Re-registered onto every new Room in bindRoom() — onChat/onHitFx/onKillFeed used to
   // bind directly to `this.room` at call time, so a reconnect (which swaps in
   // a brand-new Room instance) silently orphaned them: chat and hit-fx popups
   // just stopped after any network blip, with no visible error.
   private chatCallback: ((msg: ChatMessage) => void) | null = null;
   private hitFxCallback: ((msg: HitFxMessage) => void) | null = null;
+  private killFeedCallback: ((msg: KillFeedMessage) => void) | null = null;
 
   constructor(endpoint: string = resolveGameServerUrl()) {
     this.client = new Client(endpoint);
@@ -454,6 +456,7 @@ export class GameConnection {
     });
     if (this.chatCallback) this.room.onMessage('chat', this.chatCallback);
     if (this.hitFxCallback) this.room.onMessage('hitFx', this.hitFxCallback);
+    if (this.killFeedCallback) this.room.onMessage('killFeed', this.killFeedCallback);
     const state = this.room.state as never;
     const $ = getStateCallbacks(this.room) as <T>(instance: T) => never;
     const proxy = $(state) as unknown as {
@@ -656,6 +659,16 @@ export class GameConnection {
   /** Drop the hit-fx listener so an unmounted engine cannot spawn into a destroyed overlay. */
   public offHitFx(): void {
     this.hitFxCallback = null;
+  }
+
+  /** In-match kill ticker. Re-attached on reconnect like onHitFx. */
+  public onKillFeed(callback: (msg: KillFeedMessage) => void): void {
+    this.killFeedCallback = callback;
+    this.room?.onMessage('killFeed', callback);
+  }
+
+  public offKillFeed(): void {
+    this.killFeedCallback = null;
   }
 
   /** Admin-only — server re-checks adminSessions, this is UI convenience only. */

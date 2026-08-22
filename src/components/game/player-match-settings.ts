@@ -3,12 +3,16 @@
 export type PlayerMatchSettings = {
   bloom: boolean;
   masterVolume: number;
+  sfxVolume: number;
+  musicVolume: number;
   mouseSensMult: number;
 };
 
 export const DEFAULT_PLAYER_MATCH_SETTINGS: PlayerMatchSettings = {
   bloom: true,
   masterVolume: 1,
+  sfxVolume: 1,
+  musicVolume: 1,
   mouseSensMult: 1,
 };
 
@@ -40,10 +44,14 @@ export function sanitizePlayerMatchSettings(
   raw: Partial<PlayerMatchSettings> | null | undefined
 ): PlayerMatchSettings {
   const vol = Number(raw?.masterVolume);
+  const sfx = Number(raw?.sfxVolume);
+  const music = Number(raw?.musicVolume);
   const sens = Number(raw?.mouseSensMult);
   return {
     bloom: raw?.bloom !== false,
     masterVolume: Number.isFinite(vol) ? Math.max(0, Math.min(1, vol)) : 1,
+    sfxVolume: Number.isFinite(sfx) ? Math.max(0, Math.min(1, sfx)) : 1,
+    musicVolume: Number.isFinite(music) ? Math.max(0, Math.min(1, music)) : 1,
     mouseSensMult: Number.isFinite(sens) ? Math.max(0.25, Math.min(2.5, sens)) : 1,
   };
 }

@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { persistSoundFile } from '@/lib/sound-asset-upload';
 import { invalidateSoundDefinitionsCache } from '@/lib/sound-definitions';
 import { isWritableSoundEventKey } from '@/lib/sound-event-key';
+import { defaultSoundFileUrl, packBindingForEvent } from '@shared/default-sound-pack';
 
 export { isWritableSoundEventKey } from '@/lib/sound-event-key';
 
@@ -57,8 +58,21 @@ export async function patchSoundDefinition(
 ): Promise<void> {
   const eventKey = eventKeyRaw.trim();
   if (!eventKey) throw new Error('eventKey is required');
-  const existing = await prisma.soundDefinition.findUnique({ where: { eventKey } });
-  if (!existing) throw new Error('No sound bound to this event yet');
+  let existing = await prisma.soundDefinition.findUnique({ where: { eventKey } });
+  if (!existing) {
+    const pack = packBindingForEvent(eventKey);
+    if (!pack || !isWritableSoundEventKey(eventKey)) {
+      throw new Error('No sound bound to this event yet');
+    }
+    existing = await prisma.soundDefinition.create({
+      data: {
+        eventKey,
+        fileUrl: defaultSoundFileUrl(pack.file),
+        fileName: pack.fileName,
+        volume: 1,
+      },
+    });
+  }
   const data: SoundFxUpdate & { volume?: number } = {};
   if (Object.prototype.hasOwnProperty.call(body, 'volume')) {
     data.volume = Math.max(0, Math.min(1, Number(body.volume) || 0));

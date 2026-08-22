@@ -45,7 +45,18 @@ import { makeHammerSolidObject, defaultSizeForHammer, type HammerPrimitive } fro
 import { DualJoystick } from '../input/dual-joystick';
 import { JoystickOverlay } from '../ui/joystick-overlay';
 import { detectTouchDevice } from '../utils/constants';
-import { playSound, playLoopedSound, stopLoopedSound, preloadSoundboard, setMasterVolume } from '../effects/soundboard';
+import {
+  playSound,
+  playLoopedSound,
+  stopLoopedSound,
+  preloadSoundboard,
+  applyPlayerMatchAudio,
+  setMusicDuck,
+  playIngameMusic,
+  stopIngameMusic,
+} from '../effects/soundboard';
+import { pendingImpactCue } from '../effects/impact-sfx';
+import { playFootstepSfx, playMoveSfx, playTrapHitSfx, playWeaponFireSfx, playWeaponReloadSfx, supportPadKind } from '../effects/weapon-sfx';
 import { PauseMenu, useGameFullscreen } from '../ui/pause-menu';
 import {
   loadPlayerMatchSettings,
@@ -307,8 +318,13 @@ export function MapPlayPreview({
     };
   }, []);
   useEffect(() => {
-    setMasterVolume(matchSettings.masterVolume);
-  }, [matchSettings.masterVolume]);
+    applyPlayerMatchAudio(matchSettings);
+  }, [matchSettings.masterVolume, matchSettings.sfxVolume, matchSettings.musicVolume]);
+
+  useEffect(() => {
+    setMusicDuck(paused ? 0.22 : 1);
+    return () => setMusicDuck(1);
+  }, [paused]);
 
   useEffect(() => {
     if (paused && document.pointerLockElement) document.exitPointerLock?.();
@@ -353,6 +369,7 @@ export function MapPlayPreview({
   const tpsRef = useRef<TpsViewSettings>(resolvedTps);
   const onCloseRef = useRef(onClose);
   const [hp, setHp] = useState(100);
+  const [ammoUi, setAmmoUi] = useState('');
   const [energyUi, setEnergyUi] = useState(100);
   const [abilityUi, setAbilityUi] = useState(() => defaultAbilityHostState());
   // Live text readout of player Z vs. the nearest collision pad's top —
@@ -408,6 +425,7 @@ export function MapPlayPreview({
     if (!host) return;
 
     preloadSoundboard();
+    playIngameMusic();
     setHp(100);
     setFinished(false);
     setLoading(true);
@@ -655,6 +673,14 @@ export function MapPlayPreview({
     let interactPulse = false;
     let attackPulse = false;
     let lastAttackAt = 0;
+    let mag = -1;
+    let reserve = 0;
+    let reloadEndsAt = 0;
+    let wasReloadHeld = false;
+    let wasWantFire = false;
+    let lastAmmoLabel = '';
+    const impactRay = new THREE.Raycaster();
+    const impactNdc = new THREE.Vector2(0, 0);
     let raf = 0;
     const scratch = createSimScratch();
     let finishedLocal = false;
@@ -1073,6 +1099,7 @@ export function MapPlayPreview({
           : keyBindToCodes(aimBind).some((c) => keys.has(c));
       const aimNow = joy ? Math.hypot(lookStick.x, lookStick.y) > 0.25 : desktopAim;
       if (aimNow !== aimHeldUi) {
+        if (aimNow) playSound('weapon_zoom');
         aimHeldUi = aimNow;
         setAimingHud(aimNow);
       }
@@ -1100,16 +1127,18 @@ export function MapPlayPreview({
         wishStrafe += moveStick.x;
       }
       const sprintingNow = sprint && wasGrounded && (wishFwd !== 0 || wishStrafe !== 0);
-      if (sprintingNow && !wasSprintingForSound) playLoopedSound('sprint_start');
-      else if (!sprintingNow && wasSprintingForSound) stopLoopedSound('sprint_start');
+      if (sprintingNow && !wasSprintingForSound) {
+        playSound('sprint_burst');
+        playLoopedSound('sprint_start');
+      } else if (!sprintingNow && wasSprintingForSound) stopLoopedSound('sprint_start');
       wasSprintingForSound = sprintingNow;
       const flippingNow = scratch.flipMs > 0;
       if (flippingNow && !wasFlippingForSound) playSound('flip');
       wasFlippingForSound = flippingNow;
-      if (crouch && !wasCrouchingForSound) playSound('crouch');
+      if (crouch && !wasCrouchingForSound) playMoveSfx('crouch');
       wasCrouchingForSound = crouch;
       const slidingNow = scratch.slideMs > 0;
-      if (slidingNow && !wasSlidingForSound) playSound('slide');
+      if (slidingNow && !wasSlidingForSound) playMoveSfx('slide');
       wasSlidingForSound = slidingNow;
       if (
         body.isGrounded &&
@@ -1117,7 +1146,7 @@ export function MapPlayPreview({
         now - lastFootstepAt > (sprintingNow ? 280 : 420)
       ) {
         lastFootstepAt = now;
-        playSound('footstep');
+        playFootstepSfx(supportPadKind(pads, scratch.supportPadId));
       }
       if (scratch.customMoveActiveId && scratch.customMoveActiveId !== lastCustomMoveId) {
         playSound(customMoveSoundKey(scratch.customMoveActiveId));
@@ -1225,7 +1254,7 @@ export function MapPlayPreview({
             bounds,
             physOptsRef.current
           );
-          if (scratch.wallJumpLockoutMs > 0 && prevWallLock <= 0) playSound('wall_jump');
+          if (scratch.wallJumpLockoutMs > 0 && prevWallLock <= 0) playMoveSfx('wall_jump');
           else if (scratch.jumpCount === 2 && prevJumpCount < 2) playSound('double_jump');
           if (scratch.exhausted && !prevExhausted) playSound('energy_exhausted');
 
@@ -1421,7 +1450,7 @@ export function MapPlayPreview({
           // damagePlayer() early-return on isBerserkActive).
           if (isBerserkActive(abilityHost, Date.now())) continue;
           if (h.instantKill) {
-            if (hpLocal > 0) playSound('trap_trigger');
+            if (hpLocal > 0) playTrapHitSfx(h);
             hpLocal = 0;
             setHp(0);
             continue;
@@ -1431,7 +1460,7 @@ export function MapPlayPreview({
             lastDamageAt.set(h.id, now);
             hpLocal = Math.max(0, hpLocal - h.damage);
             setHp(hpLocal);
-            playSound('trap_trigger');
+            playTrapHitSfx(h);
           }
         }
 
@@ -1630,7 +1659,7 @@ export function MapPlayPreview({
         }
         const justLandedVis = justLanded;
         if (justLandedVis) playSound('land');
-        else if (wasGrounded && !body.isGrounded && body.vz > 0.5) playSound('jump');
+        else if (wasGrounded && !body.isGrounded && body.vz > 0.5) playMoveSfx('jump');
         wasGrounded = body.isGrounded;
         if (justLandedVis) landUntil = performance.now() + 280;
         if (hpLocal <= 0 && wasAliveForSound) playSound('player_death');
@@ -1644,52 +1673,123 @@ export function MapPlayPreview({
         let attackThisFrame = false;
 
         if (joy?.consumeAttackPulse()) attackPulse = true;
-        if (attackPulse) {
-          attackPulse = false;
-          // Bullet power: Play Test doesn't track ammo/reload at all, so
-          // "unlimited ammo" stands in as a rapid-fire cooldown bypass —
-          // the closest testable proxy for its real effect.
-          const effectiveCooldownMs = isUnlimitedAmmoActive(abilityHost, Date.now())
+        const shootHeld =
+          attackPulse ||
+          mouseButtons.has(0) ||
+          !!joy?.isAttackHeld();
+        const fireMode = combat.fireMode || 'semi';
+        const wantFire = fireMode === 'auto' ? shootHeld : attackPulse;
+        const fireEdge = wantFire && !wasWantFire;
+        wasWantFire = wantFire;
+        attackPulse = false;
+
+        const magSize = combat.kind === 'hitscan' ? Math.max(0, combat.magSize ?? 12) : 0;
+        const reloadMs = Math.max(200, combat.reloadMs ?? 1600);
+        if (mag < 0) {
+          mag = magSize;
+          reserve = combat.reserveAmmo ?? magSize * 4;
+        }
+        const unlimited = isUnlimitedAmmoActive(abilityHost, Date.now());
+        const reloading = reloadEndsAt > 0 && now < reloadEndsAt;
+        if (reloadEndsAt > 0 && now >= reloadEndsAt) {
+          const need = Math.max(0, magSize - mag);
+          const take = Math.min(need, reserve);
+          mag += take;
+          reserve -= take;
+          reloadEndsAt = 0;
+        }
+        const reloadHeld = keyBindToCodes(bindingsRef.current.reload).some((c) => keys.has(c));
+        if (reloadHeld && !wasReloadHeld && magSize > 0 && mag < magSize && reserve > 0 && !reloading) {
+          reloadEndsAt = now + reloadMs;
+          playWeaponReloadSfx(wepDef?.model);
+        }
+        wasReloadHeld = reloadHeld;
+
+        if (wantFire) {
+          const effectiveCooldownMs = unlimited
             ? Math.min(combat.cooldownMs, 80)
             : combat.cooldownMs;
           if (now - lastAttackAt >= effectiveCooldownMs) {
-            lastAttackAt = now;
-            attackThisFrame = true;
-            playSound(combat.kind === 'melee' ? 'melee_punch' : 'weapon_fire');
-            if (combat.kind === 'melee') meleeUntil = now + 500;
-            const kickDeg = wepDef?.recoilKickDeg || combatFeel.recoilKickDeg || 2;
-            recoilPitch += (kickDeg * Math.PI) / 180;
-            shakeAmp = Math.max(shakeAmp, combatFeel.shakeOnFire ?? 0.015);
-            weaponKick = Math.max(
-              weaponKick,
-              wepDef?.weaponKickZ ?? combatFeel.weaponKickZ ?? 0
-            );
-            if (combat.kind !== 'cosmetic') {
-              // Foundry: melee_direction = direction_to(camera aim point)
-              const cosP = Math.cos(pitch);
-              const sinP = Math.sin(pitch);
-              const forward = new THREE.Vector3(
-                Math.sin(yaw) * cosP,
-                sinP,
-                Math.cos(yaw) * cosP
+            if (magSize > 0 && !unlimited && (reloading || mag <= 0)) {
+              if (fireEdge) playSound('weapon_empty');
+              lastAttackAt = now;
+            } else {
+              lastAttackAt = now;
+              attackThisFrame = true;
+              if (magSize > 0 && !unlimited) mag = Math.max(0, mag - 1);
+              playWeaponFireSfx(wepDef?.model, combat.kind);
+              if (combat.kind === 'melee') meleeUntil = now + 500;
+              const kickDeg = wepDef?.recoilKickDeg || combatFeel.recoilKickDeg || 2;
+              recoilPitch += (kickDeg * Math.PI) / 180;
+              shakeAmp = Math.max(shakeAmp, combatFeel.shakeOnFire ?? 0.015);
+              weaponKick = Math.max(
+                weaponKick,
+                wepDef?.weaponKickZ ?? combatFeel.weaponKickZ ?? 0
               );
-              const reach = Math.max(1.2, combat.range);
-              const eye = playerPos.clone().add(new THREE.Vector3(0, 1.5, 0));
-              const aimPoint = eye
-                .clone()
-                .addScaledVector(forward, Math.min(reach, combat.kind === 'hitscan' ? 3.2 : 2.4));
-              const hitRadius = combat.kind === 'hitscan' ? 1.6 : Math.max(1.35, reach * 0.55);
-              roots.forEach((root, id) => {
-                if (root.position.distanceTo(aimPoint) > hitRadius) return;
-                const ent = playDoc.entities.find((e) => e.id === id);
-                if (!ent) return;
-                if (ent.animation?.trigger === 'interact' || ent.kind === 'button') {
-                  colliding.add(id);
-                  director.evaluateTriggers([ent], playerPos, true, colliding);
+              let metalHit = false;
+              if (combat.kind !== 'cosmetic') {
+                const cosP = Math.cos(pitch);
+                const sinP = Math.sin(pitch);
+                const forward = new THREE.Vector3(
+                  Math.sin(yaw) * cosP,
+                  sinP,
+                  Math.cos(yaw) * cosP
+                );
+                const reach = Math.max(1.2, combat.range);
+                const eye = playerPos.clone().add(new THREE.Vector3(0, 1.5, 0));
+                const aimPoint = eye
+                  .clone()
+                  .addScaledVector(forward, Math.min(reach, combat.kind === 'hitscan' ? 3.2 : 2.4));
+                const hitRadius = combat.kind === 'hitscan' ? 1.6 : Math.max(1.35, reach * 0.55);
+                roots.forEach((root, id) => {
+                  if (root.position.distanceTo(aimPoint) > hitRadius) return;
+                  const ent = playDoc.entities.find((e) => e.id === id);
+                  if (!ent) return;
+                  if (ent.animation?.trigger === 'interact' || ent.kind === 'button') {
+                    colliding.add(id);
+                    director.evaluateTriggers([ent], playerPos, true, colliding);
+                  }
+                });
+                if (combat.kind === 'hitscan' && cameraCollidables.length) {
+                  impactRay.setFromCamera(impactNdc, camera);
+                  impactRay.far = reach;
+                  const hits = impactRay.intersectObjects(cameraCollidables, true);
+                  for (const h of hits) {
+                    if (h.distance < 0.4) continue;
+                    let skip = false;
+                    let obj: THREE.Object3D | null = h.object;
+                    while (obj) {
+                      if (obj === playerRoot) {
+                        skip = true;
+                        break;
+                      }
+                      obj = obj.parent;
+                    }
+                    if (!skip) {
+                      metalHit = true;
+                      break;
+                    }
+                  }
                 }
+              }
+              const cue = pendingImpactCue({
+                fireKind: combat.kind,
+                hitConfirmed: false,
+                metalHit,
               });
+              if (cue) playSound(cue);
             }
           }
+        }
+        const nextAmmo =
+          magSize > 0
+            ? reloading || (reloadEndsAt > 0 && now < reloadEndsAt)
+              ? 'RELOADING…'
+              : `${Math.max(0, mag)} / ${Math.max(0, reserve)}`
+            : '';
+        if (nextAmmo !== lastAmmoLabel) {
+          lastAmmoLabel = nextAmmo;
+          setAmmoUi(nextAmmo);
         }
 
         if (wepDef) {
@@ -1749,6 +1849,7 @@ export function MapPlayPreview({
       disposed = true;
       cancelAnimationFrame(raf);
       stopLoopedSound('sprint_start');
+      stopIngameMusic();
       ro.disconnect();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
@@ -1819,6 +1920,9 @@ export function MapPlayPreview({
             <div className="h-full bg-sky-400" style={{ width: `${energyUi}%` }} />
           </div>
           <span className="text-white/70">{energyUi}</span>
+          {ammoUi ? (
+            <span className="ml-2 text-amber-200/90 font-black tabular-nums">{ammoUi}</span>
+          ) : null}
         </div>
         <div className="ml-3 flex items-end gap-1.5">
           {getActivePowerDefinitions()
@@ -1965,7 +2069,7 @@ export function MapPlayPreview({
         onMatchSettingsChange={(next) => {
           const saved = savePlayerMatchSettings(next);
           setMatchSettings(saved);
-          setMasterVolume(saved.masterVolume);
+          applyPlayerMatchAudio(saved);
         }}
         pauseHint={formatBindKey(bindings.pause)}
       />

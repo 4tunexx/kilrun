@@ -140,6 +140,11 @@ export class PlayerState extends Schema {
   @type('number') weaponReloadMs = 0;
   /** Timestamp ms when reload finishes (0 = not reloading). */
   @type('number') reloadEndsAt = 0;
+  /**
+   * Bumps when a mag-less shot actually fires (melee / unlimited). Guns with
+   * a magazine already signal fire via ammoInMag dropping — don't double-count.
+   */
+  @type('number') attackSeq = 0;
   /** Temporary shield HP from power-up shop. */
   @type('number') shieldHp = 0;
   /** Per-match telemetry / server-authored rewards. */
