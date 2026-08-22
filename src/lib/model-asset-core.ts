@@ -1,5 +1,5 @@
 import { randomBytes, createHash } from 'crypto';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, unlink, writeFile } from 'fs/promises';
 import path from 'path';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads', 'models');
@@ -12,6 +12,41 @@ const CONTENT_TYPES: Record<string, string> = {
   fbx: 'application/octet-stream',
   obj: 'text/plain',
 };
+
+/**
+ * Cheap structural sanity check per extension — not a full 3D-format parser
+ * (no new dependency for that), just enough to catch "this isn't actually a
+ * model file" before it's stored and served to every client's GLTFLoader as
+ * one. Type used to be inferred purely from the filename extension / data-
+ * URL header, so any binary could be uploaded and served as a `.glb`.
+ */
+export function looksLikeValidModelFile(buffer: Buffer, ext: string): boolean {
+  if (ext === 'glb') {
+    // GLB binary header: magic "glTF" (4 bytes) + version (u32) + length (u32).
+    return buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'glTF';
+  }
+  if (ext === 'gltf') {
+    // glTF is plain JSON with a required top-level "asset" object.
+    try {
+      const parsed = JSON.parse(buffer.toString('utf8'));
+      return Boolean(parsed && typeof parsed === 'object' && 'asset' in parsed);
+    } catch {
+      return false;
+    }
+  }
+  if (ext === 'fbx') {
+    if (buffer.length < 20) return false;
+    // Binary FBX has a fixed magic string; ASCII FBX opens with a header comment.
+    if (buffer.toString('ascii', 0, 18) === 'Kaydara FBX Binary') return true;
+    return /FBX/i.test(buffer.toString('utf8', 0, Math.min(buffer.length, 256)));
+  }
+  if (ext === 'obj') {
+    // OBJ is plain text keyed by short line prefixes (v/vn/vt/f/o/g/mtllib).
+    const sample = buffer.toString('utf8', 0, Math.min(buffer.length, 8192));
+    return /(^|\n)\s*(v|vt|vn|f|o|g|mtllib)\s/.test(sample);
+  }
+  return false;
+}
 
 export function bufferFromModelDataUrl(dataUrl: string): { buffer: Buffer; hintExt: string | null } {
   if (!dataUrl.startsWith('data:')) {
@@ -40,6 +75,9 @@ export async function persistModelBuffer(
   const ext =
     (nameExt && ALLOWED_EXT.has(nameExt) ? nameExt : null) ??
     (hintExt && ALLOWED_EXT.has(hintExt) ? hintExt : 'glb');
+  if (!looksLikeValidModelFile(buffer, ext)) {
+    throw new Error(`File does not look like a valid .${ext} model.`);
+  }
   const hash = createHash('sha256').update(buffer).digest('hex').slice(0, 16);
   const filename = `model-${hash}.${ext}`;
 
@@ -77,6 +115,33 @@ export async function persistModelFromDataUrl(
   if (!dataUrl.startsWith('data:')) return dataUrl;
   const { buffer, hintExt } = bufferFromModelDataUrl(dataUrl);
   return persistModelBuffer(buffer, originalFilename, hintExt);
+}
+
+/**
+ * Best-effort delete of a previously persisted asset (Vercel Blob or a
+ * local /uploads/** file). No-ops for `data:` URLs (nothing was stored to a
+ * file) and any other external URL (not ours to delete). Never throws —
+ * storage cleanup must never block the caller's own delete flow. Callers
+ * are responsible for confirming the URL is actually unreferenced first
+ * (content-hashed model/preview files can be shared by multiple rows).
+ */
+export async function deletePersistedAsset(url: string | null | undefined): Promise<void> {
+  if (!url) return;
+  try {
+    if (url.includes('.blob.vercel-storage.com/')) {
+      if (!process.env.BLOB_READ_WRITE_TOKEN) return;
+      const { del } = await import('@vercel/blob');
+      await del(url);
+      return;
+    }
+    const localPath = url.split('?')[0];
+    if (localPath.startsWith('/uploads/') && !localPath.includes('..')) {
+      const abs = path.join(process.cwd(), 'public', localPath);
+      await unlink(abs);
+    }
+  } catch (err) {
+    console.error('[deletePersistedAsset] cleanup failed (non-fatal)', url, err);
+  }
 }
 
 export async function persistUploadedModelFile(file: File, originalFilename?: string): Promise<string> {

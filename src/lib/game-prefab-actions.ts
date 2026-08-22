@@ -15,8 +15,6 @@ import {
   type CloudPrefabRow,
 } from '@/lib/game-prefab-core';
 
-export type { CloudPrefabRow };
-
 async function requireStaff() {
   const session = await auth();
   const steamId = (session?.user as { steamId?: string } | undefined)?.steamId;

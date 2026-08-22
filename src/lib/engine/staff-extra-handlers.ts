@@ -43,6 +43,7 @@ import {
   type SiteImageKind,
 } from '@/lib/site-asset-upload';
 import { persistUploadedModelFile } from '@/lib/model-asset-core';
+import { checkUploadRateLimit } from '@/lib/engine/upload-rate-limit';
 
 export type { StaffEngineResource };
 
@@ -54,6 +55,7 @@ function staffStatus(message: string) {
   if (/staff only|not authenticated|session expired/i.test(message)) return 401;
   if (/not found|no sound bound/i.test(message)) return 404;
   if (/already exists|prerequisite/i.test(message)) return 409;
+  if (/too many uploads/i.test(message)) return 429;
   return 400;
 }
 
@@ -74,7 +76,7 @@ export async function handleStaffEngineResource(
 
 async function handleSounds(req: NextRequest, method: string) {
   try {
-    await requireEngineStaff(req);
+    const staff = await requireEngineStaff(req);
     if (method === 'GET') {
       const rows = await loadSoundDefinitions({ force: true });
       const sounds: Record<string, (typeof rows)[number]> = {};
@@ -83,6 +85,7 @@ async function handleSounds(req: NextRequest, method: string) {
       return engineJson(req, { ok: true, sounds, customMoveEvents });
     }
     if (method === 'POST') {
+      checkUploadRateLimit(`sounds:${staff.id}`);
       const form = await req.formData();
       const eventKey = String(form.get('eventKey') ?? '').trim();
       const file = form.get('file');
@@ -212,6 +215,7 @@ async function handleModels(req: NextRequest, method: string) {
     }
     if (method === 'POST') {
       const staff = await requireEngineStaff(req);
+      checkUploadRateLimit(`models:${staff.id}`);
       const body = (await req.json().catch(() => null)) as {
         name?: string;
         category?: string;
@@ -245,7 +249,8 @@ async function handleModels(req: NextRequest, method: string) {
 async function handleMeshes(req: NextRequest, method: string) {
   if (method !== 'POST') return engineJson(req, { ok: false, error: 'Method not allowed' }, 405);
   try {
-    await requireEngineStaff(req);
+    const staff = await requireEngineStaff(req);
+    checkUploadRateLimit(`meshes:${staff.id}`);
     const form = await req.formData();
     const file = form.get('file');
     if (!(file instanceof File)) {
@@ -263,7 +268,8 @@ async function handleMeshes(req: NextRequest, method: string) {
 async function handleImages(req: NextRequest, method: string) {
   if (method !== 'POST') return engineJson(req, { ok: false, error: 'Method not allowed' }, 405);
   try {
-    await requireEngineStaff(req);
+    const staff = await requireEngineStaff(req);
+    checkUploadRateLimit(`images:${staff.id}`);
     const form = await req.formData();
     const file = form.get('file');
     const kindRaw = String(form.get('kind') ?? 'misc');

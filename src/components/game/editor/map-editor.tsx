@@ -884,7 +884,7 @@ export function MapEditor({
       );
       if (!ok) return;
     }
-    persist();
+    persist({ skipCloudSync: true });
     setActivePlayMapIdForMode(gameMode, mapId);
     setActivePlayId(mapId);
     const published = workingDoc();
@@ -946,7 +946,7 @@ export function MapEditor({
     setDirty(false);
   };
 
-  const persist = (opts?: { quiet?: boolean }) => {
+  const persist = (opts?: { quiet?: boolean; skipCloudSync?: boolean }) => {
     try {
       const next = workingDoc();
       const liveThumb = apiRef.current?.captureThumbnail() ?? null;
@@ -958,6 +958,13 @@ export function MapEditor({
       void import('./map-thumbnail').then(({ ensureMapThumbnail }) =>
         ensureMapThumbnail(mapId, { force: true })
       );
+      // Skip when the caller (publishToMatch) is about to fire its own
+      // setActive:true publish for the same map right after this — two
+      // concurrent publishCloudMap calls for the same row used to race,
+      // and if this draft-sync (setActive:false, built from a stale
+      // `existing.isActive` read) committed after the real publish, it
+      // silently flipped the just-published MAIN map back to inactive.
+      if (opts?.skipCloudSync) return true;
       // Keep cloud draft in sync so other devices see the same map.
       void publishCloudMap({
         localId: mapId,

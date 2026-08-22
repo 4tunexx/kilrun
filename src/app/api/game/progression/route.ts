@@ -48,20 +48,15 @@ function authStatus(message: string) {
 
 export async function GET(req: NextRequest) {
   try {
-    const requested = req.nextUrl.searchParams.get('userId')?.trim() || '';
-    let ownerId: string | null = null;
-    try {
-      ownerId = (await requireProgressionUser(req)).id;
-    } catch {
-      ownerId = null;
-    }
-    const userId = requested || ownerId;
-    if (!userId) {
-      return engineJson(req, { ok: false, error: 'Not authenticated' }, 401);
-    }
-    const reconcile = ownerId === userId;
+    // Always resolve whose progression to load from the authenticated
+    // caller — never from a client-supplied id. There is no legitimate
+    // cross-user lookup here (the in-match menu and profile page only ever
+    // show the signed-in player's own progression); trusting a `?userId=`
+    // query param let anyone read any player's XP/level/skill points
+    // without being logged in at all.
+    const owner = await requireProgressionUser(req);
     const [progression, powers] = await Promise.all([
-      loadGameProgressionForUser(userId, { reconcile }),
+      loadGameProgressionForUser(owner.id, { reconcile: true }),
       loadPowerDefinitionsForMenu(),
     ]);
     return engineJson(req, { ok: true, progression, powers });

@@ -5,7 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { createBloomComposer } from '../renderer/bloom-composer';
 import type { EditorEntity, EditorLayer, MapDocument, MapEnvironment } from './map-document';
-import { scrubDanglingReferences } from './map-document';
+import { expandIdsWithGroups, scrubDanglingReferences } from './map-document';
 import {
   DEFAULT_ENVIRONMENT,
   HAMMER_SOLID_MODEL,
@@ -2276,7 +2276,12 @@ export function createEditorViewport(
       if (selectedIds.includes(id)) {
         selectedIds = selectedIds.filter((x) => x !== id);
       } else {
-        selectedIds = [...selectedIds, id];
+        // Adding a grouped entity pulls its whole group in — otherwise the
+        // group's rotate/move gizmo pivots around a partial subset and the
+        // pieces left out of selectedIds stay frozen while the rest move,
+        // which reads as the group "falling apart." Removal stays
+        // single-entity so shift-click can still peel one piece off.
+        selectedIds = expandIdsWithGroups(doc.entities, [...selectedIds, id]);
       }
       selectedId = selectedIds[selectedIds.length - 1] ?? null;
     } else {
@@ -2851,8 +2856,14 @@ export function createEditorViewport(
       select(null);
       return;
     }
-    selectedIds = picked;
-    selectedId = picked[picked.length - 1];
+    // A marquee that only clips part of a grouped cluster (an edge that
+    // misses one brush, an occluded/off-screen piece) must still pull in
+    // the whole group — otherwise rotating drags the picked subset around
+    // its own smaller pivot while the excluded siblings stay put, and the
+    // group visibly comes apart even though each moved piece is itself
+    // rotated correctly.
+    selectedIds = expandIdsWithGroups(doc.entities, picked);
+    selectedId = selectedIds[selectedIds.length - 1];
     attachSelectionGizmo();
     handlers.onSelect(selectedId);
     handlers.onSelectionChange?.(selectedIds);

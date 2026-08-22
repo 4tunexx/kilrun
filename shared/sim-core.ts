@@ -296,6 +296,38 @@ export function resolveSolidPads<T extends CorePad>(
 }
 
 /**
+ * When ascending (the Fly power — nothing else moves `z` freely upward),
+ * stop the player's head just below the underside of any solid pad overhead
+ * instead of passing straight through it. Same box test `resolveSolidPads`
+ * uses, resolved vertically (clamp z) instead of horizontally (push x/y).
+ */
+export function clampAscendingZ<T extends CorePad>(
+  x: number,
+  y: number,
+  fromZ: number,
+  toZ: number,
+  pads: Iterable<T>,
+  radius: number = PLAYER_RADIUS,
+  height: number = PLAYER_HEIGHT
+): number {
+  if (toZ <= fromZ) return toZ;
+  let clamped = toZ;
+  for (const pad of pads) {
+    if (!padBlocksMovement(pad) || pad.topOnly) continue;
+    const bottomZ = pad.z - padBoxHeight(pad);
+    if (bottomZ <= fromZ + height) continue; // no headroom to protect at the start
+    const halfW = pad.width / 2 + radius;
+    const halfD = pad.depth / 2 + radius;
+    const { lx, ly } = toPadLocal(x, y, pad.x, pad.y, pad.rotYaw || 0);
+    if (Math.abs(lx) >= halfW || Math.abs(ly) >= halfD) continue;
+    if (bottomZ < clamped + height) {
+      clamped = Math.min(clamped, bottomZ - height - COLLISION_SKIN);
+    }
+  }
+  return Math.max(fromZ, clamped);
+}
+
+/**
  * Rate-limited vertical stick to a support top.
  *
  * Stepped ramp pads change topZ by small amounts per cell; hard-assigning z
@@ -699,7 +731,13 @@ export function stepSim(
   if (flyActive) {
     body.isGrounded = false;
     body.vz = 0;
-    body.z += (input.jumpPressed ? 1.4 : input.crouch ? -1.4 : 0) * dt;
+    const flyDz = (input.jumpPressed ? 1.4 : input.crouch ? -1.4 : 0) * dt;
+    // Ascending flies straight into platform undersides with no check
+    // otherwise — clamp so the player's head stops at the ceiling instead
+    // of clipping through it. Descending is unaffected (findSupportPad
+    // above already catches landing on something).
+    body.z =
+      flyDz > 0 ? clampAscendingZ(body.x, body.y, body.z, body.z + flyDz, pads) : body.z + flyDz;
     scratch.coyoteMs = 0;
     scratch.jumpCount = 0;
     scratch.jumpBufferMs = 0;
@@ -740,7 +778,16 @@ export function stepSim(
     scratch.wallJumpCooldownMs > 0 &&
     scratch.wallJumpCooldownNormalX === scratch.touchingWallX &&
     scratch.wallJumpCooldownNormalY === scratch.touchingWallY;
-  const canWallJump = wallJumpEnabled && !grounded && wasTouchingWall && !onCooldownWall;
+  // Same energy gate as double-jump — unguarded, wall-jump had no stamina
+  // cost at all, so alternating between two nearby walls (each on its own
+  // cooldown) was a free, unlimited-height climb regardless of the energy
+  // system every other form of extra verticality is balanced around.
+  const canWallJump =
+    wallJumpEnabled &&
+    !grounded &&
+    wasTouchingWall &&
+    !onCooldownWall &&
+    body.energy >= JUMP_ENERGY_COST * 0.2;
 
   if (jumpEdge) {
     if (canWallJump) {
@@ -756,6 +803,7 @@ export function stepSim(
       scratch.coyoteMs = 0;
       scratch.jumpBufferMs = 0;
       scratch.jumpCount = 1;
+      body.energy = Math.max(0, body.energy - JUMP_ENERGY_COST);
     } else if (scratch.jumpCount === 0 || scratch.jumpCount === 2) {
       if (!grounded && (scratch.extraAirJumps || 0) > 0 && body.energy >= JUMP_ENERGY_COST * 0.2) {
         scratch.extraAirJumps -= 1;

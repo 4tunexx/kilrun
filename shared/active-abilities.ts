@@ -16,6 +16,8 @@ import {
   getAbilitySlotKind,
   type AbilitySlotKind,
 } from './power-definitions.js';
+import { resolveSolidPads, type CorePad } from './sim-core.js';
+import { PLAYER_HEIGHT, PLAYER_RADIUS } from './sim-constants.js';
 
 export type ActiveAbilityKey =
   | 'visibility'
@@ -49,10 +51,49 @@ export interface AbilityHost {
   energy: number;
   x: number;
   y: number;
+  z: number;
   vz: number;
   aimAngle: number;
   isInvisible: boolean;
   ability: AbilityHostState;
+}
+
+const TELEPORT_SWEEP_STEP = 0.25;
+
+/**
+ * Clamp a straight-line teleport (Hook pull, backflip dash) to the furthest
+ * point along the path that isn't inside solid geometry, so these abilities
+ * can never pass clean through a wall. Walks the path in small steps rather
+ * than a true raycast — cheap, reuses the same `resolveSolidPads` collision
+ * surface every other movement in the sim already trusts, and this only
+ * runs once per activation, not per tick.
+ */
+function clampTeleportToSolids(
+  fromX: number,
+  fromY: number,
+  z: number,
+  toX: number,
+  toY: number,
+  pads: Iterable<CorePad> | undefined
+): { x: number; y: number } {
+  if (!pads) return { x: toX, y: toY };
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 1e-6) return { x: toX, y: toY };
+  const steps = Math.max(1, Math.ceil(dist / TELEPORT_SWEEP_STEP));
+  let safeX = fromX;
+  let safeY = fromY;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const x = fromX + dx * t;
+    const y = fromY + dy * t;
+    const resolved = resolveSolidPads({ x, y, z }, pads, PLAYER_RADIUS, PLAYER_HEIGHT, false);
+    if (resolved.touchingWall) break;
+    safeX = x;
+    safeY = y;
+  }
+  return { x: safeX, y: safeY };
 }
 
 export function defaultAbilityHostState(): AbilityHostState {
@@ -131,7 +172,8 @@ export function activateAbility(
   host: AbilityHost,
   abilityKey: string | null | undefined,
   now: number,
-  levels: Record<string, number>
+  levels: Record<string, number>,
+  pads?: Iterable<CorePad>
 ): boolean {
   if (!host.isAlive || host.hasFinished) return false;
   if (!abilityKey) return false;
@@ -145,7 +187,7 @@ export function activateAbility(
   const energyCost = getEnergyCostForAbility(abilityKey);
   if (energyCost > 0 && host.energy < energyCost) return false;
 
-  const applied = applyAbilityEffect(host, abilityKey, level, now);
+  const applied = applyAbilityEffect(host, abilityKey, level, now, pads);
   if (!applied) return false;
 
   if (energyCost > 0) {
@@ -158,7 +200,13 @@ export function activateAbility(
   return true;
 }
 
-function applyAbilityEffect(host: AbilityHost, abilityKey: string, level: number, now: number): boolean {
+function applyAbilityEffect(
+  host: AbilityHost,
+  abilityKey: string,
+  level: number,
+  now: number,
+  pads?: Iterable<CorePad>
+): boolean {
   const timedBuff = getTimedBuffStatsByKey(abilityKey, level);
   if (timedBuff.buffKind) {
     if (!timedBuff.durationMs) return false;
@@ -185,16 +233,22 @@ function applyAbilityEffect(host: AbilityHost, abilityKey: string, level: number
   if (burst.kind === 'range_pull') {
     if (!burst.rangeMeters || !burst.pullDurationMs) return false;
     host.ability.hookEndsAt = now + burst.pullDurationMs;
-    host.x += Math.cos(host.aimAngle || 0) * burst.rangeMeters;
-    host.y += Math.sin(host.aimAngle || 0) * burst.rangeMeters;
+    const targetX = host.x + Math.cos(host.aimAngle || 0) * burst.rangeMeters;
+    const targetY = host.y + Math.sin(host.aimAngle || 0) * burst.rangeMeters;
+    const safe = clampTeleportToSolids(host.x, host.y, host.z, targetX, targetY, pads);
+    host.x = safe.x;
+    host.y = safe.y;
     host.vz = Math.max(host.vz, 0.35);
     return true;
   }
   if (burst.kind === 'range_dash') {
     if (!burst.rangeMeters || !burst.pullDurationMs) return false;
     host.ability.backflipEndsAt = now + burst.pullDurationMs;
-    host.x += -Math.cos(host.aimAngle || 0) * burst.rangeMeters;
-    host.y += -Math.sin(host.aimAngle || 0) * burst.rangeMeters;
+    const targetX = host.x - Math.cos(host.aimAngle || 0) * burst.rangeMeters;
+    const targetY = host.y - Math.sin(host.aimAngle || 0) * burst.rangeMeters;
+    const safe = clampTeleportToSolids(host.x, host.y, host.z, targetX, targetY, pads);
+    host.x = safe.x;
+    host.y = safe.y;
     host.vz = Math.max(host.vz, 0.5);
     return true;
   }

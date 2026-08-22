@@ -57,6 +57,10 @@ next-env.d.ts
 /desktop/ui/dist
 /desktop/ui/public
 /desktop/dist
+# Stray unreferenced build artifact — tauri.conf.json's frontendDist is
+# ../ui/dist, not this. Ignored so a build script that regenerates it
+# doesn't reappear as an untracked file every time.
+/desktop/webview-dist
 
 # Local weapon source copies. Runtime uses public/game/weapons/.
 /weapon_models/

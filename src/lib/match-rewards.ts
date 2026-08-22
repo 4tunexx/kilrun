@@ -5,6 +5,7 @@
  */
 
 import { prisma } from '@/lib/prisma';
+import { Prisma } from '@/generated/prisma';
 import {
   applyKpDelta,
   grantXp,
@@ -201,13 +202,58 @@ async function awardFromExisting(
   };
 }
 
+/**
+ * Atomically create a MatchResult and claim it against (userId, matchId) so
+ * two concurrent reward requests for the same match (retry, duplicate
+ * Colyseus delivery) can never both succeed and double-grant VP/XP/KP.
+ *
+ * `matchResult.create` and `matchRewardClaim.create` run in one transaction;
+ * the claim's unique (userId, matchId) index is the actual race guard — the
+ * loser's transaction aborts on a P2002 conflict, and we hand it back the
+ * winner's already-committed MatchResult instead of creating a second one.
+ */
+export async function claimMatchResult(
+  matchId: string,
+  userId: string,
+  data: Omit<Prisma.MatchResultCreateInput, 'user'>
+): Promise<{ row: Awaited<ReturnType<typeof prisma.matchResult.create>>; isNewClaim: boolean }> {
+  try {
+    const row = await prisma.$transaction(async (tx) => {
+      const created = await tx.matchResult.create({
+        data: { ...data, user: { connect: { id: userId } } },
+      });
+      await tx.matchRewardClaim.create({
+        data: { userId, matchId, matchResultId: created.id },
+      });
+      return created;
+    });
+    return { row, isNewClaim: true };
+  } catch (err) {
+    const isUniqueConflict =
+      err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+    if (!isUniqueConflict) throw err;
+    // Someone else's request won the race and already committed a
+    // MatchResult for this (userId, matchId) — hand that back instead.
+    const claim = await prisma.matchRewardClaim.findUnique({
+      where: { userId_matchId: { userId, matchId } },
+    });
+    if (claim) {
+      const existing = await prisma.matchResult.findUnique({
+        where: { id: claim.matchResultId },
+      });
+      if (existing) return { row: existing, isNewClaim: false };
+    }
+    // Extremely unlikely (claim row missing/deleted between the conflict
+    // and this lookup) — surface the original error rather than silently
+    // granting rewards a second time.
+    throw err;
+  }
+}
+
 async function applyDeathrunPlayer(
   matchId: string,
   player: ServerMatchPlayerInput
 ): Promise<PlayerAward> {
-  const existing = await findMatchResultByMatchId(player.userId, matchId);
-  if (existing) return awardFromExisting(player.userId, existing);
-
   const cfg = await getActiveMatchRewardsConfig();
   const outcome = player.outcome;
   const reward = cfg.deathrun[outcome] ?? cfg.deathrun.loss;
@@ -218,17 +264,15 @@ async function applyDeathrunPlayer(
   const role =
     player.role === 'trapper' || player.role === 'runner' ? player.role : 'runner';
 
-  const row = await prisma.matchResult.create({
-    data: {
-      userId: player.userId,
-      mode: 'deathrun',
-      role,
-      outcome,
-      xpEarned: reward.xp,
-      vpEarned: reward.vp,
-      stats: { matchId, score, distance, kills, deaths, gameXpAwarded: false },
-    },
+  const { row, isNewClaim } = await claimMatchResult(matchId, player.userId, {
+    mode: 'deathrun',
+    role,
+    outcome,
+    xpEarned: reward.xp,
+    vpEarned: reward.vp,
+    stats: { matchId, score, distance, kills, deaths, gameXpAwarded: false },
   });
+  if (!isNewClaim) return awardFromExisting(player.userId, row);
 
   await prisma.matchStat.create({
     data: {
@@ -283,9 +327,6 @@ async function applyHordePlayer(
   matchId: string,
   player: ServerMatchPlayerInput
 ): Promise<PlayerAward> {
-  const existing = await findMatchResultByMatchId(player.userId, matchId);
-  if (existing) return awardFromExisting(player.userId, existing);
-
   const cfg = await getActiveMatchRewardsConfig();
   const outcome = player.outcome;
   const reward = cfg.horde[outcome] ?? cfg.horde.loss;
@@ -295,17 +336,15 @@ async function applyHordePlayer(
   const bonusXp = Math.min(cfg.hordeWaveBonusCap, wavesCleared * cfg.hordeWaveBonusPerWave);
   const xpEarned = reward.xp + bonusXp;
 
-  const row = await prisma.matchResult.create({
-    data: {
-      userId: player.userId,
-      mode: 'horde',
-      role: 'survivor',
-      outcome,
-      xpEarned,
-      vpEarned: reward.vp,
-      stats: { matchId, wavesCleared, kills, deaths, gameXpAwarded: false },
-    },
+  const { row, isNewClaim } = await claimMatchResult(matchId, player.userId, {
+    mode: 'horde',
+    role: 'survivor',
+    outcome,
+    xpEarned,
+    vpEarned: reward.vp,
+    stats: { matchId, wavesCleared, kills, deaths, gameXpAwarded: false },
   });
+  if (!isNewClaim) return awardFromExisting(player.userId, row);
 
   // MatchStat is Deathrun-only telemetry — Horde uses MatchResult.stats.
 
@@ -354,9 +393,6 @@ async function applyCompetitivePlayer(
   player: ServerMatchPlayerInput,
   mode: MatchRewardMode
 ): Promise<PlayerAward> {
-  const existing = await findMatchResultByMatchId(player.userId, matchId);
-  if (existing) return awardFromExisting(player.userId, existing);
-
   const { computeCompetitiveKpDelta, KP_DEFAULT, getRankForKp } = await import(
     '@/lib/kp'
   );
@@ -421,27 +457,25 @@ async function applyCompetitivePlayer(
   const roundsWon = clampNonNegInt(player.roundsWon, 50);
   const roundsLost = clampNonNegInt(player.roundsLost, 50);
 
-  const row = await prisma.matchResult.create({
-    data: {
-      userId: player.userId,
-      mode: modeTag,
-      role: team,
-      outcome,
-      xpEarned: reward.xp,
-      vpEarned: reward.vp,
-      kpDelta,
-      stats: {
-        matchId,
-        queue,
-        roundsWon,
-        roundsLost,
-        kills,
-        deaths,
-        opponentAvgKp: player.opponentAvgKp ?? KP_DEFAULT,
-        gameXpAwarded: false,
-      },
+  const { row, isNewClaim } = await claimMatchResult(matchId, player.userId, {
+    mode: modeTag,
+    role: team,
+    outcome,
+    xpEarned: reward.xp,
+    vpEarned: reward.vp,
+    kpDelta,
+    stats: {
+      matchId,
+      queue,
+      roundsWon,
+      roundsLost,
+      kills,
+      deaths,
+      opponentAvgKp: player.opponentAvgKp ?? KP_DEFAULT,
+      gameXpAwarded: false,
     },
   });
+  if (!isNewClaim) return awardFromExisting(player.userId, row);
 
   // MatchStat is Deathrun-only telemetry — Competitive uses MatchResult.stats.
 

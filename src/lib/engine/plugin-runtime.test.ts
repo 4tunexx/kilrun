@@ -49,6 +49,17 @@ describe('plugin permissions', () => {
     expect(hostMessageAllowed(undefined, 'registerWeapon')).toBe(true);
   });
 
+  it('never grants server access from missing permissions, even though everything else legacy-allows', () => {
+    // A manifest that omits `permissions` entirely used to be treated as
+    // "allow everything," including `server` — the exact opt-in gate that
+    // decides whether a plugin's server-executable source ships to the live
+    // catalog at all. Omitting the field must not be a way to skip that gate.
+    expect(pluginHasPermission(undefined, 'server')).toBe(false);
+    expect(pluginHasPermission(null, 'server')).toBe(false);
+    expect(pluginHasPermission([], 'server')).toBe(false);
+    expect(pluginHasPermission(['server'], 'server')).toBe(true);
+  });
+
   it('strips live source without server permission', () => {
     setLoadedPluginBundles([
       {

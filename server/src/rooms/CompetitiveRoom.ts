@@ -576,7 +576,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
       const now = Date.now();
-      if (!activateAbility(player, payload?.ability, now)) return;
+      if (!activateAbility(player, payload?.ability, now, this.state.platforms)) return;
       if (payload?.ability) {
         let level = 0;
         try {
@@ -590,6 +590,10 @@ export class CompetitiveRoom extends Room<RoomState> {
         if (radius > 0 && damage > 0) {
           for (const target of this.state.players.values()) {
             if (target.sessionId === player.sessionId || !target.isAlive || target.hasFinished) continue;
+            // Same friendly-fire rule regular gunfire respects — this AOE
+            // used to skip it and could hurt teammates even with friendly
+            // fire off.
+            if (target.role === player.role && !this.friendlyFire) continue;
             const dx = target.x - player.x;
             const dy = target.y - player.y;
             if (Math.hypot(dx, dy) <= radius) {

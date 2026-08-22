@@ -40,11 +40,10 @@ async function progressionFetch(path: string, init: RequestInit = {}): Promise<R
   return fetch(path, { ...init, credentials: 'include' });
 }
 
-export async function fetchGameProgression(
-  userId?: string
-): Promise<GameProgressionSnapshot | null> {
-  const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
-  const res = await progressionFetch(`/api/game/progression${qs}`, { cache: 'no-store' });
+export async function fetchGameProgression(): Promise<GameProgressionSnapshot | null> {
+  // Always the signed-in caller's own progression — the server resolves
+  // identity from the session/bearer token, never from a query param.
+  const res = await progressionFetch('/api/game/progression', { cache: 'no-store' });
   if (res.status === 401 || res.status === 403) return null;
   if (!res.ok) throw new Error(await readError(res));
   const data = (await res.json()) as {

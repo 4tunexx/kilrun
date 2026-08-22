@@ -22,11 +22,39 @@ let cache: Record<string, SoundEntry> = {};
 let loaded = false;
 let loadedAt = 0;
 let loadingPromise: Promise<void> | null = null;
-// Caps rapid repeats (multi-pellet hits, fast footsteps) from stacking
-// unboundedly loud/overlapping voices for the same event.
+// Caps rapid repeats (multi-pellet hits) from stacking unboundedly
+// loud/overlapping voices for the same event.
 const activeVoices = new Map<string, number>();
 const MAX_CONCURRENT_PER_EVENT = 6;
 const CACHE_TTL_MS = 15_000;
+
+// Movement one-shots are re-triggered on a tight cadence by player input
+// (every ~280-420ms while moving/sprinting; on every jump/land/etc). If the
+// bound clip for one of these is long or uncropped (e.g. an admin bound an
+// entire song to "footstep" instead of a short foley clip), naive one-shot
+// playback stacks overlapping copies of it and keeps ringing long after the
+// player has stopped moving. These events get voice-stealing (retriggering
+// stops whatever's still playing for that exact event first) and a hard
+// playback-length ceiling, so this can't happen regardless of what's bound —
+// no admin re-upload/crop required.
+const CADENCE_EVENTS = new Set([
+  'footstep',
+  'footstep_water',
+  'footstep_ice',
+  'footstep_sand',
+  'monster_footstep',
+  'monster_fly',
+  'jump',
+  'double_jump',
+  'wall_jump',
+  'land',
+  'slide',
+  'crouch',
+  'flip',
+  'sprint_burst',
+]);
+const CADENCE_MAX_DURATION_S = 0.8;
+const cadenceVoices = new Map<string, AudioBufferSourceNode>();
 let masterVolume = 1;
 let sfxVolume = 1;
 let musicVolume = 1;
@@ -249,25 +277,51 @@ export function playSoundOrFallback(
  * shared/sound-events.ts for valid keys). No-ops if nothing is bound. */
 export function playSound(eventKey: string, opts?: { volume?: number }): void {
   if (typeof window === 'undefined' || typeof AudioContext === 'undefined') return;
+  const isCadence = CADENCE_EVENTS.has(eventKey);
   void ensureLoaded().then(async () => {
     const entry = cache[eventKey];
     if (!entry?.fileUrl) return;
     const active = activeVoices.get(eventKey) ?? 0;
-    if (active >= MAX_CONCURRENT_PER_EVENT) return;
+    if (!isCadence && active >= MAX_CONCURRENT_PER_EVENT) return;
     try {
       const ctx = getAudioContext();
       if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
       const buffer = await getProcessedBuffer(entry.fileUrl, entry);
+      if (isCadence) {
+        // Voice-steal: whatever's still playing for this exact cadence
+        // event gets cut off the instant a new trigger fires, so the same
+        // footstep/jump/etc. can never sound twice at once.
+        const prev = cadenceVoices.get(eventKey);
+        if (prev) {
+          try {
+            prev.onended = null;
+            prev.stop();
+          } catch {
+            // Already stopped/ended — fine.
+          }
+        }
+      }
       const src = ctx.createBufferSource();
       src.buffer = buffer;
       const gain = ctx.createGain();
       gain.gain.value = mixedVolume(opts?.volume, entry.volume, busFor(eventKey));
       src.connect(gain).connect(ctx.destination);
-      activeVoices.set(eventKey, active + 1);
-      src.onended = () => {
-        activeVoices.set(eventKey, Math.max(0, (activeVoices.get(eventKey) ?? 1) - 1));
-      };
-      src.start();
+      if (isCadence) {
+        cadenceVoices.set(eventKey, src);
+        src.onended = () => {
+          if (cadenceVoices.get(eventKey) === src) cadenceVoices.delete(eventKey);
+        };
+        // Hard ceiling so an uncropped long clip can never ring out past a
+        // plausible foley length, no matter what the source file actually is.
+        src.start();
+        src.stop(ctx.currentTime + Math.min(buffer.duration, CADENCE_MAX_DURATION_S));
+      } else {
+        activeVoices.set(eventKey, active + 1);
+        src.onended = () => {
+          activeVoices.set(eventKey, Math.max(0, (activeVoices.get(eventKey) ?? 1) - 1));
+        };
+        src.start();
+      }
     } catch {
       // Never let audio playback break gameplay.
     }

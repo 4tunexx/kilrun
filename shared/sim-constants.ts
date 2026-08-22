@@ -53,23 +53,29 @@ export const WALL_JUMP_LOCKOUT_MS = 180;
 export const WALL_JUMP_SAME_WALL_COOLDOWN_MS = 300;
 
 /**
- * Old maps saved `wallJumpEnabled: false` because that used to be the editor
- * default. Enable parkour unless the map actually tuned wall-jump numbers
- * while leaving the toggle off (a real opt-out).
+ * Trusts an explicit `wallJumpEnabled` from the map's combat settings, and
+ * only falls back to the current default when the field was never set at
+ * all (documents saved before this setting existed).
+ *
+ * This used to try to guess "old map with a stale default" apart from "a
+ * real opt-out" by checking whether the wall-jump tuning sliders had been
+ * touched. That guess was backwards for the normal case: unchecking the
+ * "Enable wall jump" toggle without also touching the sliders — the usual
+ * way anyone turns it off — left `tuned` false, so the guess silently
+ * re-enabled wall-jump on every map that explicitly disabled it. Trusting
+ * the explicit value is the only option that never overrides a real,
+ * deliberate opt-out. Maps saved between 2026-07-26 and 2026-08-22 (while
+ * the shipped default was `false`) may still carry a stale
+ * `wallJumpEnabled: false` from that old default rather than a deliberate
+ * choice; re-saving such a map with the toggle set as desired clears it.
  */
 export function resolveWallJumpEnabled(cs?: {
   wallJumpEnabled?: unknown;
-  wallJumpHorizVel?: unknown;
-  wallJumpVertVel?: unknown;
-  wallSlideGravMult?: unknown;
 } | null): boolean {
-  if (!cs || cs.wallJumpEnabled !== false) return WALL_JUMP_ENABLED_DEFAULT;
-  const horiz = typeof cs.wallJumpHorizVel === 'number' ? cs.wallJumpHorizVel : WALL_JUMP_HORIZ_VEL;
-  const vert = typeof cs.wallJumpVertVel === 'number' ? cs.wallJumpVertVel : WALL_JUMP_VERT_VEL;
-  const slide = typeof cs.wallSlideGravMult === 'number' ? cs.wallSlideGravMult : WALL_SLIDE_GRAV_MULT;
-  const tuned =
-    horiz !== WALL_JUMP_HORIZ_VEL || vert !== WALL_JUMP_VERT_VEL || slide !== WALL_SLIDE_GRAV_MULT;
-  return !tuned;
+  if (!cs || cs.wallJumpEnabled === undefined || cs.wallJumpEnabled === null) {
+    return WALL_JUMP_ENABLED_DEFAULT;
+  }
+  return cs.wallJumpEnabled === true;
 }
 
 export const MAX_ENERGY = 100;

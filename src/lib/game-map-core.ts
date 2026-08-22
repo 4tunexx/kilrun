@@ -6,6 +6,7 @@
 import { prisma } from '@/lib/prisma';
 import { persistSiteImage } from '@/lib/site-asset-upload';
 import { normalizeKilrunMode, type KilrunMode } from '@/lib/game-modes';
+import { MAP_PUBLISH_MAX_BYTES } from '@/lib/map-publish-limits';
 import type { MapDocument } from '@/components/game/editor/map-document';
 
 export type CloudMapListItem = {
@@ -73,7 +74,7 @@ export async function publishCloudMapAsStaff(
   const { doc: cleaned, strippedKeys } = stripInlineDataUrls(input.document);
   throwIfInlineAssetsStripped(strippedKeys);
   const documentJson = JSON.stringify(cleaned);
-  if (documentJson.length > 4_500_000) {
+  if (documentJson.length > MAP_PUBLISH_MAX_BYTES) {
     throw new Error(
       'Map is too large to publish. Upload custom GLBs/textures to the live site (not inline data URLs), then retry.'
     );
@@ -89,40 +90,37 @@ export async function publishCloudMapAsStaff(
     }
   }
 
-  const existing = input.localId
-    ? await prisma.gameMap.findFirst({
-        where: { localId: input.localId, mode },
-      })
-    : null;
-
-  const resolvedIsActive = input.setActive === true ? true : Boolean(existing?.isActive);
-
-  const data = {
-    name: input.name.trim() || 'Untitled map',
-    mode,
-    documentJson,
-    ...(thumbnailUrl !== undefined ? { thumbnailUrl } : {}),
-    isActive: resolvedIsActive,
-    createdById: staff.id,
-    localId: input.localId ?? existing?.localId ?? null,
-  };
-
-  const row = input.setActive
-    ? await prisma.$transaction(async (tx) => {
-        await tx.gameMap.updateMany({
-          where: { mode, isActive: true },
-          data: { isActive: false },
-        });
-        return existing
-          ? tx.gameMap.update({ where: { id: existing.id }, data: { ...data, isActive: true } })
-          : tx.gameMap.create({ data: { ...data, isActive: true } });
-      })
-    : existing
-      ? await prisma.gameMap.update({
-          where: { id: existing.id },
-          data: { ...data, isActive: resolvedIsActive },
-        })
-      : await prisma.gameMap.create({ data: { ...data, isActive: false } });
+  // The existing-row lookup and the write must happen in the SAME
+  // transaction, for every path — not only when setActive is true. Two
+  // concurrent publishes for the same (localId, mode) — a real "Set as
+  // MAIN" plus a stray draft-sync autosave, say — used to each read
+  // `existing.isActive` outside any transaction and could commit out of
+  // order, so the draft-sync's stale, non-transactional write could land
+  // last and silently flip a just-published MAIN map back to inactive.
+  const row = await prisma.$transaction(async (tx) => {
+    const existing = input.localId
+      ? await tx.gameMap.findFirst({ where: { localId: input.localId, mode } })
+      : null;
+    const resolvedIsActive = input.setActive === true ? true : Boolean(existing?.isActive);
+    const data = {
+      name: input.name.trim() || 'Untitled map',
+      mode,
+      documentJson,
+      ...(thumbnailUrl !== undefined ? { thumbnailUrl } : {}),
+      isActive: resolvedIsActive,
+      createdById: staff.id,
+      localId: input.localId ?? existing?.localId ?? null,
+    };
+    if (input.setActive) {
+      await tx.gameMap.updateMany({
+        where: { mode, isActive: true },
+        data: { isActive: false },
+      });
+    }
+    return existing
+      ? tx.gameMap.update({ where: { id: existing.id }, data })
+      : tx.gameMap.create({ data });
+  });
 
   return {
     id: row.id,

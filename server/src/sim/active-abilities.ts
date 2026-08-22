@@ -1,5 +1,6 @@
 import type { PlayerState } from '../schema/RoomState.js';
 import { parseAbilityLevels, type AbilityLevels } from '../../../shared/ability-progression.js';
+import type { CorePad } from '../../../shared/sim-core.js';
 import {
   activateAbility as activateAbilityGeneric,
   tickActiveAbilityTimers as tickActiveAbilityTimersGeneric,
@@ -37,9 +38,14 @@ export function getPlayerAbilityLevels(player: PlayerState): AbilityLevels {
   }
 }
 
-export function activateAbility(player: PlayerState, abilityKey: string | null | undefined, now: number): boolean {
+export function activateAbility(
+  player: PlayerState,
+  abilityKey: string | null | undefined,
+  now: number,
+  pads?: Iterable<CorePad>
+): boolean {
   const levels = getPlayerAbilityLevels(player);
-  return activateAbilityGeneric(player, abilityKey, now, levels);
+  return activateAbilityGeneric(player, abilityKey, now, levels, pads);
 }
 
 export function tickActiveAbilityTimers(player: PlayerState, now: number): void {

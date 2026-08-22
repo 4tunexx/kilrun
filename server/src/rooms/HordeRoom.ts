@@ -555,7 +555,7 @@ export class HordeRoom extends Room<RoomState> {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
       const now = Date.now();
-      if (!activateAbility(player, payload?.ability, now)) return;
+      if (!activateAbility(player, payload?.ability, now, this.state.platforms)) return;
       if (payload?.ability) {
         let level = 0;
         try {
@@ -565,17 +565,24 @@ export class HordeRoom extends Room<RoomState> {
         }
         // Generic burst "radius_damage" dispatch — works for the original
         // Thunder Bolt power AND any custom power reusing this template.
+        // Horde is co-op vs AI monsters, so this hits monsters, not
+        // teammates (it used to loop `this.state.players`, which meant
+        // activating it only ever damaged your own team and never the
+        // monsters it's meant to kill).
         const stats = getBurstEffectStatsByKey(payload.ability, level);
         const radius = stats.kind === 'radius_damage' ? stats.radiusMeters || 0 : 0;
         const damage = stats.kind === 'radius_damage' ? stats.damage || 0 : 0;
         if (radius > 0 && damage > 0) {
-          for (const target of this.state.players.values()) {
-            if (target.sessionId === player.sessionId || !target.isAlive || target.hasFinished) continue;
-            const dx = target.x - player.x;
-            const dy = target.y - player.y;
-            if (Math.hypot(dx, dy) <= radius) {
-              this.damagePlayer(target, damage);
-            }
+          const hits: MonsterSim[] = [];
+          for (const mon of this.monsters) {
+            const dx = mon.x - player.x;
+            const dy = mon.y - player.y;
+            if (Math.hypot(dx, dy) <= radius) hits.push(mon);
+          }
+          for (const mon of hits) {
+            mon.hp -= damage;
+            this.sendHitFx(client.sessionId, damage, mon.x, mon.y, (mon.z ?? 0) + 1.4, 'monster');
+            if (mon.hp <= 0) this.killMonster(mon.id, client.sessionId);
           }
         }
       }

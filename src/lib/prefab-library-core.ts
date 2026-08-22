@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { persistSiteImage } from '@/lib/site-asset-upload';
-import { persistModelFromDataUrl } from '@/lib/model-asset-core';
+import { deletePersistedAsset, persistModelFromDataUrl } from '@/lib/model-asset-core';
 
 export type PrefabLibraryRow = {
   id: string;
@@ -85,10 +85,46 @@ export async function uploadPrefabModelAsStaff(
   return toRow(created);
 }
 
+/**
+ * Content-hashed model/preview files can be shared by other rows (dedup) or
+ * copied inline into a map/cloud-prefab's entity JSON when a prefab is
+ * placed — placing one doesn't keep a live foreign key back to this row, it
+ * copies the URL. So the underlying file is only safe to delete once no
+ * other MapPrefabModel row, GameMap document, or GamePrefab stamp still
+ * mentions the URL; otherwise deleting it would 404 a live map's model.
+ */
+async function isAssetUrlStillReferenced(url: string, excludePrefabId: string): Promise<boolean> {
+  const [otherPrefab, mapUsing, cloudPrefabUsing] = await Promise.all([
+    prisma.mapPrefabModel.findFirst({
+      where: {
+        id: { not: excludePrefabId },
+        OR: [{ modelUrl: url }, { previewUrl: url }],
+      },
+      select: { id: true },
+    }),
+    prisma.gameMap.findFirst({
+      where: { documentJson: { contains: url } },
+      select: { id: true },
+    }),
+    prisma.gamePrefab.findFirst({
+      where: { entitiesJson: { contains: url } },
+      select: { id: true },
+    }),
+  ]);
+  return Boolean(otherPrefab || mapUsing || cloudPrefabUsing);
+}
+
 export async function deletePrefabModelAsStaff(id: string, staffId: string): Promise<{ ok: true }> {
   const existing = await prisma.mapPrefabModel.findUnique({ where: { id } });
   if (!existing) throw new Error('Prefab not found');
   await prisma.mapPrefabModel.delete({ where: { id } });
+
+  for (const url of new Set([existing.modelUrl, existing.previewUrl].filter(Boolean) as string[])) {
+    if (!(await isAssetUrlStillReferenced(url, id))) {
+      await deletePersistedAsset(url);
+    }
+  }
+
   try {
     const { writeAuditLog } = await import('@/lib/audit');
     const staff = await prisma.user.findUnique({

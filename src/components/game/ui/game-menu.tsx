@@ -744,7 +744,7 @@ export function useGameProgression(userId: string | null | undefined) {
     if (!userId) return;
     setLoading(true);
     import('@/lib/game-progression-client')
-      .then(({ fetchGameProgression }) => fetchGameProgression(userId))
+      .then(({ fetchGameProgression }) => fetchGameProgression())
       .then((snap) => {
         setProgression(snap);
         checkLevelUp(snap);

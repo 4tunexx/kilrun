@@ -53,6 +53,33 @@ function asEntities(raw: unknown): PluginEntitySim[] {
   return out.slice(0, 400);
 }
 
+/**
+ * SECURITY NOTE — this is NOT a real sandbox, and cannot fully become one
+ * via `vm` alone (Node's own docs say so explicitly). Every function value
+ * that crosses into the context — `Kilrun.definePlugin`, `entities.
+ * registerScript`, etc. — is an escape hatch by construction: a plugin can
+ * always reach the HOST realm's `Function` constructor via `someFn.
+ * constructor('return process')()` on any function reference it holds,
+ * because those closures are still host-realm functions. That API surface
+ * is unavoidable — it's how a plugin talks to the game at all.
+ *
+ * What IS fixed here: this used to also inject the host process's own
+ * `Math`/`Number`/`String`/`Boolean`/`Array`/`Object`/`JSON`/`console`
+ * directly into the context, which handed a plugin the single most common,
+ * copy-pasted vm-escape one-liner for free (e.g. `Array.constructor('return
+ * process')()`) via completely ordinary-looking code. Omitting them here
+ * lets `vm.createContext` give the context its own separate, harmless
+ * intrinsics instead — plugin code behaves identically, it just no longer
+ * gets a free bridge back to the host realm through those specific globals.
+ *
+ * Real containment (closing the `Kilrun.*` escape hatch too) needs actual
+ * process/isolate separation — e.g. `isolated-vm`, or running plugin
+ * execution in a separate low-privilege worker/child process with no access
+ * to `GAME_SERVER_ADMIN_SECRET` / the DB connection string — not more `vm`
+ * tuning. Until that lands, treat "who can publish a `server`-permission
+ * plugin" (admin-only, see src/app/api/engine/plugins/route.ts) as the real
+ * mitigation, not this context.
+ */
 function loadOne(source: string): LoadedVm {
   const scripts = new Set<string>();
   const context = vm.createContext({
@@ -82,14 +109,12 @@ function loadOne(source: string): LoadedVm {
         },
       },
     },
+    // Kept as a no-op stub (unlike Math/Array/etc. above, `console` has no
+    // freely-available fresh-realm equivalent inside a vm context) so
+    // plugins that log for debugging don't throw ReferenceErrors and get
+    // disabled. It's still a host-function bridge like `Kilrun.*` — see the
+    // note above; this doesn't add risk beyond what that API already is.
     console: { log() {}, warn() {}, error() {} },
-    Math,
-    Number,
-    String,
-    Boolean,
-    Array,
-    Object,
-    JSON,
   });
   vm.runInContext(wrapPluginSourceAsCjs(clipPluginSource(source)), context, {
     timeout: LOAD_TIMEOUT_MS,

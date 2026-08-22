@@ -47,7 +47,22 @@ async function persistSkinAssetUrls(
   return next;
 }
 
+const MAX_VP_PRICE = 1_000_000;
+
+function validateStoreItemInput(input: UpsertStoreItemInput): void {
+  if (!input.itemName?.trim()) throw new Error('Item name is required');
+  if (input.itemName.trim().length > 120) throw new Error('Item name is too long (max 120 characters)');
+  if (!input.itemCategory?.trim()) throw new Error('Item category is required');
+  if (input.itemCategory.trim().length > 60) throw new Error('Item category is too long (max 60 characters)');
+  if (!input.itemSku?.trim()) throw new Error('Item SKU is required');
+  if (input.itemSku.trim().length > 80) throw new Error('Item SKU is too long (max 80 characters)');
+  if (!Number.isFinite(input.vpPrice)) throw new Error('VP price must be a number');
+  if (input.vpPrice < 0) throw new Error('VP price cannot be negative');
+  if (input.vpPrice > MAX_VP_PRICE) throw new Error(`VP price is too large (max ${MAX_VP_PRICE})`);
+}
+
 export async function upsertStoreItemAsStaff(input: UpsertStoreItemInput) {
+  validateStoreItemInput(input);
   const isSkin =
     input.itemCategory === 'Skins' || isSkinCosmeticSlot(input.cosmeticSlot ?? undefined);
   if (isSkin) {

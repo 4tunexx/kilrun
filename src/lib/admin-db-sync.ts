@@ -20,7 +20,7 @@ import { invalidateSoundDefinitionsCache } from '@/lib/sound-definitions';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-08-11-ghost-runs-clanwars-crate-cosmetics';
+const DB_SCHEMA_SYNC_VERSION = '2026-08-22-match-reward-claim-idempotency';
 
 async function requireAdmin() {
   const session = await auth();
@@ -203,6 +203,47 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`MatchResult verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — MatchResult.kpDelta/stats not writable. (${msg})`
+    );
+  }
+
+  // Runtime verify: MatchRewardClaim (userId, matchId) unique index — this is
+  // what actually stops two concurrent match-result POSTs from double-
+  // granting VP/XP/KP for the same match. Probe: create a claim, confirm a
+  // second create with the same (userId, matchId) is rejected, clean up.
+  try {
+    const probeMatchId = `schema_probe_${Date.now()}`;
+    const probeResult = await prisma.matchResult.create({
+      data: {
+        userId: staff.id,
+        mode: 'schema_probe',
+        outcome: 'probe',
+        xpEarned: 0,
+        vpEarned: 0,
+        stats: { probe: true },
+      },
+    });
+    const claim = await prisma.matchRewardClaim.create({
+      data: { userId: staff.id, matchId: probeMatchId, matchResultId: probeResult.id },
+    });
+    let rejectedDuplicate = false;
+    try {
+      await prisma.matchRewardClaim.create({
+        data: { userId: staff.id, matchId: probeMatchId, matchResultId: probeResult.id },
+      });
+    } catch {
+      rejectedDuplicate = true;
+    }
+    await prisma.matchRewardClaim.delete({ where: { id: claim.id } });
+    await prisma.matchResult.delete({ where: { id: probeResult.id } });
+    if (!rejectedDuplicate) {
+      throw new Error('unique (userId, matchId) index not enforced — duplicate claim was accepted');
+    }
+    steps.push('MatchRewardClaim unique index verified (duplicate correctly rejected)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`MatchRewardClaim verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — MatchRewardClaim unique index not active yet (match rewards can double-grant until this syncs). (${msg})`
     );
   }
 

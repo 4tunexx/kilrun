@@ -1,5 +1,7 @@
 use base64::Engine as _;
 use serde::Serialize;
+
+mod secure_store;
 use std::fs;
 use std::io::{Cursor, Read, Write};
 use std::net::TcpListener;
@@ -9,7 +11,12 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use zip::ZipArchive;
 
-const ENGINE_VERSION: &str = "0.1.3";
+// Single source of truth is Cargo.toml's `version` — this used to be a
+// separately hand-maintained literal that had already drifted out of sync
+// with Cargo.toml (and with tauri.conf.json / stamp-exe-icon.mjs) in the
+// past. `CARGO_PKG_VERSION` is set by Cargo at compile time from the same
+// Cargo.toml field, so there is nothing left to keep in sync by hand here.
+const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn default_platform_origin() -> String {
     option_env!("KILRUN_PLATFORM_URL")
@@ -175,12 +182,33 @@ fn read_saved_origin() -> String {
     origin_only(&default_platform_origin())
 }
 
+/// Session token is stored DPAPI-encrypted (`sessionTokenProtected`, base64)
+/// rather than as plaintext in engine-config.json — a plaintext token there
+/// could be lifted by any other local process/account with read access to
+/// the file. `sessionToken` (plaintext) is the pre-encryption legacy key:
+/// if found, it's decrypted-format-migrated to the protected key on this
+/// read so an already-linked install keeps working after an update instead
+/// of silently losing its session.
 fn read_session_token() -> Option<String> {
-    read_config()
+    let cfg = read_config();
+    if let Some(protected) = cfg.get("sessionTokenProtected").and_then(|v| v.as_str()) {
+        return secure_store::unprotect_from_base64(protected)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && s.len() <= 4096);
+    }
+    let legacy = cfg
         .get("sessionToken")
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty() && s.len() <= 4096)
+        .filter(|s| !s.is_empty() && s.len() <= 4096)?;
+    if let Ok(encoded) = secure_store::protect_to_base64(&legacy) {
+        let _ = patch_config(serde_json::json!({
+            "sessionTokenProtected": encoded,
+            "sessionToken": serde_json::Value::Null,
+        }));
+    }
+    Some(legacy)
 }
 
 fn project_dir(id: &str) -> Result<PathBuf, String> {
@@ -416,12 +444,19 @@ fn set_engine_session(token: String) -> Result<(), String> {
     if trimmed.is_empty() || trimmed.len() > 4096 {
         return Err("invalid engine session".into());
     }
-    patch_config(serde_json::json!({ "sessionToken": trimmed }))
+    let encoded = secure_store::protect_to_base64(&trimmed)?;
+    patch_config(serde_json::json!({
+        "sessionTokenProtected": encoded,
+        "sessionToken": serde_json::Value::Null,
+    }))
 }
 
 #[tauri::command]
 fn clear_engine_session() -> Result<(), String> {
-    patch_config(serde_json::json!({ "sessionToken": serde_json::Value::Null }))
+    patch_config(serde_json::json!({
+        "sessionTokenProtected": serde_json::Value::Null,
+        "sessionToken": serde_json::Value::Null,
+    }))
 }
 
 #[tauri::command]
@@ -463,13 +498,50 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
+/// Howard Hinnant's days-since-epoch -> (year, month, day) civil calendar
+/// algorithm (public domain: http://howardhinnant.github.io/date_algorithms.html),
+/// used instead of pulling in the `chrono` crate for one timestamp.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    let year = if m <= 2 { y + 1 } else { y };
+    (year, m, d)
+}
+
+/// Minimal RFC3339 UTC formatter (no chrono dependency), matching the
+/// `YYYY-MM-DDTHH:MM:SS.mmmZ` shape JS's `Date.prototype.toISOString()`
+/// produces.
+fn format_rfc3339_utc(epoch_secs: u64, millis: u32) -> String {
+    let days = (epoch_secs / 86400) as i64;
+    let secs_of_day = epoch_secs % 86400;
+    let (year, month, day) = civil_from_days(days);
+    let hour = secs_of_day / 3600;
+    let minute = (secs_of_day % 3600) / 60;
+    let second = secs_of_day % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+}
+
+/// Fallback `updatedAt` for a map document that never got `meta.updatedAt`
+/// stamped by the editor. This used to return raw Unix-epoch SECONDS as a
+/// string (e.g. "1755900000") despite the misleading "RFC3339-ish" comment.
+/// `list_projects` sorts `updatedAt` values as plain strings, and a
+/// lexicographic comparison between an epoch-seconds string and a real
+/// ISO-8601 string (starting with "20…") doesn't track actual chronological
+/// order at all — every epoch-fallback project would sort as older/newer
+/// than EVERY real-timestamped one regardless of when either was actually
+/// saved, since '1' vs '2' as the first character decides it, not the date.
 fn chrono_like_now() -> String {
-    // RFC3339-ish UTC without extra deps.
-    let secs = std::time::SystemTime::now()
+    let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("{secs}")
+        .unwrap_or(std::time::Duration::from_secs(0));
+    format_rfc3339_utc(now.as_secs(), now.subsec_millis())
 }
 
 fn emit_deep_link(app: &AppHandle, raw: &str) {
@@ -694,6 +766,65 @@ fn djb2_hex(bytes: &[u8]) -> String {
 const PRISTINE_V1_1_0_JSON: &str = "a2307820c5e826e4";
 const PRISTINE_V1_1_0_JS: &str = "3dd765c9dd37685d";
 
+#[derive(Debug, PartialEq, Eq)]
+enum SeedAction {
+    /// No files on disk yet — write the bundled copy fresh.
+    WriteFresh,
+    /// Disk already matches bundled, or there's nothing newer to offer.
+    NoOp,
+    /// Disk differs, but it's either our own last-tracked version or the
+    /// one known pristine release — safe to overwrite in place.
+    UpgradeInPlace,
+    /// Disk differs and matches neither (most likely user edits), but a
+    /// newer bundled version exists. Never overwrite unrecognized content —
+    /// the update goes to a separate sibling folder instead.
+    WriteLatestSibling,
+}
+
+/// Pure decision logic for `seed_example_plugin`, kept separate from the
+/// filesystem I/O so the actual upgrade/no-op/sibling-write matrix is unit
+/// testable without touching disk.
+fn decide_seed_action(
+    files_exist: bool,
+    disk_json_hash: &str,
+    disk_js_hash: &str,
+    bundled_json_hash: &str,
+    bundled_js_hash: &str,
+    meta_json_hash: &str,
+    meta_js_hash: &str,
+    disk_version: &str,
+    bundled_version: &str,
+) -> SeedAction {
+    if !files_exist {
+        return SeedAction::WriteFresh;
+    }
+    if disk_json_hash == bundled_json_hash && disk_js_hash == bundled_js_hash {
+        return SeedAction::NoOp;
+    }
+    let matches_meta = !meta_json_hash.is_empty()
+        && meta_json_hash == disk_json_hash
+        && meta_js_hash == disk_js_hash;
+    let matches_known_pristine =
+        disk_json_hash == PRISTINE_V1_1_0_JSON && disk_js_hash == PRISTINE_V1_1_0_JS;
+    let bundled_newer = parse_semver(bundled_version) > parse_semver(disk_version);
+
+    if bundled_newer && (matches_meta || matches_known_pristine) {
+        return SeedAction::UpgradeInPlace;
+    }
+    if bundled_newer {
+        // Disk content is neither our last-tracked version nor the one
+        // known pristine release, and a newer bundled version exists —
+        // most likely the user edited the example plugin (or has some
+        // older untracked bundled version predating the meta-tracking
+        // file). This used to silently do nothing forever once that
+        // happened: the user's edits are never safe to discard, but
+        // leaving them permanently stuck on a stale example isn't a real
+        // fix either.
+        return SeedAction::WriteLatestSibling;
+    }
+    SeedAction::NoOp
+}
+
 fn seed_example_plugin() -> Result<(), String> {
     ensure_layout()?;
     let dir = plugins_root().join("kilrun-example");
@@ -720,51 +851,99 @@ fn seed_example_plugin() -> Result<(), String> {
         Ok(())
     };
 
-    if !json_path.exists() || !js_path.exists() {
-        return write_bundled();
-    }
-
-    let disk_json = fs::read(&json_path).unwrap_or_default();
-    let disk_js = fs::read(&js_path).unwrap_or_default();
+    let files_exist = json_path.exists() && js_path.exists();
+    let disk_json = if files_exist { fs::read(&json_path).unwrap_or_default() } else { Vec::new() };
+    let disk_js = if files_exist { fs::read(&js_path).unwrap_or_default() } else { Vec::new() };
     let disk_json_hash = djb2_hex(&disk_json);
     let disk_js_hash = djb2_hex(&disk_js);
-
-    if disk_json_hash == bundled_json_hash && disk_js_hash == bundled_js_hash {
-        let meta = serde_json::json!({
-            "version": bundled_version,
-            "jsonHash": bundled_json_hash,
-            "jsHash": bundled_js_hash,
-        });
-        let _ = atomic_write(meta_path.as_path(), meta.to_string().as_bytes());
-        return Ok(());
-    }
-
     let meta = fs::read_to_string(&meta_path)
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
     let meta_json_hash = meta
         .as_ref()
         .and_then(|v| v.get("jsonHash").and_then(|x| x.as_str()))
-        .unwrap_or("");
+        .unwrap_or("")
+        .to_string();
     let meta_js_hash = meta
         .as_ref()
         .and_then(|v| v.get("jsHash").and_then(|x| x.as_str()))
-        .unwrap_or("");
-    let matches_meta = !meta_json_hash.is_empty()
-        && meta_json_hash == disk_json_hash
-        && meta_js_hash == disk_js_hash;
-    let matches_known_pristine =
-        disk_json_hash == PRISTINE_V1_1_0_JSON && disk_js_hash == PRISTINE_V1_1_0_JS;
+        .unwrap_or("")
+        .to_string();
     let disk_version = serde_json::from_slice::<serde_json::Value>(&disk_json)
         .ok()
         .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(|s| s.to_string()))
         .unwrap_or_default();
-    let bundled_newer = parse_semver(&bundled_version) > parse_semver(&disk_version);
 
-    if bundled_newer && (matches_meta || matches_known_pristine) {
-        return write_bundled();
+    let action = decide_seed_action(
+        files_exist,
+        &disk_json_hash,
+        &disk_js_hash,
+        &bundled_json_hash,
+        &bundled_js_hash,
+        &meta_json_hash,
+        &meta_js_hash,
+        &disk_version,
+        &bundled_version,
+    );
+
+    match action {
+        SeedAction::WriteFresh | SeedAction::UpgradeInPlace => write_bundled(),
+        SeedAction::NoOp => {
+            if files_exist && disk_json_hash == bundled_json_hash && disk_js_hash == bundled_js_hash {
+                let meta = serde_json::json!({
+                    "version": bundled_version,
+                    "jsonHash": bundled_json_hash,
+                    "jsHash": bundled_js_hash,
+                });
+                let _ = atomic_write(meta_path.as_path(), meta.to_string().as_bytes());
+            }
+            Ok(())
+        }
+        // Drop the update into a clearly-separate sibling folder — the
+        // user's edited/untracked file is untouched, and the update is now
+        // actually on disk somewhere they'll see it, instead of vanishing
+        // silently.
+        SeedAction::WriteLatestSibling => {
+            let latest_dir = plugins_root().join("kilrun-example-latest");
+            let latest_meta_path = latest_dir.join(".seed-meta.json");
+            let already_written = fs::read_to_string(&latest_meta_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .map(|v| {
+                    v.get("jsonHash").and_then(|x| x.as_str()) == Some(bundled_json_hash.as_str())
+                        && v.get("jsHash").and_then(|x| x.as_str()) == Some(bundled_js_hash.as_str())
+                })
+                .unwrap_or(false);
+            if !already_written {
+                fs::create_dir_all(&latest_dir).map_err(|e| e.to_string())?;
+                let mut patched: serde_json::Value =
+                    serde_json::from_str(EXAMPLE_PLUGIN_JSON).map_err(|e| e.to_string())?;
+                if let Some(obj) = patched.as_object_mut() {
+                    let name = obj
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Kilrun Example")
+                        .to_string();
+                    obj.insert("id".into(), serde_json::json!("kilrun-example-latest"));
+                    obj.insert("name".into(), serde_json::json!(format!("{name} (Updated)")));
+                }
+                atomic_write(
+                    latest_dir.join("plugin.json").as_path(),
+                    serde_json::to_string_pretty(&patched)
+                        .map_err(|e| e.to_string())?
+                        .as_bytes(),
+                )?;
+                atomic_write(latest_dir.join("index.js").as_path(), EXAMPLE_PLUGIN_JS.as_bytes())?;
+                let meta = serde_json::json!({
+                    "version": bundled_version,
+                    "jsonHash": bundled_json_hash,
+                    "jsHash": bundled_js_hash,
+                });
+                atomic_write(latest_meta_path.as_path(), meta.to_string().as_bytes())?;
+            }
+            Ok(())
+        }
     }
-    Ok(())
 }
 
 fn safe_plugin_rel(rel: &str) -> Result<PathBuf, String> {
@@ -1117,8 +1296,147 @@ pub fn run() {
             Ok(())
         })
         .on_page_load(|window, _payload| {
-            let _ = window.eval("window.__KILRUN_ENGINE__=true;window.__KILRUN_ENGINE_VERSION__='0.1.3';");
+            let _ = window.eval(format!(
+                "window.__KILRUN_ENGINE__=true;window.__KILRUN_ENGINE_VERSION__='{ENGINE_VERSION}';"
+            ));
         })
         .run(tauri::generate_context!())
         .expect("error while running Kilrun Engine");
+}
+
+#[cfg(test)]
+mod seed_example_plugin_tests {
+    use super::{decide_seed_action, SeedAction, PRISTINE_V1_1_0_JS, PRISTINE_V1_1_0_JSON};
+
+    #[test]
+    fn writes_fresh_when_no_files_exist() {
+        assert_eq!(
+            decide_seed_action(false, "", "", "b1", "b2", "", "", "", "1.2.0"),
+            SeedAction::WriteFresh
+        );
+    }
+
+    #[test]
+    fn no_op_when_disk_already_matches_bundled() {
+        assert_eq!(
+            decide_seed_action(true, "b1", "b2", "b1", "b2", "b1", "b2", "1.2.0", "1.2.0"),
+            SeedAction::NoOp
+        );
+    }
+
+    #[test]
+    fn upgrades_in_place_when_disk_matches_our_own_last_tracked_version() {
+        // disk == meta (untouched since we last wrote it), bundled is newer
+        assert_eq!(
+            decide_seed_action(true, "old1", "old2", "new1", "new2", "old1", "old2", "1.0.0", "1.1.0"),
+            SeedAction::UpgradeInPlace
+        );
+    }
+
+    #[test]
+    fn upgrades_in_place_for_the_one_known_pristine_release_even_with_no_meta_file() {
+        assert_eq!(
+            decide_seed_action(
+                true,
+                PRISTINE_V1_1_0_JSON,
+                PRISTINE_V1_1_0_JS,
+                "new1",
+                "new2",
+                "", // no meta file at all
+                "",
+                "1.1.0",
+                "1.2.0"
+            ),
+            SeedAction::UpgradeInPlace
+        );
+    }
+
+    #[test]
+    fn writes_to_a_sibling_instead_of_overwriting_unrecognized_or_edited_content() {
+        // This is the actual bug: disk doesn't match meta, doesn't match the
+        // one hardcoded pristine hash, but bundled IS newer — the old logic
+        // silently did nothing forever here. Never overwrite (could be user
+        // edits) but never stay silently stuck either.
+        assert_eq!(
+            decide_seed_action(
+                true,
+                "user-edited-hash",
+                "user-edited-hash-js",
+                "new1",
+                "new2",
+                "some-other-meta-hash",
+                "some-other-meta-hash-js",
+                "1.0.5",
+                "1.2.0"
+            ),
+            SeedAction::WriteLatestSibling
+        );
+    }
+
+    #[test]
+    fn does_nothing_when_disk_is_unrecognized_but_not_older_than_bundled() {
+        // Unrecognized content, but bundled isn't actually newer (e.g. disk
+        // claims a version >= bundled) — no update to offer, so no sibling
+        // write either.
+        assert_eq!(
+            decide_seed_action(
+                true,
+                "user-edited-hash",
+                "user-edited-hash-js",
+                "new1",
+                "new2",
+                "",
+                "",
+                "9.9.9",
+                "1.2.0"
+            ),
+            SeedAction::NoOp
+        );
+    }
+}
+
+#[cfg(test)]
+mod chrono_like_now_tests {
+    use super::{chrono_like_now, civil_from_days, format_rfc3339_utc};
+
+    #[test]
+    fn formats_a_known_epoch_as_the_correct_calendar_date() {
+        // 2024-01-01T00:00:00.000Z
+        assert_eq!(format_rfc3339_utc(1_704_067_200, 0), "2024-01-01T00:00:00.000Z");
+        // 1970-01-01T00:00:00.000Z (epoch itself)
+        assert_eq!(format_rfc3339_utc(0, 0), "1970-01-01T00:00:00.000Z");
+        // 2025-08-22T12:34:56.789Z
+        assert_eq!(format_rfc3339_utc(1_755_866_096, 789), "2025-08-22T12:34:56.789Z");
+    }
+
+    #[test]
+    fn civil_from_days_matches_known_reference_dates() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(19722), (2023, 12, 31));
+        assert_eq!(civil_from_days(19723), (2024, 1, 1)); // leap year boundary
+    }
+
+    #[test]
+    fn output_is_a_real_iso_8601_string_not_raw_epoch_seconds() {
+        let now = chrono_like_now();
+        // This is the actual bug: a bare epoch-seconds string like
+        // "1755900000" sorts lexicographically BEFORE any ISO date string
+        // starting with "2" (2000-2999), regardless of which is more
+        // recent. A real ISO string always starts with a 4-digit year.
+        assert!(now.starts_with("20"), "expected an ISO year prefix, got {now}");
+        assert!(now.contains('T') && now.ends_with('Z'), "expected RFC3339 shape, got {now}");
+    }
+
+    #[test]
+    fn sorts_correctly_alongside_real_meta_updated_at_timestamps() {
+        // The whole point of the fix: our fallback and a genuine
+        // `meta.updatedAt` from the editor must interleave by actual time
+        // when compared as plain strings, the way list_projects sorts them.
+        let older_real_timestamp = "2020-01-01T00:00:00.000Z".to_string();
+        let fallback_now = chrono_like_now();
+        assert!(
+            fallback_now > older_real_timestamp,
+            "a fallback timestamp generated today must sort AFTER a real 2020 timestamp"
+        );
+    }
 }

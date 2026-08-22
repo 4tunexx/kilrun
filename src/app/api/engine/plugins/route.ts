@@ -6,6 +6,7 @@ import {
   requireEngineStaff,
 } from '@/lib/engine/engine-api';
 import { isPluginPermission, parsePluginManifest } from '@/lib/engine/plugin-manifest';
+import { isAdminRole } from '@/lib/roles';
 import { catalogSourceForPublish } from '@/lib/engine/plugin-catalog';
 import { clipPluginSource } from '@shared/plugin-source';
 
@@ -36,6 +37,18 @@ export async function POST(req: NextRequest) {
     const permissions = Array.isArray(body.permissions)
       ? body.permissions.filter(isPluginPermission)
       : undefined;
+    // `server` ships the plugin's source to the authoritative Colyseus
+    // process, which runs it in a Node `vm` sandbox — not a real security
+    // boundary. Restricting who can grant it to full admins (not
+    // moderators) shrinks the blast radius of a compromised staff account
+    // reaching that runtime. Non-server plugins are unaffected.
+    if (permissions?.includes('server') && !isAdminRole(staff.role)) {
+      return engineJson(
+        req,
+        { ok: false, error: 'Only admins can publish plugins with server permission' },
+        403
+      );
+    }
     const manifest = parsePluginManifest({
       id: pluginId,
       name: body.name || pluginId,

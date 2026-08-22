@@ -39,11 +39,20 @@ export function isPluginPermission(value: unknown): value is PluginPermission {
   return PLUGIN_PERMISSIONS.includes(value as PluginPermission);
 }
 
-/** Missing `permissions` (legacy maps) allow everything. An empty list denies gated APIs. */
+/**
+ * Missing `permissions` (legacy manifests, predating this permission system)
+ * allow everything EXCEPT `server` — that one gate exists specifically to
+ * keep a plugin's server-executable source out of the live catalog unless
+ * the manifest opts in explicitly (see `catalogSourceForPublish`). Defaulting
+ * it to allow-everything meant simply omitting `permissions` bypassed that
+ * gate entirely, shipping arbitrary server-side code with no opt-in at all.
+ * An empty list still denies every gated API, same as before.
+ */
 export function pluginHasPermission(
   permissions: readonly string[] | undefined | null,
   need: PluginPermission
 ): boolean {
+  if (need === 'server') return permissions != null && permissions.includes('server');
   if (permissions == null) return true;
   if (need === 'editor' || need === 'map') {
     return permissions.includes('editor') || permissions.includes('map');

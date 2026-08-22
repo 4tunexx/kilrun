@@ -649,6 +649,7 @@ export function MapPlayPreview({
       energy: 100,
       x: 0,
       y: 0,
+      z: 0,
       vz: 0,
       aimAngle: 0,
       isInvisible: false,
@@ -1270,6 +1271,7 @@ export function MapPlayPreview({
             const nowMs = Date.now();
             abilityHost.x = body.x;
             abilityHost.y = body.y;
+            abilityHost.z = body.z;
             abilityHost.vz = body.vz;
             abilityHost.aimAngle = yaw;
             abilityHost.energy = body.energy;
@@ -1282,7 +1284,7 @@ export function MapPlayPreview({
               const wasHeld = abilityWasHeld.get(abilityKey) ?? false;
               abilityWasHeld.set(abilityKey, isHeld);
               if (isHeld && !wasHeld) {
-                const activated = activateAbility(abilityHost, abilityKey, nowMs, abilityLevelsMaxed());
+                const activated = activateAbility(abilityHost, abilityKey, nowMs, abilityLevelsMaxed(), pads);
                 if (activated) {
                   abilityChanged = true;
                   playSound(`power_${abilityKey}`);

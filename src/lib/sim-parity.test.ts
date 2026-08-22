@@ -21,6 +21,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  clampAscendingZ,
   createCoreScratch,
   findSupportPad,
   glueToSupport,
@@ -322,6 +323,54 @@ describe('solid push-out contract', () => {
   });
 });
 
+describe('clampAscendingZ: Fly power stops at a ceiling instead of clipping through it', () => {
+  const ceiling: CorePad = { x: 0, y: 0, z: 5, width: 6, depth: 6, height: 0.5 }; // spans z 4.5..5
+
+  it('lets a body rise freely when nothing is overhead', () => {
+    expect(clampAscendingZ(0, 0, 0, 3, [])).toBeCloseTo(3, 6);
+  });
+
+  it('clamps a rise that would poke the head through the ceiling', () => {
+    // PLAYER_HEIGHT means the head reaches the ceiling well before feet-z
+    // would numerically equal the ceiling's z.
+    const result = clampAscendingZ(0, 0, 0, 10, [ceiling]);
+    expect(result).toBeLessThan(10);
+    expect(result + PLAYER_HEIGHT).toBeLessThanOrEqual(4.5 + 1e-6);
+  });
+
+  it('ignores a ceiling with no horizontal overlap', () => {
+    const farCeiling: CorePad = { ...ceiling, x: 50, y: 50 };
+    expect(clampAscendingZ(0, 0, 0, 10, [farCeiling])).toBeCloseTo(10, 6);
+  });
+
+  it('is a no-op while descending (only guards ascent)', () => {
+    expect(clampAscendingZ(0, 0, 10, 0, [ceiling])).toBeCloseTo(0, 6);
+  });
+
+  it('end-to-end: flying straight up under a low ceiling stops below it, never above', () => {
+    // Bottom face at 3.5 — comfortably more headroom than PLAYER_HEIGHT
+    // above the z=0 start, so this is a real ceiling to fly into rather
+    // than a degenerate case where standing height already pokes through it.
+    const lowCeiling: CorePad = { x: 0, y: 0, z: 4, width: 6, depth: 6, height: 0.5 };
+    const clientBody = body({ z: 0 });
+    const serverBody = body({ z: 0 });
+    const clientScratch = createSimScratch();
+    const serverScratch = createCoreScratch();
+    const opts = { nowMs: 1_700_000_000_000, flyActive: true };
+    const pads = [lowCeiling];
+    for (let i = 0; i < 200; i += 1) {
+      stepPlatformer(clientBody, input({ jumpPressed: true }), DT, pads, clientScratch, BOUNDS, opts);
+      stepSim(serverBody, input({ jumpPressed: true }), DT, pads, serverScratch, BOUNDS, opts);
+    }
+    expect(clientBody.z).toBeCloseTo(serverBody.z, 9);
+    // Without the fix this reaches z ~= 200 * 1.4 * DT ~= 9.3, well above
+    // the ceiling; with it, the head is held at/under the ceiling's
+    // underside (3.5) for the whole climb.
+    expect(clientBody.z + PLAYER_HEIGHT).toBeLessThanOrEqual(3.5 + 1e-6);
+    expect(clientBody.z).toBeGreaterThan(1); // it did actually rise, just not through the ceiling
+  });
+});
+
 describe('ground glue contract', () => {
   it('absorbs a fresh landing in one step, capped by the climb limit', () => {
     const b = { z: 0, vz: -8 };
@@ -582,6 +631,61 @@ describe('client adapter vs shared core lockstep', () => {
       stepSim(serverBody, step, DT, pads, serverScratch, BOUNDS, opts);
       assertMatch(clientBody, serverBody, 40 + i);
     }
+  });
+
+  it('wall-jump costs energy instead of being free (the alternating-walls exploit)', () => {
+    const wall: SimPad = { x: 3, y: 0, z: 3, width: 0.4, depth: 8, height: 3, kind: 'solid' };
+    const clientBody = body();
+    const serverBody = body();
+    const clientScratch = createSimScratch();
+    const serverScratch = createCoreScratch();
+    const opts = { nowMs: NOW, wallJumpEnabled: true };
+    const pads = [floor({ width: 40, depth: 20 }), wall];
+    for (let i = 0; i < 40; i += 1) {
+      const step = input({ moveX: 1 });
+      stepPlatformer(clientBody, step, DT, pads, clientScratch, BOUNDS, opts);
+      stepSim(serverBody, step, DT, pads, serverScratch, BOUNDS, opts);
+    }
+    // Set energy right at the wall, immediately before the jump tick, so the
+    // approach walk's own passive regen (energy regens whenever not
+    // sprinting) can't muddy what this test is isolating.
+    clientBody.energy = 5;
+    serverBody.energy = 5;
+    stepPlatformer(clientBody, input({ jumpPressed: true, moveX: 1 }), DT, pads, clientScratch, BOUNDS, opts);
+    stepSim(serverBody, input({ jumpPressed: true, moveX: 1 }), DT, pads, serverScratch, BOUNDS, opts);
+    assertMatch(clientBody, serverBody, 999);
+    expect(clientBody.vz).toBeGreaterThan(0); // the jump did fire
+    // Billed the same JUMP_ENERGY_COST double-jump already uses — this is
+    // the actual bug: wall-jump used to leave energy completely untouched,
+    // which is what let alternating between two walls climb forever for free.
+    expect(clientBody.energy).toBeLessThan(5);
+  });
+
+  it('a wall-jump attempt with insufficient energy is denied outright (no partial/free jump)', () => {
+    const wall: SimPad = { x: 3, y: 0, z: 3, width: 0.4, depth: 8, height: 3, kind: 'solid' };
+    const clientBody = body();
+    const serverBody = body();
+    const clientScratch = createSimScratch();
+    const serverScratch = createCoreScratch();
+    const opts = { nowMs: NOW, wallJumpEnabled: true };
+    const pads = [floor({ width: 40, depth: 20 }), wall];
+    for (let i = 0; i < 40; i += 1) {
+      const step = input({ moveX: 1 });
+      stepPlatformer(clientBody, step, DT, pads, clientScratch, BOUNDS, opts);
+      stepSim(serverBody, step, DT, pads, serverScratch, BOUNDS, opts);
+    }
+    // Zero energy right at the wall — one tick's worth of passive regen
+    // (~0.6 at ENERGY_REGEN_RATE=18/s, 30Hz) still lands well under the 0.8
+    // floor (JUMP_ENERGY_COST * 0.2) that double-jump already enforces, so
+    // this isolates the gate itself rather than exact regen timing.
+    clientBody.energy = 0;
+    serverBody.energy = 0;
+    stepPlatformer(clientBody, input({ jumpPressed: true, moveX: 1 }), DT, pads, clientScratch, BOUNDS, opts);
+    stepSim(serverBody, input({ jumpPressed: true, moveX: 1 }), DT, pads, serverScratch, BOUNDS, opts);
+    assertMatch(clientBody, serverBody, 999);
+    // No wall-jump boost fired: vz stays at a plain-falling value, not the
+    // wall-jump's WALL_JUMP_VERT_VEL launch.
+    expect(clientBody.vz).toBeLessThan(1);
   });
 
   it('slide', () => {

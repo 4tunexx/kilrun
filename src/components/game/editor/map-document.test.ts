@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  expandIdsWithGroups,
   getAllEntityWarnings,
   getEntityWarnings,
   sanitizePlayerBindings,
@@ -315,5 +316,50 @@ describe('sanitizeShopPowerUp', () => {
       modes: ['horde'],
     });
     expect(out?.effect).toBe('heal');
+  });
+});
+
+describe('expandIdsWithGroups', () => {
+  // Regression coverage for the "grouped solids fly apart when rotated" bug:
+  // marquee/box-select and shift-click used to hand the rotate gizmo a
+  // partial subset of a group, so it pivoted the picked pieces around a
+  // smaller centroid while the excluded siblings stayed frozen in place.
+  const brushA = stub('a', { groupId: 'g1' });
+  const brushB = stub('b', { groupId: 'g1' });
+  const brushC = stub('c', { groupId: 'g1' });
+  const loner = stub('d');
+  const entities = [brushA, brushB, brushC, loner];
+
+  it('pulls in every sibling once any one group member is selected', () => {
+    expect(expandIdsWithGroups(entities, ['a'])).toEqual(
+      expect.arrayContaining(['a', 'b', 'c'])
+    );
+    expect(expandIdsWithGroups(entities, ['a'])).toHaveLength(3);
+  });
+
+  it('expands a partial box-select of the group to the full group', () => {
+    // Only two of three brushes were inside the marquee rectangle.
+    const partial = ['a', 'b'];
+    expect(expandIdsWithGroups(entities, partial).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('leaves ungrouped entities untouched', () => {
+    expect(expandIdsWithGroups(entities, ['d'])).toEqual(['d']);
+  });
+
+  it('is a no-op on an already-complete group selection', () => {
+    expect(expandIdsWithGroups(entities, ['a', 'b', 'c']).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('merges multiple different groups from one mixed selection', () => {
+    const other = stub('e', { groupId: 'g2' });
+    const otherEntities = [...entities, other, stub('f', { groupId: 'g2' })];
+    expect(expandIdsWithGroups(otherEntities, ['a', 'e']).sort()).toEqual([
+      'a',
+      'b',
+      'c',
+      'e',
+      'f',
+    ]);
   });
 });

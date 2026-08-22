@@ -1,4 +1,5 @@
 import { resolveModeBase } from '@/lib/game-modes';
+import { MAP_PUBLISH_MAX_BYTES } from '@/lib/map-publish-limits';
 import type { MapDocument } from './map-document';
 import {
   entityExportsAsPlatform,
@@ -12,11 +13,47 @@ export interface MapValidationIssue {
   message: string;
 }
 
+/**
+ * Mirrors the server's actual publish cap (`game-map-core.ts`, via the
+ * shared `MAP_PUBLISH_MAX_BYTES` constant) against the FULL serialized
+ * document — not just embedded data: URL bytes, which is all the
+ * Deathrun-specific check below covers. A map with modest embedded assets
+ * but a huge entity count could pass that check and still get rejected on
+ * publish with a much less actionable server error. Runs for every mode —
+ * Horde/Competitive had no size check of any kind before this.
+ */
+function checkTotalPublishSize(doc: MapDocument): MapValidationIssue[] {
+  const bytes = JSON.stringify(doc).length;
+  const mb = bytes / (1024 * 1024);
+  const capMb = MAP_PUBLISH_MAX_BYTES / (1024 * 1024);
+  if (bytes > MAP_PUBLISH_MAX_BYTES) {
+    return [
+      {
+        level: 'error',
+        message: `Map is ~${mb.toFixed(1)} MB total — over the ${capMb.toFixed(1)} MB publish limit. Upload custom GLBs/textures to the live site instead of embedding them, or simplify the map.`,
+      },
+    ];
+  }
+  if (bytes > MAP_PUBLISH_MAX_BYTES * 0.85) {
+    return [
+      {
+        level: 'warn',
+        message: `Map is ~${mb.toFixed(1)} MB total — close to the ${capMb.toFixed(1)} MB publish limit.`,
+      },
+    ];
+  }
+  return [];
+}
+
 export function validateMapForPublish(doc: MapDocument): MapValidationIssue[] {
   const base = resolveModeBase(getMapGameMode(doc));
-  if (base === 'horde') return validateHordeMap(doc);
-  if (base === 'competitive') return validateCompetitiveMap(doc);
-  return validateDeathrunMap(doc);
+  const modeIssues =
+    base === 'horde'
+      ? validateHordeMap(doc)
+      : base === 'competitive'
+        ? validateCompetitiveMap(doc)
+        : validateDeathrunMap(doc);
+  return [...modeIssues, ...checkTotalPublishSize(doc)];
 }
 
 function validateDeathrunMap(doc: MapDocument): MapValidationIssue[] {

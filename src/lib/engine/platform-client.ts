@@ -406,7 +406,18 @@ function dataUrlToFile(dataUrl: string, filename: string): File {
   return new File([bytes], filename, { type: mime });
 }
 
-/** Persist a GLB/FBX/OBJ to Blob and return a public URL (website or Engine). */
+/**
+ * Persist a GLB/FBX/OBJ to Blob and return a public URL (website or Engine).
+ *
+ * `/api/engine/meshes` deliberately serves double duty: the desktop Engine
+ * calls it with a bearer staff token, and the web Admin GLB uploader calls
+ * the exact same route with an ordinary browser cookie session — both are
+ * accepted because `requireEngineStaff` (src/lib/engine/engine-api.ts)
+ * checks either credential. That's intentional (avoids a second lambda on
+ * the Hobby plan route budget — see staff-extra-handlers.ts), not
+ * accidental permissiveness. If `/api/engine/*` auth is ever tightened to
+ * bearer-token-only, this web-Admin call path needs to move first.
+ */
 export async function persistEditorModelFile(file: File): Promise<string> {
   if (file.size > 4_000_000) {
     throw new Error(

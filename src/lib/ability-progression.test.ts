@@ -6,7 +6,7 @@ import {
   getGameLevelProgress,
   skillPointsForLevel,
 } from '@shared/ability-progression';
-import { resolveWallJumpEnabled, WALL_JUMP_HORIZ_VEL } from '@shared/sim-constants';
+import { resolveWallJumpEnabled } from '@shared/sim-constants';
 
 describe('in-game skill points', () => {
   it('grants one unspent point per level after 1', () => {
@@ -33,19 +33,19 @@ describe('in-game skill points', () => {
   });
 });
 
-describe('legacy wall-jump maps', () => {
-  it('enables parkour when old maps saved the previous false default', () => {
+describe('wall-jump toggle', () => {
+  it('defaults to enabled when a map never set the field at all', () => {
     expect(resolveWallJumpEnabled(undefined)).toBe(true);
-    expect(resolveWallJumpEnabled({ wallJumpEnabled: true })).toBe(true);
-    expect(resolveWallJumpEnabled({ wallJumpEnabled: false })).toBe(true);
+    expect(resolveWallJumpEnabled({})).toBe(true);
   });
 
-  it('still honors a real opt-out that also tuned wall-jump numbers', () => {
-    expect(
-      resolveWallJumpEnabled({
-        wallJumpEnabled: false,
-        wallJumpHorizVel: WALL_JUMP_HORIZ_VEL + 3,
-      })
-    ).toBe(false);
+  it('honors an explicit opt-out even when nothing else was tuned', () => {
+    // This is the normal way an author turns wall-jump off: uncheck the
+    // toggle, don't touch the horiz/vert/slide sliders. Must stay off.
+    expect(resolveWallJumpEnabled({ wallJumpEnabled: false })).toBe(false);
+  });
+
+  it('honors an explicit opt-in', () => {
+    expect(resolveWallJumpEnabled({ wallJumpEnabled: true })).toBe(true);
   });
 });
