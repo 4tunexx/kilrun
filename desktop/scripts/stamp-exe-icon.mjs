@@ -14,7 +14,7 @@ await rcedit(exe, {
     LegalCopyright: 'Kilrun',
     OriginalFilename: 'kilrun-engine.exe',
   },
-  'file-version': '0.1.2',
-  'product-version': '0.1.2',
+  'file-version': '0.1.3',
+  'product-version': '0.1.3',
 });
 console.log('Stamped icon onto', exe);

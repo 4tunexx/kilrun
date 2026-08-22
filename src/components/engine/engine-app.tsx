@@ -49,6 +49,7 @@ import {
 } from '@/lib/engine/platform-client';
 import { EnginePerfHud } from './engine-perf-hud';
 import { EngineSplash } from './engine-splash';
+import { EnginePreferencesOverlay, applyStoredEngineAudio } from './engine-preferences';
 import { HelpGuideOverlay, KeyboardShortcutsOverlay } from '@/components/game/editor/editor-help';
 import { EngineHome, type CloudBadge } from './engine-home';
 import { PluginManagerDialog } from './plugin-manager';
@@ -118,6 +119,7 @@ export function EngineApp({
   const [showPlugins, setShowPlugins] = React.useState(false);
   const [showGuide, setShowGuide] = React.useState(false);
   const [showShortcuts, setShowShortcuts] = React.useState(false);
+  const [showPrefs, setShowPrefs] = React.useState(false);
   const [editorUi, setEditorUi] = React.useState<EngineEditorUiState>(DEFAULT_EDITOR_UI);
   const [livePingMs, setLivePingMs] = React.useState<number | null>(null);
   const [projectsRoot, setProjectsRoot] = React.useState<string | null>(null);
@@ -229,6 +231,10 @@ export function EngineApp({
   React.useEffect(() => {
     const id = window.setTimeout(() => setSplash(false), 2200);
     return () => window.clearTimeout(id);
+  }, []);
+
+  React.useEffect(() => {
+    applyStoredEngineAudio();
   }, []);
 
   const siteHost = platformUrl.replace(/^https?:\/\//, '').replace(/\/$/, '') || 'kilrun.vercel.app';
@@ -563,6 +569,10 @@ export function EngineApp({
       setShowPlugins(true);
       return;
     }
+    if (type === 'audio-settings') {
+      setShowPrefs(true);
+      return;
+    }
     if (type === 'plugins-reload') {
       void loadDesktopPlugins().then((result) => {
         toast({
@@ -624,6 +634,7 @@ export function EngineApp({
           void refreshCloud();
         }}
       />
+      <EnginePreferencesOverlay open={showPrefs} onClose={() => setShowPrefs(false)} />
     </>
   );
 
@@ -690,6 +701,7 @@ export function EngineApp({
           onSetMain={(mapId) => requireLiveThen({ kind: 'hub-upload', mapId, setActive: true })}
           onConnect={() => void connectLiveGame()}
           onDisconnect={() => void disconnectLiveGame()}
+          onOpenSettings={() => setShowPrefs(true)}
         />
       </div>
       <input
@@ -877,6 +889,7 @@ function EngineMenuBar({
               { label: 'Layout: triple', onSelect: () => run('layout-triple'), disabled: !inEditor, checked: inEditor && editorUi.viewLayout === 'triple' },
               { separator: true },
               { label: 'Perf HUD', onSelect: () => run('toggle-perf-hud'), checked: showPerfHud },
+              { label: 'Audio & look…', onSelect: () => run('audio-settings') },
               { label: 'Graphics…', onSelect: () => run('graphics'), disabled: !inEditor },
             ]}
           />
@@ -959,6 +972,8 @@ function EngineMenuBar({
             open={openMenu === 'Settings'}
             onOpen={() => setOpenMenu((m) => (m === 'Settings' ? null : 'Settings'))}
             items={[
+              { label: 'Audio & look…', onSelect: () => run('audio-settings') },
+              { separator: true },
               { label: 'Perf HUD', onSelect: () => run('toggle-perf-hud'), checked: showPerfHud },
               ...(desktop
                 ? [

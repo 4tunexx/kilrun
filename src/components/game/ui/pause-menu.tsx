@@ -9,6 +9,7 @@ import {
   DEFAULT_PLAYER_MATCH_SETTINGS,
   type PlayerMatchSettings,
 } from '../player-match-settings';
+import { PlayerMatchSettingsFields } from '../player-match-settings-form';
 
 interface PauseMenuProps {
   open: boolean;
@@ -55,10 +56,6 @@ export function PauseMenu({
   }, [open]);
 
   if (!open) return null;
-
-  const patchSettings = (partial: Partial<PlayerMatchSettings>) => {
-    onMatchSettingsChange?.({ ...matchSettings, ...partial });
-  };
 
   if (confirmingAbandon) {
     return (
@@ -109,63 +106,11 @@ export function PauseMenu({
         <div className="w-full max-w-sm mx-4 rounded-2xl border border-white/15 bg-[#0f1724]/95 p-6 shadow-2xl">
           <h2 className="text-2xl font-black tracking-wide text-white mb-1">Settings</h2>
           <p className="text-sm text-white/50 mb-5">This device only · stored in the browser</p>
-          <div className="space-y-4 mb-5">
-            <label className="flex items-center justify-between text-sm text-white/80">
-              Bloom
-              <input
-                type="checkbox"
-                checked={matchSettings.bloom}
-                onChange={(e) => patchSettings({ bloom: e.target.checked })}
-              />
-            </label>
-            <label className="block text-sm text-white/80">
-              Master ({Math.round(matchSettings.masterVolume * 100)}%)
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                className="mt-1 w-full"
-                value={matchSettings.masterVolume}
-                onChange={(e) => patchSettings({ masterVolume: Number(e.target.value) })}
-              />
-            </label>
-            <label className="block text-sm text-white/80">
-              Sound effects ({Math.round(matchSettings.sfxVolume * 100)}%)
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                className="mt-1 w-full"
-                value={matchSettings.sfxVolume}
-                onChange={(e) => patchSettings({ sfxVolume: Number(e.target.value) })}
-              />
-            </label>
-            <label className="block text-sm text-white/80">
-              Music ({Math.round(matchSettings.musicVolume * 100)}%)
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                className="mt-1 w-full"
-                value={matchSettings.musicVolume}
-                onChange={(e) => patchSettings({ musicVolume: Number(e.target.value) })}
-              />
-            </label>
-            <label className="block text-sm text-white/80">
-              Look sensitivity ({matchSettings.mouseSensMult.toFixed(2)}×)
-              <input
-                type="range"
-                min={0.25}
-                max={2.5}
-                step={0.05}
-                className="mt-1 w-full"
-                value={matchSettings.mouseSensMult}
-                onChange={(e) => patchSettings({ mouseSensMult: Number(e.target.value) })}
-              />
-            </label>
+          <div className="mb-5">
+            <PlayerMatchSettingsFields
+              value={matchSettings}
+              onChange={(next) => onMatchSettingsChange?.(next)}
+            />
           </div>
           <Button
             className="w-full justify-start"

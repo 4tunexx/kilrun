@@ -10,6 +10,7 @@ import {
   PanelLeftOpen,
   Plus,
   Puzzle,
+  Settings,
   Unlink,
   Upload,
 } from 'lucide-react';
@@ -55,6 +56,7 @@ export function EngineHome({
   onSetMain,
   onConnect,
   onDisconnect,
+  onOpenSettings,
 }: {
   maps: MapListItem[];
   filtered: MapListItem[];
@@ -75,6 +77,7 @@ export function EngineHome({
   onSetMain: (id: string) => void;
   onConnect: () => void;
   onDisconnect: () => void;
+  onOpenSettings?: () => void;
 }) {
   const heroParallax = usePointerParallax(22);
   const modeList = useKilrunModes();
@@ -142,6 +145,11 @@ export function EngineHome({
           {desktop && onOpenPlugins ? (
             <Button size="sm" variant="ghost" className="h-9 w-9 p-0" title="Plugins" onClick={onOpenPlugins}>
               <Puzzle className="h-4 w-4" />
+            </Button>
+          ) : null}
+          {onOpenSettings ? (
+            <Button size="sm" variant="ghost" className="h-9 w-9 p-0" title="Audio & look" onClick={onOpenSettings}>
+              <Settings className="h-4 w-4" />
             </Button>
           ) : null}
         </aside>
@@ -222,6 +230,12 @@ export function EngineHome({
                 </Button>
               ) : null}
             </>
+          ) : null}
+          {onOpenSettings ? (
+            <Button size="sm" variant="ghost" className="h-8 w-full justify-start text-[11px]" onClick={onOpenSettings}>
+              <Settings className="h-3.5 w-3.5 mr-1.5" />
+              Audio & look
+            </Button>
           ) : null}
         </div>
       </aside>
