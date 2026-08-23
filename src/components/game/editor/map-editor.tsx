@@ -173,7 +173,7 @@ import type { SkinAttachment } from '@/lib/player-skins';
 import { SNAP_FACE_LABELS, SnapFacePicker } from './snap-face-picker';
 import './engine/builtins';
 import { activateExtensionTool, emitPlaytest, listExtensionTools } from '@/lib/engine/plugin-sdk';
-import { getSidebarPlugin, getSidebarPlugins, isStudioPluginTab } from './engine/registry';
+import { getInspectorPlugins, getSidebarPlugin, getSidebarPlugins, isStudioPluginTab } from './engine/registry';
 import type { MapEditorBrains, MapEditorStudioOptions } from './engine/types';
 import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
 import { listCloudMapDocuments, publishCloudMap } from '@/lib/game-map-actions';
@@ -457,6 +457,8 @@ export function MapEditor({
   const [allAnimStopped, setAllAnimStopped] = useState(false);
   /** Mobile/desktop properties inspector visibility when something is selected. */
   const [propsOpen, setPropsOpen] = useState(!mobileFirst);
+  /** Dismissed Solid FX inspector — resets when the selection changes. */
+  const [inspectorDismissed, setInspectorDismissed] = useState(false);
   /** Bottom transform/place toolbar — persisted so Settings can toggle visibility. */
   const [toolsOpen, setToolsOpen] = useState(() => {
     if (typeof window === 'undefined') return true;
@@ -670,6 +672,10 @@ export function MapEditor({
   useEffect(() => {
     if (selectedId && !uiCollapsed && !isStudioSidebarTab(tab)) setPropsOpen(true);
   }, [selectedId, uiCollapsed, tab]);
+
+  useEffect(() => {
+    setInspectorDismissed(false);
+  }, [selectedId]);
 
   const collapseAllMenus = () => {
     setTab((prev) => (isStudioSidebarTab(prev) ? 'assets' : prev));
@@ -3980,6 +3986,45 @@ export function MapEditor({
             >
               Props
             </button>
+          )}
+
+          {!uiCollapsed &&
+            selected &&
+            !anyStudioOpen &&
+            !inspectorDismissed &&
+            getInspectorPlugins().some((p) => !p.showWhen || p.showWhen(selected)) && (
+            <div
+              className={`absolute z-[80] bg-black/80 border border-white/15 rounded-xl p-3 backdrop-blur space-y-2 text-sm overflow-y-auto ${
+                isMobile
+                  ? 'left-3 right-3 top-3 max-h-[36vh] w-auto overscroll-contain'
+                  : `top-3 w-72 max-h-[calc(100%-6rem)] ${propsOpen ? 'right-[19.5rem]' : 'right-3'}`
+              }`}
+            >
+              {getInspectorPlugins()
+                .filter((p) => !p.showWhen || p.showWhen(selected))
+                .map((plugin) => {
+                  const Icon = plugin.icon;
+                  return (
+                    <div key={plugin.id} className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="flex items-center gap-1.5 text-[10px] tracking-widest text-white/50 uppercase">
+                          <Icon className="h-3.5 w-3.5 text-cyan-300" />
+                          {plugin.label}
+                        </p>
+                        <button
+                          type="button"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-white/70 hover:bg-white/10"
+                          title={`Close ${plugin.label}`}
+                          onClick={() => setInspectorDismissed(true)}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      {plugin.render(brains)}
+                    </div>
+                  );
+                })}
+            </div>
           )}
 
           {!uiCollapsed && selected && propsOpen && !anyStudioOpen && (

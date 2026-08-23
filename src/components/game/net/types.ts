@@ -147,6 +147,9 @@ export interface NetPlatformState {
   rotYaw?: number;
   entityId?: string;
   motionEnabled?: boolean;
+  fxControlled?: boolean;
+  fxHidden?: boolean;
+  fxProgress?: number;
 }
 
 export interface NetObstacleState {

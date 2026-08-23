@@ -234,6 +234,12 @@ export class PlatformState extends Schema {
    * prop become a walk-through auto-step.
    */
   @type('boolean') topOnly = false;
+  /** Solid FX is authored on this pad's entity. */
+  @type('boolean') fxControlled = false;
+  /** True while vanish / pre-unveil collision is off. */
+  @type('boolean') fxHidden = false;
+  /** 0 = fully hidden, 1 = fully visible (client shader). */
+  @type('number') fxProgress = 1;
 }
 
 /** A hazard that toggles on/off on a fixed interval (or stays on when alwaysActive). */

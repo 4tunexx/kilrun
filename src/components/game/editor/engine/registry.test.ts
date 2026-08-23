@@ -1,10 +1,12 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import {
+  getInspectorPlugins,
   getMapEditorPlugins,
   getSidebarPlugin,
   getSidebarPlugins,
   isStudioPluginTab,
   registerMapEditorPlugin,
+  removeMapEditorPlugins,
   setBuiltinMapEditorPlugins,
 } from './registry';
 import type { MapEditorBrains, MapEditorPlugin } from './types';
@@ -18,6 +20,7 @@ function plugin(id: string, order: number, extra: Partial<MapEditorPlugin> = {})
 describe('map editor plugin registry', () => {
   beforeEach(() => {
     setBuiltinMapEditorPlugins([]);
+    removeMapEditorPlugins(() => true);
   });
 
   it('sorts the rail by ascending order, not registration order', () => {
@@ -62,5 +65,15 @@ describe('map editor plugin registry', () => {
     setBuiltinMapEditorPlugins([plugin('weapon', 100, { onActivate: (b) => { seen = b; } })]);
     getSidebarPlugin('weapon')?.onActivate?.(brains);
     expect(seen).toBe(brains);
+  });
+
+  it('keeps inspector-slot plugins off the left rail', () => {
+    setBuiltinMapEditorPlugins([
+      plugin('assets', 10),
+      plugin('solid-fx', 40, { slot: 'inspector' }),
+    ]);
+    expect(getSidebarPlugins().map((p) => p.id)).toEqual(['assets']);
+    expect(getInspectorPlugins().map((p) => p.id)).toEqual(['solid-fx']);
+    expect(getMapEditorPlugins().map((p) => p.id)).toEqual(['assets', 'solid-fx']);
   });
 });

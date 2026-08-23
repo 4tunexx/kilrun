@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
 import type { MapDocument } from './map-document';
-import { ensureCombatSettings, ensurePlatformMotion, DEFAULT_WEAPON_DEF } from './map-document';
+import { ensureCombatSettings, ensurePlatformMotion, ensureSolidFx, DEFAULT_WEAPON_DEF } from './map-document';
 import { PLAYER_HEIGHT, PLAYER_RADIUS, resolveWallJumpEnabled } from '@shared/sim-constants';
 import { isPlayerOverlappingObstacle } from '@shared/obstacle-hit';
 import { emitPlaytest, runEntityPluginScripts } from '@/lib/engine/plugin-sdk';
@@ -20,6 +20,12 @@ import {
 } from './map-document';
 import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
 import { AnimationDirector } from './animation-director';
+import { SolidFxDirector } from './solid-fx-director';
+import {
+  applySolidFxToPads,
+  configsFromFxPads,
+  createSolidFxRuntime,
+} from '@shared/solid-fx';
 import {
   applyTextureToObject,
   disposeClonedMaterials,
@@ -235,7 +241,7 @@ function snapBodyToPads(body: SimBody, pads: SimPad[]) {
   let best: SimPad | null = null;
   let bestDist = Infinity;
   for (const pad of pads) {
-    if (pad.doorControlled && pad.open) continue;
+    if ((pad.doorControlled && pad.open) || pad.fxHidden) continue;
     const dx = body.x - pad.x;
     const dy = body.y - pad.y;
     const planar = Math.hypot(dx, dy);
@@ -456,7 +462,13 @@ export function MapPlayPreview({
       homeY: p.y,
       homeZ: p.z,
       open: false,
+      fxHidden: !!(p.fx?.enabled && p.fx.mode === 'appear'),
+      fxProgress: p.fx?.enabled && p.fx.mode === 'appear' ? 0 : 1,
     }));
+    const fxConfigs = configsFromFxPads(pads);
+    const fxRuntimes = new Map(
+      [...fxConfigs.keys()].map((id) => [id, createSolidFxRuntime()])
+    );
     const buttons = mapDocToSimButtons(playDoc);
     const actions = mapDocToSimActions(playDoc);
     const lastZonePressAt = new Map<string, number>();
@@ -601,6 +613,7 @@ export function MapPlayPreview({
     if (SHOW_COLLISION_DEBUG) addCollisionPadMeshes(scene, pads);
 
     const director = new AnimationDirector();
+    const solidFxDirector = new SolidFxDirector();
     const roots = new Map<string, THREE.Object3D>();
     // TPS camera wall-avoidance raycast target list (see updateFollowCamera's
     // `collidables` option) — built once after entity placement finishes
@@ -842,6 +855,9 @@ export function MapPlayPreview({
           planted.userData.editorEntity = ent;
           scene.add(planted);
           roots.set(ent.id, planted);
+          if (ent.solidFx?.enabled) {
+            solidFxDirector.attach(ent.id, planted, ensureSolidFx(ent));
+          }
           const motion = ensurePlatformMotion(ent);
           if (motion.enabled) {
             motionVisual.set(ent.id, {
@@ -1231,6 +1247,31 @@ export function MapPlayPreview({
           const platformDeltas = advanceMovingPads(pads, matchElapsedMs);
           if (platformDeltas.length) invalidatePadSpatialCache();
           applyPadCarry(body, scratch.supportPadId, platformDeltas);
+
+          if (fxConfigs.size > 0) {
+            applySolidFxToPads(
+              pads,
+              fxConfigs,
+              fxRuntimes,
+              [
+                {
+                  x: body.x,
+                  y: body.y,
+                  z: body.z,
+                  supportPadId: scratch.supportPadId ?? null,
+                },
+              ],
+              matchElapsedMs
+            );
+            const seen = new Set<string>();
+            for (const pad of pads) {
+              if (!pad.entityId || seen.has(pad.entityId)) continue;
+              seen.add(pad.entityId);
+              if (typeof pad.fxProgress === 'number') {
+                solidFxDirector.setProgress(pad.entityId, pad.fxProgress);
+              }
+            }
+          }
 
           const prevJumpCount = scratch.jumpCount;
           const prevWallLock = scratch.wallJumpLockoutMs;
@@ -1831,6 +1872,7 @@ export function MapPlayPreview({
       }
 
       director.update(frameDt);
+      solidFxDirector.update(frameDt);
       if (playerRoot) {
         const swayCombat = ensureCombatSettings(playDoc);
         tickSkinAttachments(playerRoot, frameDt, now * 0.001, {
@@ -1865,6 +1907,7 @@ export function MapPlayPreview({
       if (document.pointerLockElement) document.exitPointerLock?.();
       envHandle.dispose();
       director.clear();
+      solidFxDirector.clear();
       // Every entity mesh here mixes uniquely-created geometry (hammer
       // solids, placeholders, the fallback capsule, floor, ghost) with
       // cache-derived GLB parts (loadAnimatedPrefab / loadPlayerAvatar —

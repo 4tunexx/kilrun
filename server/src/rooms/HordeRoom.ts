@@ -8,6 +8,7 @@ import {
   type ObstacleBlueprint,
   type PlatformBlueprint,
 } from '../sim/platforms.js';
+import { SolidFxHost } from '../sim/solid-fx-host.js';
 import {
   HORDE_MIN_PLAYERS_TO_START,
   LOBBY_COUNTDOWN_MS,
@@ -245,6 +246,7 @@ export class HordeRoom extends Room<RoomState> {
   private baseCapacity = 4;
   protected minPlayersToStart = HORDE_MIN_PLAYERS_TO_START;
   private padIndex = new PadSpatialIndex<PlatformState>();
+  private solidFx = new SolidFxHost();
 
   private latestInputs = new Map<string, PlayerInput>();
   private simScratch = new Map<string, PlayerSimScratch>();
@@ -734,6 +736,7 @@ export class HordeRoom extends Room<RoomState> {
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(platforms));
       this.padIndex.rebuild(this.state.platforms);
+      this.solidFx.load(platforms);
       this.platformMotion.clear();
       this.matchElapsedMs = 0;
 
@@ -854,6 +857,7 @@ export class HordeRoom extends Room<RoomState> {
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(pads));
       this.padIndex.rebuild(this.state.platforms);
+      this.solidFx.load(pads);
       this.platformMotion.clear();
       this.matchElapsedMs = 0;
       this.staticHazards = Array.isArray(data.obstacles)
@@ -1315,6 +1319,7 @@ export class HordeRoom extends Room<RoomState> {
       this.matchElapsedMs
     );
     this.padIndex.rebuild(this.state.platforms);
+    this.tickSolidFx();
     this.tickSpawnQueue();
     this.tickMonsters(dtMs / 1000);
     this.tickButtonArming(dtMs);
@@ -1374,6 +1379,21 @@ export class HordeRoom extends Room<RoomState> {
         this.beginWave(this.state.wave + 1);
       }
     }
+  }
+
+  private tickSolidFx() {
+    if (this.solidFx.configs.size === 0) return;
+    const players: { x: number; y: number; z: number; supportPadId: string | null }[] = [];
+    this.state.players.forEach((player, sessionId) => {
+      const scratch = this.simScratch.get(sessionId);
+      players.push({
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        supportPadId: scratch?.supportPadId ?? scratch?.supportPlatformId ?? null,
+      });
+    });
+    this.solidFx.tick(Array.from(this.state.platforms), players, Date.now());
   }
 
   /** Decays button-armed obstacle activations. Mirrors DeathrunRoom.tickObstacles. */

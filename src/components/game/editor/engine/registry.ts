@@ -29,6 +29,13 @@ export function getSidebarPlugins(): MapEditorPlugin[] {
     .sort((a, b) => a.order - b.order);
 }
 
+/** Selection-scoped inspectors (Solid FX, …) — not shown on the left rail. */
+export function getInspectorPlugins(): MapEditorPlugin[] {
+  return getMapEditorPlugins()
+    .filter((p) => p.slot === 'inspector')
+    .sort((a, b) => a.order - b.order);
+}
+
 export function removeMapEditorPlugins(predicate: (plugin: MapEditorPlugin) => boolean) {
   for (let i = extraPlugins.length - 1; i >= 0; i--) {
     if (predicate(extraPlugins[i])) extraPlugins.splice(i, 1);

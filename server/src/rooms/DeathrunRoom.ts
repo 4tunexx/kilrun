@@ -8,6 +8,7 @@ import {
   type ObstacleBlueprint,
   type PlatformBlueprint,
 } from '../sim/platforms.js';
+import { SolidFxHost } from '../sim/solid-fx-host.js';
 import {
   FINISH_X,
   LOBBY_COUNTDOWN_MS,
@@ -174,6 +175,7 @@ export class DeathrunRoom extends Room<RoomState> {
   private obstacleTimers: number[] = [];
   private lastObstacleHitAt = new Map<string, number>();
   private padIndex = new PadSpatialIndex<PlatformState>();
+  private solidFx = new SolidFxHost();
   /** Shop pool for deathrun warmup (empty = no buy menu). */
   private shopPowerUps: Array<{
     id: string;
@@ -598,6 +600,7 @@ export class DeathrunRoom extends Room<RoomState> {
     while (this.state.platforms.length > 0) this.state.platforms.pop();
     this.state.platforms.push(...createFromBlueprints(platforms));
     this.padIndex.rebuild(this.state.platforms);
+    this.solidFx.load(platforms);
 
     while (this.state.obstacles.length > 0) this.state.obstacles.pop();
     const hazards = Array.isArray(data?.obstacles) ? data.obstacles : [];
@@ -1061,6 +1064,7 @@ export class DeathrunRoom extends Room<RoomState> {
       this.matchElapsedMs
     );
     this.padIndex.rebuild(this.state.platforms);
+    this.tickSolidFx();
     this.tickObstacles(dtMs);
     this.tickPlayers(dtMs, platformDeltas);
 
@@ -1079,6 +1083,21 @@ export class DeathrunRoom extends Room<RoomState> {
         this.endRound('trapper');
       }
     }
+  }
+
+  private tickSolidFx() {
+    if (this.solidFx.configs.size === 0) return;
+    const players: { x: number; y: number; z: number; supportPadId: string | null }[] = [];
+    this.state.players.forEach((player, sessionId) => {
+      const scratch = this.simScratch.get(sessionId);
+      players.push({
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        supportPadId: scratch?.supportPadId ?? scratch?.supportPlatformId ?? null,
+      });
+    });
+    this.solidFx.tick(Array.from(this.state.platforms), players, Date.now());
   }
 
   private tickObstacles(dtMs: number) {

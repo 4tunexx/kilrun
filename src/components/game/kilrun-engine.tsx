@@ -859,6 +859,7 @@ export default function KilrunEngine({
           homeX: p.x,
           homeY: p.y,
           homeZ: p.z,
+          fxHidden: !!(p.fx?.enabled && p.fx.mode === 'appear'),
         }));
         const finishes = mapDocToSimFinishes(playDoc);
         predictedBounds = mapDocToWorldBounds(playDoc, predictedPads, finishes);
@@ -1101,6 +1102,17 @@ export default function KilrunEngine({
               if (padDeltas.length) {
                 invalidatePadSpatialCache();
                 applyPadCarry(predictedBody, predictedScratch.supportPadId, padDeltas);
+              }
+              const hiddenByEntity = new Map<string, boolean>();
+              for (const p of platformsRef.current.values()) {
+                if (p.entityId && p.fxControlled) hiddenByEntity.set(p.entityId, !!p.fxHidden);
+              }
+              if (hiddenByEntity.size) {
+                for (const pad of predictedPads) {
+                  if (pad.entityId && hiddenByEntity.has(pad.entityId)) {
+                    pad.fxHidden = hiddenByEntity.get(pad.entityId);
+                  }
+                }
               }
               const cos = Math.cos(cameraYaw);
               const sin = Math.sin(cameraYaw);
@@ -1530,6 +1542,7 @@ export default function KilrunEngine({
         const doc = customDocRef.current;
         if (doc) {
           overlay.update(dt, overlayPlayerPos, interactPulse, doc.entities);
+          overlay.syncSolidFx(platformsRef.current.values());
         } else {
           overlay.update(dt, null, false, []);
         }

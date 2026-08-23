@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cloneEntity,
+  ensureSolidFx,
+  entityShowsSolidFx,
   expandIdsWithGroups,
   getAllEntityWarnings,
   getEntityWarnings,
+  HAMMER_SOLID_MODEL,
   sanitizePlayerBindings,
   sanitizeShopPowerUp,
   scrubDanglingReferences,
@@ -361,5 +365,43 @@ describe('expandIdsWithGroups', () => {
       'e',
       'f',
     ]);
+  });
+});
+
+describe('ensureSolidFx / entityShowsSolidFx', () => {
+  it('fills defaults and clamps collideAt', () => {
+    const fx = ensureSolidFx();
+    expect(fx.enabled).toBe(false);
+    expect(fx.mode).toBe('appear');
+    expect(fx.trigger).toBe('proximity');
+    expect(fx.style).toBe('unveil');
+    expect(fx.radius).toBe(2);
+    expect(fx.durationMs).toBe(700);
+    expect(fx.collideAt).toBe(0.5);
+
+    const patched = ensureSolidFx({ collideAt: 4, durationMs: -10, trigger: 'nope' as never });
+    expect(patched.collideAt).toBe(1);
+    expect(patched.durationMs).toBe(1);
+    expect(patched.trigger).toBe('proximity');
+  });
+
+  it('reads solidFx off an entity and copies it in cloneEntity', () => {
+    const ent = stub('box', {
+      model: HAMMER_SOLID_MODEL,
+      solidFx: ensureSolidFx({ enabled: true, mode: 'disappear', trigger: 'step' }),
+    });
+    expect(ensureSolidFx(ent).enabled).toBe(true);
+    expect(ensureSolidFx(ent).mode).toBe('disappear');
+    const copy = cloneEntity(ent);
+    expect(copy.solidFx).toEqual(ent.solidFx);
+    expect(copy.solidFx).not.toBe(ent.solidFx);
+  });
+
+  it('opens for walkable solids and stays closed for player/markers', () => {
+    expect(entityShowsSolidFx(stub('floor'))).toBe(true);
+    expect(entityShowsSolidFx(stub('hammer', { model: HAMMER_SOLID_MODEL }))).toBe(true);
+    expect(entityShowsSolidFx(stub('hero', { kind: 'player' }))).toBe(false);
+    expect(entityShowsSolidFx(stub('lamp', { kind: 'light' }))).toBe(false);
+    expect(entityShowsSolidFx(stub('go', { kind: 'start' }))).toBe(false);
   });
 });

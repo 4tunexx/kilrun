@@ -11,6 +11,14 @@ import type {
 import type { HammerPrimitive } from './hammer-shapes';
 import { isHammerPrimitive } from './hammer-shapes';
 import type { CustomMoveDef } from '@shared/custom-moves';
+import {
+  defaultSolidFx as defaultSolidFxShared,
+  ensureSolidFx as ensureSolidFxShared,
+  type SolidFxConfig,
+} from '@shared/solid-fx';
+
+export type { SolidFxConfig };
+export type EntitySolidFx = SolidFxConfig;
 
 export type { CustomMoveDef } from '@shared/custom-moves';
 export { defaultCustomMove } from '@shared/custom-moves';
@@ -905,6 +913,8 @@ export interface EditorEntity {
    */
   meshCollisionBakeKey?: string;
   animation?: EntityAnimation;
+  /** Vanish / unveil / glitch FX for walkable solids. */
+  solidFx?: SolidFxConfig;
   /** Only for kind === 'player' */
   playerAnims?: PlayerAnimBindings;
   /**
@@ -2269,6 +2279,29 @@ export function entityExportsAsPlatform(ent: EditorEntity): boolean {
   return true;
 }
 
+/** Whether the Solid FX inspector should open for this entity. */
+export function entityShowsSolidFx(ent: EditorEntity): boolean {
+  if (isPlatformPlayerKind(ent.kind)) return false;
+  if (ent.kind === 'light' || ent.kind === 'button' || ent.kind === 'action') return false;
+  if (isInvisibleMarkerKind(ent.kind)) return false;
+  if (ent.kind === 'start' || ent.kind === 'finish' || ent.kind === 'checkpoint') return false;
+  if (typeof ent.kind === 'string' && ent.kind.startsWith('spawn')) return false;
+  return entityExportsAsPlatform(ent) || isHammerSolidEntity(ent);
+}
+
+export function defaultSolidFx(): SolidFxConfig {
+  return defaultSolidFxShared();
+}
+
+export function ensureSolidFx(
+  input?: Partial<SolidFxConfig> | EditorEntity | null
+): SolidFxConfig {
+  if (input && typeof input === 'object' && 'kind' in input && 'id' in input) {
+    return ensureSolidFxShared((input as EditorEntity).solidFx);
+  }
+  return ensureSolidFxShared(input as Partial<SolidFxConfig> | null | undefined);
+}
+
 /** Human-readable label for an entity kind (editor UI). */
 export function entityKindLabel(kind: EditorEntityKind): string {
   switch (kind) {
@@ -2949,6 +2982,7 @@ export function cloneEntity(ent: EditorEntity): EditorEntity {
     collisionSize: ent.collisionSize ? ([...ent.collisionSize] as [number, number, number]) : undefined,
     textureRepeat: ent.textureRepeat ? ([...ent.textureRepeat] as [number, number]) : undefined,
     textureOffset: ent.textureOffset ? ([...ent.textureOffset] as [number, number]) : undefined,
+    solidFx: ent.solidFx ? { ...ent.solidFx } : undefined,
   };
 }
 

@@ -21,6 +21,7 @@ import {
   type CorePhysOpts,
   type CoreScratch,
 } from '@shared/sim-core';
+import type { SolidFxConfig } from '@shared/solid-fx';
 
 /**
  * Geometry is inherited from `CoreGameplayPad` so the shared collision core
@@ -29,6 +30,8 @@ import {
  */
 export interface SimPad extends CoreGameplayPad {
   kind?: 'solid' | 'checkpoint' | 'jumpPad' | 'finish' | 'ice' | 'conveyor' | 'water' | 'sand';
+  /** Authored vanish / unveil config (Play Test + client prediction). */
+  fx?: SolidFxConfig;
   /** Moving platform (optional). */
   homeX?: number;
   homeY?: number;

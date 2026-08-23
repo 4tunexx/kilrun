@@ -86,6 +86,10 @@ export interface CorePad {
   /** Button-wired door: passes straight through while open. */
   doorControlled?: boolean;
   open?: boolean;
+  /** Solid FX: pad is currently intangible (hidden / mid-vanish). */
+  fxHidden?: boolean;
+  /** Solid FX reveal amount (0 = hidden, 1 = visible) — visual sync. */
+  fxProgress?: number;
 }
 
 export interface CoreSupportHit<T> {
@@ -104,6 +108,7 @@ export interface CoreSolidResult {
 
 /** A door that is currently open must not support or block the player. */
 export function padBlocksMovement(pad: CorePad): boolean {
+  if (pad.fxHidden) return false;
   return !(pad.doorControlled && pad.open);
 }
 

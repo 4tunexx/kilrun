@@ -7,6 +7,7 @@ import {
   ensurePushRail,
   ensureSpinHazard,
   ensurePlatformMotion,
+  ensureSolidFx,
   ensureWaveAnchor,
   generateId,
   isHammerSolidEntity,
@@ -233,6 +234,8 @@ export interface SimPlatformBlueprint {
   entityId?: string;
   /** True for a Solid door wired to a Button — starts closed, opens on activation. */
   doorControlled?: boolean;
+  /** Authored vanish / unveil FX (copied from the source entity). */
+  fx?: import('@shared/solid-fx').SolidFxConfig;
   /** Yaw radians in sim XY — OBB colliders on the server. */
   rotYaw?: number;
   /** True analytic ramp support — dz per unit of LOCAL x/y (post-rotYaw).
@@ -923,9 +926,15 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
     doc.entities.find((e) => e.kind === 'player');
   const doorControlledIds = collectActivatorControlledDoorIds(doc);
   const pads = source.flatMap((e) => {
-    const basePads = entityToCollisionPads(e);
-    if (e.kind !== 'door' || !doorControlledIds.has(e.id)) return basePads;
-    return basePads.map((p) => ({ ...p, doorControlled: true }));
+    let basePads = entityToCollisionPads(e);
+    if (e.kind === 'door' && doorControlledIds.has(e.id)) {
+      basePads = basePads.map((p) => ({ ...p, doorControlled: true }));
+    }
+    if (e.solidFx?.enabled) {
+      const fx = ensureSolidFx(e.solidFx);
+      basePads = basePads.map((p) => ({ ...p, fx }));
+    }
+    return basePads;
   });
 
   if (pads.length === 0 && runner) {

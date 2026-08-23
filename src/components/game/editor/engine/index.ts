@@ -3,6 +3,7 @@ export {
   registerMapEditorPlugin,
   getSidebarPlugin,
   getSidebarPlugins,
+  getInspectorPlugins,
   getMapEditorPlugins,
   isStudioPluginTab,
   removeMapEditorPlugins,

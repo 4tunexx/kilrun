@@ -551,4 +551,45 @@ describe('stepPlatformer (Foundry feel)', () => {
     }
     expect(opened.x).toBeGreaterThan(1.2);
   });
+
+  it('lets the player walk through an fxHidden pad', () => {
+    const wall: SimPad = {
+      x: 1.2,
+      y: 0,
+      z: 1.1,
+      width: 0.35,
+      depth: 3,
+      height: 2.2,
+      kind: 'solid',
+      fxHidden: false,
+    };
+    const blocked = groundedBody({ x: 0, y: 0, z: 0 });
+    const scratchBlocked = createSimScratch();
+    for (let i = 0; i < 20; i++) {
+      stepPlatformer(
+        blocked,
+        { moveX: 1, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+        1 / 30,
+        [floor, wall],
+        scratchBlocked,
+        bounds
+      );
+    }
+    expect(blocked.x).toBeLessThan(1.0);
+
+    wall.fxHidden = true;
+    const ghost = groundedBody({ x: 0, y: 0, z: 0 });
+    const scratchGhost = createSimScratch();
+    for (let i = 0; i < 20; i++) {
+      stepPlatformer(
+        ghost,
+        { moveX: 1, moveY: 0, jumpPressed: false, sprint: false, crouch: false },
+        1 / 30,
+        [floor, wall],
+        scratchGhost,
+        bounds
+      );
+    }
+    expect(ghost.x).toBeGreaterThan(1.2);
+  });
 });

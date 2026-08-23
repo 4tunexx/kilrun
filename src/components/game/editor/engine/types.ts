@@ -144,7 +144,7 @@ export interface MapEditorBrains {
   openStudioTab: (id: string, studio?: MapEditorStudioOptions) => void;
 }
 
-export type MapEditorPluginSlot = 'sidebar';
+export type MapEditorPluginSlot = 'sidebar' | 'inspector';
 
 /**
  * Extra brains setup a studio panel needs before it opens. Declaring these as
@@ -170,6 +170,11 @@ export interface MapEditorPlugin {
    * dismissed by closeStudioPanels(). Absent = a normal library tab.
    */
   studio?: MapEditorStudioOptions;
+  /**
+   * Inspector plugins only: shown as a floating panel when this returns true
+   * for the current selection.
+   */
+  showWhen?: (entity: EditorEntity) => boolean;
   render: (brains: MapEditorBrains) => ReactNode;
   /** Overrides the rail's default click behavior when set. */
   onActivate?: (brains: MapEditorBrains) => void;

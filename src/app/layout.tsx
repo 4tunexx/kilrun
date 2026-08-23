@@ -36,7 +36,7 @@ export default function RootLayout({
         },
       }}
     >
-      <html lang="en" className="dark">
+      <html lang="en" className="dark" style={{ colorScheme: 'dark' }}>
         <body
           suppressHydrationWarning
           className={cn(

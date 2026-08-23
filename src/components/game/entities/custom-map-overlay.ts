@@ -28,7 +28,8 @@ import {
   shouldUseGameplayFallback,
 } from '../editor/map-scene-visuals';
 import { makeHammerSolidObject, defaultSizeForHammer, type HammerPrimitive } from '../editor/hammer-shapes';
-import { ensurePlatformMotion } from '../editor/map-document';
+import { ensurePlatformMotion, ensureSolidFx } from '../editor/map-document';
+import { SolidFxDirector } from '../editor/solid-fx-director';
 import { movingPlatformU } from '../../../../shared/moving-platform';
 
 function applyEntTexture(obj: THREE.Object3D, ent: EditorEntity, doc: MapDocument) {
@@ -93,6 +94,7 @@ function makeGenericBoxPlaceholder(ent: EditorEntity): THREE.Object3D {
 export class CustomMapOverlay {
   public readonly root = new THREE.Group();
   private director = new AnimationDirector();
+  private solidFxDirector = new SolidFxDirector();
   private entityRoots = new Map<string, THREE.Object3D>();
   private restPositions = new Map<string, THREE.Vector3>();
   private motionById = new Map<
@@ -191,6 +193,9 @@ export class CustomMapOverlay {
         obj.userData.editorEntity = ent;
         this.root.add(obj);
         this.entityRoots.set(ent.id, obj);
+        if (ent.solidFx?.enabled) {
+          this.solidFxDirector.attach(ent.id, obj, ensureSolidFx(ent));
+        }
         this.restPositions.set(ent.id, new THREE.Vector3(...ent.position));
         const motion = ensurePlatformMotion(ent);
         if (motion.enabled) {
@@ -227,6 +232,9 @@ export class CustomMapOverlay {
           placeholder.userData.editorEntity = ent;
           this.root.add(placeholder);
           this.entityRoots.set(ent.id, placeholder);
+          if (ent.solidFx?.enabled) {
+            this.solidFxDirector.attach(ent.id, placeholder, ensureSolidFx(ent));
+          }
           this.restPositions.set(ent.id, new THREE.Vector3(...ent.position));
           this.director.register(ent.id, placeholder, []);
         } catch (fallbackErr) {
@@ -268,6 +276,7 @@ export class CustomMapOverlay {
     }
     if (!playerThreePos) {
       this.director.update(dt);
+      this.solidFxDirector.update(dt);
       return;
     }
     const colliding = this.collidingSet;
@@ -277,6 +286,23 @@ export class CustomMapOverlay {
     });
     this.director.evaluateTriggers(entities, playerThreePos, interactPressed, colliding);
     this.director.update(dt);
+    this.solidFxDirector.update(dt);
+  }
+
+  /** Drive vanish / unveil meshes from the live platform snapshot. */
+  syncSolidFx(
+    platforms: Iterable<{
+      entityId?: string;
+      fxControlled?: boolean;
+      fxProgress?: number;
+    }>
+  ) {
+    const byEntity = new Map<string, number>();
+    for (const p of platforms) {
+      if (!p.entityId || !p.fxControlled || typeof p.fxProgress !== 'number') continue;
+      if (!byEntity.has(p.entityId)) byEntity.set(p.entityId, p.fxProgress);
+    }
+    for (const [id, progress] of byEntity) this.solidFxDirector.setProgress(id, progress);
   }
 
   /** Hazard damage tick helper for client-side feedback / play overlays. */
@@ -312,7 +338,7 @@ export class CustomMapOverlay {
     const out: THREE.Object3D[] = [];
     this.entityRoots.forEach((root) => {
       const ent = root.userData.editorEntity as EditorEntity | undefined;
-      if (ent && entityExportsAsPlatform(ent)) out.push(root);
+      if (ent && entityExportsAsPlatform(ent) && root.visible) out.push(root);
     });
     return out;
   }
@@ -320,6 +346,7 @@ export class CustomMapOverlay {
   clear() {
     this.loadToken++;
     this.director.clear();
+    this.solidFxDirector.clear();
     for (const obj of this.entityRoots.values()) {
       obj.removeFromParent();
       disposeEntityTree(obj);

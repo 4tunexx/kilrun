@@ -119,33 +119,96 @@
   * {
     @apply border-border;
   }
+  html {
+    color-scheme: dark;
+  }
   body {
     @apply bg-background text-foreground;
+    color-scheme: dark;
   }
+}
 
-  /* Thin dark scrollbars — match hub panels / popovers everywhere */
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(222 20% 32%) transparent;
-  }
-  *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-  *::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  *::-webkit-scrollbar-thumb {
-    background: hsl(222 20% 32%);
-    border-radius: 999px;
-    border: 2px solid transparent;
-    background-clip: padding-box;
-  }
-  *::-webkit-scrollbar-thumb:hover {
-    background: hsl(356 55% 42%);
-    background-clip: padding-box;
-    border: 2px solid transparent;
-  }
+/*
+  Outside @layer so they beat Tailwind preflight.
+  color-scheme: dark makes Windows overlay scrollbars + number steppers dark.
+*/
+html,
+body,
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(222 18% 42%) hsl(222 32% 9%);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: hsl(222 32% 9%);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: hsl(222 16% 38%);
+  border-radius: 999px;
+  border: 2px solid hsl(222 32% 9%);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: hsl(356 62% 48%);
+}
+
+input,
+textarea,
+select {
+  color-scheme: dark;
+}
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  filter: invert(0.72) hue-rotate(180deg);
+  opacity: 0.85;
+}
+
+input[type='range'] {
+  accent-color: hsl(356 73% 56%);
+  height: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: hsl(222 20% 22%);
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;
+  border-radius: 999px;
+  background: hsl(356 73% 56%);
+  border: 2px solid hsl(222 32% 12%);
+  box-shadow: 0 0 0 1px hsl(356 73% 56% / 0.35);
+}
+
+input[type='range']::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: hsl(222 20% 22%);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: hsl(356 73% 56%);
+  border: 2px solid hsl(222 32% 12%);
 }
 
 .engine-grid {

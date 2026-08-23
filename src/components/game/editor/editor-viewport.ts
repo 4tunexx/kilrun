@@ -38,6 +38,7 @@ import {
   scaleFromSideOffset,
   ensureEnvironment,
   ensureSpinHazard,
+  ensureSolidFx,
 } from './map-document';
 import { bakeMeshCollisionForEntity, meshCollisionBakeKeyFor } from './mesh-voxelize';
 import {
@@ -244,6 +245,7 @@ function syncLightParams(root: THREE.Object3D, ent: EditorEntity) {
   });
 }
 import { AnimationDirector } from './animation-director';
+import { SolidFxDirector } from './solid-fx-director';
 import { loadAnimatedPrefab, resolveModelSrc, scanModelClips } from './model-scan';
 import { DEFAULT_DOOR_MODEL, modelFootprint } from './prototype-catalog';
 
@@ -370,6 +372,8 @@ export interface EditorViewportApi {
   deleteSelected: () => void;
   updateSelected: (patch: Partial<EditorEntity>) => void;
   previewAnim: (which: 'default' | 'active') => void;
+  /** Play the selected solid's vanish / unveil FX once, then restore the mesh. */
+  previewSolidFx: () => void;
   /** Freeze the selected (or given) entity's animation in the editor viewport — does not touch the map document. */
   stopEntityAnim: (entityId?: string) => void;
   /** Resume normal trigger-driven animation for one entity after stopEntityAnim(). */
@@ -573,6 +577,7 @@ export function createEditorViewport(
   const DEFAULT_CAM_POS = new THREE.Vector3(12, 14, 18);
   const DEFAULT_CAM_TARGET = new THREE.Vector3(0, 0, 0);
   const director = new AnimationDirector();
+  const solidFxDirector = new SolidFxDirector();
   const entityClips = new Map<string, THREE.AnimationClip[]>();
 
   // Box-select (Alt+drag). Short Alt+click falls through so Brush can force-stack.
@@ -3432,10 +3437,11 @@ export function createEditorViewport(
       drawThisFrame = true;
     }
     director.update(dt);
+    solidFxDirector.update(dt);
 
     // Anything still moving under its own power has to keep drawing, otherwise
     // the dirty window expires mid-animation and the picture freezes.
-    if (freeFly || animatedEntities.size > 0 || director.hasRunningAction) {
+    if (freeFly || animatedEntities.size > 0 || director.hasRunningAction || solidFxDirector.hasPreview) {
       drawThisFrame = true;
     }
     if (!drawThisFrame) return;
@@ -4483,6 +4489,16 @@ export function createEditorViewport(
       if (which === 'active') director.previewActive(ent);
       else director.playDefault(ent);
     },
+    previewSolidFx: () => {
+      if (!selectedId) return;
+      const ent = doc.entities.find((e) => e.id === selectedId);
+      if (!ent?.solidFx?.enabled) return;
+      const root = roots.get(selectedId);
+      if (!root) return;
+      const fx = ensureSolidFx(ent);
+      solidFxDirector.preview(selectedId, root, fx);
+      requestRender(Math.max(800, fx.durationMs + 400));
+    },
     stopEntityAnim: (entityId) => {
       const id = entityId ?? selectedId;
       if (!id) return;
@@ -4614,6 +4630,7 @@ export function createEditorViewport(
       if (document.pointerLockElement) document.exitPointerLock?.();
       boxOverlay.remove();
       director.clear();
+      solidFxDirector.clear();
       for (const id of [...roots.keys()]) disposeRoot(id);
       if (skyTexture) {
         skyTexture.dispose();

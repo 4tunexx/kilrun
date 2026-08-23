@@ -15,6 +15,7 @@ import { settingsPlugin } from '../plugins/settings-plugin';
 import { studioPlugins } from '../plugins/studio-plugins';
 import { texturesPlugin } from '../plugins/textures-plugin';
 import { worldPlugin } from '../plugins/world-plugin';
+import { solidFxPlugin } from '../plugins/solid-fx-plugin';
 
 setBuiltinMapEditorPlugins([
   assetsPlugin,
@@ -25,5 +26,6 @@ setBuiltinMapEditorPlugins([
   texturesPlugin,
   settingsPlugin,
   helpPlugin,
+  solidFxPlugin,
   ...studioPlugins,
 ]);

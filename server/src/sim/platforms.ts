@@ -3,6 +3,7 @@
  * not a continuous tunnel floor.
  */
 import { ObstacleState, PlatformState } from '../schema/RoomState.js';
+import type { SolidFxConfig } from '../../../shared/solid-fx.js';
 import { PLAYER_HEIGHT, PLAYER_RADIUS, WORLD_HEIGHT, WORLD_WIDTH } from './constants.js';
 import {
   findSupportPad,
@@ -39,6 +40,7 @@ export interface PlatformBlueprint {
   entityId?: string;
   /** True for a Solid door wired to a Button — starts closed, opens on activation. */
   doorControlled?: boolean;
+  fx?: SolidFxConfig;
 }
 
 export interface ObstacleBlueprint {
@@ -114,6 +116,10 @@ export function createFromBlueprints(blueprints: PlatformBlueprint[]): PlatformS
     platform.doorControlled = !!bp.doorControlled;
     platform.open = false;
     platform.topOnly = !!bp.topOnly;
+    const fxOn = !!bp.fx?.enabled;
+    platform.fxControlled = fxOn;
+    platform.fxHidden = fxOn && bp.fx?.mode === 'appear';
+    platform.fxProgress = platform.fxHidden ? 0 : 1;
     return platform;
   });
 }
