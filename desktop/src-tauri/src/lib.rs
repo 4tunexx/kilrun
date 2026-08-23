@@ -586,8 +586,221 @@ fn chrono_like_now() -> String {
     format_rfc3339_utc(now.as_secs(), now.subsec_millis())
 }
 
+fn is_engine_deep_link(arg: &str) -> bool {
+    let lower = arg.to_ascii_lowercase();
+    lower.starts_with("kilrun-engine:") || lower.starts_with("com.kilrun.engine:")
+}
+
+fn normalize_engine_deep_link(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    for prefix in ["com.kilrun.engine://", "com.kilrun.engine:"] {
+        if lower.starts_with(prefix) {
+            let rest = trimmed[prefix.len()..].trim_start_matches('/');
+            return format!("kilrun-engine://{rest}");
+        }
+    }
+    trimmed.to_string()
+}
+
+fn focus_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn emit_deep_link(app: &AppHandle, raw: &str) {
-    let _ = app.emit("kilrun-engine-deep-link", raw);
+    let link = normalize_engine_deep_link(raw);
+    let _ = app.emit("kilrun-engine-deep-link", &link);
+    focus_main_window(app);
+}
+
+/// Website (admin Map Editor) probes this so "Open" can detect Kilrun Engine.exe
+/// on the same PC. Bound to loopback only. CORS + Private-Network-Access headers
+/// let https://kilrun.vercel.app call it from the browser.
+const ENGINE_PRESENCE_PORT: u16 = 17832;
+
+fn presence_cors(origin: &str) -> String {
+    let allow = if origin.is_empty() {
+        "*".to_string()
+    } else {
+        origin.to_string()
+    };
+    format!(
+        "Access-Control-Allow-Origin: {allow}\r\n\
+         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+         Access-Control-Allow-Headers: Content-Type\r\n\
+         Access-Control-Allow-Private-Network: true\r\n\
+         Access-Control-Max-Age: 86400\r\n\
+         Vary: Origin\r\n"
+    )
+}
+
+fn http_header_value(req: &str, name: &str) -> String {
+    let needle = format!("{name}:");
+    for line in req.lines() {
+        if line.len() >= needle.len() && line[..needle.len()].eq_ignore_ascii_case(&needle) {
+            return line[needle.len()..].trim().to_string();
+        }
+    }
+    String::new()
+}
+
+fn http_request_line(req: &str) -> Option<(String, String)> {
+    let line = req.lines().next()?;
+    let mut parts = line.split_whitespace();
+    let method = parts.next()?.to_ascii_uppercase();
+    let target = parts.next()?.to_string();
+    Some((method, target))
+}
+
+fn percent_encode_query(input: &str) -> String {
+    let mut out = String::new();
+    for b in input.bytes() {
+        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+fn query_param(query: &str, key: &str) -> Option<String> {
+    for pair in query.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == key && !v.is_empty() {
+                return Some(percent_decode(v));
+            }
+        }
+    }
+    None
+}
+
+fn write_http(stream: &mut impl Write, status: &str, cors: &str, content_type: &str, body: &[u8]) {
+    let header = format!(
+        "HTTP/1.1 {status}\r\n{cors}Content-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(header.as_bytes());
+    let _ = stream.write_all(body);
+}
+
+fn presence_open_link(target: &str, body: &str) -> String {
+    let query = target.split_once('?').map(|(_, q)| q).unwrap_or("");
+    let mut map = query_param(query, "map").unwrap_or_default();
+    let mut action = query_param(query, "action").unwrap_or_else(|| "open".into());
+    if map.is_empty() || action.is_empty() {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(body.trim()) {
+            if map.is_empty() {
+                if let Some(m) = json.get("map").and_then(|v| v.as_str()) {
+                    map = m.to_string();
+                }
+            }
+            if let Some(a) = json.get("action").and_then(|v| v.as_str()) {
+                if !a.is_empty() {
+                    action = a.to_string();
+                }
+            }
+        }
+    }
+    if action != "open" && action != "new" {
+        action = "open".into();
+    }
+    if map.is_empty() {
+        format!("kilrun-engine://{action}")
+    } else {
+        format!("kilrun-engine://open?map={}", percent_encode_query(&map))
+    }
+}
+
+fn start_presence_server(app: AppHandle) {
+    std::thread::spawn(move || {
+        let listener = match TcpListener::bind(("127.0.0.1", ENGINE_PRESENCE_PORT)) {
+            Ok(listener) => listener,
+            Err(err) => {
+                eprintln!("[kilrun-engine] presence server not started: {err}");
+                return;
+            }
+        };
+        for incoming in listener.incoming() {
+            let Ok(mut stream) = incoming else { continue };
+            let Ok(peer) = stream.peer_addr() else { continue };
+            if !peer.ip().is_loopback() {
+                continue;
+            }
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+            let mut buf = vec![0u8; 8192];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            if n == 0 {
+                continue;
+            }
+            let req = String::from_utf8_lossy(&buf[..n]);
+            let cors = presence_cors(&http_header_value(&req, "Origin"));
+            let Some((method, target)) = http_request_line(&req) else {
+                write_http(
+                    &mut stream,
+                    "400 Bad Request",
+                    &cors,
+                    "text/plain; charset=utf-8",
+                    b"bad request",
+                );
+                continue;
+            };
+            let path = target.split('?').next().unwrap_or(target.as_str());
+            if method == "OPTIONS" {
+                write_http(&mut stream, "204 No Content", &cors, "text/plain; charset=utf-8", b"");
+                continue;
+            }
+            if method == "GET"
+                && (path == "/engine-ping"
+                    || path == "/engine-ping"
+                    || path == "/ping"
+                    || path == "/")
+            {
+                let body = serde_json::json!({
+                    "ok": true,
+                    "app": "kilrun-engine",
+                    "version": ENGINE_VERSION,
+                })
+                .to_string();
+                write_http(
+                    &mut stream,
+                    "200 OK",
+                    &cors,
+                    "application/json",
+                    body.as_bytes(),
+                );
+                continue;
+            }
+            if (method == "POST" || method == "GET")
+                && (path == "/engine-open" || path == "/engine-open")
+            {
+                let body = req.split("\r\n\r\n").nth(1).unwrap_or("");
+                let link = presence_open_link(&target, body);
+                emit_deep_link(&app, &link);
+                focus_main_window(&app);
+                let out = serde_json::json!({ "ok": true, "opened": true }).to_string();
+                write_http(
+                    &mut stream,
+                    "200 OK",
+                    &cors,
+                    "application/json",
+                    out.as_bytes(),
+                );
+                continue;
+            }
+            write_http(
+                &mut stream,
+                "404 Not Found",
+                &cors,
+                "text/plain; charset=utf-8",
+                b"not found",
+            );
+        }
+    });
 }
 
 fn percent_decode(input: &str) -> String {
@@ -1412,16 +1625,13 @@ fn install_module(archive_base64: String) -> Result<PluginListItem, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let startup_link = std::env::args().find(|a| a.starts_with("kilrun-engine:"));
+    let startup_link = std::env::args().find(|a| is_engine_deep_link(a));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            if let Some(url) = argv.iter().find(|a| a.starts_with("kilrun-engine:")) {
+            focus_main_window(app);
+            if let Some(url) = argv.iter().find(|a| is_engine_deep_link(a)) {
                 emit_deep_link(app, url);
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
             }
         }))
         .plugin(tauri_plugin_deep_link::init())
@@ -1470,6 +1680,7 @@ pub fn run() {
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 let _ = app.deep_link().register("kilrun-engine");
+                let _ = app.deep_link().register("com.kilrun.engine");
                 let app2 = handle.clone();
                 app.deep_link().on_open_url(move |event| {
                     for url in event.urls() {
@@ -1477,6 +1688,8 @@ pub fn run() {
                     }
                 });
             }
+
+            start_presence_server(handle.clone());
 
             Ok(())
         })
@@ -1622,6 +1835,52 @@ mod chrono_like_now_tests {
         assert!(
             fallback_now > older_real_timestamp,
             "a fallback timestamp generated today must sort AFTER a real 2020 timestamp"
+        );
+    }
+}
+
+#[cfg(test)]
+mod deep_link_normalize_tests {
+    use super::normalize_engine_deep_link;
+
+    #[test]
+    fn identifier_protocol_becomes_kilrun_engine() {
+        assert_eq!(
+            normalize_engine_deep_link("com.kilrun.engine://open?map=map_1"),
+            "kilrun-engine://open?map=map_1"
+        );
+        assert_eq!(
+            normalize_engine_deep_link("COM.KILRUN.ENGINE://open"),
+            "kilrun-engine://open"
+        );
+    }
+}
+
+#[cfg(test)]
+mod presence_link_tests {
+    use super::presence_open_link;
+
+    #[test]
+    fn empty_open_has_no_map() {
+        assert_eq!(
+            presence_open_link("/engine-open", ""),
+            "kilrun-engine://open"
+        );
+    }
+
+    #[test]
+    fn query_map_is_included() {
+        assert_eq!(
+            presence_open_link("/engine-open?map=map_1", ""),
+            "kilrun-engine://open?map=map_1"
+        );
+    }
+
+    #[test]
+    fn json_body_map_is_included() {
+        assert_eq!(
+            presence_open_link("/engine-open", r#"{"map":"map_9"}"#),
+            "kilrun-engine://open?map=map_9"
         );
     }
 }

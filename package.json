@@ -20,7 +20,8 @@
     "engine:ui:build": "vite build --config desktop/ui/vite.config.ts",
     "engine:icon": "node desktop/scripts/make-engine-icon.mjs",
     "engine:dev": "tauri dev --config desktop/src-tauri/tauri.conf.json",
-    "engine:build": "node desktop/scripts/build-engine.mjs"
+    "engine:build": "node desktop/scripts/build-engine.mjs",
+    "engine:publish-installer": "node desktop/scripts/publish-engine-installer.mjs"
   },
   "dependencies": {
     "@clerk/backend": "^3.11.7",

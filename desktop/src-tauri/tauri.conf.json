@@ -46,7 +46,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["kilrun-engine"]
+        "schemes": ["kilrun-engine", "com.kilrun.engine"]
       }
     }
   },

@@ -18,6 +18,7 @@ import {
   Users,
   ArrowLeft,
   Puzzle,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,8 +53,8 @@ import {
 import { useKilrunModes } from '@/lib/use-kilrun-modes';
 import { getMapGameMode } from '@/components/game/editor/map-document';
 import { listCloudMapDocuments, publishCloudMap, forkCloudMap, deleteCloudMapsMatching } from '@/lib/game-map-actions';
-import { EngineLaunchBanner } from '@/components/engine/engine-launch-banner';
-import { tryLaunchKilrunEngine } from '@/lib/engine/protocol';
+import { EngineDownloadButton, EngineInstallPrompt, EngineLaunchBanner } from '@/components/engine/engine-launch-banner';
+import { completeKilrunEngineLaunch, probeKilrunEngine, requestKilrunEngineOpen, tryLaunchKilrunEngine } from '@/lib/engine/protocol';
 import { isKilrunEngineDesktop, isWindowsClient } from '@/lib/engine/runtime';
 import { getEngineLaunchPref } from '@/lib/engine/launch-pref';
 
@@ -78,6 +79,54 @@ export function AdminMapEditorPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [syncingCloud, setSyncingCloud] = useState(false);
+  const [openingEngine, setOpeningEngine] = useState(false);
+  const [engineLive, setEngineLive] = useState(false);
+  const [missingEngine, setMissingEngine] = useState<{ mapId: string } | null>(null);
+
+  useEffect(() => {
+    void probeKilrunEngine().then((presence) => setEngineLive(Boolean(presence)));
+  }, []);
+
+  const openMap = useCallback(
+    async (id: string) => {
+      if (isKilrunEngineDesktop() || !isWindowsClient() || getEngineLaunchPref() !== 'auto') {
+        setEditorMapId(id);
+        return;
+      }
+      if (engineLive) {
+        setOpeningEngine(true);
+        try {
+          const opened = await requestKilrunEngineOpen({ mapId: id, action: 'open' });
+          if (opened) {
+            toast({
+              title: 'Opened in Kilrun Engine',
+              description: 'The Windows editor should be in front now.',
+            });
+            return;
+          }
+        } finally {
+          setOpeningEngine(false);
+        }
+      }
+      tryLaunchKilrunEngine({ mapId: id, action: 'open' });
+      setOpeningEngine(true);
+      try {
+        const result = await completeKilrunEngineLaunch({ mapId: id, action: 'open' });
+        if (result === 'running') {
+          setEngineLive(true);
+          toast({
+            title: 'Opened in Kilrun Engine',
+            description: 'The Windows editor should be in front now.',
+          });
+          return;
+        }
+        setMissingEngine({ mapId: id });
+      } finally {
+        setOpeningEngine(false);
+      }
+    },
+    [engineLive, toast]
+  );
 
   useEffect(() => {
     void fetch('/api/game/plugin-modes', { cache: 'no-store' })
@@ -168,6 +217,9 @@ export function AdminMapEditorPanel() {
   if (!selectedMode) {
     return (
       <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <EngineDownloadButton />
+        </div>
         <EngineLaunchBanner />
         <Card className="border-slate-700/60 bg-slate-900/50">
           <CardHeader className="pb-2">
@@ -221,6 +273,9 @@ export function AdminMapEditorPanel() {
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <EngineDownloadButton />
+      </div>
       <EngineLaunchBanner />
       <Card className="border-slate-700/60 bg-slate-900/50">
         <CardHeader className="pb-3">
@@ -403,18 +458,15 @@ export function AdminMapEditorPanel() {
                         <Button
                           size="sm"
                           className="h-7 text-xs"
-                          onClick={() => {
-                            if (
-                              isWindowsClient() &&
-                              !isKilrunEngineDesktop() &&
-                              getEngineLaunchPref() === 'auto'
-                            ) {
-                              tryLaunchKilrunEngine({ mapId: m.id });
-                            }
-                            setEditorMapId(m.id);
-                          }}
+                          disabled={openingEngine}
+                          onClick={() => void openMap(m.id)}
                         >
-                          <Pencil className="h-3 w-3 mr-1" /> Open
+                          {openingEngine ? (
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          ) : (
+                            <Pencil className="h-3 w-3 mr-1" />
+                          )}
+                          Open
                         </Button>
                         <Button
                           size="sm"
@@ -605,6 +657,14 @@ export function AdminMapEditorPanel() {
           )}
         </CardContent>
       </Card>
+      <EngineInstallPrompt
+        open={Boolean(missingEngine)}
+        mapId={missingEngine?.mapId}
+        onOpenInBrowser={() => {
+          if (missingEngine) setEditorMapId(missingEngine.mapId);
+        }}
+        onClose={() => setMissingEngine(null)}
+      />
     </div>
   );
 }

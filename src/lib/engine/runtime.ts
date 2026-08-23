@@ -17,6 +17,8 @@ export function isKilrunEngineDesktop(): boolean {
 
 export function isWindowsClient(): boolean {
   if (typeof navigator === 'undefined') return false;
+  const uaData = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData;
+  if (uaData?.platform) return /Win/i.test(uaData.platform);
   return /Windows/i.test(navigator.userAgent) || /Win32|Win64/.test(navigator.platform);
 }
 

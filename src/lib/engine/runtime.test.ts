@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildEngineDeepLink, parseEngineDeepLink, parseEngineLoopbackUrl } from './protocol';
+import { buildEngineDeepLink, parseEngineDeepLink, parseEngineLoopbackUrl, ENGINE_PRESENCE_PORT, ENGINE_PRESENCE_ORIGIN } from './protocol';
 import {
   absolutizeSiteAssetUrl,
   detectEngineEnv,
@@ -36,6 +36,16 @@ describe('kilrun engine protocol', () => {
       action: 'auth',
       token: 'abc.def',
     });
+    expect(parseEngineDeepLink('com.kilrun.engine://open?map=map_1')).toEqual({
+      mapId: 'map_1',
+      action: 'open',
+    });
+  });
+
+  it('exposes a stable loopback presence URL for the website', () => {
+    expect(ENGINE_PRESENCE_PORT).toBe(17832);
+    expect(ENGINE_PRESENCE_ORIGIN).toBe('http://127.0.0.1:17832');
+    expect(buildEngineDeepLink()).toBe('kilrun-engine://open');
   });
 });
 

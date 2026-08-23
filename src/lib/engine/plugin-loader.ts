@@ -21,39 +21,15 @@ import { listSandboxPluginIds, createPluginSandbox, destroyAllPluginSandboxes } 
 import { clearPluginModes, registerPluginMode } from '@/lib/game-modes';
 import {
   fetchOfficialCatalog,
-  hasEngineSession,
-  publishCloudModule,
   type OfficialCatalogRow,
 } from './platform-client';
-import { peekPluginRuntimeBundles, setLoadedPluginBundles, type MapPluginBundle } from './plugin-runtime-store';
+import { setLoadedPluginBundles, type MapPluginBundle } from './plugin-runtime-store';
 import { comparePluginVersions } from '@shared/plugin-source';
 
 export type PluginLoadResult = {
   loaded: string[];
   errors: { id: string; error: string }[];
 };
-
-async function syncLoadedModulesToCatalog() {
-  if (!hasEngineSession()) return;
-  for (const bundle of peekPluginRuntimeBundles()) {
-    try {
-      await publishCloudModule({
-        moduleId: bundle.id,
-        kind: 'plugin',
-        version: bundle.version,
-        source: bundle.source,
-        entry: bundle.entry,
-        permissions: bundle.permissions,
-        modes: bundle.modes,
-        weapons: bundle.weapons,
-        shopItems: bundle.shopItems,
-        official: false,
-      });
-    } catch {
-      /* catalog API may not be deployed yet */
-    }
-  }
-}
 
 export async function syncOfficialModules(): Promise<{ installed: string[]; skipped: number }> {
   const result = { installed: [] as string[], skipped: 0 };
@@ -158,17 +134,6 @@ export async function loadDesktopModules(): Promise<PluginLoadResult> {
           weapons: captured?.weapons,
           shopItems: captured?.shopItems,
         });
-      } else if (hasEngineSession()) {
-        void publishCloudModule({
-          moduleId: manifest.id,
-          kind,
-          version: manifest.version,
-          source,
-          entry: manifest.entry,
-          permissions: manifest.permissions,
-          name: manifest.name,
-          official: false,
-        }).catch(() => undefined);
       }
     } catch (err) {
       result.errors.push({
@@ -184,7 +149,6 @@ export async function loadDesktopModules(): Promise<PluginLoadResult> {
   setLoadedPluginBundles(bundles);
   bindDiskEditorPanels();
   notifyPluginsChanged();
-  void syncLoadedModulesToCatalog();
   return result;
 }
 

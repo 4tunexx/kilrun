@@ -459,7 +459,16 @@ export function EngineApp({
           }
         })();
       }
-      if (parsed.mapId) setEditorMapId(parsed.mapId);
+      if (parsed.mapId) {
+        if (loadMap(parsed.mapId)) setEditorMapId(parsed.mapId);
+        else {
+          toast({
+            title: 'Kilrun Engine is open',
+            description:
+              'That map is not in this Engine yet. Pull from live or upload it from the website.',
+          });
+        }
+      }
     };
     window.addEventListener('kilrun-engine-deep-link', onDeep as EventListener);
     let unlisten: (() => void) | undefined;

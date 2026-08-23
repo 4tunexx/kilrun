@@ -118,6 +118,11 @@ const distSetup = path.join(distDir, 'Kilrun Engine Setup.exe');
 fs.copyFileSync(setupSrc, distSetup);
 fs.copyFileSync(exe, path.join(distDir, 'Kilrun Engine.exe'));
 
+const publicDir = path.join(root, 'public/downloads');
+fs.mkdirSync(publicDir, { recursive: true });
+const publicSetup = path.join(publicDir, 'Kilrun-Engine-Setup.exe');
+fs.copyFileSync(setupSrc, publicSetup);
+
 const desktopDir = path.join(process.env.USERPROFILE || process.env.HOME || '', 'Desktop');
 if (fs.existsSync(desktopDir)) {
   fs.copyFileSync(setupSrc, path.join(desktopDir, 'Kilrun Engine Setup.exe'));
@@ -128,6 +133,9 @@ if (fs.existsSync(desktopDir)) {
 console.log('Kilrun Engine installer ready:');
 console.log(' ', setupSrc);
 console.log(' ', distSetup);
+console.log(' ', publicSetup);
+console.log('Download URL: https://kilrun.vercel.app/api/engine/download');
+console.log('File URL:     https://kilrun.vercel.app/downloads/Kilrun-Engine-Setup.exe');
 if (fs.existsSync(desktopDir)) {
   console.log(' ', path.join(desktopDir, 'Kilrun Engine Setup.exe'));
   console.log(' ', path.join(desktopDir, 'Kilrun Engine.exe'));
