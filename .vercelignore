@@ -1,0 +1,18 @@
+# Engine native build output — never upload to the website deploy
+desktop/src-tauri/target
+desktop/src-tauri/gen
+desktop/dist
+desktop/ui/dist
+desktop/ui/public
+desktop/webview-dist
+
+node_modules
+.next
+src/generated/prisma
+coverage
+model_skins
+weapon_models
+effects
+.cursor-tmp
+.env*
+!.env.example

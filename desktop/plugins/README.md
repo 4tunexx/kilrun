@@ -1,5 +1,7 @@
 # Kilrun Engine plugins
 
+Plugins are **gameplay actions** (modes, weapons, entity scripts). Editor tools are [Extensions](../extensions/README.md). Client upgrades / themes are [Addons](../addons/README.md).
+
 Drop a folder (or install a zip) under Documents/Kilrun/Plugins. Each plugin is one folder with `plugin.json` and an entry script (usually `index.js`).
 
 ## plugin.json
@@ -67,5 +69,7 @@ Entity scripts run in Engine Play Test and, with `server`, on Colyseus. Weapons/
 6. XP/VP still use the base sim (Deathrun/Horde/Competitive). Match reports also send `pluginMode` for logs/results copy.
 
 The game server prefers a **newer catalog version** over the JS snapshot baked into the map, so you can update a plugin without republishing every map. Snapshot remains the fallback.
+
+Admins can **Push to everyone** in Modules to mark a pack official. Other Engine clients install that version on launch — still no EXE rebuild. Extensions and Addons never ship `server` source.
 
 See `desktop/plugins/kilrun-example` for a working Gauntlet mode, Map Stats panel, Pulse Bat shop item, and `kilrun-example.pulse` touch script.

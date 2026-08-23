@@ -16,7 +16,9 @@ export async function GET(_req: NextRequest) {
       orderBy: { updatedAt: 'desc' },
       take: 64,
     });
-    const plugins = rows.map((row) => {
+    const plugins = rows
+      .filter((row) => !row.kind || row.kind === 'plugin')
+      .map((row) => {
       const parsed = parseCatalogManifestJson(row.manifestJson);
       return {
         pluginId: row.pluginId,

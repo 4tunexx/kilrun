@@ -2,6 +2,7 @@ import { isKilrunEngineDesktop } from './runtime';
 import { KILRUN_ENGINE_VERSION } from './version';
 import type { MapDocument } from '@/components/game/editor/map-document';
 import type { InstalledPlugin } from './plugin-manifest';
+import { parseModuleKind, type ModuleKind } from './module-kind';
 
 export type DesktopProjectListItem = {
   id: string;
@@ -88,7 +89,19 @@ export async function readDesktopProject(id: string): Promise<DesktopProjectFile
   }
 }
 
-export type KilrunDiskFolder = 'Projects' | 'Assets' | 'Prefabs' | 'Plugins' | 'Cache' | 'Exports';
+export type KilrunDiskFolder =
+  | 'Projects'
+  | 'Assets'
+  | 'Prefabs'
+  | 'Plugins'
+  | 'Extensions'
+  | 'Addons'
+  | 'Cache'
+  | 'Exports';
+
+function withKind(row: InstalledPlugin, fallback: ModuleKind = 'plugin'): InstalledPlugin {
+  return { ...row, kind: parseModuleKind(row.kind, fallback) };
+}
 
 export async function openDesktopProjectsFolder(): Promise<void> {
   return openDesktopKilrunFolder('Projects');
@@ -222,59 +235,160 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export async function listDesktopPlugins(): Promise<InstalledPlugin[]> {
+export async function listDesktopModules(kind?: ModuleKind): Promise<InstalledPlugin[]> {
   const invoke = await getInvoke();
   if (!invoke) return [];
   try {
-    return await invoke('list_plugins');
+    const rows = await invoke<InstalledPlugin[]>('list_modules', { kind: kind ?? null });
+    return rows.map((row) => withKind(row, kind));
   } catch (err) {
-    console.warn('[kilrun-engine] list_plugins failed', err);
-    return [];
+    if (kind && kind !== 'plugin') {
+      console.warn('[kilrun-engine] list_modules failed', err);
+      return [];
+    }
+    try {
+      const rows = await invoke<InstalledPlugin[]>('list_plugins');
+      return rows.map((row) => withKind(row, 'plugin'));
+    } catch (legacyErr) {
+      console.warn('[kilrun-engine] list_plugins failed', legacyErr);
+      return [];
+    }
+  }
+}
+
+export async function listDesktopPlugins(): Promise<InstalledPlugin[]> {
+  return listDesktopModules('plugin');
+}
+
+export async function setDesktopModuleEnabled(
+  kind: ModuleKind,
+  id: string,
+  enabled: boolean
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) return;
+  try {
+    await invoke('set_module_enabled', { kind, id, enabled });
+  } catch {
+    if (kind === 'plugin') await invoke('set_plugin_enabled', { id, enabled });
   }
 }
 
 export async function setDesktopPluginEnabled(id: string, enabled: boolean): Promise<void> {
+  return setDesktopModuleEnabled('plugin', id, enabled);
+}
+
+export async function uninstallDesktopModule(kind: ModuleKind, id: string): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) return;
-  await invoke('set_plugin_enabled', { id, enabled });
+  try {
+    await invoke('uninstall_module', { kind, id });
+  } catch {
+    if (kind === 'plugin') await invoke('uninstall_plugin', { id });
+  }
 }
 
 export async function uninstallDesktopPlugin(id: string): Promise<void> {
-  const invoke = await getInvoke();
-  if (!invoke) return;
-  await invoke('uninstall_plugin', { id });
+  return uninstallDesktopModule('plugin', id);
 }
 
-export async function readDesktopPluginFile(id: string, rel: string): Promise<string | null> {
+export async function readDesktopModuleFile(
+  kind: ModuleKind,
+  id: string,
+  rel: string
+): Promise<string | null> {
   const invoke = await getInvoke();
   if (!invoke) return null;
   try {
-    return await invoke('read_plugin_file', { id, rel });
+    return await invoke('read_module_file', { kind, id, rel });
   } catch (err) {
-    console.warn('[kilrun-engine] read_plugin_file failed', err);
-    return null;
+    if (kind !== 'plugin') {
+      console.warn('[kilrun-engine] read_module_file failed', err);
+      return null;
+    }
+    try {
+      return await invoke('read_plugin_file', { id, rel });
+    } catch (legacyErr) {
+      console.warn('[kilrun-engine] read_plugin_file failed', legacyErr);
+      return null;
+    }
+  }
+}
+
+export async function readDesktopPluginFile(id: string, rel: string): Promise<string | null> {
+  return readDesktopModuleFile('plugin', id, rel);
+}
+
+export async function desktopModuleAssetDataUrl(
+  kind: ModuleKind,
+  id: string,
+  rel: string
+): Promise<string | null> {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  try {
+    return await invoke('module_asset_data_url', { kind, id, rel });
+  } catch (err) {
+    if (kind !== 'plugin') {
+      console.warn('[kilrun-engine] module_asset_data_url failed', err);
+      return null;
+    }
+    try {
+      return await invoke('plugin_asset_data_url', { id, rel });
+    } catch (legacyErr) {
+      console.warn('[kilrun-engine] plugin_asset_data_url failed', err);
+      return null;
+    }
   }
 }
 
 export async function desktopPluginAssetDataUrl(id: string, rel: string): Promise<string | null> {
+  return desktopModuleAssetDataUrl('plugin', id, rel);
+}
+
+export async function inspectDesktopModuleArchive(bytes: Uint8Array): Promise<InstalledPlugin> {
   const invoke = await getInvoke();
-  if (!invoke) return null;
+  if (!invoke) throw new Error('Module install is only available in Kilrun Engine');
   try {
-    return await invoke('plugin_asset_data_url', { id, rel });
-  } catch (err) {
-    console.warn('[kilrun-engine] plugin_asset_data_url failed', err);
-    return null;
+    return withKind(await invoke('inspect_module', { archiveBase64: bytesToBase64(bytes) }));
+  } catch {
+    return withKind(await invoke('inspect_plugin', { archiveBase64: bytesToBase64(bytes) }), 'plugin');
+  }
+}
+
+export async function installDesktopModuleArchive(bytes: Uint8Array): Promise<InstalledPlugin> {
+  const invoke = await getInvoke();
+  if (!invoke) throw new Error('Module install is only available in Kilrun Engine');
+  try {
+    return withKind(await invoke('install_module', { archiveBase64: bytesToBase64(bytes) }));
+  } catch {
+    return withKind(await invoke('install_plugin', { archiveBase64: bytesToBase64(bytes) }), 'plugin');
   }
 }
 
 export async function inspectDesktopPluginArchive(bytes: Uint8Array): Promise<InstalledPlugin> {
-  const invoke = await getInvoke();
-  if (!invoke) throw new Error('Plugin install is only available in Kilrun Engine');
-  return invoke('inspect_plugin', { archiveBase64: bytesToBase64(bytes) });
+  return inspectDesktopModuleArchive(bytes);
 }
 
 export async function installDesktopPluginArchive(bytes: Uint8Array): Promise<InstalledPlugin> {
+  return installDesktopModuleArchive(bytes);
+}
+
+export async function installDesktopModuleSource(input: {
+  kind: ModuleKind;
+  id: string;
+  manifestJson: string;
+  source: string;
+}): Promise<InstalledPlugin> {
   const invoke = await getInvoke();
-  if (!invoke) throw new Error('Plugin install is only available in Kilrun Engine');
-  return invoke('install_plugin', { archiveBase64: bytesToBase64(bytes) });
+  if (!invoke) throw new Error('Official sync is only available in Kilrun Engine');
+  return withKind(
+    await invoke('install_module_source', {
+      kind: input.kind,
+      id: input.id,
+      manifestJson: input.manifestJson,
+      source: input.source,
+    }),
+    input.kind
+  );
 }

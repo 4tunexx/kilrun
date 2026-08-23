@@ -1,0 +1,11 @@
+{
+  "id": "kilrun-studio-pack",
+  "kind": "addon",
+  "name": "Studio Pack",
+  "version": "1.0.0",
+  "author": "Kilrun",
+  "description": "Engine Pack — accent theme and home card. Push official to update every Engine client without a new EXE.",
+  "engine": "0.1.3",
+  "entry": "index.js",
+  "permissions": ["theme", "content"]
+}

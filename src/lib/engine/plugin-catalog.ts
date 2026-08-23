@@ -7,6 +7,7 @@ import {
   type PluginModeSpec,
 } from '@/lib/game-modes';
 import { isPluginPermission, pluginHasPermission, type PluginPermission } from '@/lib/engine/plugin-manifest';
+import { kindAllowsServer, parseModuleKind, type ModuleKind } from '@/lib/engine/module-kind';
 import type { MapPluginBundle } from '@/lib/engine/plugin-runtime-store';
 import { clipPluginSource, comparePluginVersions } from '@shared/plugin-source';
 
@@ -113,9 +114,13 @@ export function collectPluginModesFromSources(input: {
 
 export function catalogSourceForPublish(
   source: string,
-  permissions: PluginPermission[] | undefined
+  permissions: PluginPermission[] | undefined,
+  kind: ModuleKind = 'plugin'
 ): string {
-  if (!pluginHasPermission(permissions, 'server')) return '';
+  if (kindAllowsServer(kind)) {
+    if (!pluginHasPermission(permissions, 'server')) return '';
+    return clipPluginSource(source);
+  }
   return clipPluginSource(source);
 }
 

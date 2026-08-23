@@ -12,8 +12,9 @@ import type { MapEditorBrains } from '@/components/game/editor/engine/types';
 import type { CatalogWeaponDef } from '@/lib/weapon-catalog';
 import { registerCatalogWeapon } from '@/lib/weapon-catalog';
 import { registerPluginMode } from '@/lib/game-modes';
-import { desktopPluginAssetDataUrl } from '@/lib/engine/desktop-bridge';
+import { desktopModuleAssetDataUrl } from '@/lib/engine/desktop-bridge';
 import { KILRUN_ENGINE_VERSION } from '@/lib/engine/version';
+import type { ModuleKind } from '@/lib/engine/module-kind';
 import {
   adoptPluginIframe,
   parkPluginIframe,
@@ -71,6 +72,27 @@ type PanelSpec = {
   order: number;
 };
 
+export type ExtensionToolSpec = {
+  moduleId: string;
+  id: string;
+  label: string;
+  order: number;
+};
+
+export type AddonHomeCard = {
+  moduleId: string;
+  id: string;
+  title: string;
+  body: string;
+};
+
+export type AddonTexture = {
+  moduleId: string;
+  id: string;
+  name: string;
+  dataUrl: string;
+};
+
 type Listener = (payload: PlaytestPayload) => void;
 
 type PluginCapture = {
@@ -79,8 +101,17 @@ type PluginCapture = {
 };
 
 const panels: PanelSpec[] = [];
+const extensionTools: ExtensionToolSpec[] = [];
+const addonHomeCards: AddonHomeCard[] = [];
+const addonTextures: AddonTexture[] = [];
 const shopExtras: MapShopItem[] = [];
 const captures = new Map<string, PluginCapture>();
+const moduleKinds = new Map<string, ModuleKind>();
+const THEME_VAR_RE = /^--kilrun-[a-z0-9-]+$/i;
+
+export function rememberModuleKind(id: string, kind: ModuleKind) {
+  moduleKinds.set(id, kind);
+}
 const playtestListeners: Record<PlaytestEvent, Listener[]> = {
   beforeStart: [],
   ready: [],
@@ -150,6 +181,19 @@ function applyHostHandlers() {
     onRegisterMode: (_pluginId, spec) => {
       registerPluginMode(spec);
     },
+    onRegisterTool: (pluginId, spec) => {
+      if (extensionTools.some((row) => row.moduleId === pluginId && row.id === spec.id)) return;
+      extensionTools.push({ moduleId: pluginId, id: spec.id, label: spec.label, order: spec.order });
+    },
+    onRegisterTheme: (_pluginId, spec) => {
+      applyAddonTheme(spec);
+    },
+    onRegisterTextures: (pluginId, rows) => {
+      applyAddonTextures(pluginId, rows);
+    },
+    onRegisterHomeCard: (pluginId, spec) => {
+      applyAddonHomeCard(pluginId, spec);
+    },
     onMutateDoc: (_pluginId, doc) => {
       const brains = brainsRead?.();
       if (!brains || !isMapDocument(doc)) return;
@@ -165,7 +209,8 @@ function applyHostHandlers() {
     onStartPlay: () => {
       void brainsRead?.().startPlay();
     },
-    onAssetRequest: (pluginId, rel) => desktopPluginAssetDataUrl(pluginId, rel),
+    onAssetRequest: (pluginId, rel) =>
+      desktopModuleAssetDataUrl(moduleKinds.get(pluginId) || 'plugin', pluginId, rel),
   });
   setShopItemExtrasProvider(() => shopExtras);
 }
@@ -189,7 +234,11 @@ function DiskPluginPanel({
     if (!el) return;
     adoptPluginIframe(pluginId, el);
     postToPlugin(pluginId, { type: 'doc', doc: brainsRef.current.doc });
-    postToPlugin(pluginId, { type: 'selected', id: brainsRef.current.selectedId });
+    postToPlugin(pluginId, {
+      type: 'selected',
+      id: brainsRef.current.selectedId,
+      ids: brainsRef.current.selectedIds,
+    });
     postToPlugin(pluginId, { type: 'mount', panelId });
     return () => {
       parkPluginIframe(pluginId);
@@ -198,8 +247,8 @@ function DiskPluginPanel({
 
   React.useEffect(() => {
     postToAllPlugins({ type: 'doc', doc: brains.doc });
-    postToAllPlugins({ type: 'selected', id: brains.selectedId });
-  }, [brains.doc, brains.selectedId]);
+    postToAllPlugins({ type: 'selected', id: brains.selectedId, ids: brains.selectedIds });
+  }, [brains.doc, brains.selectedId, brains.selectedIds]);
 
   return React.createElement('div', {
     ref: hostRef,
@@ -225,13 +274,91 @@ export type KilrunPluginApi = {
   };
   entities: { registerScript: (id: string, handlers: EntityScriptHandlers) => void };
   modes: { register: (spec: unknown) => void };
+  tools: {
+    register: (spec: {
+      id: string;
+      label: string;
+      order?: number;
+      onActivate: (ctx: PluginEditorCtx) => void;
+    }) => void;
+  };
+  theme: { register: (spec: { id?: string; name?: string; vars?: Record<string, string> }) => void };
+  content: { registerTextures: (rows: Array<{ id: string; name?: string; dataUrl?: string }>) => void };
+  engine: { registerHomeCard: (spec: { id: string; title: string; body?: string }) => void };
   assets: { loadDataUrl: (rel: string) => Promise<string | null> };
 };
 
+function applyAddonTheme(spec: unknown) {
+  if (!spec || typeof spec !== 'object' || typeof document === 'undefined') return;
+  const vars = (spec as { vars?: Record<string, unknown> }).vars;
+  if (!vars || typeof vars !== 'object') return;
+  const root = document.documentElement;
+  for (const [key, value] of Object.entries(vars)) {
+    if (!THEME_VAR_RE.test(key)) continue;
+    const text = String(value ?? '').trim().slice(0, 80);
+    if (!text) continue;
+    root.style.setProperty(key, text);
+  }
+}
+
+function applyAddonTextures(moduleId: string, rows: unknown) {
+  if (!Array.isArray(rows)) return;
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const rec = row as { id?: unknown; name?: unknown; dataUrl?: unknown };
+    const id = String(rec.id || '').trim();
+    const dataUrl = String(rec.dataUrl || '');
+    if (!id || !dataUrl.startsWith('data:image/')) continue;
+    const next = { moduleId, id, name: String(rec.name || id), dataUrl: dataUrl.slice(0, 2_000_000) };
+    const index = addonTextures.findIndex((item) => item.moduleId === moduleId && item.id === id);
+    if (index >= 0) addonTextures[index] = next;
+    else addonTextures.push(next);
+  }
+}
+
+function applyAddonHomeCard(moduleId: string, spec: unknown) {
+  if (!spec || typeof spec !== 'object') return;
+  const row = spec as { id?: unknown; title?: unknown; body?: unknown };
+  const id = String(row.id || '').trim();
+  const title = String(row.title || '').trim();
+  if (!id || !title) return;
+  const next = { moduleId, id, title, body: String(row.body || '').trim() };
+  const index = addonHomeCards.findIndex((item) => item.moduleId === moduleId && item.id === id);
+  if (index >= 0) addonHomeCards[index] = next;
+  else addonHomeCards.push(next);
+}
+
+export function listExtensionTools(): ExtensionToolSpec[] {
+  return [...extensionTools].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+}
+
+export function activateExtensionTool(moduleId: string, toolId: string) {
+  postToPlugin(moduleId, { type: 'toolActivate', toolId });
+}
+
+export function listAddonHomeCards(): AddonHomeCard[] {
+  return [...addonHomeCards];
+}
+
+export function listAddonTextures(): AddonTexture[] {
+  return [...addonTextures];
+}
+
 export function resetPluginRuntime() {
   panels.length = 0;
+  extensionTools.length = 0;
+  addonHomeCards.length = 0;
+  addonTextures.length = 0;
   shopExtras.length = 0;
   captures.clear();
+  moduleKinds.clear();
+  if (typeof document !== 'undefined') {
+    const style = document.documentElement.style;
+    for (let i = style.length - 1; i >= 0; i -= 1) {
+      const name = style.item(i);
+      if (name.startsWith('--kilrun-')) style.removeProperty(name);
+    }
+  }
   (Object.keys(playtestListeners) as PlaytestEvent[]).forEach((key) => {
     playtestListeners[key] = [];
   });

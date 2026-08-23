@@ -3,6 +3,7 @@ import {
   parsePluginModeSpec,
   type PluginModeSpec,
 } from '@/lib/game-modes';
+import { kindAllowsServer, parseModuleKind, type ModuleKind } from './module-kind';
 import { KILRUN_ENGINE_VERSION } from './version';
 
 export const PLUGIN_PERMISSIONS = [
@@ -13,6 +14,9 @@ export const PLUGIN_PERMISSIONS = [
   'assets',
   'modes',
   'server',
+  'tools',
+  'theme',
+  'content',
 ] as const;
 export type PluginPermission = (typeof PLUGIN_PERMISSIONS)[number];
 
@@ -24,6 +28,7 @@ export type PluginManifest = {
   description?: string;
   engine?: string;
   entry: string;
+  kind: ModuleKind;
   permissions?: PluginPermission[];
   modes?: PluginModeSpec[];
 };
@@ -31,6 +36,10 @@ export type PluginManifest = {
 export type InstalledPlugin = PluginManifest & {
   enabled: boolean;
   path: string;
+};
+
+export type ParseManifestOptions = {
+  defaultKind?: ModuleKind;
 };
 
 const ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/;
@@ -74,6 +83,13 @@ export function permissionForHostMessage(type: string): PluginPermission | null 
       return 'playtest';
     case 'assetRequest':
       return 'assets';
+    case 'registerTool':
+      return 'tools';
+    case 'registerTheme':
+    case 'registerHomeCard':
+      return 'theme';
+    case 'registerTextures':
+      return 'content';
     default:
       return null;
   }
@@ -106,7 +122,7 @@ export function engineMeetsRequirement(required?: string, current = KILRUN_ENGIN
   return true;
 }
 
-export function parsePluginManifest(raw: unknown): PluginManifest {
+export function parsePluginManifest(raw: unknown, opts?: ParseManifestOptions): PluginManifest {
   if (!raw || typeof raw !== 'object') throw new Error('plugin.json is invalid');
   const row = raw as Record<string, unknown>;
   const id = String(row.id || '').trim();
@@ -117,8 +133,9 @@ export function parsePluginManifest(raw: unknown): PluginManifest {
   if (!entry || entry.includes('..') || entry.startsWith('/')) {
     throw new Error('plugin.json entry path is invalid');
   }
+  const kind = parseModuleKind(row.kind, opts?.defaultKind ?? 'plugin');
   const permissions = Array.isArray(row.permissions)
-    ? row.permissions.filter(isPluginPermission)
+    ? row.permissions.filter(isPluginPermission).filter((perm) => perm !== 'server' || kindAllowsServer(kind))
     : undefined;
   const modes = Array.isArray(row.modes)
     ? row.modes.map(parsePluginModeSpec).filter((spec): spec is PluginModeSpec => Boolean(spec))
@@ -137,7 +154,8 @@ export function parsePluginManifest(raw: unknown): PluginManifest {
     description: row.description ? String(row.description) : undefined,
     engine: row.engine ? String(row.engine) : undefined,
     entry,
+    kind,
     permissions,
-    modes: modes.length ? modes : undefined,
+    modes: kind === 'plugin' && modes.length ? modes : undefined,
   };
 }

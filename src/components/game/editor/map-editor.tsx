@@ -171,7 +171,7 @@ import { sanitizeTpsView } from '../tps/tps-view-settings';
 import type { SkinAttachment } from '@/lib/player-skins';
 import { SNAP_FACE_LABELS, SnapFacePicker } from './snap-face-picker';
 import './engine/builtins';
-import { emitPlaytest } from '@/lib/engine/plugin-sdk';
+import { activateExtensionTool, emitPlaytest, listExtensionTools } from '@/lib/engine/plugin-sdk';
 import { getSidebarPlugin, getSidebarPlugins, isStudioPluginTab } from './engine/registry';
 import type { MapEditorBrains, MapEditorStudioOptions } from './engine/types';
 import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
@@ -294,6 +294,7 @@ export function MapEditor({
   const [brush, setBrush] = useState<string | null>('floor-square');
   /** Select = pick objects; Brush = paint/place. Defaults to Select so clicks don't stack. */
   const [editTool, setEditTool] = useState<EditTool>('select');
+  const [extensionToolId, setExtensionToolId] = useState<string | null>(null);
   const [hammerShape, setHammerShape] = useState<HammerPrimitive>(() => loadStickyHammerShape());
   const [paintTextureUrl, setPaintTextureUrl] = useState<string | null>(null);
   /** Set after RMB-click on a solid with the Paint tool: exact texture+UV ready to LMB-paste. */
@@ -3353,6 +3354,7 @@ export function MapEditor({
             <ToolBtn
               active={editTool === 'select' && !pendingPlaceKind}
               onClick={() => {
+                setExtensionToolId(null);
                 setEditTool('select');
                 apiRef.current?.clearPendingPlace();
                 setPendingPlaceKind(null);
@@ -3424,6 +3426,7 @@ export function MapEditor({
             <ToolBtn
               active={editTool === 'paint'}
               onClick={() => {
+                setExtensionToolId(null);
                 setEditTool('paint');
                 if (freeFly) apiRef.current?.setFreeFly(false);
                 selectLibraryTab('textures');
@@ -3432,6 +3435,20 @@ export function MapEditor({
             >
               <Palette className="w-4 h-4 text-sky-300" />
             </ToolBtn>
+            {listExtensionTools().map((tool) => (
+              <ToolBtn
+                key={`${tool.moduleId}:${tool.id}`}
+                active={extensionToolId === `${tool.moduleId}:${tool.id}`}
+                onClick={() => {
+                  setEditTool('select');
+                  setExtensionToolId(`${tool.moduleId}:${tool.id}`);
+                  activateExtensionTool(tool.moduleId, tool.id);
+                }}
+                title={`${tool.label} — extension tool`}
+              >
+                <span className="text-[8px] font-bold leading-none px-0.5">{tool.label}</span>
+              </ToolBtn>
+            ))}
             <div className="w-px h-6 bg-white/15 mx-1" />
             <ToolBtn
               active={viewLayout === 'single'}

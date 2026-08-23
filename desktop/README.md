@@ -15,10 +15,13 @@ actual live multiplayer matches are still played on the website
   the exact same physics step the live game server runs.
 - **Model Editor / Player Model studio** — sculpt skins, weapons, and player
   models; bind animation clips; publish to the shop.
-- **Plugin SDK** — install/author `.kplugin` bundles that register weapons,
-  shop items, modes, or editor panels. Plugins requesting the `server`
-  permission (server-executable code) can only be published by full admins,
-  not moderators — see [Security](#security) below.
+- **Modules (no EXE rebuild)** — three installable packs:
+  - **Plugins** (`.kplugin`) — gameplay *actions*: modes, weapons, entity scripts
+  - **Extensions** (`.kext`) — editor *tools*: extra toolbar actions, never live-server
+  - **Addons** (`.kaddon`) — *Engine Packs*: themes, home cards, official client upgrades
+  Staff can **Push to everyone** (official catalog). Other Engine clients install
+  those packs on next launch. Plugins requesting the `server` permission can
+  only be published by full admins — see [Security](#security) below.
 - **Live publish** — "Set as MAIN" pushes a map straight to the live site
   as the active map for its mode. GLB/texture uploads go to the live site's
   storage, not embedded as data URLs.
@@ -48,8 +51,13 @@ Recipients do **not** need Node, Rust, or this repo.
 > a code-signing certificate yet. Click **More info → Run anyway**. This is
 > expected until a certificate is purchased and wired into the build.
 >
-> **No auto-update.** New versions must be manually re-downloaded and
-> re-installed; there's no in-app update check yet.
+> **Feature updates do not need a new EXE.** Publish an official Plugin,
+> Extension, or Addon and every Engine client pulls it on launch.
+>
+> **Native EXE updates** (Rust/Tauri/security) still need a new installer.
+> Set `KILRUN_ENGINE_LATEST_VERSION` and `KILRUN_ENGINE_DOWNLOAD_URL` on the
+> website; Engine shows an update banner. A signed in-app auto-updater is
+> not wired yet.
 
 Maps, prefabs, plugins, and exports live on disk:
 
@@ -59,6 +67,8 @@ Documents/Kilrun/
   Assets/
   Prefabs/
   Plugins/
+  Extensions/
+  Addons/
   Cache/
   Exports/
 ```
@@ -92,7 +102,8 @@ offline.
   the `server` permission to plugins from accounts you don't fully trust.
 - **Upload rate limiting** — the Engine staff upload endpoints
   (models/images/meshes/sounds) are rate-limited per staff account.
-- **Not yet done**: code signing and an in-app auto-updater (see above).
+- **Not yet done**: code signing and a silent in-app EXE auto-updater.
+  Official modules already hot-update without that.
 
 ## Rebuild (developers only)
 
@@ -133,6 +144,8 @@ desktop/
   ui/                 Bundled frontend (Vite) — the actual editor UI, built
                        from the same game/editor components as the website
   plugins/            Bundled example plugin (kilrun-example)
+  extensions/         Bundled example extension (kilrun-align-tool)
+  addons/             Bundled example addon / Engine Pack (kilrun-studio-pack)
   scripts/            Build tooling (icon stamping, installer packaging)
   dist/               Build output — Setup.exe + a standalone .exe (gitignored)
 ```

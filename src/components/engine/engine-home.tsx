@@ -3,6 +3,7 @@
 import React from 'react';
 import {
   Cloud,
+  Download,
   FolderOpen,
   Link2,
   Monitor,
@@ -14,6 +15,8 @@ import {
   Unlink,
   Upload,
 } from 'lucide-react';
+import { listAddonHomeCards } from '@/lib/engine/plugin-sdk';
+import type { EngineUpdateInfo } from '@/lib/engine/platform-client';
 import { InteractiveWordmark } from '@/components/interactive-wordmark';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,6 +54,8 @@ export function EngineHome({
   onPull,
   onOpenProjects,
   onOpenPlugins,
+  engineUpdate,
+  onDownloadUpdate,
   onOpenMap,
   onUpload,
   onSetMain,
@@ -72,6 +77,8 @@ export function EngineHome({
   onPull: (mode: KilrunMode) => void;
   onOpenProjects: () => void;
   onOpenPlugins?: () => void;
+  engineUpdate?: EngineUpdateInfo | null;
+  onDownloadUpdate?: () => void;
   onOpenMap: (id: string) => void;
   onUpload: (id: string) => void;
   onSetMain: (id: string) => void;
@@ -143,7 +150,7 @@ export function EngineHome({
             </Button>
           ) : null}
           {desktop && onOpenPlugins ? (
-            <Button size="sm" variant="ghost" className="h-9 w-9 p-0" title="Plugins" onClick={onOpenPlugins}>
+            <Button size="sm" variant="ghost" className="h-9 w-9 p-0" title="Modules" onClick={onOpenPlugins}>
               <Puzzle className="h-4 w-4" />
             </Button>
           ) : null}
@@ -226,7 +233,7 @@ export function EngineHome({
               {onOpenPlugins ? (
                 <Button size="sm" variant="ghost" className="h-8 w-full justify-start text-[11px]" onClick={onOpenPlugins}>
                   <Puzzle className="h-3.5 w-3.5 mr-1.5" />
-                  Plugins
+                  Modules
                 </Button>
               ) : null}
             </>
@@ -282,6 +289,26 @@ export function EngineHome({
         </div>
 
         <div className="px-6 py-6 space-y-8">
+          {engineUpdate?.available ? (
+            <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-amber-100">
+                  Engine {engineUpdate.latest} is available
+                </p>
+                <p className="text-[12px] text-amber-100/80">
+                  {engineUpdate.notes ||
+                    'This is a native shell update. Plugins, Extensions, and Addons still install without a new EXE.'}
+                </p>
+              </div>
+              {onDownloadUpdate ? (
+                <Button size="sm" onClick={onDownloadUpdate}>
+                  <Download className="h-3.5 w-3.5 mr-1" />
+                  Download
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          <AddonHomeCards />
           <section>
             <SectionLabel>New file</SectionLabel>
             <div className="grid gap-3 sm:grid-cols-3">
@@ -377,6 +404,31 @@ function SectionLabel({
       <p className="text-[11px] uppercase tracking-[0.28em] text-red-300/80 shrink-0">{children}</p>
       <div className="h-px flex-1 bg-slate-700/40" />
     </div>
+  );
+}
+
+function AddonHomeCards() {
+  const [cards, setCards] = React.useState(() => listAddonHomeCards());
+  React.useEffect(() => {
+    const refresh = () => setCards(listAddonHomeCards());
+    window.addEventListener('kilrun-plugins-changed', refresh);
+    refresh();
+    return () => window.removeEventListener('kilrun-plugins-changed', refresh);
+  }, []);
+  if (!cards.length) return null;
+  return (
+    <section>
+      <SectionLabel>Engine Packs</SectionLabel>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {cards.map((card) => (
+          <div key={`${card.moduleId}:${card.id}`} className={`rounded-2xl ${PANEL} px-4 py-3`}>
+            <p className="text-[10px] uppercase tracking-[0.28em] text-red-300/80">Addon</p>
+            <p className="mt-1 font-semibold text-slate-100">{card.title}</p>
+            {card.body ? <p className="mt-1 text-[12px] text-slate-400">{card.body}</p> : null}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

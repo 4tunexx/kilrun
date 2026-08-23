@@ -1,0 +1,11 @@
+{
+  "id": "kilrun-align-tool",
+  "kind": "extension",
+  "name": "Align Tools",
+  "version": "1.0.0",
+  "author": "Kilrun",
+  "description": "Editor tools that align or flatten the current selection. Installs without rebuilding Engine.",
+  "engine": "0.1.3",
+  "entry": "index.js",
+  "permissions": ["tools", "editor"]
+}

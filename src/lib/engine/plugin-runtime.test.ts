@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   hostMessageAllowed,
+  parsePluginManifest,
   pluginHasPermission,
 } from './plugin-manifest';
+import { catalogSourceForPublish } from './plugin-catalog';
 import {
   attachPluginRuntimeToDoc,
   catalogWeaponToShopItem,
@@ -47,6 +49,36 @@ describe('plugin permissions', () => {
 
   it('treats missing permissions as legacy allow', () => {
     expect(hostMessageAllowed(undefined, 'registerWeapon')).toBe(true);
+  });
+
+  it('gates extension tools and addon themes', () => {
+    expect(hostMessageAllowed(['editor'], 'registerTool')).toBe(false);
+    expect(hostMessageAllowed(['tools'], 'registerTool')).toBe(true);
+    expect(hostMessageAllowed(['theme'], 'registerTheme')).toBe(true);
+    expect(hostMessageAllowed(['content'], 'registerTextures')).toBe(true);
+  });
+
+  it('strips server from extension and addon manifests', () => {
+    const ext = parsePluginManifest({
+      id: 'align-x',
+      kind: 'extension',
+      permissions: ['tools', 'editor', 'server'],
+    });
+    expect(ext.kind).toBe('extension');
+    expect(ext.permissions).toEqual(['tools', 'editor']);
+    const addon = parsePluginManifest({
+      id: 'studio-pack',
+      kind: 'addon',
+      permissions: ['theme', 'server'],
+    });
+    expect(addon.permissions).toEqual(['theme']);
+  });
+
+  it('keeps extension/addon source in the catalog without server permission', () => {
+    expect(catalogSourceForPublish('export default function activate() {}', ['tools'], 'extension')).toContain(
+      'activate'
+    );
+    expect(catalogSourceForPublish('export default function activate() {}', ['weapons'], 'plugin')).toBe('');
   });
 
   it('never grants server access from missing permissions, even though everything else legacy-allows', () => {

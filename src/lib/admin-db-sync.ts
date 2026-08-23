@@ -20,7 +20,7 @@ import { invalidateSoundDefinitionsCache } from '@/lib/sound-definitions';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-08-22-match-reward-claim-idempotency';
+const DB_SCHEMA_SYNC_VERSION = '2026-08-23-engine-module-catalog';
 
 async function requireAdmin() {
   const session = await auth();
@@ -604,6 +604,21 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`MapGhostRun verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — MapGhostRun not available. Run db push. (${msg})`
+    );
+  }
+
+  // Runtime verify: GamePlugin kind/official (Engine Plugins / Extensions / Addons)
+  try {
+    await prisma.gamePlugin.findFirst({
+      select: { id: true, pluginId: true, kind: true, official: true },
+    });
+    const moduleCount = await prisma.gamePlugin.count();
+    steps.push(`GamePlugin.kind/official fields verified (count=${moduleCount})`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`GamePlugin module fields verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — GamePlugin.kind/official not available. Run db push. (${msg})`
     );
   }
 

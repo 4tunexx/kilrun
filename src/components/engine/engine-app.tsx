@@ -43,9 +43,11 @@ import {
   configureEnginePlatform,
   enginePlatformOrigin,
   fetchEngineSession,
+  fetchEngineUpdateInfo,
   hasEngineSession,
   probeEngineApi,
   type EngineSessionUser,
+  type EngineUpdateInfo,
 } from '@/lib/engine/platform-client';
 import { EnginePerfHud } from './engine-perf-hud';
 import { EngineSplash } from './engine-splash';
@@ -53,7 +55,8 @@ import { EnginePreferencesOverlay, applyStoredEngineAudio } from './engine-prefe
 import { HelpGuideOverlay, KeyboardShortcutsOverlay } from '@/components/game/editor/editor-help';
 import { EngineHome, type CloudBadge } from './engine-home';
 import { PluginManagerDialog } from './plugin-manager';
-import { loadDesktopPlugins } from '@/lib/engine/plugin-loader';
+import { loadDesktopModules, syncOfficialModules } from '@/lib/engine/plugin-loader';
+import { isAdminRole } from '@/lib/roles';
 import { DEFAULT_EDITOR_PERF_MODE, type EditorPerfMode, type EditorViewLayout } from '@/components/game/editor/editor-viewport';
 import { getSidebarPlugins } from '@/components/game/editor/engine/registry';
 import '@/components/game/editor/engine/builtins';
@@ -117,6 +120,7 @@ export function EngineApp({
   const [showPerfHud, setShowPerfHud] = React.useState(false);
   const [showAbout, setShowAbout] = React.useState(false);
   const [showPlugins, setShowPlugins] = React.useState(false);
+  const [engineUpdate, setEngineUpdate] = React.useState<EngineUpdateInfo | null>(null);
   const [showGuide, setShowGuide] = React.useState(false);
   const [showShortcuts, setShowShortcuts] = React.useState(false);
   const [showPrefs, setShowPrefs] = React.useState(false);
@@ -187,9 +191,20 @@ export function EngineApp({
           saveMap,
           setMapThumbnail,
         });
-        const plugins = await loadDesktopPlugins();
+        try {
+          await syncOfficialModules();
+        } catch (err) {
+          console.warn('[kilrun-engine] official module sync', err);
+        }
+        const plugins = await loadDesktopModules();
         if (!cancelled && plugins.errors.length) {
           console.warn('[kilrun-engine] plugin load', plugins.errors);
+        }
+        try {
+          const update = await fetchEngineUpdateInfo();
+          if (!cancelled && update?.available) setEngineUpdate(update);
+        } catch {
+          /* version endpoint may not be deployed yet */
         }
       } catch (err) {
         console.warn('[kilrun-engine] desktop hydrate failed', err);
@@ -543,6 +558,14 @@ export function EngineApp({
       void openDesktopKilrunFolder('Plugins');
       return;
     }
+    if (type === 'open-extensions') {
+      void openDesktopKilrunFolder('Extensions');
+      return;
+    }
+    if (type === 'open-addons') {
+      void openDesktopKilrunFolder('Addons');
+      return;
+    }
     if (type === 'open-prefabs') {
       void openDesktopKilrunFolder('Prefabs');
       return;
@@ -574,11 +597,11 @@ export function EngineApp({
       return;
     }
     if (type === 'plugins-reload') {
-      void loadDesktopPlugins().then((result) => {
+      void loadDesktopModules().then((result) => {
         toast({
           title: result.loaded.length
-            ? `Loaded ${result.loaded.length} plugin${result.loaded.length === 1 ? '' : 's'}`
-            : 'Plugins reloaded',
+            ? `Loaded ${result.loaded.length} module${result.loaded.length === 1 ? '' : 's'}`
+            : 'Modules reloaded',
           description: result.errors.length
             ? result.errors.map((row) => `${row.id}: ${row.error}`).join(' · ')
             : undefined,
@@ -640,7 +663,7 @@ export function EngineApp({
 
   if (editorMapId && ready) {
     return (
-      <div className="h-screen w-screen bg-[#080b12] text-white font-sans antialiased flex flex-col overflow-hidden">
+      <div className="h-screen w-screen bg-[var(--kilrun-shell-bg,#080b12)] text-white font-sans antialiased flex flex-col overflow-hidden">
         {shell}
         <div className="flex-1 min-h-0 relative">
           <MapEditor
@@ -670,7 +693,11 @@ export function EngineApp({
           dataRoot={dataRoot}
           platformUrl={platformUrl}
         />
-        <PluginManagerDialog open={showPlugins} onClose={() => setShowPlugins(false)} />
+        <PluginManagerDialog
+          open={showPlugins}
+          onClose={() => setShowPlugins(false)}
+          canPushOfficial={isAdminRole(liveUser?.role)}
+        />
         <HelpGuideOverlay open={showGuide} onClose={() => setShowGuide(false)} />
         <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       </div>
@@ -678,7 +705,7 @@ export function EngineApp({
   }
 
   return (
-    <div className="h-screen w-screen bg-[#080b12] text-white font-sans antialiased flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-[var(--kilrun-shell-bg,#080b12)] text-white font-sans antialiased flex flex-col overflow-hidden">
       {shell}
       <div className="flex-1 min-h-0 overflow-hidden relative">
         <EngineHome
@@ -696,6 +723,12 @@ export function EngineApp({
           onPull={(mode) => void syncCloud(mode)}
           onOpenProjects={() => void openDesktopProjectsFolder()}
           onOpenPlugins={() => setShowPlugins(true)}
+          engineUpdate={engineUpdate}
+          onDownloadUpdate={
+            engineUpdate?.downloadUrl
+              ? () => void openDesktopExternalUrl(engineUpdate.downloadUrl)
+              : undefined
+          }
           onOpenMap={setEditorMapId}
           onUpload={(mapId) => requireLiveThen({ kind: 'hub-upload', mapId, setActive: false })}
           onSetMain={(mapId) => requireLiveThen({ kind: 'hub-upload', mapId, setActive: true })}
@@ -738,7 +771,11 @@ export function EngineApp({
         dataRoot={dataRoot}
         platformUrl={platformUrl}
       />
-      <PluginManagerDialog open={showPlugins} onClose={() => setShowPlugins(false)} />
+      <PluginManagerDialog
+        open={showPlugins}
+        onClose={() => setShowPlugins(false)}
+        canPushOfficial={isAdminRole(liveUser?.role)}
+      />
       <HelpGuideOverlay open={showGuide} onClose={() => setShowGuide(false)} />
       <KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>
@@ -894,13 +931,19 @@ function EngineMenuBar({
             ]}
           />
           <MenuDrop
-            label="Plugins"
-            open={openMenu === 'Plugins'}
-            onOpen={() => setOpenMenu((m) => (m === 'Plugins' ? null : 'Plugins'))}
+            label="Modules"
+            open={openMenu === 'Modules'}
+            onOpen={() => setOpenMenu((m) => (m === 'Modules' ? null : 'Modules'))}
             items={[
-              { label: 'Manage plugins…', onSelect: () => run('plugins-manage'), disabled: !desktop },
-              { label: 'Reload plugins', onSelect: () => run('plugins-reload'), disabled: !desktop },
-              ...(desktop ? [{ label: 'Open Plugins folder', onSelect: () => run('open-plugins') }] : []),
+              { label: 'Manage modules…', onSelect: () => run('plugins-manage'), disabled: !desktop },
+              { label: 'Reload modules', onSelect: () => run('plugins-reload'), disabled: !desktop },
+              ...(desktop
+                ? [
+                    { label: 'Open Plugins folder', onSelect: () => run('open-plugins') },
+                    { label: 'Open Extensions folder', onSelect: () => run('open-extensions') },
+                    { label: 'Open Addons folder', onSelect: () => run('open-addons') },
+                  ]
+                : []),
             ]}
           />
           <MenuDrop
@@ -920,6 +963,8 @@ function EngineMenuBar({
                     { label: 'Open Assets folder', onSelect: () => run('open-assets') },
                     { label: 'Open Prefabs folder', onSelect: () => run('open-prefabs') },
                     { label: 'Open Plugins folder', onSelect: () => run('open-plugins') },
+                    { label: 'Open Extensions folder', onSelect: () => run('open-extensions') },
+                    { label: 'Open Addons folder', onSelect: () => run('open-addons') },
                   ]
                 : []),
             ]}
@@ -1205,8 +1250,8 @@ function AboutDialog({
           </div>
         </div>
         <p className="text-sm text-slate-300 mb-3">
-          Maps save on this PC. Link live game (Steam staff) to upload drafts and Set as MAIN for
-          players.
+          Maps save on this PC. Plugins add gameplay, Extensions add editor tools, Addons are Engine
+          Packs. Link live game to upload maps or push official modules to everyone — no EXE rebuild.
         </p>
         <dl className="text-[12px] space-y-2 text-slate-400">
           <div>

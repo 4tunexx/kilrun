@@ -25,6 +25,10 @@ export type PluginHostHandlers = {
   onRegisterWeapon: (pluginId: string, def: unknown) => void;
   onRegisterShopItem: (pluginId: string, item: unknown) => void;
   onRegisterMode: (pluginId: string, spec: unknown) => void;
+  onRegisterTool: (pluginId: string, spec: { id: string; label: string; order: number }) => void;
+  onRegisterTheme: (pluginId: string, spec: unknown) => void;
+  onRegisterTextures: (pluginId: string, rows: unknown) => void;
+  onRegisterHomeCard: (pluginId: string, spec: unknown) => void;
   onMutateDoc: (pluginId: string, doc: unknown) => void;
   onToast: (opts: { title?: string; description?: string; variant?: 'default' | 'destructive' }) => void;
   onStartPlay: () => void;
@@ -114,9 +118,30 @@ function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermi
   window.SharedWorker = function () { throw new Error('blocked'); };
   var lastDoc = { version: 1, name: '', entities: [], layers: [], gridSize: 1 };
   var lastSelected = null;
+  var lastSelectedIds = [];
   var panels = {};
+  var tools = {};
   var scripts = {};
   var play = { beforeStart: [], ready: [], exit: [], tick: [] };
+  function makeCtx() {
+    return {
+      getDoc: function () { return lastDoc; },
+      mutateDoc: function (fn) {
+        if (!can('editor')) return;
+        try {
+          var next = typeof fn === 'function' ? fn(JSON.parse(JSON.stringify(lastDoc))) : fn;
+          lastDoc = next;
+          send({ type: 'mutateDoc', doc: next });
+        } catch (err) {
+          send({ type: 'toast', title: 'Plugin mutate failed', description: String(err && err.message || err), variant: 'destructive' });
+        }
+      },
+      toast: function (o) { send(Object.assign({ type: 'toast' }, o || {})); },
+      startPlay: function () { if (can('playtest')) send({ type: 'startPlay' }); },
+      selectedId: function () { return lastSelected; },
+      selectedIds: function () { return lastSelectedIds.slice(); }
+    };
+  }
   var Kilrun = {
     version: boot.version,
     definePlugin: function (fn) { fn(Kilrun); },
@@ -125,6 +150,31 @@ function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermi
         if (!spec || !spec.id || !can('editor')) return;
         panels[spec.id] = spec;
         send({ type: 'registerPanel', spec: { id: String(spec.id), label: String(spec.label || spec.id), order: spec.order || 180 } });
+      }
+    },
+    tools: {
+      register: function (spec) {
+        if (!spec || !spec.id || !can('tools')) return;
+        tools[spec.id] = spec;
+        send({ type: 'registerTool', spec: { id: String(spec.id), label: String(spec.label || spec.id), order: spec.order || 220 } });
+      }
+    },
+    theme: {
+      register: function (spec) {
+        if (!can('theme')) return;
+        send({ type: 'registerTheme', spec: spec });
+      }
+    },
+    content: {
+      registerTextures: function (rows) {
+        if (!can('content')) return;
+        send({ type: 'registerTextures', rows: rows });
+      }
+    },
+    engine: {
+      registerHomeCard: function (spec) {
+        if (!can('theme') && !can('content')) return;
+        send({ type: 'registerHomeCard', spec: spec });
       }
     },
     weapons: { register: function (def) { if (can('weapons')) send({ type: 'registerWeapon', def: def }); } },
@@ -158,10 +208,21 @@ function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermi
     var d = e.data;
     if (!d || d.ns !== '${NS_TO}') return;
     if (d.type === 'doc') lastDoc = d.doc || lastDoc;
-    if (d.type === 'selected') lastSelected = d.id || null;
+    if (d.type === 'selected') {
+      lastSelected = d.id || null;
+      lastSelectedIds = Array.isArray(d.ids) ? d.ids.slice() : (d.id ? [d.id] : []);
+    }
     if (d.type === 'assetResult' && pendingAssets[d.reqId]) {
       pendingAssets[d.reqId](d.url || null);
       delete pendingAssets[d.reqId];
+    }
+    if (d.type === 'toolActivate') {
+      var tool = tools[d.toolId];
+      if (tool && typeof tool.onActivate === 'function') {
+        try { tool.onActivate(makeCtx()); } catch (err) {
+          send({ type: 'toast', title: 'Tool failed', description: String(err && err.message || err), variant: 'destructive' });
+        }
+      }
     }
     if (d.type === 'mount') {
       var spec = panels[d.panelId];
@@ -169,22 +230,7 @@ function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermi
       if (!spec || !el || typeof spec.mount !== 'function') return;
       el.innerHTML = '';
       try {
-        spec.mount(el, {
-          getDoc: function () { return lastDoc; },
-          mutateDoc: function (fn) {
-            if (!can('editor')) return;
-            try {
-              var next = typeof fn === 'function' ? fn(JSON.parse(JSON.stringify(lastDoc))) : fn;
-              lastDoc = next;
-              send({ type: 'mutateDoc', doc: next });
-            } catch (err) {
-              send({ type: 'toast', title: 'Plugin mutate failed', description: String(err && err.message || err), variant: 'destructive' });
-            }
-          },
-          toast: function (o) { send(Object.assign({ type: 'toast' }, o || {})); },
-          startPlay: function () { if (can('playtest')) send({ type: 'startPlay' }); },
-          selectedId: function () { return lastSelected; }
-        });
+        spec.mount(el, makeCtx());
       } catch (err) {
         el.textContent = String(err && err.message || err);
       }
@@ -261,6 +307,29 @@ function onHostMessage(ev: MessageEvent) {
   }
   if (type === 'registerMode') {
     handlers.onRegisterMode(pluginId, data.spec);
+    return;
+  }
+  if (type === 'registerTool' && data.spec && typeof data.spec === 'object') {
+    const spec = data.spec as { id?: string; label?: string; order?: number };
+    if (spec.id) {
+      handlers.onRegisterTool(pluginId, {
+        id: String(spec.id),
+        label: String(spec.label || spec.id),
+        order: typeof spec.order === 'number' ? spec.order : 220,
+      });
+    }
+    return;
+  }
+  if (type === 'registerTheme') {
+    handlers.onRegisterTheme(pluginId, data.spec);
+    return;
+  }
+  if (type === 'registerTextures') {
+    handlers.onRegisterTextures(pluginId, data.rows);
+    return;
+  }
+  if (type === 'registerHomeCard') {
+    handlers.onRegisterHomeCard(pluginId, data.spec);
     return;
   }
   if (type === 'mutateDoc') {

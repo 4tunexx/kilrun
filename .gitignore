@@ -68,3 +68,6 @@ next-env.d.ts
 # Godot SFX dump. Runtime uses public/game/sounds/. Keep effects/ locally to re-run db:seed-sounds.
 /effects/
 
+
+.vercel
+.env*

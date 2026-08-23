@@ -1,9 +1,11 @@
 import { isKilrunEngineDesktop } from './runtime';
 import {
-  listDesktopPlugins,
-  readDesktopPluginFile,
+  installDesktopModuleSource,
+  listDesktopModules,
+  readDesktopModuleFile,
 } from './desktop-bridge';
 import { engineMeetsRequirement, parsePluginManifest } from './plugin-manifest';
+import { MODULE_KIND_META, MODULE_KINDS, parseModuleKind, type ModuleKind } from './module-kind';
 import {
   applyPluginShopItem,
   applyPluginWeapon,
@@ -12,30 +14,102 @@ import {
   notifyPluginsChanged,
   peekPluginRegistrations,
   preparePluginHost,
+  rememberModuleKind,
   resetPluginRuntime,
 } from './plugin-sdk';
 import { listSandboxPluginIds, createPluginSandbox, destroyAllPluginSandboxes } from './plugin-sandbox';
 import { clearPluginModes, registerPluginMode } from '@/lib/game-modes';
-import { hasEngineSession, publishCloudPlugin } from './platform-client';
+import {
+  fetchOfficialCatalog,
+  hasEngineSession,
+  publishCloudModule,
+  type OfficialCatalogRow,
+} from './platform-client';
 import { peekPluginRuntimeBundles, setLoadedPluginBundles, type MapPluginBundle } from './plugin-runtime-store';
+import { comparePluginVersions } from '@shared/plugin-source';
 
 export type PluginLoadResult = {
   loaded: string[];
   errors: { id: string; error: string }[];
 };
 
-async function syncLoadedPluginsToCatalog() {
+async function syncLoadedModulesToCatalog() {
   if (!hasEngineSession()) return;
   for (const bundle of peekPluginRuntimeBundles()) {
     try {
-      await publishCloudPlugin(bundle);
+      await publishCloudModule({
+        moduleId: bundle.id,
+        kind: 'plugin',
+        version: bundle.version,
+        source: bundle.source,
+        entry: bundle.entry,
+        permissions: bundle.permissions,
+        modes: bundle.modes,
+        weapons: bundle.weapons,
+        shopItems: bundle.shopItems,
+        official: false,
+      });
     } catch {
       /* catalog API may not be deployed yet */
     }
   }
 }
 
+export async function syncOfficialModules(): Promise<{ installed: string[]; skipped: number }> {
+  const result = { installed: [] as string[], skipped: 0 };
+  if (!isKilrunEngineDesktop()) return result;
+  let catalog: OfficialCatalogRow[] = [];
+  try {
+    catalog = await fetchOfficialCatalog();
+  } catch {
+    return result;
+  }
+  if (!catalog.length) return result;
+
+  const local: InstalledLocal[] = [];
+  for (const kind of MODULE_KINDS) {
+    const rows = await listDesktopModules(kind);
+    for (const row of rows) local.push({ id: row.id, version: row.version, kind });
+  }
+
+  for (const row of catalog) {
+    const kind = parseModuleKind(row.kind);
+    const have = local.find((item) => item.id === row.moduleId && item.kind === kind);
+    if (have && comparePluginVersions(row.version, have.version) <= 0) {
+      result.skipped += 1;
+      continue;
+    }
+    try {
+      const manifest = {
+        id: row.moduleId,
+        name: row.name || row.moduleId,
+        version: row.version,
+        entry: row.entry || 'index.js',
+        kind,
+        permissions: row.permissions,
+        modes: row.modes,
+      };
+      await installDesktopModuleSource({
+        kind,
+        id: row.moduleId,
+        manifestJson: JSON.stringify(manifest),
+        source: row.source,
+      });
+      result.installed.push(row.moduleId);
+    } catch (err) {
+      console.warn('[kilrun-engine] official module sync failed', row.moduleId, err);
+    }
+  }
+  return result;
+}
+
+type InstalledLocal = { id: string; version: string; kind: ModuleKind };
+
 export async function loadDesktopPlugins(): Promise<PluginLoadResult> {
+  return loadDesktopModules();
+}
+
+export async function loadDesktopModules(): Promise<PluginLoadResult> {
   const result: PluginLoadResult = { loaded: [], errors: [] };
   if (!isKilrunEngineDesktop()) return result;
 
@@ -45,10 +119,14 @@ export async function loadDesktopPlugins(): Promise<PluginLoadResult> {
   attachKilrunGlobal();
   preparePluginHost();
 
-  const installed = await listDesktopPlugins();
+  const installed = [];
+  for (const kind of MODULE_KINDS) {
+    installed.push(...(await listDesktopModules(kind)));
+  }
   const bundles: MapPluginBundle[] = [];
 
   for (const plugin of installed) {
+    const kind = parseModuleKind(plugin.kind);
     if (!plugin.enabled) continue;
     if (!engineMeetsRequirement(plugin.engine)) {
       result.errors.push({
@@ -58,27 +136,44 @@ export async function loadDesktopPlugins(): Promise<PluginLoadResult> {
       continue;
     }
     try {
-      const rawJson = await readDesktopPluginFile(plugin.id, 'plugin.json');
-      const manifest = parsePluginManifest(rawJson ? JSON.parse(rawJson) : plugin);
-      const source = await readDesktopPluginFile(plugin.id, manifest.entry);
+      const manifestName = MODULE_KIND_META[kind].manifestFile;
+      const rawJson = await readDesktopModuleFile(kind, plugin.id, manifestName);
+      const manifest = parsePluginManifest(rawJson ? JSON.parse(rawJson) : plugin, {
+        defaultKind: kind,
+      });
+      const source = await readDesktopModuleFile(kind, plugin.id, manifest.entry);
       if (!source) throw new Error(`Missing ${manifest.entry}`);
+      rememberModuleKind(manifest.id, kind);
       for (const spec of manifest.modes ?? []) registerPluginMode(spec);
       await createPluginSandbox(manifest.id, source, manifest.permissions);
       const captured = peekPluginRegistrations().get(manifest.id);
-      bundles.push({
-        id: manifest.id,
-        version: manifest.version,
-        entry: manifest.entry,
-        source,
-        modes: manifest.modes,
-        permissions: manifest.permissions,
-        weapons: captured?.weapons,
-        shopItems: captured?.shopItems,
-      });
+      if (kind === 'plugin') {
+        bundles.push({
+          id: manifest.id,
+          version: manifest.version,
+          entry: manifest.entry,
+          source,
+          modes: manifest.modes,
+          permissions: manifest.permissions,
+          weapons: captured?.weapons,
+          shopItems: captured?.shopItems,
+        });
+      } else if (hasEngineSession()) {
+        void publishCloudModule({
+          moduleId: manifest.id,
+          kind,
+          version: manifest.version,
+          source,
+          entry: manifest.entry,
+          permissions: manifest.permissions,
+          name: manifest.name,
+          official: false,
+        }).catch(() => undefined);
+      }
     } catch (err) {
       result.errors.push({
         id: plugin.id,
-        error: err instanceof Error ? err.message : 'Failed to load plugin',
+        error: err instanceof Error ? err.message : 'Failed to load module',
       });
     }
     if (!result.errors.some((row) => row.id === plugin.id)) {
@@ -89,7 +184,7 @@ export async function loadDesktopPlugins(): Promise<PluginLoadResult> {
   setLoadedPluginBundles(bundles);
   bindDiskEditorPanels();
   notifyPluginsChanged();
-  void syncLoadedPluginsToCatalog();
+  void syncLoadedModulesToCatalog();
   return result;
 }
 

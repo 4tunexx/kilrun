@@ -723,18 +723,23 @@ model GameMap {
   @@index([updatedAt])
 }
 
-/// Staff-published plugin catalog (Engine live-link upsert). Latest source per pluginId.
+/// Staff-published plugin / extension / addon catalog (Engine live-link upsert).
 model GamePlugin {
   id           String   @id @default(auto()) @map("_id") @db.ObjectId
   pluginId     String   @unique
   version      String
   source       String
   manifestJson String
+  /// plugin | extension | addon
+  kind         String   @default("plugin")
+  /// Official rows are auto-installed on every Engine launch.
+  official     Boolean  @default(false)
   createdById  String?  @db.ObjectId
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@index([updatedAt])
+  @@index([kind, official])
 }
 
 /// Staff-shared map editor prefab stamps (multi-entity layouts).

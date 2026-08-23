@@ -91,6 +91,39 @@ fn plugins_root() -> PathBuf {
     kilrun_root().join("Plugins")
 }
 
+fn normalize_kind(kind: &str) -> Result<String, String> {
+    match kind {
+        "extension" => Ok("extension".into()),
+        "addon" => Ok("addon".into()),
+        "plugin" | "" => Ok("plugin".into()),
+        _ => Err("unknown module kind".into()),
+    }
+}
+
+fn module_root(kind: &str) -> Result<PathBuf, String> {
+    Ok(kilrun_root().join(match normalize_kind(kind)?.as_str() {
+        "extension" => "Extensions",
+        "addon" => "Addons",
+        _ => "Plugins",
+    }))
+}
+
+fn manifest_filename(kind: &str) -> &'static str {
+    match kind {
+        "extension" => "extension.json",
+        "addon" => "addon.json",
+        _ => "plugin.json",
+    }
+}
+
+fn enabled_config_key(kind: &str) -> &'static str {
+    match kind {
+        "extension" => "extensionEnabled",
+        "addon" => "addonEnabled",
+        _ => "pluginEnabled",
+    }
+}
+
 fn config_path() -> PathBuf {
     dirs::data_local_dir()
         .or_else(dirs::home_dir)
@@ -101,7 +134,7 @@ fn config_path() -> PathBuf {
 
 fn ensure_layout() -> Result<(), String> {
     let root = kilrun_root();
-    for child in ["Projects", "Assets", "Prefabs", "Plugins", "Cache", "Exports"] {
+    for child in ["Projects", "Assets", "Prefabs", "Plugins", "Extensions", "Addons", "Cache", "Exports"] {
         fs::create_dir_all(root.join(child)).map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -423,7 +456,16 @@ fn open_projects_folder() -> Result<(), String> {
 #[tauri::command]
 fn open_kilrun_folder(name: String) -> Result<(), String> {
     ensure_layout()?;
-    let allowed = ["Projects", "Assets", "Prefabs", "Plugins", "Cache", "Exports"];
+    let allowed = [
+        "Projects",
+        "Assets",
+        "Prefabs",
+        "Plugins",
+        "Extensions",
+        "Addons",
+        "Cache",
+        "Exports",
+    ];
     if !allowed.contains(&name.as_str()) {
         return Err("unknown Kilrun folder".into());
     }
@@ -645,6 +687,10 @@ fn start_auth_loopback(app: AppHandle) -> Result<u16, String> {
 
 const EXAMPLE_PLUGIN_JSON: &str = include_str!("../../plugins/kilrun-example/plugin.json");
 const EXAMPLE_PLUGIN_JS: &str = include_str!("../../plugins/kilrun-example/index.js");
+const EXAMPLE_EXT_JSON: &str = include_str!("../../extensions/kilrun-align-tool/extension.json");
+const EXAMPLE_EXT_JS: &str = include_str!("../../extensions/kilrun-align-tool/index.js");
+const EXAMPLE_ADDON_JSON: &str = include_str!("../../addons/kilrun-studio-pack/addon.json");
+const EXAMPLE_ADDON_JS: &str = include_str!("../../addons/kilrun-studio-pack/index.js");
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -659,15 +705,16 @@ struct PluginListItem {
     permissions: Vec<String>,
     enabled: bool,
     path: String,
+    kind: String,
 }
 
-fn plugin_dir(id: &str) -> Result<PathBuf, String> {
-    Ok(plugins_root().join(sanitize_id(id)?))
+fn module_dir(kind: &str, id: &str) -> Result<PathBuf, String> {
+    Ok(module_root(kind)?.join(sanitize_id(id)?))
 }
 
-fn is_plugin_enabled(id: &str) -> bool {
+fn is_module_enabled(kind: &str, id: &str) -> bool {
     match read_config()
-        .get("pluginEnabled")
+        .get(enabled_config_key(kind))
         .and_then(|v| v.as_object())
         .and_then(|m| m.get(id))
     {
@@ -699,59 +746,37 @@ fn engine_meets(required: &str) -> bool {
     true
 }
 
-fn read_plugin_manifest(dir: &Path) -> Result<PluginListItem, String> {
-    let raw = fs::read_to_string(dir.join("plugin.json")).map_err(|_| "plugin.json missing".to_string())?;
+fn read_module_manifest(dir: &Path, kind: &str) -> Result<PluginListItem, String> {
+    let kind = normalize_kind(kind)?;
+    let preferred = manifest_filename(&kind);
+    let path = if dir.join(preferred).exists() {
+        dir.join(preferred)
+    } else if dir.join("plugin.json").exists() {
+        dir.join("plugin.json")
+    } else if dir.join("extension.json").exists() {
+        dir.join("extension.json")
+    } else if dir.join("addon.json").exists() {
+        dir.join("addon.json")
+    } else {
+        return Err(format!("{preferred} missing"));
+    };
+    let raw = fs::read_to_string(&path).map_err(|_| format!("{preferred} missing"))?;
     let value: serde_json::Value =
-        serde_json::from_str(&raw).map_err(|e| format!("plugin.json: {e}"))?;
-    let id = value
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    sanitize_id(&id)?;
-    let name = value
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or(&id)
-        .to_string();
-    let version = value
-        .get("version")
-        .and_then(|v| v.as_str())
-        .unwrap_or("0.0.0")
-        .to_string();
-    let entry = value
-        .get("entry")
-        .and_then(|v| v.as_str())
-        .unwrap_or("index.js")
-        .replace('\\', "/");
-    if entry.is_empty() || entry.contains("..") || entry.starts_with('/') {
-        return Err("invalid plugin entry".into());
-    }
-    let permissions = value
-        .get("permissions")
-        .and_then(|v| v.as_array())
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    Ok(PluginListItem {
-        id: id.clone(),
-        name,
-        version,
-        author: value.get("author").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        description: value
-            .get("description")
+        serde_json::from_str(&raw).map_err(|e| format!("{}: {e}", path.display()))?;
+    let id = sanitize_id(
+        value
+            .get("id")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        engine: value.get("engine").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        entry,
-        permissions,
-        enabled: is_plugin_enabled(&id),
-        path: dir.to_string_lossy().into_owned(),
-    })
+            .unwrap_or("")
+            .trim(),
+    )?;
+    Ok(manifest_item_from_value(
+        id.clone(),
+        &value,
+        dir.to_string_lossy().into_owned(),
+        is_module_enabled(&kind, &id),
+        &kind,
+    ))
 }
 
 fn djb2_hex(bytes: &[u8]) -> String {
@@ -946,6 +971,60 @@ fn seed_example_plugin() -> Result<(), String> {
     }
 }
 
+fn seed_simple_module(
+    kind: &str,
+    id: &str,
+    json: &str,
+    js: &str,
+) -> Result<(), String> {
+    ensure_layout()?;
+    let dir = module_root(kind)?.join(id);
+    let manifest = dir.join(manifest_filename(kind));
+    let entry = dir.join("index.js");
+    if manifest.exists() && entry.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    atomic_write(manifest.as_path(), json.as_bytes())?;
+    atomic_write(entry.as_path(), js.as_bytes())?;
+    Ok(())
+}
+
+fn seed_example_extension() -> Result<(), String> {
+    seed_simple_module("extension", "kilrun-align-tool", EXAMPLE_EXT_JSON, EXAMPLE_EXT_JS)
+}
+
+fn seed_example_addon() -> Result<(), String> {
+    seed_simple_module("addon", "kilrun-studio-pack", EXAMPLE_ADDON_JSON, EXAMPLE_ADDON_JS)
+}
+
+#[tauri::command]
+fn install_module_source(
+    kind: String,
+    id: String,
+    manifest_json: String,
+    source: String,
+) -> Result<PluginListItem, String> {
+    ensure_layout()?;
+    let kind = normalize_kind(&kind)?;
+    let id = sanitize_id(&id)?;
+    let value: serde_json::Value =
+        serde_json::from_str(&manifest_json).map_err(|e| format!("manifest: {e}"))?;
+    let entry = value
+        .get("entry")
+        .and_then(|v| v.as_str())
+        .unwrap_or("index.js")
+        .replace('\\', "/");
+    if entry.is_empty() || entry.contains("..") || entry.starts_with('/') {
+        return Err("invalid module entry".into());
+    }
+    let dest = module_root(&kind)?.join(&id);
+    fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+    atomic_write(dest.join(manifest_filename(&kind)).as_path(), manifest_json.as_bytes())?;
+    atomic_write(dest.join(Path::new(&entry)).as_path(), source.as_bytes())?;
+    read_module_manifest(&dest, &kind)
+}
+
 fn safe_plugin_rel(rel: &str) -> Result<PathBuf, String> {
     let cleaned = rel.replace('\\', "/");
     if cleaned.is_empty() || cleaned.starts_with('/') || cleaned.contains("..") {
@@ -979,12 +1058,10 @@ fn mime_for(path: &Path) -> &'static str {
     }
 }
 
-#[tauri::command]
-fn list_plugins() -> Result<Vec<PluginListItem>, String> {
-    ensure_layout()?;
-    let _ = seed_example_plugin();
+fn list_kind(kind: &str) -> Result<Vec<PluginListItem>, String> {
     let mut out = Vec::new();
-    let entries = match fs::read_dir(plugins_root()) {
+    let root = module_root(kind)?;
+    let entries = match fs::read_dir(root) {
         Ok(e) => e,
         Err(_) => return Ok(out),
     };
@@ -993,8 +1070,30 @@ fn list_plugins() -> Result<Vec<PluginListItem>, String> {
         if !path.is_dir() {
             continue;
         }
-        if let Ok(item) = read_plugin_manifest(&path) {
+        if let Ok(item) = read_module_manifest(&path, kind) {
             out.push(item);
+        }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+fn list_plugins() -> Result<Vec<PluginListItem>, String> {
+    list_modules(Some("plugin".into()))
+}
+
+#[tauri::command]
+fn list_modules(kind: Option<String>) -> Result<Vec<PluginListItem>, String> {
+    ensure_layout()?;
+    let _ = seed_example_plugin();
+    let _ = seed_example_extension();
+    let _ = seed_example_addon();
+    let mut out = Vec::new();
+    if let Some(kind) = kind.as_deref().filter(|s| !s.is_empty()) {
+        out.extend(list_kind(&normalize_kind(kind)?)?);
+    } else {
+        for kind in ["plugin", "extension", "addon"] {
+            out.extend(list_kind(kind)?);
         }
     }
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -1003,13 +1102,19 @@ fn list_plugins() -> Result<Vec<PluginListItem>, String> {
 
 #[tauri::command]
 fn set_plugin_enabled(id: String, enabled: bool) -> Result<(), String> {
+    set_module_enabled("plugin".into(), id, enabled)
+}
+
+#[tauri::command]
+fn set_module_enabled(kind: String, id: String, enabled: bool) -> Result<(), String> {
+    let kind = normalize_kind(&kind)?;
     let id = sanitize_id(&id)?;
     let mut cfg = read_config();
     let map = cfg
         .as_object_mut()
         .ok_or_else(|| "invalid engine config".to_string())?;
     let enabled_map = map
-        .entry("pluginEnabled")
+        .entry(enabled_config_key(&kind))
         .or_insert_with(|| serde_json::json!({}));
     if let Some(obj) = enabled_map.as_object_mut() {
         obj.insert(id, serde_json::Value::Bool(enabled));
@@ -1019,13 +1124,19 @@ fn set_plugin_enabled(id: String, enabled: bool) -> Result<(), String> {
 
 #[tauri::command]
 fn uninstall_plugin(id: String) -> Result<(), String> {
-    let dir = plugin_dir(&id)?;
+    uninstall_module("plugin".into(), id)
+}
+
+#[tauri::command]
+fn uninstall_module(kind: String, id: String) -> Result<(), String> {
+    let kind = normalize_kind(&kind)?;
+    let dir = module_dir(&kind, &id)?;
     if dir.exists() {
         fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }
     let mut cfg = read_config();
     if let Some(obj) = cfg
-        .get_mut("pluginEnabled")
+        .get_mut(enabled_config_key(&kind))
         .and_then(|v| v.as_object_mut())
     {
         obj.remove(&id);
@@ -1035,18 +1146,28 @@ fn uninstall_plugin(id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn read_plugin_file(id: String, rel: String) -> Result<String, String> {
-    let dir = plugin_dir(&id)?;
+    read_module_file("plugin".into(), id, rel)
+}
+
+#[tauri::command]
+fn read_module_file(kind: String, id: String, rel: String) -> Result<String, String> {
+    let dir = module_dir(&kind, &id)?;
     let rel_path = safe_plugin_rel(&rel)?;
     let path = dir.join(&rel_path);
     if !path.starts_with(&dir) {
-        return Err("plugin file escapes plugin folder".into());
+        return Err("module file escapes module folder".into());
     }
-    fs::read_to_string(&path).map_err(|_| "plugin file not found".to_string())
+    fs::read_to_string(&path).map_err(|_| "module file not found".to_string())
 }
 
 #[tauri::command]
 fn plugin_asset_data_url(id: String, rel: String) -> Result<String, String> {
-    let dir = plugin_dir(&id)?;
+    module_asset_data_url("plugin".into(), id, rel)
+}
+
+#[tauri::command]
+fn module_asset_data_url(kind: String, id: String, rel: String) -> Result<String, String> {
+    let dir = module_dir(&kind, &id)?;
     let rel_path = safe_plugin_rel(&rel)?;
     let path = dir.join(&rel_path);
     if !path.starts_with(&dir) {
@@ -1060,36 +1181,73 @@ fn plugin_asset_data_url(id: String, rel: String) -> Result<String, String> {
     Ok(format!("data:{};base64,{}", mime_for(&path), b64))
 }
 
-fn zip_plugin_manifest(bytes: &[u8]) -> Result<(String, serde_json::Value), String> {
+fn zip_plugin_manifest(bytes: &[u8]) -> Result<(String, serde_json::Value, String), String> {
     let mut archive =
-        ZipArchive::new(Cursor::new(bytes.to_vec())).map_err(|e| format!("not a zip/.kplugin: {e}"))?;
+        ZipArchive::new(Cursor::new(bytes.to_vec())).map_err(|e| format!("not a zip module: {e}"))?;
     let mut manifest_name: Option<String> = None;
     for i in 0..archive.len() {
         let file = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = file.name().replace('\\', "/");
-        if name.ends_with("plugin.json") && !name.contains("..") {
+        if name.contains("..") {
+            continue;
+        }
+        if name.ends_with("extension.json") || name.ends_with("addon.json") || name.ends_with("plugin.json")
+        {
+            let prefer = name.ends_with("extension.json") || name.ends_with("addon.json");
             manifest_name = Some(name);
-            break;
+            if prefer {
+                break;
+            }
         }
     }
-    let manifest_name = manifest_name.ok_or_else(|| "zip has no plugin.json".to_string())?;
+    let manifest_name = manifest_name.ok_or_else(|| "zip has no plugin.json / extension.json / addon.json".to_string())?;
+    let kind = infer_kind_from_name(&manifest_name).to_string();
     let mut file = archive
         .by_name(&manifest_name)
-        .map_err(|_| "plugin.json missing".to_string())?;
+        .map_err(|_| "manifest missing".to_string())?;
     let mut raw = String::new();
     file.read_to_string(&mut raw).map_err(|e| e.to_string())?;
     let value: serde_json::Value =
-        serde_json::from_str(&raw).map_err(|e| format!("plugin.json: {e}"))?;
+        serde_json::from_str(&raw).map_err(|e| format!("manifest: {e}"))?;
     let id = value
         .get("id")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim()
         .to_string();
-    Ok((sanitize_id(&id)?, value))
+    let kind = value
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or(kind);
+    Ok((sanitize_id(&id)?, value, normalize_kind(&kind)?))
 }
 
-fn manifest_item_from_value(id: String, value: &serde_json::Value, path: String, enabled: bool) -> PluginListItem {
+fn infer_kind_from_name(name: &str) -> &'static str {
+    let base = name.replace('\\', "/");
+    let file = base.rsplit('/').next().unwrap_or(&base);
+    if file == "extension.json" {
+        "extension"
+    } else if file == "addon.json" {
+        "addon"
+    } else {
+        "plugin"
+    }
+}
+
+fn manifest_item_from_value(
+    id: String,
+    value: &serde_json::Value,
+    path: String,
+    enabled: bool,
+    kind: &str,
+) -> PluginListItem {
+    let kind = value
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or(kind)
+        .to_string();
+    let kind = normalize_kind(&kind).unwrap_or_else(|_| "plugin".into());
     PluginListItem {
         id: id.clone(),
         name: value
@@ -1124,49 +1282,68 @@ fn manifest_item_from_value(id: String, value: &serde_json::Value, path: String,
             .unwrap_or_default(),
         enabled,
         path,
+        kind,
     }
 }
 
 #[tauri::command]
 fn inspect_plugin(archive_base64: String) -> Result<PluginListItem, String> {
+    inspect_module(archive_base64)
+}
+
+#[tauri::command]
+fn inspect_module(archive_base64: String) -> Result<PluginListItem, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(archive_base64.trim())
-        .map_err(|_| "plugin archive is not valid base64".to_string())?;
+        .map_err(|_| "module archive is not valid base64".to_string())?;
     if bytes.len() > 32 * 1024 * 1024 {
-        return Err("plugin archive is too large".into());
+        return Err("module archive is too large".into());
     }
-    let (id, value) = zip_plugin_manifest(&bytes)?;
+    let (id, value, kind) = zip_plugin_manifest(&bytes)?;
     if let Some(required) = value.get("engine").and_then(|v| v.as_str()) {
         if !engine_meets(required) {
             return Err(format!(
-                "plugin needs Engine {required}+ (this app is {ENGINE_VERSION})"
+                "module needs Engine {required}+ (this app is {ENGINE_VERSION})"
             ));
         }
     }
-    Ok(manifest_item_from_value(id, &value, "(archive)".into(), true))
+    Ok(manifest_item_from_value(id, &value, "(archive)".into(), true, &kind))
 }
 
 #[tauri::command]
 fn install_plugin(archive_base64: String) -> Result<PluginListItem, String> {
+    install_module(archive_base64)
+}
+
+#[tauri::command]
+fn install_module(archive_base64: String) -> Result<PluginListItem, String> {
     ensure_layout()?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(archive_base64.trim())
-        .map_err(|_| "plugin archive is not valid base64".to_string())?;
+        .map_err(|_| "module archive is not valid base64".to_string())?;
     if bytes.len() > 32 * 1024 * 1024 {
-        return Err("plugin archive is too large".into());
+        return Err("module archive is too large".into());
     }
+    let (_, _, kind) = zip_plugin_manifest(&bytes)?;
     let mut archive =
-        ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("not a zip/.kplugin: {e}"))?;
+        ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("not a zip module: {e}"))?;
     let mut manifest_name: Option<String> = None;
     for i in 0..archive.len() {
         let file = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = file.name().replace('\\', "/");
-        if name.ends_with("plugin.json") && !name.contains("..") {
+        if name.contains("..") {
+            continue;
+        }
+        if name.ends_with("extension.json") || name.ends_with("addon.json") || name.ends_with("plugin.json")
+        {
+            let prefer = name.ends_with("extension.json") || name.ends_with("addon.json");
             manifest_name = Some(name);
-            break;
+            if prefer {
+                break;
+            }
         }
     }
-    let manifest_name = manifest_name.ok_or_else(|| "zip has no plugin.json".to_string())?;
+    let manifest_name = manifest_name.ok_or_else(|| "zip has no module manifest".to_string())?;
     let prefix = manifest_name
         .rsplit_once('/')
         .map(|(head, _)| format!("{head}/"))
@@ -1174,13 +1351,13 @@ fn install_plugin(archive_base64: String) -> Result<PluginListItem, String> {
     let manifest_raw = {
         let mut file = archive
             .by_name(&manifest_name)
-            .map_err(|_| "plugin.json missing".to_string())?;
+            .map_err(|_| "manifest missing".to_string())?;
         let mut raw = String::new();
         file.read_to_string(&mut raw).map_err(|e| e.to_string())?;
         raw
     };
     let manifest_value: serde_json::Value =
-        serde_json::from_str(&manifest_raw).map_err(|e| format!("plugin.json: {e}"))?;
+        serde_json::from_str(&manifest_raw).map_err(|e| format!("manifest: {e}"))?;
     let id = manifest_value
         .get("id")
         .and_then(|v| v.as_str())
@@ -1191,11 +1368,11 @@ fn install_plugin(archive_base64: String) -> Result<PluginListItem, String> {
     if let Some(required) = manifest_value.get("engine").and_then(|v| v.as_str()) {
         if !engine_meets(required) {
             return Err(format!(
-                "plugin needs Engine {required}+ (this app is {ENGINE_VERSION})"
+                "module needs Engine {required}+ (this app is {ENGINE_VERSION})"
             ));
         }
     }
-    let dest = plugins_root().join(&id);
+    let dest = module_root(&kind)?.join(&id);
     if dest.exists() {
         fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
     }
@@ -1230,7 +1407,7 @@ fn install_plugin(archive_base64: String) -> Result<PluginListItem, String> {
         file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
         atomic_write(&out_path, &buf)?;
     }
-    read_plugin_manifest(&dest)
+    read_module_manifest(&dest, &kind)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1263,12 +1440,20 @@ pub fn run() {
             navigate_engine,
             start_auth_loopback,
             list_plugins,
+            list_modules,
             set_plugin_enabled,
+            set_module_enabled,
             uninstall_plugin,
+            uninstall_module,
             read_plugin_file,
+            read_module_file,
             plugin_asset_data_url,
+            module_asset_data_url,
             inspect_plugin,
-            install_plugin
+            inspect_module,
+            install_plugin,
+            install_module,
+            install_module_source
         ])
         .setup(move |app| {
             let _ = ensure_layout();

@@ -8,6 +8,11 @@ import type { KilrunMode } from '@/lib/game-modes';
 import type { MapPluginBundle } from '@/lib/engine/plugin-runtime-store';
 import { isKilrunEngineDesktop } from '@/lib/engine/runtime';
 import { buildEngineFetchHeaders } from '@/lib/engine/engine-fetch-headers';
+import type { ModuleKind } from '@/lib/engine/module-kind';
+import { parseModuleKind } from '@/lib/engine/module-kind';
+import type { PluginPermission } from '@/lib/engine/plugin-manifest';
+import { parseVersionParts } from '@/lib/engine/plugin-manifest';
+import { KILRUN_ENGINE_VERSION } from '@/lib/engine/version';
 
 export type CloudMapListItem = {
   id: string;
@@ -158,23 +163,121 @@ export async function probeEngineApi(): Promise<'ok' | 'missing' | 'error'> {
   }
 }
 
-export async function publishCloudPlugin(bundle: MapPluginBundle): Promise<void> {
+export type OfficialCatalogRow = {
+  moduleId: string;
+  kind: ModuleKind;
+  version: string;
+  source: string;
+  entry?: string;
+  name?: string;
+  permissions?: PluginPermission[];
+  modes?: unknown[];
+};
+
+export type EngineUpdateInfo = {
+  latest: string;
+  current: string;
+  downloadUrl: string;
+  notes: string;
+  available: boolean;
+};
+
+export async function publishCloudModule(input: {
+  moduleId: string;
+  kind: ModuleKind;
+  version: string;
+  source: string;
+  entry?: string;
+  permissions?: PluginPermission[];
+  modes?: unknown;
+  weapons?: unknown;
+  shopItems?: unknown;
+  name?: string;
+  official?: boolean;
+}): Promise<void> {
   if (!platform.token) return;
   const res = await engineFetch('/api/engine/plugins', {
     method: 'POST',
     body: JSON.stringify({
-      pluginId: bundle.id,
-      version: bundle.version,
-      source: bundle.source,
-      entry: bundle.entry,
-      permissions: bundle.permissions,
-      modes: bundle.modes,
-      weapons: bundle.weapons,
-      shopItems: bundle.shopItems,
+      pluginId: input.moduleId,
+      kind: input.kind,
+      version: input.version,
+      source: input.source,
+      entry: input.entry,
+      permissions: input.permissions,
+      modes: input.modes,
+      weapons: input.weapons,
+      shopItems: input.shopItems,
+      name: input.name,
+      official: input.official,
     }),
   });
   if (res.status === 404) return;
   if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function publishCloudPlugin(bundle: MapPluginBundle): Promise<void> {
+  return publishCloudModule({
+    moduleId: bundle.id,
+    kind: 'plugin',
+    version: bundle.version,
+    source: bundle.source,
+    entry: bundle.entry,
+    permissions: bundle.permissions,
+    modes: bundle.modes,
+    weapons: bundle.weapons,
+    shopItems: bundle.shopItems,
+    official: false,
+  });
+}
+
+export async function fetchOfficialCatalog(): Promise<OfficialCatalogRow[]> {
+  const origin = enginePlatformOrigin();
+  const res = await fetch(`${origin}/api/engine/catalog`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { modules?: OfficialCatalogRow[] };
+  return (data.modules ?? []).filter((row) => row?.moduleId).map((row) => ({
+    ...row,
+    kind: parseModuleKind(row.kind),
+  }));
+}
+
+export async function fetchEngineUpdateInfo(): Promise<EngineUpdateInfo | null> {
+  try {
+    const origin = enginePlatformOrigin();
+    const res = await fetch(`${origin}/api/engine/version`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      latest?: string;
+      downloadUrl?: string;
+      notes?: string;
+    };
+    const latest = String(data.latest || '').trim();
+    if (!latest) return null;
+    const have = parseVersionParts(KILRUN_ENGINE_VERSION);
+    const need = parseVersionParts(latest);
+    let available = false;
+    for (let i = 0; i < 3; i++) {
+      if (need[i] > have[i]) {
+        available = true;
+        break;
+      }
+      if (need[i] < have[i]) break;
+    }
+    return {
+      latest,
+      current: KILRUN_ENGINE_VERSION,
+      downloadUrl: String(data.downloadUrl || '').trim(),
+      notes: String(data.notes || '').trim(),
+      available,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function publishCloudMap(input: {
