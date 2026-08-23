@@ -410,6 +410,25 @@ export interface EditorViewportApi {
 
 const SKY_COLORS = MAP_SKY_COLORS;
 
+// Any real map's coordinates stay well inside this bound. A NaN/Infinite or
+// absurdly-large position (from a bad mirror/array/CSG op, or corrupted
+// paste/undo data) blows up TransformControls' camera-distance-based
+// auto-scale factor, which renders every gizmo handle gigantic — the
+// "whole screen turns yellow on hover" symptom. Refusing to attach the
+// gizmo to a corrupt position is the actual fix; no visible handle can
+// explode if the gizmo is never placed somewhere insane to begin with.
+export const MAX_SCENE_COORD = 100_000;
+export function isSaneGizmoPosition(v: { x: number; y: number; z: number }): boolean {
+  return (
+    Number.isFinite(v.x) &&
+    Number.isFinite(v.y) &&
+    Number.isFinite(v.z) &&
+    Math.abs(v.x) <= MAX_SCENE_COORD &&
+    Math.abs(v.y) <= MAX_SCENE_COORD &&
+    Math.abs(v.z) <= MAX_SCENE_COORD
+  );
+}
+
 export function createEditorViewport(
   host: HTMLElement,
   initial: MapDocument,
@@ -907,11 +926,14 @@ export function createEditorViewport(
   // Three.js rotate gizmos include a camera-facing filled yellow disc (E) and
   // a gray disc (XYZE). Hovering them — or the infinite axis helper lines in
   // move mode — paints the whole viewport yellow. Keep only X/Y/Z rings/arrows.
-  (transform as unknown as { showE: boolean; showXYZE: boolean; showXYZ: boolean }).showE = false;
-  (transform as unknown as { showE: boolean; showXYZE: boolean; showXYZ: boolean }).showXYZE = false;
-  // Center octahedron hover yellow-highlights every axis. Free-move still
-  // works via the XY / XZ / YZ plane squares between the arrows.
-  (transform as unknown as { showE: boolean; showXYZE: boolean; showXYZ: boolean }).showXYZ = false;
+  // `showXYZ` is NOT a real TransformControls property (only showX/showY/
+  // showZ/showXY/showYZ/showXZ/showE/showXYZE exist) — setting it here was a
+  // silent no-op that never actually hid the center free-move octahedron;
+  // that handle is hidden for real below, by name, in the updateMatrixWorld
+  // patch (which also now catches anything else that renders oversized,
+  // regardless of which named handle turns out to be responsible).
+  (transform as unknown as { showE: boolean; showXYZE: boolean }).showE = false;
+  (transform as unknown as { showE: boolean; showXYZE: boolean }).showXYZE = false;
   transform.size = 0.75;
   const lastPrimaryPos = new THREE.Vector3();
   const lastPrimaryScale = new THREE.Vector3(1, 1, 1);
@@ -1511,13 +1533,54 @@ export function createEditorViewport(
   scene.add(transformHelper);
   // After TransformControls rebuilds handle visibility, hide the hover discs
   // and the 1e6-long axis helper lines that otherwise fill the screen yellow.
+  //
+  // The named hides below (tag==='helper', E/XYZE/XYZ) are the two mechanisms
+  // actually traced in three.js's TransformControls source:
+  //  - Every non-dragging "helper" object (the 1e6-unit-long axis line used
+  //    to show a translate/scale ray) becomes visible the instant ANY axis is
+  //    merely hovered — gated on `this.axis` truthiness, not `this.dragging`
+  //    like every other helper. That's a one-line source oversight, not
+  //    something specific to this app's data.
+  //  - The E / XYZE / XYZ handles highlight-yellow their entire disc on
+  //    hover, and their auto-scale (world units, distance-from-camera based)
+  //    can render far larger than the small arrows around them.
+  // Named hides catch the two known three.js mechanisms above. This is a
+  // last-resort safety net on top of them, NOT the primary fix (that's
+  // isSaneGizmoPosition, which stops the gizmo from ever attaching to a
+  // corrupt/runaway position in the first place — see attachSelectionGizmo).
+  // Handle scale is `factor * size / 4`, and `factor` is deliberately
+  // proportional to camera-to-gizmo distance so the gizmo keeps a constant
+  // apparent size regardless of zoom — at a legitimately far zoomed-out
+  // view (hundreds of world units) this can reach the low hundreds. The
+  // bound below is only meant to catch a genuine blow-up (NaN/Infinity, or
+  // a distance corrupted by some other path than the pivot/position check),
+  // never ordinary large-map editing.
+  const MAX_HANDLE_SCALE = 2000;
   const origHelperUpdate = transformHelper.updateMatrixWorld.bind(transformHelper);
   transformHelper.updateMatrixWorld = (force?: boolean) => {
     origHelperUpdate(force);
     transformHelper.traverse((child) => {
       const tagged = child as THREE.Object3D & { tag?: string };
-      if (tagged.tag === 'helper') child.visible = false;
-      if (child.name === 'E' || child.name === 'XYZE' || child.name === 'XYZ') child.visible = false;
+      if (tagged.tag === 'helper') {
+        child.visible = false;
+        return;
+      }
+      if (child.name === 'E' || child.name === 'XYZE' || child.name === 'XYZ') {
+        child.visible = false;
+        return;
+      }
+      if (!child.visible) return;
+      const s = child.scale;
+      if (
+        !Number.isFinite(s.x) ||
+        !Number.isFinite(s.y) ||
+        !Number.isFinite(s.z) ||
+        Math.abs(s.x) > MAX_HANDLE_SCALE ||
+        Math.abs(s.y) > MAX_HANDLE_SCALE ||
+        Math.abs(s.z) > MAX_HANDLE_SCALE
+      ) {
+        child.visible = false;
+      }
     });
   };
 
@@ -2127,6 +2190,12 @@ export function createEditorViewport(
     const ids = selectionTransformIds();
     if (ids.length >= 2) {
       const pivot = computeSelectionPivot(ids);
+      if (!isSaneGizmoPosition(pivot)) {
+        console.warn('[editor] refusing to attach gizmo: selection pivot is corrupt', pivot);
+        proxyActive = false;
+        transform.detach();
+        return;
+      }
       groupProxy.position.copy(pivot);
       groupProxy.rotation.set(0, 0, 0);
       groupProxy.quaternion.identity();
@@ -2150,6 +2219,11 @@ export function createEditorViewport(
     const obj = roots.get(selectedId);
     // TransformControls throws if the object is not in the scene graph.
     if (!obj || !obj.parent) {
+      transform.detach();
+      return;
+    }
+    if (!isSaneGizmoPosition(obj.position)) {
+      console.warn('[editor] refusing to attach gizmo: entity position is corrupt', selectedId, obj.position);
       transform.detach();
       return;
     }
