@@ -773,6 +773,7 @@ export function createEditorViewport(
 
   const gizmoGroup = new THREE.Group();
   gizmoGroup.name = '__gizmos';
+  gizmoGroup.userData.skipBloom = true;
   scene.add(gizmoGroup);
   const measureGroup = new THREE.Group();
   scene.add(measureGroup);
@@ -1531,6 +1532,7 @@ export function createEditorViewport(
       ? (transform as unknown as { getHelper: () => THREE.Object3D }).getHelper()
       : (transform as unknown as THREE.Object3D);
   scene.add(transformHelper);
+  transformHelper.userData.skipBloom = true;
   // After TransformControls rebuilds handle visibility, hide the hover discs
   // and the 1e6-long axis helper lines that otherwise fill the screen yellow.
   //

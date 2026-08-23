@@ -3,14 +3,13 @@ import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { isSaneGizmoPosition, MAX_SCENE_COORD } from './editor-viewport';
 
-// Reproduces the "hovering over the gizmo turns the whole screen yellow" bug:
-// TransformControls scales every handle by a camera-distance-proportional
-// factor. If the attached object's position is corrupt (NaN, or blown up by
-// a bad mirror/array/CSG op), that factor explodes and the hovered handle
-// renders gigantic and fully opaque (its hover-highlight color is yellow),
-// covering the viewport. isSaneGizmoPosition is the guard editor-viewport.ts
-// checks in attachSelectionGizmo() before ever attaching TransformControls
-// to an object, so the runaway factor is never computed in the first place.
+// Two ways the viewport goes yellow on gizmo hover:
+// 1. Corrupt attach position (NaN / 1e9) explodes TransformControls' camera-
+//    distance scale — isSaneGizmoPosition refuses to attach in that case.
+// 2. Hovering a plane handle (green XZ / other plates) highlights by mutating
+//    handle.material to yellow DURING the bloom pass. If that handle was
+//    swapped onto the shared darkMesh, the selected box renders as a solid
+//    yellow volume. Bloom skips gizmos (userData.skipBloom / __gizmos).
 
 describe('isSaneGizmoPosition', () => {
   it('accepts ordinary map coordinates', () => {

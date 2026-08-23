@@ -116,6 +116,7 @@ import {
   resolveCollideMaterial,
   entityWorldSize,
 } from './map-document';
+import { isUsefulUndoSnapshot } from './editor-history';
 import {
   defaultSizeForHammer,
   HAMMER_PRIMITIVES,
@@ -525,7 +526,11 @@ export function MapEditor({
    * alone can't see that. Normal maps stay far under the budget and keep all 60
    * steps; huge maps lose their oldest steps instead of the tab's heap.
    */
+  const liveDocForHistory = () => apiRef.current?.getDoc() ?? docRef.current;
+
   const pushUndoSnapshot = (snapshot: MapDocument) => {
+    const last = undoStack.current[undoStack.current.length - 1];
+    if (last && !isUsefulUndoSnapshot(snapshot, last)) return;
     undoStack.current.push(snapshot);
     // One stringify per debounced history entry (not per mutation), alongside a
     // structuredClone of the same document — no meaningful added cost.
@@ -554,20 +559,25 @@ export function MapEditor({
     if (skipHistory.current) return;
     if (!historyAnchor.current) {
       historyAnchor.current = structuredClone(docRef.current);
-      redoStack.current = [];
-      setCanRedo(false);
-      setCanUndo(true);
     }
     if (historyTimer.current) window.clearTimeout(historyTimer.current);
     historyTimer.current = window.setTimeout(() => {
-      if (historyAnchor.current) {
-        pushUndoSnapshot(historyAnchor.current);
-        historyAnchor.current = null;
-        redoStack.current = [];
-        setCanUndo(true);
-        setCanRedo(false);
-      }
+      commitHistoryAnchor();
     }, 400);
+  };
+
+  const commitHistoryAnchor = () => {
+    if (!historyAnchor.current) return;
+    // Hover / click on a gizmo plate still emits onDocChange with no mutation.
+    // Recording that live document makes the next undo a no-op, and wiping
+    // redo here would force the user to redo then undo again.
+    if (isUsefulUndoSnapshot(historyAnchor.current, liveDocForHistory())) {
+      pushUndoSnapshot(historyAnchor.current);
+      redoStack.current = [];
+      setCanRedo(false);
+    }
+    historyAnchor.current = null;
+    setCanUndo(undoStack.current.length > 0);
   };
 
   const flushHistory = () => {
@@ -575,13 +585,7 @@ export function MapEditor({
       window.clearTimeout(historyTimer.current);
       historyTimer.current = null;
     }
-    if (historyAnchor.current) {
-      pushUndoSnapshot(historyAnchor.current);
-      historyAnchor.current = null;
-      redoStack.current = [];
-      setCanUndo(true);
-      setCanRedo(false);
-    }
+    commitHistoryAnchor();
   };
 
   const pullViewportDoc = () => {
@@ -594,9 +598,15 @@ export function MapEditor({
 
   const undo = () => {
     flushHistory();
-    const prev = popUndoSnapshot();
-    if (!prev) return;
-    const current = structuredClone(apiRef.current?.getDoc() ?? docRef.current);
+    const current = structuredClone(liveDocForHistory());
+    let prev = popUndoSnapshot();
+    while (prev && !isUsefulUndoSnapshot(prev, current)) {
+      prev = popUndoSnapshot();
+    }
+    if (!prev) {
+      setCanUndo(undoStack.current.length > 0);
+      return;
+    }
     redoStack.current.push(current);
     skipHistory.current = true;
     apiRef.current?.setDoc(prev);

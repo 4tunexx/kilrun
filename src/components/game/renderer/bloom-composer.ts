@@ -23,6 +23,53 @@ type BloomTweak = {
   toneMapped: boolean;
 };
 
+type TransformOverlay = THREE.Object3D & {
+  isTransformControlsRoot?: boolean;
+  isTransformControlsGizmo?: boolean;
+  isTransformControlsPlane?: boolean;
+};
+
+/**
+ * Editor overlays (transform helper, collision pads) must never receive the
+ * shared dark material. TransformControls highlights a hovered plate by
+ * mutating `handle.material` to yellow during `updateMatrixWorld` — which
+ * runs inside the bloom render. If that handle was swapped onto `darkMesh`,
+ * every darkened surface (the selected hammer box) renders as a solid yellow
+ * volume in the bloom buffer.
+ */
+export function isBloomExcludedObject(obj: THREE.Object3D): boolean {
+  let current: THREE.Object3D | null = obj;
+  while (current) {
+    if (current.userData?.skipBloom === true) return true;
+    if (current.name === '__gizmos') return true;
+    const typed = current as TransformOverlay;
+    if (
+      typed.isTransformControlsRoot ||
+      typed.isTransformControlsGizmo ||
+      typed.isTransformControlsPlane
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function isBloomHideRoot(obj: THREE.Object3D): boolean {
+  if (obj.userData?.skipBloom === true) return true;
+  if (obj.name === '__gizmos') return true;
+  return !!(obj as TransformOverlay).isTransformControlsRoot;
+}
+
+function resetSharedDarkMaterials() {
+  darkMesh.color.setHex(0x000000);
+  darkMesh.opacity = 1;
+  darkLine.color.setHex(0x000000);
+  darkLine.opacity = 1;
+  darkSprite.color.setHex(0x000000);
+  darkSprite.opacity = 1;
+}
+
 /**
  * Bloom only meshes marked `userData.bloom` (Glow & Emissive).
  * Halo strength comes from `userData.bloomStrength` (0–1), not from surface brightness,
@@ -41,8 +88,15 @@ export function createBloomComposer(
   const saved = new Map<string, THREE.Material | THREE.Material[]>();
   const tweaks: BloomTweak[] = [];
   const bloomTint = new THREE.Color();
+  const hiddenOverlays: THREE.Object3D[] = [];
 
   const darken = (obj: THREE.Object3D) => {
+    if (isBloomHideRoot(obj) && obj.visible) {
+      hiddenOverlays.push(obj);
+      obj.visible = false;
+    }
+    if (isBloomExcludedObject(obj)) return;
+
     const strength = Number(obj.userData?.bloomStrength);
     const bloomOn = obj.userData?.bloom === true && Number.isFinite(strength) && strength > 0.01;
     const mesh = obj as THREE.Mesh;
@@ -140,8 +194,13 @@ export function createBloomComposer(
     render() {
       saved.clear();
       tweaks.length = 0;
+      hiddenOverlays.length = 0;
+      resetSharedDarkMaterials();
       scene.traverse(darken);
       bloomComposer.render();
+      for (const overlay of hiddenOverlays) overlay.visible = true;
+      hiddenOverlays.length = 0;
+      resetSharedDarkMaterials();
       for (const t of tweaks) {
         t.mat.color.copy(t.color);
         t.mat.emissive.copy(t.emissive);
