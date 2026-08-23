@@ -711,9 +711,15 @@ export function MapEditor({
       onSelect: setSelectedId,
       onSelectionChange: setSelectedIds,
       onDocChange: (next, opts) => {
-        scheduleHistory();
         const merged = { ...next, environment: ensureEnvironment(next) };
+        // Plate hover / click-release still emits a settled onDocChange with
+        // the live document. Do not dirty the map or open a history window
+        // for that — it was the dummy undo step and the yellow-hover partner
+        // bug. Mid-drag is always a real mutation, so skip the stringify.
+        const changed = Boolean(opts?.transient) || isUsefulUndoSnapshot(docRef.current, merged);
+        if (changed) scheduleHistory();
         docRef.current = merged;
+        if (!changed) return;
         setDirty(true);
         // Mid-drag the ref is enough: every reader that matters goes through
         // docRef or the viewport's own copy, and re-rendering this component on

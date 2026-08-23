@@ -197,18 +197,21 @@ export function createBloomComposer(
       hiddenOverlays.length = 0;
       resetSharedDarkMaterials();
       scene.traverse(darken);
-      bloomComposer.render();
-      for (const overlay of hiddenOverlays) overlay.visible = true;
-      hiddenOverlays.length = 0;
-      resetSharedDarkMaterials();
-      for (const t of tweaks) {
-        t.mat.color.copy(t.color);
-        t.mat.emissive.copy(t.emissive);
-        t.mat.emissiveIntensity = t.emissiveIntensity;
-        t.mat.toneMapped = t.toneMapped;
+      try {
+        bloomComposer.render();
+      } finally {
+        for (const overlay of hiddenOverlays) overlay.visible = true;
+        hiddenOverlays.length = 0;
+        resetSharedDarkMaterials();
+        for (const t of tweaks) {
+          t.mat.color.copy(t.color);
+          t.mat.emissive.copy(t.emissive);
+          t.mat.emissiveIntensity = t.emissiveIntensity;
+          t.mat.toneMapped = t.toneMapped;
+        }
+        tweaks.length = 0;
+        scene.traverse(restore);
       }
-      tweaks.length = 0;
-      scene.traverse(restore);
       finalComposer.render();
     },
     dispose() {
