@@ -22,9 +22,10 @@ import { loadAnimatedPrefab, resolveModelSrc } from './model-scan';
 import { AnimationDirector } from './animation-director';
 import { SolidFxDirector } from './solid-fx-director';
 import {
-  applySolidFxToPads,
   configsFromFxPads,
   createSolidFxRuntime,
+  distanceToFxPad,
+  evaluateSolidFx,
 } from '@shared/solid-fx';
 import {
   applyTextureToObject,
@@ -466,9 +467,18 @@ export function MapPlayPreview({
       fxProgress: p.fx?.enabled && p.fx.mode === 'appear' ? 0 : 1,
     }));
     const fxConfigs = configsFromFxPads(pads);
+    for (const ent of playDoc.entities) {
+      if (!ent.solidFx?.enabled) continue;
+      fxConfigs.set(ent.id, ensureSolidFx(ent));
+    }
     const fxRuntimes = new Map(
       [...fxConfigs.keys()].map((id) => [id, createSolidFxRuntime()])
     );
+    const fxWorldBox = new THREE.Box3();
+    const fxWorldNear = new THREE.Box3();
+    const fxWorldPt = new THREE.Vector3();
+    const fxWorldChest = new THREE.Vector3();
+    const fxWorldAvatar = new THREE.Vector3();
     const buttons = mapDocToSimButtons(playDoc);
     const actions = mapDocToSimActions(playDoc);
     const lastZonePressAt = new Map<string, number>();
@@ -856,7 +866,7 @@ export function MapPlayPreview({
           scene.add(planted);
           roots.set(ent.id, planted);
           if (ent.solidFx?.enabled) {
-            solidFxDirector.attach(ent.id, planted, ensureSolidFx(ent));
+            solidFxDirector.attach(ent.id, planted, ensureSolidFx(ent), { ghost: true });
           }
           const motion = ensurePlatformMotion(ent);
           if (motion.enabled) {
@@ -1249,27 +1259,58 @@ export function MapPlayPreview({
           applyPadCarry(body, scratch.supportPadId, platformDeltas);
 
           if (fxConfigs.size > 0) {
-            applySolidFxToPads(
-              pads,
-              fxConfigs,
-              fxRuntimes,
-              [
-                {
-                  x: body.x,
-                  y: body.y,
-                  z: body.z,
-                  supportPadId: scratch.supportPadId ?? null,
-                },
-              ],
-              matchElapsedMs
-            );
-            const seen = new Set<string>();
-            for (const pad of pads) {
-              if (!pad.entityId || seen.has(pad.entityId)) continue;
-              seen.add(pad.entityId);
-              if (typeof pad.fxProgress === 'number') {
-                solidFxDirector.setProgress(pad.entityId, pad.fxProgress);
+            const supportId = scratch.supportPadId ?? scratch.supportPadId ?? null;
+            const [wx, wy, wz] = simToThree(body.x, body.y, body.z);
+            fxWorldPt.set(wx, wy, wz);
+            fxWorldChest.set(wx, wy + PLAYER_HEIGHT * 0.55, wz);
+            if (playerRoot) fxWorldAvatar.copy(playerRoot.position);
+            for (const [id, cfg] of fxConfigs) {
+              const runtime = fxRuntimes.get(id) ?? createSolidFxRuntime();
+              fxRuntimes.set(id, runtime);
+              let distance = Infinity;
+              let standingOn = false;
+              for (const pad of pads) {
+                if (pad.entityId !== id) continue;
+                distance = Math.min(
+                  distance,
+                  distanceToFxPad(body.x, body.y, body.z, pad)
+                );
+                if (supportId && (supportId === pad.id || supportId === pad.entityId)) {
+                  standingOn = true;
+                }
               }
+              const root = roots.get(id);
+              if (root) {
+                root.updateMatrixWorld(true);
+                fxWorldBox.setFromObject(root);
+                if (!fxWorldBox.isEmpty()) {
+                  const dMesh = Math.min(
+                    fxWorldBox.distanceToPoint(fxWorldPt),
+                    fxWorldBox.distanceToPoint(fxWorldChest),
+                    playerRoot ? fxWorldBox.distanceToPoint(fxWorldAvatar) : Infinity
+                  );
+                  distance = Math.min(distance, dMesh);
+                  fxWorldNear.copy(fxWorldBox).expandByScalar(Math.max(0.15, cfg.radius));
+                  if (
+                    fxWorldNear.containsPoint(fxWorldPt) ||
+                    fxWorldNear.containsPoint(fxWorldChest) ||
+                    (playerRoot && fxWorldNear.containsPoint(fxWorldAvatar))
+                  ) {
+                    distance = 0;
+                  }
+                }
+              }
+              const result = evaluateSolidFx(
+                cfg,
+                { distance, standingOn, nowMs: matchElapsedMs },
+                runtime
+              );
+              for (const pad of pads) {
+                if (pad.entityId !== id) continue;
+                pad.fxHidden = result.passThrough;
+                pad.fxProgress = result.progress;
+              }
+              solidFxDirector.setProgress(id, result.progress);
             }
           }
 

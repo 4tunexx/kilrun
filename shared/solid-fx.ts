@@ -48,8 +48,26 @@ export interface SolidFxPad {
   x: number;
   y: number;
   z: number;
+  /** Sim AABB (optional). When set, proximity uses closest point on the volume. */
+  width?: number;
+  depth?: number;
+  height?: number;
+  rotYaw?: number;
   fxHidden?: boolean;
   fxProgress?: number;
+  /**
+   * Visual AABB relative to this pad's origin. Ramp collision is a thin
+   * top slab; proximity must use the full mesh volume or walking into the
+   * cyan marker never unveils.
+   */
+  fxVol?: {
+    ox: number;
+    oy: number;
+    oz: number;
+    width: number;
+    depth: number;
+    height: number;
+  };
 }
 
 export interface SolidFxPlayer {
@@ -66,9 +84,9 @@ export const SOLID_FX_PRESETS: Record<string, Partial<SolidFxConfig> & { label: 
     mode: 'appear',
     trigger: 'proximity',
     style: 'unveil',
-    radius: 2,
+    radius: 3,
     delayMs: 0,
-    durationMs: 700,
+    durationMs: 900,
     restoreMs: 0,
     collideAt: 0.5,
   },
@@ -76,11 +94,11 @@ export const SOLID_FX_PRESETS: Record<string, Partial<SolidFxConfig> & { label: 
     label: 'Glitch appear',
     enabled: true,
     mode: 'appear',
-    trigger: 'step',
+    trigger: 'proximity',
     style: 'glitch',
-    radius: 2,
+    radius: 3,
     delayMs: 0,
-    durationMs: 550,
+    durationMs: 750,
     restoreMs: 0,
     collideAt: 0.45,
   },
@@ -88,11 +106,11 @@ export const SOLID_FX_PRESETS: Record<string, Partial<SolidFxConfig> & { label: 
     label: 'Matrix appear',
     enabled: true,
     mode: 'appear',
-    trigger: 'step',
+    trigger: 'proximity',
     style: 'matrix',
-    radius: 2,
+    radius: 3,
     delayMs: 0,
-    durationMs: 800,
+    durationMs: 900,
     restoreMs: 0,
     collideAt: 0.5,
   },
@@ -159,7 +177,13 @@ export function evaluateSolidFx(
     return { progress: 1, passThrough: false };
   }
 
-  const triggered = isTriggered(cfg.trigger, input.distance, cfg.radius, input.standingOn);
+  const triggered = isTriggered(
+    cfg.trigger,
+    input.distance,
+    cfg.radius,
+    input.standingOn,
+    cfg.mode
+  );
   const now = input.nowMs;
   const duration = Math.max(1, cfg.durationMs);
 
@@ -259,10 +283,7 @@ export function applySolidFxToPads(
     let standingOn = false;
     for (const player of players) {
       for (const pad of fxPads) {
-        const dx = player.x - pad.x;
-        const dy = player.y - pad.y;
-        const dz = player.z - pad.z;
-        const d = Math.hypot(dx, dy, dz);
+        const d = distanceToFxPad(player.x, player.y, player.z, pad);
         if (d < distance) distance = d;
         if (player.supportPadId && (player.supportPadId === pad.id || player.supportPadId === pad.entityId)) {
           standingOn = true;
@@ -281,15 +302,54 @@ export function applySolidFxToPads(
   return results;
 }
 
+/** Closest-point distance to the pad volume (center if no size is authored). */
+export function distanceToFxPad(
+  px: number,
+  py: number,
+  pz: number,
+  pad: SolidFxPad
+): number {
+  const vol = pad.fxVol;
+  const x = pad.x + (vol?.ox ?? 0);
+  const y = pad.y + (vol?.oy ?? 0);
+  const z = pad.z + (vol?.oz ?? 0);
+  const hx = Math.max(0, (vol?.width ?? pad.width ?? 0) / 2);
+  const hy = Math.max(0, (vol?.depth ?? pad.depth ?? 0) / 2);
+  const thick = vol?.height ?? (pad.height && pad.height > 0 ? pad.height : 0.2);
+  const topZ = z;
+  const botZ = topZ - thick;
+  const yaw = vol ? 0 : (pad.rotYaw ?? 0);
+  let lx = px - x;
+  let ly = py - y;
+  if (yaw) {
+    const c = Math.cos(-yaw);
+    const s = Math.sin(-yaw);
+    const rx = lx * c - ly * s;
+    const ry = lx * s + ly * c;
+    lx = rx;
+    ly = ry;
+  }
+  const qx = Math.min(hx, Math.max(-hx, lx));
+  const qy = Math.min(hy, Math.max(-hy, ly));
+  const qz = Math.min(topZ, Math.max(botZ, pz));
+  return Math.hypot(lx - qx, ly - qy, pz - qz);
+}
+
 function isTriggered(
   trigger: SolidFxTrigger,
   distance: number,
   radius: number,
-  standingOn: boolean
+  standingOn: boolean,
+  mode: SolidFxMode
 ): boolean {
   const near = distance <= radius;
   if (trigger === 'proximity') return near;
-  if (trigger === 'step') return standingOn;
+  if (trigger === 'step') {
+    if (standingOn) return true;
+    // Appear solids start with no collision, so "step on" is impossible
+    // until they unveil. Walking into the volume counts instead.
+    return mode === 'appear' && near;
+  }
   return near || standingOn;
 }
 

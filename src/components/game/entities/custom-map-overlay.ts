@@ -193,9 +193,9 @@ export class CustomMapOverlay {
         obj.userData.editorEntity = ent;
         this.root.add(obj);
         this.entityRoots.set(ent.id, obj);
-        if (ent.solidFx?.enabled) {
-          this.solidFxDirector.attach(ent.id, obj, ensureSolidFx(ent));
-        }
+          if (ent.solidFx?.enabled) {
+            this.solidFxDirector.attach(ent.id, obj, ensureSolidFx(ent), { ghost: true });
+          }
         this.restPositions.set(ent.id, new THREE.Vector3(...ent.position));
         const motion = ensurePlatformMotion(ent);
         if (motion.enabled) {
@@ -233,7 +233,7 @@ export class CustomMapOverlay {
           this.root.add(placeholder);
           this.entityRoots.set(ent.id, placeholder);
           if (ent.solidFx?.enabled) {
-            this.solidFxDirector.attach(ent.id, placeholder, ensureSolidFx(ent));
+            this.solidFxDirector.attach(ent.id, placeholder, ensureSolidFx(ent), { ghost: true });
           }
           this.restPositions.set(ent.id, new THREE.Vector3(...ent.position));
           this.director.register(ent.id, placeholder, []);
@@ -299,7 +299,7 @@ export class CustomMapOverlay {
   ) {
     const byEntity = new Map<string, number>();
     for (const p of platforms) {
-      if (!p.entityId || !p.fxControlled || typeof p.fxProgress !== 'number') continue;
+      if (!p.entityId || typeof p.fxProgress !== 'number') continue;
       if (!byEntity.has(p.entityId)) byEntity.set(p.entityId, p.fxProgress);
     }
     for (const [id, progress] of byEntity) this.solidFxDirector.setProgress(id, progress);

@@ -179,6 +179,11 @@ export function applyTextureToObject(
             // every entity sync, including every prop edit and undo/redo).
             const replacingOwnClone = m.userData?.__kilrunTextureClone === true;
             const cloned = m.clone();
+            // Three r185 Material.copy() does not copy these. Solid FX (and any
+            // other onBeforeCompile hook) would vanish the moment a texture
+            // finished loading after the director attached.
+            cloned.onBeforeCompile = m.onBeforeCompile;
+            cloned.customProgramCacheKey = m.customProgramCacheKey;
             const localTex = tex.clone();
             localTex.needsUpdate = true;
             (cloned as THREE.MeshStandardMaterial).map = localTex;

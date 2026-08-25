@@ -49,15 +49,13 @@ describe('mapDocToSimPlatforms', () => {
       },
     ]);
     const pads = mapDocToSimPlatforms(doc);
-    // A rigid box's top face is always flat, no matter the rotation — a
-    // single pad with the correct slope gradient is mathematically exact,
-    // not an approximation, so this should be exactly one pad, not many
-    // discrete shelves (which always reads as stairs, however thin).
-    expect(pads.length).toBe(1);
-    const pad = pads[0];
-    expect(pad.kind).toBe('solid');
+    // Walkable face is still one continuous sloped plane (not stair shelves).
+    // Extra pads are full-volume slices so the mesh body is not walk-through.
+    const pad = pads.find((p) => p.topOnly && ((p.slopeGradX ?? 0) !== 0 || (p.slopeGradY ?? 0) !== 0));
+    expect(pad).toBeTruthy();
+    expect(pad!.kind).toBe('solid');
     // Genuinely sloped, not flat: a real gradient in one axis.
-    const grad = Math.hypot(pad.slopeGradX ?? 0, pad.slopeGradY ?? 0);
+    const grad = Math.hypot(pad!.slopeGradX ?? 0, pad!.slopeGradY ?? 0);
     expect(grad).toBeGreaterThan(0.3);
     // 8-long plank tilted 25° should have height = z + grad*offset match a
     // ~3.4-unit total rise (8*sin(25°)) across its run — sanity-check the
@@ -65,7 +63,7 @@ describe('mapDocToSimPlatforms', () => {
     const totalRiseAcrossRun = grad * 8 * Math.cos((25 * Math.PI) / 180);
     expect(totalRiseAcrossRun).toBeGreaterThan(2);
     // Thin/top-only so it doesn't ALSO act as a sloped side-wall.
-    expect(pad.height ?? 1).toBeLessThanOrEqual(0.35);
+    expect(pad!.height ?? 1).toBeLessThanOrEqual(0.35);
   });
 
   it('fits the collision surface to whichever face is actually up after a 180° flip', () => {
@@ -94,8 +92,8 @@ describe('mapDocToSimPlatforms', () => {
       },
     ]);
     const pads = mapDocToSimPlatforms(doc);
-    expect(pads.length).toBe(1);
-    const pad = pads[0];
+    expect(pads.length).toBeGreaterThanOrEqual(1);
+    const pad = pads.find((p) => p.topOnly) ?? pads[0];
     // Reproduce just the X-axis rotation (ry=rz=0 here) to know where each
     // candidate local face actually lands in world space.
     const rx = (rotation[0] * Math.PI) / 180;
@@ -108,6 +106,109 @@ describe('mapDocToSimPlatforms', () => {
     // the box's own thickness projected onto the tilt).
     const wrongFaceWorldY = Math.min(worldYIfTopIsYMax, worldYIfTopIsYMin);
     expect(Math.abs(pad.z - wrongFaceWorldY)).toBeGreaterThan(0.05);
+  });
+
+  it('keeps a 180°-flipped hammer box as full-volume solid (not a walk-through slab)', () => {
+    // Toolbar Flip X on a tall box used to trip isTiltedRampSolid (pitch 180 > 3)
+    // and emit a 0.3m topOnly ramp pad — mesh solid, collision air.
+    const doc = baseDoc([
+      {
+        id: 'flip-box',
+        name: 'Flipped Solid',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        collisionSize: [2, 2, 2],
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [180, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads.length).toBe(1);
+    const pad = pads[0];
+    expect(pad.topOnly).toBeFalsy();
+    expect(pad.height ?? 0).toBeGreaterThan(1.5);
+    // Bottom-aligned box flipped 180° around X hangs below the origin.
+    expect(pad.z).toBeCloseTo(0, 1);
+    expect(pad.z - (pad.height ?? 0)).toBeCloseTo(-2, 1);
+  });
+
+  it('keeps a 90°-stood hammer pad as a blocking wall, not a thin floor slab', () => {
+    const doc = baseDoc([
+      {
+        id: 'wall-flip',
+        name: 'Stood Pad',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'box',
+        solid: true,
+        collideMaterial: 'solid',
+        collisionSize: [2, 0.25, 2],
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [90, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads.length).toBe(1);
+    expect(pads[0].topOnly).toBeFalsy();
+    expect(pads[0].height ?? 0).toBeGreaterThan(1.5);
+  });
+
+  it('fills a flipped hammer ramp so the wedge body is solid, not walk-through', () => {
+    const doc = baseDoc([
+      {
+        id: 'ramp-flip',
+        name: 'Flipped Ramp',
+        kind: 'prop',
+        model: 'hammer-solid',
+        primitive: 'ramp',
+        solid: true,
+        collideMaterial: 'solid',
+        collisionSize: [2, 1.5, 3],
+        layerId: 'l1',
+        position: [0, 2, 0],
+        rotation: [180, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    const blocking = pads.filter((p) => !p.topOnly && (p.height ?? 0) > 0.4);
+    expect(blocking.length).toBeGreaterThan(0);
+    expect(pads.every((p) => !p.topOnly)).toBe(true);
+    // Pivot is at y=2; a 1.5m wedge flipped 180° around X hangs below it
+    // (down to ~0.5), not as a thin slope on the underside.
+    expect(Math.min(...blocking.map((p) => p.z - (p.height ?? 0)))).toBeLessThan(1);
+    expect(Math.max(...blocking.map((p) => p.z))).toBeGreaterThan(1.5);
+  });
+
+  it('rotates baked mesh-collision pads with a 180° flip (not yaw-only leftover)', () => {
+    const doc = baseDoc([
+      {
+        id: 'baked-flip',
+        name: 'Baked Crate',
+        kind: 'prop',
+        model: 'https://blob.example/models/crate.glb',
+        solid: true,
+        collideMaterial: 'solid',
+        meshCollisionPads: [{ cx: 0, cy: 1, cz: 0, hx: 0.5, hy: 1, hz: 0.5 }],
+        layerId: 'l1',
+        position: [0, 0, 0],
+        rotation: [180, 0, 0],
+        scale: [1, 1, 1],
+      },
+    ]);
+    const pads = mapDocToSimPlatforms(doc);
+    expect(pads).toHaveLength(1);
+    expect(pads[0].topOnly).toBeFalsy();
+    // Local box y=0..2 flipped 180° around X occupies y=0..-2.
+    expect(pads[0].z).toBeCloseTo(0, 1);
+    expect(pads[0].z - (pads[0].height ?? 0)).toBeCloseTo(-2, 1);
   });
 
   it('leaves a slightly-off-axis flat solid alone (tolerance, not over-subdividing walls)', () => {
@@ -194,11 +295,11 @@ describe('mapDocToSimPlatforms', () => {
     }
   });
 
-  it('gives tall/steep ramps the same exact single-plane treatment, no scaling issue possible', () => {
+  it('gives tall/steep ramps a continuous sloped walk plane (volume slices may also exist)', () => {
     // Old approach needed MORE steps as ramps got taller/steeper (a fixed
-    // step count breaks down eventually). The new approach doesn't scale
-    // with size at all — a rigid box's top face is always flat regardless
-    // of height or angle, so this should still be exactly 1 pad.
+    // step count breaks down eventually). The walkable top is still one
+    // analytic plane regardless of size or angle — volume slices only fill
+    // the mesh body so it isn't walk-through.
     const tallRamp = baseDoc([
       {
         id: 'ramp-tall',
@@ -216,8 +317,10 @@ describe('mapDocToSimPlatforms', () => {
       },
     ]);
     const tallPads = mapDocToSimPlatforms(tallRamp);
-    expect(tallPads.length).toBe(1);
-    const pad = tallPads[0];
+    expect(tallPads.length).toBeGreaterThanOrEqual(1);
+    const pad =
+      tallPads.find((p) => p.topOnly && ((p.slopeGradX ?? 0) !== 0 || (p.slopeGradY ?? 0) !== 0)) ??
+      tallPads[0];
     // Verify the actual height formula (what the server/client sims use:
     // topZ = pad.z + slopeGradX*(x - pad.x) + slopeGradY*(y - pad.y)) gives
     // sane, continuously-varying values across the ramp's real footprint —

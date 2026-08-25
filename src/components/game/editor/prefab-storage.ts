@@ -236,6 +236,15 @@ export interface SimPlatformBlueprint {
   doorControlled?: boolean;
   /** Authored vanish / unveil FX (copied from the source entity). */
   fx?: import('@shared/solid-fx').SolidFxConfig;
+  /** Visual AABB relative to this pad — Solid FX proximity (not collision). */
+  fxVol?: {
+    ox: number;
+    oy: number;
+    oz: number;
+    width: number;
+    depth: number;
+    height: number;
+  };
   /** Yaw radians in sim XY — OBB colliders on the server. */
   rotYaw?: number;
   /** True analytic ramp support — dz per unit of LOCAL x/y (post-rotYaw).
@@ -582,11 +591,188 @@ function rotateLocalXYZ(
   return [x3, y3, z2];
 }
 
+function entityEulerDeg(e: EditorEntity): [number, number, number] {
+  return [e.rotation?.[0] ?? 0, e.rotation?.[1] ?? 0, e.rotation?.[2] ?? 0];
+}
+
+/** Smallest angle to 0°/360° — 180° flip is NOT "near zero". */
+function wrapDeltaDeg(deg: number): number {
+  const x = ((deg % 360) + 360) % 360;
+  return Math.min(x, 360 - x);
+}
+
+function pitchRollNearZero(rotDeg: [number, number, number]): boolean {
+  return wrapDeltaDeg(rotDeg[0]) < 3 && wrapDeltaDeg(rotDeg[2]) < 3;
+}
+
+/** Degrees local +Y tilts away from world vertical (0 = upright or 180° flip). */
+function localUpTiltDeg(rotDeg: [number, number, number]): number {
+  const up = rotateLocalXYZ([0, 1, 0], rotDeg);
+  return (Math.acos(Math.min(1, Math.abs(up[1]))) * 180) / Math.PI;
+}
+
+function solidPadKind(e: EditorEntity): SimPlatformKind {
+  const mat = resolveCollideMaterial(e);
+  if (mat === 'ice') return 'ice';
+  if (mat === 'water') return 'water';
+  if (mat === 'sand') return 'sand';
+  return 'solid';
+}
+
+function accumulateWorldAabb(
+  origin: [number, number, number],
+  rotDeg: [number, number, number],
+  points: Array<[number, number, number]>
+) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const p of points) {
+    const [rx, ry, rz] = rotateLocalXYZ(p, rotDeg);
+    const x = origin[0] + rx;
+    const y = origin[1] + ry;
+    const z = origin[2] + rz;
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+    minZ = Math.min(minZ, z);
+    maxZ = Math.max(maxZ, z);
+  }
+  return { minX, maxX, minY, maxY, minZ, maxZ };
+}
+
+/** Full-volume sim pad from a world AABB. Tops may be clamped below `topY`. */
+function volumePadFromWorldAabb(
+  aabb: ReturnType<typeof accumulateWorldAabb>,
+  kind: SimPlatformKind,
+  topY: number
+): SimPlatformBlueprint | null {
+  const height = topY - aabb.minY;
+  if (!(height > 0.06)) return null;
+  const SEAM = kind === 'solid' ? 0.03 : 0;
+  return {
+    x: (aabb.minZ + aabb.maxZ) / 2,
+    y: (aabb.minX + aabb.maxX) / 2,
+    z: topY,
+    width: Math.max(0.08, aabb.maxZ - aabb.minZ) + SEAM * 2,
+    depth: Math.max(0.08, aabb.maxX - aabb.minX) + SEAM * 2,
+    height,
+    kind,
+  };
+}
+
+/**
+ * Fill a local box with thin slices so a pitched/rolled solid still blocks
+ * sideways after world-AABB conversion (one big AABB would be a phantom wall
+ * under a ramp). Slice tops are clamped to the walkable local face so they
+ * never poke above the analytic slope pad.
+ */
+function sliceBoxVolumePads(
+  origin: [number, number, number],
+  rotDeg: [number, number, number],
+  halfX: number,
+  yMin: number,
+  yMax: number,
+  halfZ: number,
+  topLocalY: number,
+  alongZ: boolean,
+  kind: SimPlatformKind
+): SimPlatformBlueprint[] {
+  const span = alongZ ? halfZ * 2 : halfX * 2;
+  const n = Math.max(8, Math.min(24, Math.round(span / 0.28)));
+  const pads: SimPlatformBlueprint[] = [];
+  for (let i = 0; i < n; i++) {
+    const t0 = i / n;
+    const t1 = (i + 1) / n;
+    const a0 = (alongZ ? -halfZ : -halfX) + t0 * span;
+    const a1 = (alongZ ? -halfZ : -halfX) + t1 * span;
+    const xs: [number, number] = alongZ ? [-halfX, halfX] : [a0, a1];
+    const zs: [number, number] = alongZ ? [a0, a1] : [-halfZ, halfZ];
+    const body: Array<[number, number, number]> = [];
+    const topFace: Array<[number, number, number]> = [];
+    for (const sx of xs) {
+      for (const sz of zs) {
+        body.push([sx, yMin, sz], [sx, yMax, sz]);
+        topFace.push([sx, topLocalY, sz]);
+      }
+    }
+    const aabb = accumulateWorldAabb(origin, rotDeg, body);
+    let walkTop = Infinity;
+    for (const p of topFace) {
+      walkTop = Math.min(walkTop, origin[1] + rotateLocalXYZ(p, rotDeg)[1]);
+    }
+    const pad = volumePadFromWorldAabb(aabb, kind, Math.min(aabb.maxY, walkTop));
+    if (pad) pads.push(pad);
+  }
+  return pads;
+}
+
+/**
+ * Full visual AABB in sim space so Solid FX proximity matches the mesh
+ * (and the cyan marker), not a thin ramp walking slab.
+ */
+export function entityFxVolume(e: EditorEntity): {
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  depth: number;
+  height: number;
+} {
+  const [ex, ey, ez] = e.position;
+  const { sizeX, sizeY, sizeZ } = entityScaledSize(e);
+  const hx = sizeX / 2;
+  const hz = sizeZ / 2;
+  const hammer = isHammerSolidEntity(e);
+  const yMin = hammer ? 0 : -sizeY / 2;
+  const yMax = hammer ? sizeY : sizeY / 2;
+  const rot: [number, number, number] = [
+    e.rotation?.[0] ?? 0,
+    e.rotation?.[1] ?? 0,
+    e.rotation?.[2] ?? 0,
+  ];
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const ly of [yMin, yMax]) {
+    for (const lx of [-hx, hx]) {
+      for (const lz of [-hz, hz]) {
+        const [rx, ry, rz] = rotateLocalXYZ([lx, ly, lz], rot);
+        minX = Math.min(minX, ex + rx);
+        maxX = Math.max(maxX, ex + rx);
+        minY = Math.min(minY, ey + ry);
+        maxY = Math.max(maxY, ey + ry);
+        minZ = Math.min(minZ, ez + rz);
+        maxZ = Math.max(maxZ, ez + rz);
+      }
+    }
+  }
+  return {
+    x: (minZ + maxZ) / 2,
+    y: (minX + maxX) / 2,
+    z: maxY,
+    width: Math.max(0.25, maxZ - minZ),
+    depth: Math.max(0.25, maxX - minX),
+    height: Math.max(0.25, maxY - minY),
+  };
+}
+
 /**
  * A block tilted on pitch/roll (not just yaw) reads as a ramp visually, but
  * `entityToPad`'s single AABB only accounts for yaw — pitch/roll are
  * silently dropped, so the collision box stays flat while the mesh looks
  * sloped. That's "can't walk up ramps, have to jump onto the top."
+ *
+ * A 180° Flip or 90° stand-up is NOT a ramp: local Y is still world-vertical
+ * (or horizontal). Treating those as ramps used to emit a 0.3m topOnly slab,
+ * so a flipped solid looked solid and played walk-through.
  */
 function isTiltedRampSolid(e: EditorEntity): boolean {
   // Only called from entityToCollisionPads, which is only reached for
@@ -598,11 +784,31 @@ function isTiltedRampSolid(e: EditorEntity): boolean {
   // back to entityToPad's flat yaw-only AABB instead of the accurate sloped
   // pad below — "some ramps work, some don't" depending on a checkbox that
   // has nothing to do with whether the mesh is actually tilted.
-  const pitch = Math.abs(e.rotation?.[0] ?? 0);
-  const roll = Math.abs(e.rotation?.[2] ?? 0);
-  // A few degrees of tolerance so slightly-off-axis walls don't get
-  // needlessly subdivided; a real ramp is tilted well past that.
-  return pitch > 3 || roll > 3;
+  const tilt = localUpTiltDeg(entityEulerDeg(e));
+  // 0° = upright or upside-down flip. ~90° = on its side (a wall). A walkable
+  // ramp sits strictly between those.
+  return tilt > 3 && tilt < 85;
+}
+
+/** 90° wall / 180° flip: full mesh AABB, not a walk-over slab. */
+function rotatedSolidToSimPads(e: EditorEntity): SimPlatformBlueprint[] {
+  const base = entityToPad(e);
+  const vol = entityFxVolume(e);
+  return [
+    {
+      ...base,
+      x: vol.x,
+      y: vol.y,
+      z: vol.z,
+      width: vol.width,
+      depth: vol.depth,
+      height: Math.max(0.12, vol.height),
+      rotYaw: 0,
+      slopeGradX: undefined,
+      slopeGradY: undefined,
+      topOnly: isHammerSolidEntity(e) ? undefined : base.topOnly,
+    },
+  ];
 }
 
 /**
@@ -626,23 +832,48 @@ function wedgePrimitiveToSimPads(e: EditorEntity): SimPlatformBlueprint[] {
   const halfX = Math.max(0.15, (size[0] * Math.abs(e.scale[0])) / 2);
   const fullY = Math.max(0.12, size[1] * Math.abs(e.scale[1]));
   const halfZ = Math.max(0.15, (size[2] * Math.abs(e.scale[2])) / 2);
-  const rotDeg: [number, number, number] = [
-    e.rotation?.[0] ?? 0,
-    e.rotation?.[1] ?? 0,
-    e.rotation?.[2] ?? 0,
-  ];
-  const mat = resolveCollideMaterial(e);
-  let kind: SimPlatformKind = 'solid';
-  if (mat === 'ice') kind = 'ice';
-  else if (mat === 'water') kind = 'water';
-  else if (mat === 'sand') kind = 'sand';
+  const rotDeg = entityEulerDeg(e);
+  const kind = solidPadKind(e);
+  const origin: [number, number, number] = [ex, ey, ez];
+  const span = halfZ * 2;
 
   // Mesh rises from local y=0 at z=-halfZ (back) to y=fullY at z=+halfZ
-  // (front ridge), flat across x — see makeHammerGeometry's wedge/ramp case.
-  // Fit the exact plane through 3 points on that slope, same technique
-  // rampEntityToSimPads uses for hand-rotated blocks, but using this mesh's
-  // OWN known slope as the local top face instead of assuming a flat
-  // y=halfY top that only tilts from rotation.
+  // (front ridge). After a 180° Flip the slope points DOWN and the original
+  // bottom is the walkable top — keeping only the slope plane made the
+  // visible wedge a walk-through. Always fill the triangle; only emit the
+  // analytic slope while that face is actually up.
+  const slopeFacingUp =
+    rotateLocalXYZ([0, fullY / 2, 0], rotDeg)[1] >= rotateLocalXYZ([0, 0, 0], rotDeg)[1];
+
+  const n = Math.max(8, Math.min(24, Math.round(span / 0.28)));
+  const volume: SimPlatformBlueprint[] = [];
+  for (let i = 0; i < n; i++) {
+    const t0 = i / n;
+    const t1 = (i + 1) / n;
+    const z0 = -halfZ + t0 * span;
+    const z1 = -halfZ + t1 * span;
+    const yHi = fullY * t1;
+    if (yHi < 0.08) continue;
+    const body: Array<[number, number, number]> = [];
+    const walkPts: Array<[number, number, number]> = [];
+    for (const sx of [-halfX, halfX] as const) {
+      for (const sz of [z0, z1] as const) {
+        body.push([sx, 0, sz], [sx, yHi, sz]);
+        const slopeY = fullY * ((sz + halfZ) / span);
+        walkPts.push(slopeFacingUp ? [sx, slopeY, sz] : [sx, 0, sz]);
+      }
+    }
+    const aabb = accumulateWorldAabb(origin, rotDeg, body);
+    let walkTop = Infinity;
+    for (const p of walkPts) {
+      walkTop = Math.min(walkTop, ey + rotateLocalXYZ(p, rotDeg)[1]);
+    }
+    const pad = volumePadFromWorldAabb(aabb, kind, Math.min(aabb.maxY, walkTop));
+    if (pad) volume.push(pad);
+  }
+
+  if (!slopeFacingUp) return volume;
+
   const [dx0, dy0, dz0] = rotateLocalXYZ([0, fullY / 2, 0], rotDeg);
   const [dx1, dy1, dz1] = rotateLocalXYZ([halfX, fullY / 2, 0], rotDeg);
   const [dx2, dy2, dz2] = rotateLocalXYZ([0, fullY, halfZ], rotDeg);
@@ -651,8 +882,6 @@ function wedgePrimitiveToSimPads(e: EditorEntity): SimPlatformBlueprint[] {
   const det = ax * bz - bx * az;
   const gThreeX = Math.abs(det) > 1e-6 ? (ay * bz - by * az) / det : 0;
   const gThreeZ = Math.abs(det) > 1e-6 ? (ax * by - bx * ay) / det : 0;
-  const slopeGradX = gThreeZ;
-  const slopeGradY = gThreeX;
 
   let minThreeX = Infinity, maxThreeX = -Infinity;
   let minThreeZ = Infinity, maxThreeZ = -Infinity;
@@ -667,23 +896,21 @@ function wedgePrimitiveToSimPads(e: EditorEntity): SimPlatformBlueprint[] {
       }
     }
   }
-  const centerThreeY = ey + dy0;
 
   return [
     {
       x: (minThreeZ + maxThreeZ) / 2,
       y: (minThreeX + maxThreeX) / 2,
-      z: centerThreeY,
+      z: ey + dy0,
       width: Math.max(0.4, maxThreeZ - minThreeZ),
       depth: Math.max(0.4, maxThreeX - minThreeX),
       kind,
-      // Sloped surface, not a wall — see the topOnly comment on
-      // resolveSolids in platformer-sim.ts.
       topOnly: true,
       height: 0.3,
-      slopeGradX,
-      slopeGradY,
+      slopeGradX: gThreeZ,
+      slopeGradY: gThreeX,
     },
+    ...volume,
   ];
 }
 
@@ -701,16 +928,8 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
   const halfX = Math.max(0.15, (foot[0] * Math.abs(e.scale[0])) / 2);
   const halfY = Math.max(0.06, (foot[1] * Math.abs(e.scale[1])) / 2);
   const halfZ = Math.max(0.15, (foot[2] * Math.abs(e.scale[2])) / 2);
-  const rotDeg: [number, number, number] = [
-    e.rotation?.[0] ?? 0,
-    e.rotation?.[1] ?? 0,
-    e.rotation?.[2] ?? 0,
-  ];
-  const mat = resolveCollideMaterial(e);
-  let kind: SimPlatformKind = 'solid';
-  if (mat === 'ice') kind = 'ice';
-  else if (mat === 'water') kind = 'water';
-  else if (mat === 'sand') kind = 'sand';
+  const rotDeg = entityEulerDeg(e);
+  const kind = solidPadKind(e);
 
   // Hammer solids are bottom-aligned — the entity's position/pivot IS the
   // box's bottom face (local y runs 0..fullY), not its center — see
@@ -781,6 +1000,18 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
     }
   }
   const centerThreeY = ey + dy0;
+  const alongZ = wrapDeltaDeg(rotDeg[0]) >= wrapDeltaDeg(rotDeg[2]);
+  const volume = sliceBoxVolumePads(
+    [ex, ey, ez],
+    rotDeg,
+    halfX,
+    yMin,
+    yMax,
+    halfZ,
+    topLocalY,
+    alongZ,
+    kind
+  );
 
   return [
     {
@@ -790,14 +1021,15 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
       width: Math.max(0.4, maxThreeZ - minThreeZ),
       depth: Math.max(0.4, maxThreeX - minThreeX),
       kind,
-      // A walkable ramp shouldn't also act as a flat-vertical-range side
-      // wall (resolveSolids' box check would be wrong for a sloped surface)
-      // — see the topOnly comment there.
+      // Walkable slope stays topOnly so resolveSolids doesn't treat the
+      // sloped AABB as a vertical wall. Volume slices below fill the mesh
+      // so a thick tilted solid isn't a walk-through.
       topOnly: true,
       height: 0.3,
       slopeGradX,
       slopeGradY,
     },
+    ...volume,
   ];
 }
 
@@ -809,54 +1041,76 @@ export function rampEntityToSimPads(e: EditorEntity, _steps = 24): SimPlatformBl
 function localPadsToSimPads(e: EditorEntity, pads: CsgLocalPad[]): SimPlatformBlueprint[] {
   if (!pads.length) return [];
   const [ex, ey, ez] = e.position;
-  const baseYaw = ((e.rotation?.[1] ?? 0) * Math.PI) / 180;
+  const rotDeg = entityEulerDeg(e);
+  const baseYaw = (rotDeg[1] * Math.PI) / 180;
   const sx = Math.abs(e.scale[0]);
   const sy = Math.abs(e.scale[1]);
   const sz = Math.abs(e.scale[2]);
-  const mat = resolveCollideMaterial(e);
-  let kind: SimPlatformKind = 'solid';
-  if (mat === 'ice') kind = 'ice';
-  else if (mat === 'water') kind = 'water';
-  else if (mat === 'sand') kind = 'sand';
+  const kind = solidPadKind(e);
+  const yawOnly = pitchRollNearZero(rotDeg);
   const cos = Math.cos(baseYaw);
   const sin = Math.sin(baseYaw);
+  const SEAM_SKIN = kind === 'solid' ? 0.03 : 0;
   return pads.map((p) => {
     const lcx = p.cx * sx;
     const lcy = p.cy * sy;
     const lcz = p.cz * sz;
-    const wx = ex + (lcx * cos + lcz * sin);
-    const wz = ez + (-lcx * sin + lcz * cos);
-    const wy = ey + lcy;
-    // Baked boxes (mesh-voxelize / CSG) built before the seam-skin fix have
-    // their old exact-touching half-extents cached on the entity forever —
-    // re-baking is the only way to change the stored pads, but every map
-    // must work without that manual step. Pad here, at the final sim-pad
-    // conversion every baked pad (fresh or years-old) always passes
-    // through, so old saved maps get the fix for free.
-    const SEAM_SKIN = kind === 'solid' ? 0.03 : 0;
-    const hx = Math.max(0.05, p.hx * sx) + SEAM_SKIN;
-    // Side-collision (resolveSolids, platformer-sim.ts) used to ignore any
-    // pad whose height was <= 0.35 (inferred "thin floor slab, top-only by
-    // design"), so a baked mesh-collision box for a genuinely short Solid
-    // prop (a slab, a low crate) got floored to a minimum 0.4m tall here to
-    // avoid falling under that cutoff — which pushed its top surface up to
-    // half that (0.2m) above the real mesh, "floating" the player standing
-    // on it. resolveSolids now keys off an explicit topOnly flag instead of
-    // height (these baked pads never set it — a baked box is always a real
-    // full-volume solid), so that workaround is gone: just the real
-    // measured half-height, with a tiny floor for degenerate zero-thickness
-    // voxels.
+    const hx0 = Math.max(0.05, p.hx * sx);
     const hy = Math.max(0.02, p.hy * sy);
-    const hz = Math.max(0.05, p.hz * sz) + SEAM_SKIN;
+    const hz0 = Math.max(0.05, p.hz * sz);
+    if (yawOnly) {
+      const wx = ex + (lcx * cos + lcz * sin);
+      const wz = ez + (-lcx * sin + lcz * cos);
+      const wy = ey + lcy;
+      // Baked boxes (mesh-voxelize / CSG) built before the seam-skin fix have
+      // their old exact-touching half-extents cached on the entity forever —
+      // re-baking is the only way to change the stored pads, but every map
+      // must work without that manual step. Pad here, at the final sim-pad
+      // conversion every baked pad (fresh or years-old) always passes
+      // through, so old saved maps get the fix for free.
+      const hx = hx0 + SEAM_SKIN;
+      const hz = hz0 + SEAM_SKIN;
+      // resolveSolids keys off an explicit topOnly flag instead of height —
+      // these baked pads never set it (a baked box is always a real
+      // full-volume solid). Keep the real measured half-height, with a tiny
+      // floor for degenerate zero-thickness voxels.
+      return {
+        x: wz,
+        y: wx,
+        z: wy + hy,
+        width: hz * 2,
+        depth: hx * 2,
+        height: hy * 2,
+        kind,
+        rotYaw: baseYaw + (p.yaw ?? 0),
+        entityId: e.id,
+      };
+    }
+    // Pitch/roll (Flip, stand-up) must rotate the baked boxes with the mesh.
+    // Yaw-only OBB can't represent that, so take the world AABB of the 8
+    // corners — still a full-volume solid, never a walk-through slab.
+    const padYaw = p.yaw ?? 0;
+    const pc = Math.cos(padYaw);
+    const ps = Math.sin(padYaw);
+    const corners: Array<[number, number, number]> = [];
+    for (const dx of [-hx0, hx0]) {
+      for (const dy of [-hy, hy]) {
+        for (const dz of [-hz0, hz0]) {
+          const rx = dx * pc + dz * ps;
+          const rz = -dx * ps + dz * pc;
+          corners.push([lcx + rx, lcy + dy, lcz + rz]);
+        }
+      }
+    }
+    const aabb = accumulateWorldAabb([ex, ey, ez], rotDeg, corners);
     return {
-      x: wz,
-      y: wx,
-      z: wy + hy,
-      width: hz * 2,
-      depth: hx * 2,
-      height: hy * 2,
+      x: (aabb.minZ + aabb.maxZ) / 2,
+      y: (aabb.minX + aabb.maxX) / 2,
+      z: aabb.maxY,
+      width: Math.max(0.05, aabb.maxZ - aabb.minZ) + SEAM_SKIN * 2,
+      depth: Math.max(0.05, aabb.maxX - aabb.minX) + SEAM_SKIN * 2,
+      height: Math.max(0.05, aabb.maxY - aabb.minY),
       kind,
-      rotYaw: baseYaw + (p.yaw ?? 0),
       entityId: e.id,
     };
   });
@@ -888,6 +1142,9 @@ function entityToCollisionPads(e: EditorEntity): SimPlatformBlueprint[] {
   }
   if (isTiltedRampSolid(e)) {
     return rampEntityToSimPads(e, 24);
+  }
+  if (!pitchRollNearZero(entityEulerDeg(e))) {
+    return rotatedSolidToSimPads(e);
   }
   return [entityToPad(e)];
 }
@@ -932,7 +1189,22 @@ export function mapDocToSimPlatforms(doc: MapDocument): SimPlatformBlueprint[] {
     }
     if (e.solidFx?.enabled) {
       const fx = ensureSolidFx(e.solidFx);
-      basePads = basePads.map((p) => ({ ...p, fx }));
+      const vol = entityFxVolume(e);
+      basePads = basePads.map((p) => ({
+        ...p,
+        fx,
+        entityId: p.entityId || e.id,
+        fxVol: {
+          ox: vol.x - p.x,
+          oy: vol.y - p.y,
+          oz: vol.z - p.z,
+          width: vol.width,
+          depth: vol.depth,
+          height: vol.height,
+        },
+      }));
+    } else {
+      basePads = basePads.map((p) => (p.entityId ? p : { ...p, entityId: e.id }));
     }
     return basePads;
   });

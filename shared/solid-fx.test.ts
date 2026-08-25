@@ -131,6 +131,51 @@ describe('applySolidFxToPads', () => {
     applySolidFxToPads(pads, configs, runtimes, [{ x: 0.2, y: 0, z: 0, supportPadId: null }], 20);
     expect(pads.every((p) => p.fxHidden)).toBe(false);
   });
+
+  it('proximity uses the closest point on the pad AABB, not the center', () => {
+    const pads: SolidFxPad[] = [
+      { id: 'p1', entityId: 'box', x: 0, y: 0, z: 0, width: 8, depth: 2, height: 1 },
+    ];
+    const configs = new Map([['box', appear({ radius: 2, durationMs: 10 })]]);
+    const runtimes = new Map();
+    applySolidFxToPads(pads, configs, runtimes, [{ x: 4.4, y: 0, z: 0, supportPadId: null }], 0);
+    applySolidFxToPads(pads, configs, runtimes, [{ x: 4.4, y: 0, z: 0, supportPadId: null }], 20);
+    expect(pads[0].fxHidden).toBe(false);
+  });
+
+  it('appear + step unveils when walking into the volume (hidden pads cannot be stood on)', () => {
+    const pads: SolidFxPad[] = [
+      { id: 'p1', entityId: 'box', x: 0, y: 0, z: 1, width: 2, depth: 2, height: 1 },
+    ];
+    const configs = new Map([
+      ['box', appear({ trigger: 'step', radius: 2, durationMs: 10 })],
+    ]);
+    const runtimes = new Map();
+    applySolidFxToPads(pads, configs, runtimes, [{ x: 0, y: 0, z: 0.5, supportPadId: null }], 0);
+    applySolidFxToPads(pads, configs, runtimes, [{ x: 0, y: 0, z: 0.5, supportPadId: null }], 20);
+    expect(pads[0].fxHidden).toBe(false);
+  });
+
+  it('fxVol uses the visual volume, not a thin ramp collision slab', () => {
+    const pads: SolidFxPad[] = [
+      {
+        id: 'p1',
+        entityId: 'ramp',
+        x: 0,
+        y: 0,
+        z: 3,
+        width: 2,
+        depth: 2,
+        height: 0.3,
+        fxVol: { ox: 0, oy: 0, oz: 0, width: 4, depth: 4, height: 3 },
+      },
+    ];
+    const configs = new Map([['ramp', appear({ radius: 0.5, durationMs: 10 })]]);
+    const runtimes = new Map();
+    applySolidFxToPads(pads, configs, runtimes, [{ x: 0, y: 0, z: 0.2, supportPadId: null }], 0);
+    applySolidFxToPads(pads, configs, runtimes, [{ x: 0, y: 0, z: 0.2, supportPadId: null }], 20);
+    expect(pads[0].fxHidden).toBe(false);
+  });
 });
 
 describe('defaultSolidFx', () => {

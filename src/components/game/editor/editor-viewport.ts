@@ -4496,8 +4496,14 @@ export function createEditorViewport(
       const root = roots.get(selectedId);
       if (!root) return;
       const fx = ensureSolidFx(ent);
-      solidFxDirector.preview(selectedId, root, fx);
-      requestRender(Math.max(800, fx.durationMs + 400));
+      const id = selectedId;
+      solidFxDirector.preview(id, root, fx);
+      const holdMs = Math.max(800, fx.durationMs + 500);
+      requestRender(holdMs);
+      window.setTimeout(() => {
+        if (solidFxDirector.hasPreview) solidFxDirector.detach(id);
+        requestRender();
+      }, holdMs);
     },
     stopEntityAnim: (entityId) => {
       const id = entityId ?? selectedId;
