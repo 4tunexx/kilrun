@@ -194,7 +194,7 @@ export class CustomMapOverlay {
         this.root.add(obj);
         this.entityRoots.set(ent.id, obj);
           if (ent.solidFx?.enabled) {
-            this.solidFxDirector.attach(ent.id, obj, ensureSolidFx(ent), { ghost: true });
+            this.solidFxDirector.attach(ent.id, obj, ensureSolidFx(ent));
           }
         this.restPositions.set(ent.id, new THREE.Vector3(...ent.position));
         const motion = ensurePlatformMotion(ent);
@@ -233,7 +233,7 @@ export class CustomMapOverlay {
           this.root.add(placeholder);
           this.entityRoots.set(ent.id, placeholder);
           if (ent.solidFx?.enabled) {
-            this.solidFxDirector.attach(ent.id, placeholder, ensureSolidFx(ent), { ghost: true });
+            this.solidFxDirector.attach(ent.id, placeholder, ensureSolidFx(ent));
           }
           this.restPositions.set(ent.id, new THREE.Vector3(...ent.position));
           this.director.register(ent.id, placeholder, []);

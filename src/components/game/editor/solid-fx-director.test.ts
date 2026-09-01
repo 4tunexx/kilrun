@@ -18,11 +18,11 @@ describe('SolidFxDirector', () => {
     director.attach(
       'p1',
       root,
-      ensureSolidFx({ enabled: true, mode: 'appear', style: 'glitch' }),
-      { ghost: true }
+      ensureSolidFx({ enabled: true, mode: 'appear', style: 'glitch' })
     );
     expect(mesh.visible).toBe(false);
     expect(root.visible).toBe(true);
+    expect(root.children.some((c) => c instanceof THREE.BoxHelper)).toBe(false);
     director.setProgress('p1', 0.5);
     expect(mesh.visible).toBe(true);
     director.setProgress('p1', 1);
@@ -30,6 +30,42 @@ describe('SolidFxDirector', () => {
     director.detach('p1');
     expect(mesh.visible).toBe(true);
     expect(mesh.material).toBe(mat);
+  });
+
+  it('never draws a wireframe outline while Appear/Disappear is hidden', () => {
+    const scene = new THREE.Scene();
+    const { root, mesh } = appearBox();
+    scene.add(root);
+    const director = new SolidFxDirector();
+    director.attach(
+      'p1',
+      root,
+      ensureSolidFx({ enabled: true, mode: 'appear', style: 'unveil' })
+    );
+    director.update(0.016);
+    const hasBoxHelper = (obj: THREE.Object3D) => {
+      let found = false;
+      obj.traverse((c) => {
+        if (c instanceof THREE.BoxHelper) found = true;
+      });
+      return found;
+    };
+    expect(mesh.visible).toBe(false);
+    expect(hasBoxHelper(scene)).toBe(false);
+    director.setProgress('p1', 0.08);
+    director.update(0.016);
+    expect(hasBoxHelper(scene)).toBe(false);
+    director.detach('p1');
+
+    director.attach(
+      'p2',
+      root,
+      ensureSolidFx({ enabled: true, mode: 'disappear', style: 'fade' })
+    );
+    director.setProgress('p2', 0);
+    director.update(0.016);
+    expect(hasBoxHelper(scene)).toBe(false);
+    director.detach('p2');
   });
 
   it('puts owned FX materials back after a texture-style clone steal', () => {

@@ -45,13 +45,6 @@ type RootEntry = {
   previewUntil: number;
   previewDuration: number;
   previewMode: 'appear' | 'disappear' | null;
-  ghost: THREE.BoxHelper | null;
-  showGhost: boolean;
-};
-
-export type SolidFxAttachOpts = {
-  /** Cyan wire while hidden so Appear platforms stay findable. */
-  ghost?: boolean;
 };
 
 function makeUniforms(style: SolidFxStyle, minY: number, maxY: number): FxUniforms {
@@ -219,7 +212,7 @@ export class SolidFxDirector {
   private entries = new Map<string, RootEntry>();
   private elapsed = 0;
 
-  attach(id: string, root: THREE.Object3D, config: SolidFxConfig, opts?: SolidFxAttachOpts) {
+  attach(id: string, root: THREE.Object3D, config: SolidFxConfig) {
     this.detach(id);
     const fx = ensureSolidFx(config);
     const { minY, maxY } = worldYBounds(root);
@@ -252,8 +245,6 @@ export class SolidFxDirector {
       previewUntil: 0,
       previewDuration: fx.durationMs,
       previewMode: null,
-      ghost: null,
-      showGhost: !!opts?.ghost,
     });
     this.paint(id);
   }
@@ -323,7 +314,6 @@ export class SolidFxDirector {
     entry.root.traverse((child) => {
       if (child.name === GLOW_HALO_NAME) child.visible = true;
     });
-    this.disposeGhost(entry);
     entry.root.visible = true;
     this.entries.delete(id);
   }
@@ -435,38 +425,5 @@ export class SolidFxDirector {
     entry.root.traverse((child) => {
       if (child.name === GLOW_HALO_NAME) child.visible = shown;
     });
-    this.syncGhost(entry, p);
-  }
-
-  private syncGhost(entry: RootEntry, progress: number) {
-    if (!entry.showGhost) {
-      this.disposeGhost(entry);
-      return;
-    }
-    const show = progress < 0.14;
-    if (!show) {
-      if (entry.ghost) entry.ghost.visible = false;
-      return;
-    }
-    if (!entry.ghost) {
-      const helper = new THREE.BoxHelper(entry.root, 0x5dffd8);
-      const mat = helper.material as THREE.LineBasicMaterial;
-      mat.depthTest = false;
-      mat.transparent = true;
-      mat.opacity = 0.55;
-      helper.renderOrder = 12;
-      (entry.root.parent ?? entry.root).add(helper);
-      entry.ghost = helper;
-    }
-    entry.ghost.visible = true;
-    entry.ghost.update();
-  }
-
-  private disposeGhost(entry: RootEntry) {
-    if (!entry.ghost) return;
-    entry.ghost.parent?.remove(entry.ghost);
-    entry.ghost.geometry.dispose();
-    (entry.ghost.material as THREE.Material).dispose();
-    entry.ghost = null;
   }
 }

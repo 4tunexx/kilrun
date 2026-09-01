@@ -180,8 +180,8 @@ export function SolidFxPluginPanel({ brains }: { brains: MapEditorBrains }) {
           </button>
           <p className="text-[10px] leading-snug text-white/40">
             Editor stays solid so you can build. Preview FX plays the animation here. Play
-            Test: Appear platforms start gone (cyan wire is the marker) — walk toward them
-            and they animate in. Disappear starts visible, then vanishes when triggered.
+            Test: Appear platforms start fully hidden — walk toward them and they animate
+            in. Disappear starts visible, then vanishes when triggered.
           </p>
         </>
       )}

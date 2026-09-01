@@ -866,7 +866,7 @@ export function MapPlayPreview({
           scene.add(planted);
           roots.set(ent.id, planted);
           if (ent.solidFx?.enabled) {
-            solidFxDirector.attach(ent.id, planted, ensureSolidFx(ent), { ghost: true });
+            solidFxDirector.attach(ent.id, planted, ensureSolidFx(ent));
           }
           const motion = ensurePlatformMotion(ent);
           if (motion.enabled) {

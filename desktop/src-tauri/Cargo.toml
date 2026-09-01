@@ -1,6 +1,6 @@
 [package]
 name = "kilrun-engine"
-version = "0.1.7"
+version = "0.1.8"
 description = "Kilrun Engine — Windows map editor and game-development application"
 authors = ["Kilrun"]
 edition = "2021"
