@@ -27,6 +27,12 @@ const DEFAULT_EDITOR_USER = {
   isAdmin: true,
 };
 
+function isLiveJoinToken(token: string | undefined): token is string {
+  if (!token) return false;
+  if (token === 'dev-practice-token') return false;
+  return !token.endsWith('.desktop-editor-practice-token');
+}
+
 function createLocalPracticeToken(): string {
   const claims = {
     userId: 'desktop-editor',
@@ -73,6 +79,8 @@ export function PlayTestEngine({
   } | null>(null);
   const [ready, setReady] = useState(false);
   const [offlineSimMode, setOfflineSimMode] = useState(false);
+  const [liveJoinFailed, setLiveJoinFailed] = useState(false);
+  const [mintAttempt, setMintAttempt] = useState(0);
 
   const simMode = resolveModeBase(mode);
   const practiceRoom: GameRoomName = isCoreKilrunMode(mode)
@@ -82,18 +90,61 @@ export function PlayTestEngine({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      const applyUser = (user: {
+        userId: string;
+        username: string;
+        avatarUrl?: string;
+        isAdmin: boolean;
+      }) => {
+        setSessionUser(user);
+      };
+      const useOffline = (
+        user: {
+          userId: string;
+          username: string;
+          avatarUrl?: string;
+          isAdmin: boolean;
+        } = DEFAULT_EDITOR_USER
+      ) => {
+        setJoinToken(
+          // Last-resort identity label for fully offline desktop (no session).
+          // Never used to join live Colyseus.
+          isKilrunEngineDesktop() && !hasEngineSession()
+            ? createLocalPracticeToken()
+            : undefined
+        );
+        applyUser(user);
+        setLiveJoinFailed(true);
+        setOfflineSimMode(true);
+      };
       try {
         if (isKilrunEngineDesktop() && hasEngineSession()) {
           const minted = await mintEngineJoinToken();
           if (cancelled) return;
-          setJoinToken(minted.token ?? createLocalPracticeToken());
           if (minted.user) {
-            setSessionUser({
+            applyUser({
               userId: minted.user.id,
               username: minted.user.username || 'Player',
               avatarUrl: minted.user.avatarUrl,
               isAdmin: minted.user.role === 'admin',
             });
+          }
+          if (minted.token) {
+            setJoinToken(minted.token);
+            setLiveJoinFailed(false);
+            if (!minted.user) applyUser(DEFAULT_EDITOR_USER);
+            return;
+          } else {
+            useOffline(
+              minted.user
+                ? {
+                    userId: minted.user.id,
+                    username: minted.user.username || 'Player',
+                    avatarUrl: minted.user.avatarUrl,
+                    isAdmin: minted.user.role === 'admin',
+                  }
+                : DEFAULT_EDITOR_USER
+            );
             return;
           }
         }
@@ -102,22 +153,33 @@ export function PlayTestEngine({
           getSessionUser().catch(() => null),
         ]);
         if (cancelled) return;
-        setJoinToken(token ?? createLocalPracticeToken());
         if (user) {
-          setSessionUser({
+          applyUser({
             userId: user.id,
             username: user.username || 'Player',
             avatarUrl: user.avatarUrl || undefined,
             isAdmin: user.role === 'admin',
           });
         } else {
-          setSessionUser(DEFAULT_EDITOR_USER);
+          applyUser(DEFAULT_EDITOR_USER);
+        }
+        if (token) {
+          setJoinToken(token);
+          setLiveJoinFailed(false);
+        } else {
+          useOffline(
+            user
+              ? {
+                  userId: user.id,
+                  username: user.username || 'Player',
+                  avatarUrl: user.avatarUrl || undefined,
+                  isAdmin: user.role === 'admin',
+                }
+              : DEFAULT_EDITOR_USER
+          );
         }
       } catch {
-        if (!cancelled) {
-          setJoinToken(createLocalPracticeToken());
-          setSessionUser(DEFAULT_EDITOR_USER);
-        }
+        if (!cancelled) useOffline();
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -125,7 +187,7 @@ export function PlayTestEngine({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [mintAttempt]);
 
   const draftDoc = useMemo(() => prepareDocForPlayTest(doc).doc, [doc]);
 
@@ -134,7 +196,7 @@ export function PlayTestEngine({
       userId: sessionUser?.userId ?? 'desktop-editor',
       username: sessionUser?.username ?? 'Player',
       avatarUrl: sessionUser?.avatarUrl,
-      token: joinToken || createLocalPracticeToken(),
+      token: joinToken ?? '',
       isAdmin: sessionUser?.isAdmin ?? true,
       ...(simMode === 'competitive' && (playTestRole === 'team_a' || playTestRole === 'team_b')
         ? { teamRequest: playTestRole as 'team_a' | 'team_b' }
@@ -143,7 +205,7 @@ export function PlayTestEngine({
     [sessionUser, joinToken, simMode, playTestRole]
   );
 
-  if (offlineSimMode) {
+  if (offlineSimMode || (ready && !isLiveJoinToken(joinToken))) {
     return (
       <div className="fixed inset-0 z-[9999] bg-[#080b12] flex flex-col">
         <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-white/10 z-[100]">
@@ -151,13 +213,22 @@ export function PlayTestEngine({
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
               <WifiOff className="w-3.5 h-3.5" /> Offline Live Simulator Active
             </span>
-            <span className="text-xs text-white/50">Full physics, weapons, &amp; AAA HUD</span>
+            <span className="text-xs text-white/50">
+              {liveJoinFailed
+                ? 'Live join failed — using offline sim'
+                : 'Full physics, weapons, & AAA HUD'}
+            </span>
           </div>
           <Button
             size="sm"
             variant="outline"
             className="text-xs border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10"
-            onClick={() => setOfflineSimMode(false)}
+            onClick={() => {
+              setOfflineSimMode(false);
+              setLiveJoinFailed(false);
+              setReady(false);
+              setMintAttempt((n) => n + 1);
+            }}
           >
             <Wifi className="w-3.5 h-3.5 mr-1" /> Try Live Server Again
           </Button>
@@ -173,7 +244,7 @@ export function PlayTestEngine({
     );
   }
 
-  if (!ready || !sessionUser) {
+  if (!ready || !sessionUser || !isLiveJoinToken(joinToken)) {
     return (
       <div className="fixed inset-0 z-[9999] bg-[#080b12] flex flex-col items-center justify-center gap-4 text-white">
         <div className="animate-spin w-8 h-8 rounded-full border-2 border-emerald-400 border-t-transparent" />

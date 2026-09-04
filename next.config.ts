@@ -38,6 +38,7 @@ const nextConfig: NextConfig = {
       './power-definitions.js': './shared/power-definitions.ts',
       './sim-constants.js': './shared/sim-constants.ts',
       './custom-moves.js': './shared/custom-moves.ts',
+      './sim-core.js': './shared/sim-core.ts',
     },
   },
   // Ensure custom-output Prisma engines are traced into Vercel serverless bundles.

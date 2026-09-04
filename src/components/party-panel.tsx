@@ -26,7 +26,7 @@ import {
   type SteamPartyInviteRow,
 } from '@/lib/party-actions';
 import { useToast } from '@/hooks/use-toast';
-import type { KilrunMode } from '@/lib/game-modes';
+import { isKilrunMode, type KilrunMode } from '@/lib/game-modes';
 import type { CompetitiveQueue } from '@/components/views/play-view';
 
 interface PartyPanelProps {
@@ -48,8 +48,8 @@ function modeFromPartyMode(
   if (mode === 'competitive') {
     return { mode: 'competitive', competitiveQueue: 'casual' };
   }
-  if (mode === 'deathrun' || mode === 'horde') {
-    return { mode: mode };
+  if (isKilrunMode(mode)) {
+    return { mode };
   }
   return null;
 }

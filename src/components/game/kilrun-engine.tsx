@@ -335,9 +335,7 @@ export default function KilrunEngine({
   const localSessionRef = useRef<string | null>(null);
   const roomPhaseRef = useRef(room.phase);
   roomPhaseRef.current = room.phase;
-  const matchRemainingRef = useRef(room.matchTimeRemainingMs ?? 0);
-  matchRemainingRef.current = room.matchTimeRemainingMs ?? 0;
-  const matchDurationRef = useRef(180_000);
+  const lastMapSessionRef = useRef<string | null>(null);
   /**
    * Server moving-platform clock plus the local time we received it, so the
    * render loop can extrapolate between 30Hz patches and still evaluate the
@@ -350,6 +348,14 @@ export default function KilrunEngine({
       receivedAt: performance.now(),
     };
   }, [room.motionElapsedMs]);
+
+  // Hard reconnect (dropped WS / new room): allow a lobby re-push. Seamless
+  // Colyseus reconnect stays `connected` with the same session and map.
+  useEffect(() => {
+    if (connectionState === 'reconnecting' || connectionState === 'lost') {
+      customLoadedRef.current = false;
+    }
+  }, [connectionState]);
 
   // Prefer cloud Active map for this mode (works for all clients), fall back to localStorage.
   // Deathrun MAIN 3rd View always wins camera/crosshair for Horde / Comp / Deathrun.
@@ -452,14 +458,20 @@ export default function KilrunEngine({
 
   // Push Active editor map for this mode to the server when lobby is ready
   useEffect(() => {
+    const sessionId = connectionRef.current?.sessionId ?? null;
+    if (sessionId !== lastMapSessionRef.current) {
+      customLoadedRef.current = false;
+      lastMapSessionRef.current = sessionId;
+    }
     if (!cloudReady) return;
+    if (connectionState !== 'connected') return;
     if (room.phase === 'results') {
       customLoadedRef.current = false;
       return;
     }
     if (room.phase !== 'lobby' && room.phase !== 'countdown') return;
     if (customLoadedRef.current) return;
-    if (!connectionRef.current?.sessionId) return;
+    if (!sessionId) return;
 
     let cancelled = false;
 
@@ -554,7 +566,7 @@ export default function KilrunEngine({
     return () => {
       cancelled = true;
     };
-  }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, mode, practiceRole, draftDoc]);
+  }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, connectionState, mode, practiceRole, draftDoc]);
 
   useEffect(() => {
     applyPlayerMatchAudio(matchSettings);
@@ -1508,9 +1520,10 @@ export default function KilrunEngine({
       map.update(dt);
 
       if (roomPhaseRef.current === 'playing') {
-        const remain = matchRemainingRef.current;
-        const elapsed = Math.max(0, matchDurationRef.current - remain);
-        overlay.tickMotion(elapsed);
+        const motionClock = motionClockRef.current;
+        const motionElapsedMs =
+          motionClock.baseMs + (performance.now() - motionClock.receivedAt);
+        overlay.tickMotion(motionElapsedMs);
       } else {
         overlay.tickMotion(0);
       }

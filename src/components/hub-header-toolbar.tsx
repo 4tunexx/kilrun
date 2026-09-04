@@ -10,7 +10,6 @@ import {
   Search,
   UserPlus,
   Users,
-  Hammer,
 } from 'lucide-react';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { NicknameEffectText } from '@/components/nickname-effect';
@@ -356,22 +355,6 @@ export function HubHeaderToolbar({
           </div>
         )}
       </div>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <a
-            href="/engine"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 font-semibold text-xs tracking-wide transition-all shadow-sm active:scale-95 mr-1"
-            title="Kilrun Engine — 3D Map Studio & Level Authoring"
-          >
-            <Hammer className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden md:inline">Map Studio</span>
-          </a>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">
-          Open Kilrun Engine Studio &amp; Download Windows App
-        </TooltipContent>
-      </Tooltip>
 
       <Tooltip>
         <TooltipTrigger asChild>

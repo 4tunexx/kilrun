@@ -414,6 +414,8 @@ model SiteSettings {
   /// actions, power keys), applies to every map/live match/Play Test alike.
   /// See shared/key-bindings.ts + src/lib/key-bindings-config.ts.
   keyBindingsConfigJson String @default("{}")
+  /// JSON array of stored /engine invite links (24h coded URLs).
+  engineInvitesJson String @default("[]")
 }
 
 model GlobalChatMessage {

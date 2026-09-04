@@ -18,8 +18,6 @@ import {
   type CloudMapListItem,
 } from '@/lib/game-map-core';
 
-export type { CloudMapDocumentRow, CloudMapListItem };
-
 async function requireStaff() {
   const session = await auth();
   const steamId = (session?.user as { steamId?: string } | undefined)?.steamId;

@@ -27,8 +27,6 @@ import {
   type GameProgressionSnapshot,
 } from '@/lib/game-progression-core';
 
-export type { GameProgressionSnapshot };
-
 async function requireAdminStaff() {
   const session = await auth();
   const steamId = (session?.user as { steamId?: string } | undefined)?.steamId;

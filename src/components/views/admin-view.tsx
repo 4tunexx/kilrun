@@ -32,6 +32,7 @@ import {
   Sparkles,
   Flag,
   Gift,
+  Hammer,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -72,6 +73,7 @@ import { AdminLiveMatchesPanel } from '@/components/views/admin/admin-live-match
 import { AdminSecretsVaultPanel } from '@/components/views/admin/admin-secrets-vault-panel';
 import { AdminClansPanel } from '@/components/views/admin/admin-clans-panel';
 import { AdminCasesPanel } from '@/components/views/admin/admin-cases-panel';
+import { AdminEngineInvitesPanel } from '@/components/views/admin/admin-engine-invites-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -145,6 +147,7 @@ const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   premium: { label: 'Premium', icon: <Gem className="h-3.5 w-3.5 text-amber-300 fill-amber-400/30" /> },
   ranks: { label: 'Ranks', icon: <Trophy className="h-3.5 w-3.5" /> },
   maps: { label: 'Map Editor', icon: <MapIcon className="h-3.5 w-3.5" /> },
+  engineInvites: { label: 'Engine invites', icon: <Hammer className="h-3.5 w-3.5" /> },
   powers: { label: 'Powers', icon: <Sparkles className="h-3.5 w-3.5" /> },
   weapons: { label: 'Weapons', icon: <Target className="h-3.5 w-3.5" /> },
   balance: { label: 'Game Balance', icon: <Flame className="h-3.5 w-3.5" /> },
@@ -174,6 +177,7 @@ const ADMIN_TABS = [
   'premium',
   'ranks',
   'maps',
+  'engineInvites',
   'powers',
   'weapons',
   'balance',
@@ -2359,6 +2363,12 @@ export default function AdminView({
         {isAdmin && (
           <TabsContent value="maps" className="mt-4">
             <AdminMapEditorPanel />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="engineInvites" className="mt-4">
+            <AdminEngineInvitesPanel />
           </TabsContent>
         )}
 
