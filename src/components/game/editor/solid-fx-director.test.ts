@@ -76,7 +76,7 @@ describe('SolidFxDirector', () => {
       root,
       ensureSolidFx({ enabled: true, mode: 'appear', style: 'glitch' })
     );
-    const owned = mesh.material as THREE.Material;
+    const owned = mesh.material as THREE.MeshStandardMaterial;
     mesh.material = owned.clone();
     director.update(0.016);
     expect(mesh.material).toBe(owned);

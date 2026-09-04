@@ -1443,6 +1443,12 @@ export function MapEditor({
         // OS key auto-repeat would otherwise flap this toggle rapidly while held.
         if (!e.repeat) setGridSnap((v) => !v);
       }
+      if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p')) {
+        e.preventDefault();
+        if (e.shiftKey) requestPlayTest('live');
+        else requestPlayTest('preview');
+        return;
+      }
       if (e.key === 'f' || e.key === 'F') apiRef.current?.focusSelected();
       if (e.key === 'Delete' || e.key === 'Backspace') apiRef.current?.deleteSelected();
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
@@ -2817,28 +2823,28 @@ export function MapEditor({
           ))}
         </select>
 
-        {variant !== 'engine' ? (
-        <>
         <Button
           size="sm"
-          className="ml-2 bg-emerald-600 hover:bg-emerald-500 text-white shrink-0"
+          className="ml-2 bg-emerald-600 hover:bg-emerald-500 text-white shrink-0 font-semibold shadow-sm"
+          title="Instant Play Test (F5) — Test play with full physics and AAA HUD"
           onClick={() => requestPlayTest('preview')}
         >
-          <Play className="w-4 h-4 mr-1" /> Play Test
+          <Play className="w-4 h-4 mr-1 fill-white" /> Play Test <span className="ml-1 text-[10px] opacity-75 font-mono">F5</span>
         </Button>
         <Button
           size="sm"
           variant="outline"
-          className="ml-2 border-amber-500/60 text-amber-300 hover:bg-amber-500/10 shrink-0"
-          title="Real game client — HUD, chat, admin panel, skill menu. Requires the game server (server/) running locally."
+          className="ml-1.5 border-amber-500/60 text-amber-300 hover:bg-amber-500/10 shrink-0 font-medium"
+          title="Play Test (Live) (Shift+F5) — Real practice room with live Colyseus game server"
           onClick={() => requestPlayTest('live')}
         >
-          <Play className="w-4 h-4 mr-1" /> Play Test (Live)
+          <Play className="w-4 h-4 mr-1 text-amber-400" /> Live Test
         </Button>
+        {variant !== 'engine' ? (
         <Button
           size="sm"
           variant="secondary"
-          className={`shrink-0 ${isLiveHere ? 'border border-emerald-400/50 text-emerald-200' : ''}`}
+          className={`shrink-0 ml-1.5 ${isLiveHere ? 'border border-emerald-400/50 text-emerald-200' : ''}`}
           onClick={publishToMatch}
           title={
             isLiveHere
@@ -2850,10 +2856,9 @@ export function MapEditor({
         >
           {isLiveHere ? 'MAIN map ✓' : 'Set as MAIN map'}
         </Button>
-        </>
         ) : (
           <span className={`ml-2 shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded ${
-            isLiveHere ? 'border border-red-400/50 text-red-200 bg-red-500/15' : 'text-slate-500'
+            isLiveHere ? 'border border-red-400/50 text-red-200 bg-red-500/15' : 'text-slate-400 bg-white/5'
           }`}>
             {isLiveHere ? 'MAIN' : dirty ? 'Unsaved' : 'Draft'}
           </span>

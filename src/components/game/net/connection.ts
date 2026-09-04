@@ -109,14 +109,28 @@ export interface RoomCallbacks {
 }
 
 function resolveGameServerUrl(): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = window.localStorage?.getItem('kilrun_game_server_url');
+      if (stored && stored.trim()) return stored.trim();
+    } catch {
+      /* ignore storage access error */
+    }
+  }
   const configured = process.env.NEXT_PUBLIC_GAME_SERVER_URL;
-  if (configured) return configured;
+  if (configured && configured.trim()) return configured.trim();
   if (typeof window !== 'undefined') {
     warnMissingGameServerUrlOnce();
+    const isEngine =
+      (window as unknown as { __KILRUN_ENGINE__?: boolean }).__KILRUN_ENGINE__ ||
+      window.location.hostname === 'tauri.localhost';
+    if (isEngine || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'ws://127.0.0.1:2567';
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.hostname}:2567`;
   }
-  return 'ws://localhost:2567';
+  return 'ws://127.0.0.1:2567';
 }
 
 let warnedMissingGameServerUrl = false;

@@ -63,6 +63,7 @@ import {
   stopIngameMusic,
 } from '../effects/soundboard';
 import { pendingImpactCue } from '../effects/impact-sfx';
+import { DamageNumberFx } from '../effects/damage-numbers';
 import { playFootstepSfx, playMoveSfx, playTrapHitSfx, playWeaponFireSfx, playWeaponReloadSfx, supportPadKind } from '../effects/weapon-sfx';
 import { PauseMenu, useGameFullscreen } from '../ui/pause-menu';
 import {
@@ -569,6 +570,8 @@ export function MapPlayPreview({
     renderer.toneMappingExposure = 0.95;
     host.appendChild(renderer.domElement);
     Object.assign(renderer.domElement.style, { width: '100%', height: '100%', display: 'block' });
+
+    const damageFx = new DamageNumberFx(host);
 
     const bloom = createBloomComposer(renderer, scene, camera);
 
@@ -1925,6 +1928,8 @@ export function MapPlayPreview({
         });
       }
 
+      damageFx.update(frameDt, camera, host.clientWidth, host.clientHeight);
+
       if (matchSettingsRef.current.bloom) bloom.render();
       else renderer.render(scene, camera);
     };
@@ -1933,6 +1938,7 @@ export function MapPlayPreview({
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      damageFx.dispose();
       stopLoopedSound('sprint_start');
       stopIngameMusic();
       ro.disconnect();
@@ -1984,30 +1990,54 @@ export function MapPlayPreview({
       className={`${embedded ? 'absolute inset-0 z-0' : 'fixed inset-0 z-[9999]'} bg-black flex flex-col`}
     >
       <div className={`${embedded ? 'h-9 px-3' : 'h-11 px-4'} flex items-center gap-3 bg-black/80 border-b border-white/10 relative z-[60]`}>
-        <span className="text-sm font-bold text-emerald-300 tracking-wide uppercase shrink-0">
+        <span className="text-sm font-bold text-emerald-300 tracking-wide uppercase shrink-0 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           {embedded ? 'Map Preview' : 'Play Test'}
         </span>
+        {playTestRole && (
+          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase ${
+            playTestRole === 'trapper' || playTestRole === 'team_a'
+              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+              : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+          }`}>
+            {playTestRole}
+          </span>
+        )}
         <span className="text-[10px] sm:text-xs text-white/50 truncate min-w-0">
           {isTouch
             ? '3rd person · Left move · Right look · Jump / Use / Attack'
             : `${formatBindKey(bindings.aim)} aim · Mouse look · ${formatBindKey(bindings.pause)} pause`}
         </span>
-        <div className="ml-4 flex items-center gap-2 text-xs">
-          <span className="text-white/50">HP</span>
-          <div className="w-28 h-2 rounded bg-white/10 overflow-hidden">
-            <div
-              className={`h-full ${hp <= 25 ? 'bg-red-500' : hp <= 50 ? 'bg-amber-400' : 'bg-emerald-400'}`}
-              style={{ width: `${hp}%` }}
-            />
+        <div className="ml-4 flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-black tracking-wider text-rose-400 uppercase">HP</span>
+            <div className="w-28 h-2.5 rounded-full bg-black/60 border border-white/10 overflow-hidden shadow-inner">
+              <div
+                className={`h-full transition-all duration-150 ${
+                  hp <= 25 ? 'bg-rose-500' : hp <= 50 ? 'bg-amber-400' : 'bg-emerald-400'
+                }`}
+                style={{ width: `${Math.max(0, Math.min(100, hp))}%` }}
+              />
+            </div>
+            <span className={`tabular-nums font-bold text-xs ${hp <= 25 ? 'text-rose-400' : 'text-white/80'}`}>{hp}</span>
           </div>
-          <span className={hp <= 0 ? 'text-red-400 font-bold' : 'text-white/70'}>{hp}</span>
-          <span className="text-white/50 ml-2">EN</span>
-          <div className="w-24 h-2 rounded bg-white/10 overflow-hidden">
-            <div className="h-full bg-sky-400" style={{ width: `${energyUi}%` }} />
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-black tracking-wider text-sky-400 uppercase">EN</span>
+            <div className="w-24 h-2.5 rounded-full bg-black/60 border border-white/10 overflow-hidden shadow-inner">
+              <div
+                className="h-full bg-gradient-to-r from-sky-500 to-cyan-400 transition-all duration-75"
+                style={{ width: `${Math.max(0, Math.min(100, energyUi))}%` }}
+              />
+            </div>
+            <span className="tabular-nums font-bold text-xs text-sky-200">{energyUi}</span>
           </div>
-          <span className="text-white/70">{energyUi}</span>
+
           {ammoUi ? (
-            <span className="ml-2 text-amber-200/90 font-black tabular-nums">{ammoUi}</span>
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 border border-white/10">
+              <span className="text-[10px] text-white/40 uppercase font-bold">Ammo</span>
+              <span className="text-amber-300 font-black tabular-nums text-xs">{ammoUi}</span>
+            </div>
           ) : null}
         </div>
         <div className="ml-3 flex items-end gap-1.5">

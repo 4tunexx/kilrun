@@ -14,6 +14,7 @@ import {
 } from '@/lib/showcase';
 import { resolveShowcaseEntries } from '@/lib/showcase-actions';
 import { PUBLIC_USER_CARD_SELECT } from '@/lib/cosmetics';
+import { isStaffRole } from '@/lib/roles';
 
 async function getViewer() {
   const session = await auth();
@@ -94,9 +95,7 @@ export type ProfileCommentRow = {
   canDelete: boolean;
 };
 
-function isStaffRole(role: string | null | undefined) {
-  return role === 'admin' || role === 'moderator';
-}
+// isStaffRole imported from '@/lib/roles'
 
 /** Full public profile aggregate: identity, rank, stats, achievements, and social context. */
 export async function getPublicProfile(userId: string): Promise<PublicProfile | null> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createEmptyMap } from './map-document';
+import { createEmptyMap, ensureEnvironment } from './map-document';
 import { isUsefulUndoSnapshot } from './editor-history';
 
 describe('isUsefulUndoSnapshot', () => {
@@ -16,7 +16,11 @@ describe('isUsefulUndoSnapshot', () => {
 
   it('treats an environment-normalized clone of the same map as a no-op', () => {
     const live = createEmptyMap('Map 1');
-    const settled = { ...live, environment: { ...live.environment } };
+    const settled: typeof live = {
+      ...live,
+      environment: { ...ensureEnvironment(live) },
+    };
     expect(isUsefulUndoSnapshot(live, settled)).toBe(false);
   });
 });
+

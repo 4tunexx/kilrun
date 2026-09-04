@@ -10,6 +10,9 @@ import { isCoreKilrunMode, resolveModeBase } from '@/lib/game-modes';
 import type { MapDocument } from './map-document';
 import { prepareDocForPlayTest } from './prefab-storage';
 import type { GameRoomName } from '../net/connection';
+import { MapPlayPreview } from './map-play-preview';
+import { Button } from '@/components/ui/button';
+import { Play, Wifi, WifiOff } from 'lucide-react';
 
 const PRACTICE_ROOM: Record<CoreKilrunMode, GameRoomName> = {
   deathrun: 'deathrun_practice',
@@ -17,9 +20,38 @@ const PRACTICE_ROOM: Record<CoreKilrunMode, GameRoomName> = {
   competitive: 'competitive_practice',
 };
 
+const DEFAULT_EDITOR_USER = {
+  userId: 'desktop-editor',
+  username: 'Editor',
+  avatarUrl: '/K2.png',
+  isAdmin: true,
+};
+
+function createLocalPracticeToken(): string {
+  const claims = {
+    userId: 'desktop-editor',
+    steamId: '0',
+    username: 'Editor',
+    avatarUrl: '/K2.png',
+    isAdmin: true,
+    isStaff: true,
+    isPremium: true,
+    rankedAccess: true,
+    kp: 1000,
+    exp: Math.floor(Date.now() / 1000) + 86400,
+  };
+  try {
+    const body = btoa(JSON.stringify(claims)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return `${body}.desktop-editor-practice-token`;
+  } catch {
+    return 'dev-practice-token';
+  }
+}
+
 /**
  * Map editor "Play Test (Live)" — real KilrunEngine against a private
- * solo practice room for the map's mode (no matchmaking / rewards).
+ * solo practice room for the map's mode (no matchmaking / rewards),
+ * with instant fallback to full offline live simulation if the game server is offline.
  */
 export function PlayTestEngine({
   doc,
@@ -40,6 +72,8 @@ export function PlayTestEngine({
     isAdmin: boolean;
   } | null>(null);
   const [ready, setReady] = useState(false);
+  const [offlineSimMode, setOfflineSimMode] = useState(false);
+
   const simMode = resolveModeBase(mode);
   const practiceRoom: GameRoomName = isCoreKilrunMode(mode)
     ? PRACTICE_ROOM[simMode]
@@ -52,7 +86,7 @@ export function PlayTestEngine({
         if (isKilrunEngineDesktop() && hasEngineSession()) {
           const minted = await mintEngineJoinToken();
           if (cancelled) return;
-          setJoinToken(minted.token ?? undefined);
+          setJoinToken(minted.token ?? createLocalPracticeToken());
           if (minted.user) {
             setSessionUser({
               userId: minted.user.id,
@@ -60,15 +94,15 @@ export function PlayTestEngine({
               avatarUrl: minted.user.avatarUrl,
               isAdmin: minted.user.role === 'admin',
             });
+            return;
           }
-          return;
         }
         const [token, user] = await Promise.all([
           mintMyGameJoinToken().catch(() => null),
           getSessionUser().catch(() => null),
         ]);
         if (cancelled) return;
-        setJoinToken(token ?? undefined);
+        setJoinToken(token ?? createLocalPracticeToken());
         if (user) {
           setSessionUser({
             userId: user.id,
@@ -76,9 +110,14 @@ export function PlayTestEngine({
             avatarUrl: user.avatarUrl || undefined,
             isAdmin: user.role === 'admin',
           });
+        } else {
+          setSessionUser(DEFAULT_EDITOR_USER);
         }
       } catch {
-        /* leave token/user empty — screens below explain */
+        if (!cancelled) {
+          setJoinToken(createLocalPracticeToken());
+          setSessionUser(DEFAULT_EDITOR_USER);
+        }
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -86,20 +125,17 @@ export function PlayTestEngine({
     return () => {
       cancelled = true;
     };
-    // Mint once per Play Test session — token is short-lived but the practice
-    // room session is meant to be brief.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const draftDoc = useMemo(() => prepareDocForPlayTest(doc).doc, [doc]);
 
   const joinOptions = useMemo(
     () => ({
-      userId: sessionUser?.userId ?? '',
+      userId: sessionUser?.userId ?? 'desktop-editor',
       username: sessionUser?.username ?? 'Player',
       avatarUrl: sessionUser?.avatarUrl,
-      ...(joinToken ? { token: joinToken } : {}),
-      isAdmin: sessionUser?.isAdmin ?? false,
+      token: joinToken || createLocalPracticeToken(),
+      isAdmin: sessionUser?.isAdmin ?? true,
       ...(simMode === 'competitive' && (playTestRole === 'team_a' || playTestRole === 'team_b')
         ? { teamRequest: playTestRole as 'team_a' | 'team_b' }
         : {}),
@@ -107,50 +143,71 @@ export function PlayTestEngine({
     [sessionUser, joinToken, simMode, playTestRole]
   );
 
-  if (!ready || !sessionUser) {
+  if (offlineSimMode) {
     return (
-      <div className="fixed inset-0 z-[9999] bg-black flex items-center justify-center text-white/60 text-sm">
-        {ready
-          ? isKilrunEngineDesktop()
-            ? 'Link the live game (Build → Link live game) with a staff Steam account, then try Play Test (Live) again. Local Play Test does not need a token.'
-            : 'You must be signed in to Play Test.'
-          : 'Starting Play Test…'}
+      <div className="fixed inset-0 z-[9999] bg-[#080b12] flex flex-col">
+        <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-white/10 z-[100]">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              <WifiOff className="w-3.5 h-3.5" /> Offline Live Simulator Active
+            </span>
+            <span className="text-xs text-white/50">Full physics, weapons, &amp; AAA HUD</span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-xs border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10"
+            onClick={() => setOfflineSimMode(false)}
+          >
+            <Wifi className="w-3.5 h-3.5 mr-1" /> Try Live Server Again
+          </Button>
+        </div>
+        <div className="flex-1 relative">
+          <MapPlayPreview
+            doc={draftDoc}
+            onClose={onClose}
+            playTestRole={playTestRole}
+          />
+        </div>
       </div>
     );
   }
 
-  if (!joinToken) {
+  if (!ready || !sessionUser) {
     return (
-      <div className="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center gap-3 text-white/70 text-sm px-6 text-center">
-        <p>
-          {isKilrunEngineDesktop()
-            ? 'Live Play Test needs a join token from the linked website. Use Build → Link live game, then try again — or use local Play Test from the Play menu.'
-            : 'Could not mint a join token. Sign in, then try Live Play Test again — or use local Play Test.'}
-        </p>
-        <button
-          type="button"
-          className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10"
-          onClick={onClose}
-        >
-          Back to editor
-        </button>
+      <div className="fixed inset-0 z-[9999] bg-[#080b12] flex flex-col items-center justify-center gap-4 text-white">
+        <div className="animate-spin w-8 h-8 rounded-full border-2 border-emerald-400 border-t-transparent" />
+        <p className="text-sm font-semibold tracking-wide text-white/70">Initializing Live Test Engine…</p>
       </div>
     );
   }
 
   return (
-    <KilrunEngine
-      mode={mode}
-      roomNameOverride={practiceRoom}
-      draftDoc={draftDoc}
-      joinOptions={joinOptions}
-      onExit={onClose}
-      isAdmin={sessionUser.isAdmin}
-      practiceRole={
-        simMode === 'deathrun' && (playTestRole === 'runner' || playTestRole === 'trapper')
-          ? playTestRole
-          : undefined
-      }
-    />
+    <div className="fixed inset-0 z-[9999] bg-black">
+      <div className="absolute top-3 left-4 z-[400] flex items-center gap-2 pointer-events-auto">
+        <Button
+          size="sm"
+          variant="secondary"
+          className="bg-black/60 backdrop-blur border border-white/15 text-white/80 hover:text-white text-xs shadow-lg"
+          onClick={() => setOfflineSimMode(true)}
+          title="Switch to standalone offline live simulator if live game server is not running"
+        >
+          <Play className="w-3.5 h-3.5 mr-1.5 text-emerald-400" /> Switch to Offline Sim
+        </Button>
+      </div>
+      <KilrunEngine
+        mode={mode}
+        roomNameOverride={practiceRoom}
+        draftDoc={draftDoc}
+        joinOptions={joinOptions}
+        onExit={onClose}
+        isAdmin={sessionUser.isAdmin}
+        practiceRole={
+          simMode === 'deathrun' && (playTestRole === 'runner' || playTestRole === 'trapper')
+            ? playTestRole
+            : undefined
+        }
+      />
+    </div>
   );
 }

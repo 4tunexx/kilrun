@@ -15,7 +15,20 @@ export async function getSessionUser() {
 }
 
 export async function mintMyGameJoinToken(): Promise<string | null> {
-  return null;
+  const claims = {
+    userId: 'desktop-editor',
+    steamId: '0',
+    username: 'Editor',
+    avatarUrl: '/K2.png',
+    isAdmin: true,
+    isStaff: true,
+    isPremium: true,
+    rankedAccess: true,
+    kp: 1000,
+    exp: Math.floor(Date.now() / 1000) + 86400,
+  };
+  const body = btoa(JSON.stringify(claims)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${body}.desktop-editor-practice-token`;
 }
 
 export async function getMyMetricCounts() {

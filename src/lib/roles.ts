@@ -25,6 +25,11 @@ export function isStaff(role: string | null | undefined): boolean {
   return canModerate(role);
 }
 
+/** Alias for isStaff — used by engine/page.tsx and other server components. */
+export function isStaffRole(role: string | null | undefined): boolean {
+  return canModerate(role);
+}
+
 /**
  * Steam IDs promoted to admin on every login:
  * - hardcoded owner IDs (always)
