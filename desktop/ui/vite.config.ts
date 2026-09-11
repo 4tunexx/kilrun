@@ -44,13 +44,20 @@ function synthesizeServerStub(source: string): string {
   for (const m of source.matchAll(/export\s+const\s+(\w+)/g)) fns.add(m[1]);
   for (const m of source.matchAll(/export\s+type\s+(\w+)/g)) types.add(m[1]);
   for (const m of source.matchAll(/export\s+interface\s+(\w+)/g)) types.add(m[1]);
-  const lines = ['const _noop = async (..._args: unknown[]) => null;'];
+  const lines = [
+    'function unavailable(name: string) {',
+    '  return async (..._args: unknown[]) => {',
+    '    console.warn("[kilrun-engine] " + name + "() is not available in the desktop app. Link live game or use the website.");',
+    '    return { ok: false, unavailable: true, reason: name + " requires the live website" };',
+    '  };',
+    '}',
+  ];
   for (const t of types) lines.push(`export type ${t} = any;`);
   for (const f of fns) {
     if (types.has(f)) continue;
-    lines.push(`export const ${f} = _noop;`);
+    lines.push(`export const ${f} = unavailable(${JSON.stringify(f)});`);
   }
-  lines.push('export default _noop;');
+  lines.push('export default unavailable("default");');
   return lines.join('\n');
 }
 

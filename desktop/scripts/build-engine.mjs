@@ -45,7 +45,8 @@ const gameServerUrl = stripSlash(process.env.NEXT_PUBLIC_GAME_SERVER_URL || '');
 const shareGameServerUrl = gameServerUrl && !isLocalHost(gameServerUrl) ? gameServerUrl : '';
 
 const capPath = path.join(root, 'desktop/src-tauri/capabilities/default.json');
-const cap = JSON.parse(fs.readFileSync(capPath, 'utf8'));
+const capOriginal = fs.readFileSync(capPath, 'utf8');
+const cap = JSON.parse(capOriginal);
 const urls = new Set(cap.remote?.urls ?? []);
 urls.add('http://localhost:3000/*');
 urls.add('http://127.0.0.1:3000/*');
@@ -59,6 +60,14 @@ try {
 }
 cap.remote = { urls: [...urls] };
 fs.writeFileSync(capPath, `${JSON.stringify(cap, null, 2)}\n`);
+const restoreCapabilities = () => {
+  try {
+    fs.writeFileSync(capPath, capOriginal);
+  } catch {
+    /* best effort — do not hide a build failure */
+  }
+};
+process.on('exit', restoreCapabilities);
 
 const tauriDir = path.join(root, 'desktop/src-tauri');
 const env = {
@@ -85,9 +94,15 @@ function run(command, cwd = root) {
 
 run('node desktop/scripts/make-engine-icon.mjs');
 
-const vcvars =
-  'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat';
-const buildCmd = fs.existsSync(vcvars)
+const vcvarsCandidates = [
+  process.env.KILRUN_VCVARS,
+  'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat',
+  'C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat',
+  'C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional\\VC\\Auxiliary\\Build\\vcvars64.bat',
+].filter(Boolean);
+const vcvars = vcvarsCandidates.find((p) => fs.existsSync(p));
+try {
+const buildCmd = vcvars
   ? `"${vcvars}" && npx tauri build --config tauri.conf.json --no-bundle --no-sign`
   : 'npx tauri build --config tauri.conf.json --no-bundle --no-sign';
 run(buildCmd, tauriDir);
@@ -95,7 +110,7 @@ run(buildCmd, tauriDir);
 const exe = path.join(tauriDir, 'target/release/kilrun-engine.exe');
 run(`node desktop/scripts/stamp-exe-icon.mjs "${exe}"`);
 
-const bundleCmd = fs.existsSync(vcvars)
+const bundleCmd = vcvars
   ? `"${vcvars}" && npx tauri bundle --config tauri.conf.json --bundles nsis --no-sign`
   : 'npx tauri bundle --config tauri.conf.json --bundles nsis --no-sign';
 run(bundleCmd, tauriDir);
@@ -141,3 +156,6 @@ if (fs.existsSync(desktopDir)) {
   console.log(' ', path.join(desktopDir, 'Kilrun Engine.exe'));
 }
 console.log('Platform:', platformUrl);
+} finally {
+  restoreCapabilities();
+}

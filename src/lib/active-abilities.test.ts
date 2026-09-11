@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activateAbility, type AbilityHost } from '@shared/active-abilities';
+import { activateAbility, canActivateAbility, type AbilityHost } from '@shared/active-abilities';
 import type { CorePad } from '@shared/sim-core';
 
 function host(overrides: Partial<AbilityHost> = {}): AbilityHost {
@@ -39,6 +39,26 @@ function host(overrides: Partial<AbilityHost> = {}): AbilityHost {
 function wallAt(x: number): CorePad {
   return { x, y: 0, z: 1, width: 1, depth: 10, height: 3 };
 }
+
+describe('canActivateAbility', () => {
+  it('denies cooldown, energy, and unlearned the same way activateAbility does', () => {
+    expect(canActivateAbility(host({ energy: 0 }), 'fly', 1000, { fly: 1 }).reason).toBe('energy');
+    expect(
+      canActivateAbility(
+        host({ ability: { ...host().ability, flyCooldownEndsAt: 5000 } }),
+        'fly',
+        1000,
+        { fly: 1 }
+      ).reason
+    ).toBe('cooldown');
+    expect(canActivateAbility(host(), 'fly', 1000, { fly: 0 }).reason).toBe('unlearned');
+    expect(canActivateAbility(host(), 'fly', 1000, { fly: 1 }).ok).toBe(true);
+  });
+
+  it('skips the unlearned check when levels are omitted', () => {
+    expect(canActivateAbility(host(), 'fly', 1000, null).ok).toBe(true);
+  });
+});
 
 describe('Hook / backflip teleport wall-clip guard', () => {
   it('stops the hook pull at a wall instead of teleporting through it', () => {

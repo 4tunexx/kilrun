@@ -9,7 +9,7 @@ import { packMatchLoadout } from '@/lib/match-loadout';
 import { getSiteSettings } from '@/lib/progression-actions';
 import { getRankForKp, KP_DEFAULT } from '@/lib/kp';
 import { parseRankConfig, RANK_MM_OPEN_KEY } from '@/lib/rank-config';
-import { mintMyGameJoinToken } from '@/lib/actions';
+import { mintMyGameJoinToken, mintMyLoadoutToken } from '@/lib/actions';
 import {
   clearPartyQueueRoom,
   getMyParty,
@@ -69,6 +69,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   const [mmWaitSec, setMmWaitSec] = useState(12);
   const [minSameRankPlayers, setMinSameRankPlayers] = useState(4);
   const [joinToken, setJoinToken] = useState<string | undefined>(undefined);
+  const [loadoutToken, setLoadoutToken] = useState<string | undefined>(undefined);
   const [tokenReady, setTokenReady] = useState(false);
   const [partyReady, setPartyReady] = useState(false);
   const [party, setParty] = useState<PartyDto | null>(null);
@@ -99,16 +100,18 @@ const LobbyView: React.FC<LobbyViewProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    void mintMyGameJoinToken()
-      .then((token) => {
+    void Promise.all([mintMyGameJoinToken(), mintMyLoadoutToken()])
+      .then(([token, loadout]) => {
         if (!cancelled) {
           setJoinToken(token ?? undefined);
+          setLoadoutToken(loadout ?? undefined);
           setTokenReady(true);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setJoinToken(undefined);
+          setLoadoutToken(undefined);
           setTokenReady(true);
         }
       });
@@ -283,6 +286,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       rankedAccess: canRanked,
       equippedSkinsJson: loadout.equippedSkinsJson,
       weaponCombat: loadout.weaponCombat,
+      ...(loadoutToken ? { loadoutToken } : {}),
       ...(joinByRoomId ? { joinByRoomId } : {}),
       ...(mode === 'competitive' && competitiveQueue === 'ranked'
         ? { rankKey, mmWaitSec, minSameRankPlayers }
@@ -303,6 +307,7 @@ const LobbyView: React.FC<LobbyViewProps> = ({
       username,
       avatarUrl,
       joinToken,
+      loadoutToken,
       isAdmin,
       isStaff,
       kp,

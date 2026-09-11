@@ -7,6 +7,7 @@ import { compactSkinsForMatch } from '@/lib/match-loadout';
 import { getAbilityStatBonuses, parseAbilityLevels } from '@shared/ability-progression';
 import { loadPowerDefinitions } from '@/lib/power-definitions';
 import { getSiteSecretValue } from '@/lib/site-secrets';
+import { loadoutSecretFromEnv, signLoadoutToken } from '@shared/signed-loadout';
 
 export const runtime = 'nodejs';
 
@@ -57,6 +58,19 @@ export async function GET(req: NextRequest) {
     const weaponCombat = resolveWeaponCombat(findWeaponAttachment(packed));
     const abilityStatBonuses = getAbilityStatBonuses(parseAbilityLevels(user.gameAbilities));
 
+    let loadoutToken: string | null = null;
+    try {
+      const secret = loadoutSecretFromEnv();
+      if (secret) {
+        loadoutToken = signLoadoutToken(
+          { userId: user.id, equippedSkinsJson, weaponCombat },
+          secret
+        );
+      }
+    } catch {
+      loadoutToken = null;
+    }
+
     return NextResponse.json({
       ok: true,
       userId: user.id,
@@ -64,6 +78,7 @@ export async function GET(req: NextRequest) {
       weaponCombat,
       abilityStatBonuses,
       abilityLevels: parseAbilityLevels(user.gameAbilities),
+      loadoutToken,
     });
   } catch (err) {
     console.error('[api/game/player-loadout]', err);

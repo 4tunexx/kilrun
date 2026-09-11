@@ -56,6 +56,7 @@ import { HelpGuideOverlay, KeyboardShortcutsOverlay } from '@/components/game/ed
 import { EngineHome, type CloudBadge } from './engine-home';
 import { PluginManagerDialog } from './plugin-manager';
 import { loadDesktopModules, syncOfficialModules } from '@/lib/engine/plugin-loader';
+import { onEngineIssue } from '@/lib/engine/engine-errors';
 import { isAdminRole } from '@/lib/roles';
 import { DEFAULT_EDITOR_PERF_MODE, type EditorPerfMode, type EditorViewLayout } from '@/components/game/editor/editor-viewport';
 import { getSidebarPlugins } from '@/components/game/editor/engine/registry';
@@ -192,13 +193,24 @@ export function EngineApp({
           setMapThumbnail,
         });
         try {
-          await syncOfficialModules();
+          const sync = await syncOfficialModules();
+          if (!cancelled && sync.error) {
+            toast({
+              title: 'Official modules unavailable',
+              description: sync.error,
+              variant: 'destructive',
+            });
+          }
         } catch (err) {
           console.warn('[kilrun-engine] official module sync', err);
         }
         const plugins = await loadDesktopModules();
         if (!cancelled && plugins.errors.length) {
-          console.warn('[kilrun-engine] plugin load', plugins.errors);
+          toast({
+            title: 'Some modules failed to load',
+            description: plugins.errors.map((row) => `${row.id}: ${row.error}`).join(' · '),
+            variant: 'destructive',
+          });
         }
         try {
           const update = await fetchEngineUpdateInfo();
@@ -217,7 +229,21 @@ export function EngineApp({
     return () => {
       cancelled = true;
     };
-  }, [refresh]);
+  }, [refresh, toast]);
+
+  React.useEffect(() => {
+    let lastAt = 0;
+    return onEngineIssue((issue) => {
+      const now = Date.now();
+      if (now - lastAt < 2500) return;
+      lastAt = now;
+      toast({
+        title: 'Engine I/O failed',
+        description: `${issue.source}: ${issue.message}`,
+        variant: 'destructive',
+      });
+    });
+  }, [toast]);
 
   React.useEffect(() => {
     void refreshCloud();

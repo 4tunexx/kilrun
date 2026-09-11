@@ -117,6 +117,7 @@ interface JoinOptions {
   mmWaitSec?: number;
   minSameRankPlayers?: number;
   equippedSkinsJson?: string;
+  loadoutToken?: string;
   weaponCombat?: {
     kind?: string;
     range?: number;
@@ -1000,7 +1001,7 @@ export class CompetitiveRoom extends Room<RoomState> {
     player.avatarUrl = claims.avatarUrl || '';
     this.steamIdBySession.set(client.sessionId, claims.steamId || '');
     player.kp = claims.kp;
-    const trusted = await fetchTrustedLoadout(player.userId);
+    const trusted = await fetchTrustedLoadout(player.userId, options.loadoutToken);
     // Competitive disallows body-replacement cosmetics (body/fullbody slots)
     // so Team A/B colors stay readable — small accessories still allowed.
     applyLoadoutToPlayer(player, trusted ?? options, { allowBodySkins: false });

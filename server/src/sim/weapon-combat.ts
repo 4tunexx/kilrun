@@ -4,13 +4,15 @@
 
 import type { PlayerState } from '../schema/RoomState.js';
 import { isHitByShot } from './collision.js';
+import { effectiveWeaponCone as effectiveWeaponConeShared } from '../../../shared/hitscan.js';
 
 export function effectiveWeaponCone(player: PlayerState, aimHeld: boolean): number {
-  const base = player.weaponConeRadians > 0 ? player.weaponConeRadians : 0.18;
-  const ads = player.weaponAdsConeScale > 0 ? player.weaponAdsConeScale : 0.85;
-  const hip = player.weaponHipfireConeScale > 0 ? player.weaponHipfireConeScale : 1;
-  const scale = aimHeld ? ads : hip;
-  return Math.max(0.015, Math.min(0.9, base * scale));
+  return effectiveWeaponConeShared({
+    coneRadians: player.weaponConeRadians,
+    aimHeld,
+    adsConeScale: player.weaponAdsConeScale,
+    hipfireConeScale: player.weaponHipfireConeScale,
+  });
 }
 
 export function weaponPelletCount(player: PlayerState): number {

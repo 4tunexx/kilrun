@@ -3,31 +3,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Box,
   Save,
-  Download,
   Upload,
   X,
-  Move3d,
-  RotateCcw,
-  Maximize2,
-  Grid3x3,
   Plus,
   Trash2,
-  Copy,
   Flag,
-  Play,
-  Palette,
-  Navigation,
   User,
-  CircleDot,
-  Undo2,
-  Redo2,
-  HelpCircle,
-  Crosshair,
-  Skull,
-  Zap,
-  Ruler,
   Menu,
   EyeOff,
   Eye,
@@ -42,27 +24,11 @@ import {
   FlagTriangleRight,
   PersonStanding,
   Home,
-  Heart,
-  HeartPulse,
-  Bug,
-  MousePointer2,
-  Paintbrush,
-  Magnet,
-  FlipHorizontal,
-  FlipVertical,
-  RotateCw,
-  PaintBucket,
-  Hammer,
-  LayoutGrid,
-  Square,
   Link2,
   Unlink2,
   Sparkles,
   Scissors,
   Combine,
-  Route,
-  Package,
-  Fan,
   Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -117,6 +83,15 @@ import {
   entityWorldSize,
 } from './map-document';
 import { isUsefulUndoSnapshot } from './editor-history';
+import { EditorGraphicsOverlay } from './map-editor-chrome';
+import {
+  MapEditorPlayTestRolePrompt,
+  MapEditorPrefabUploadDialog,
+  type PlayTestRole,
+} from './map-editor-dialogs';
+import { MapEditorTopBar } from './map-editor-top-bar';
+import { MapEditorToolstrip } from './map-editor-toolstrip';
+import { collisionMismatchIds } from './collision-mismatch';
 import {
   defaultSizeForHammer,
   HAMMER_PRIMITIVES,
@@ -127,7 +102,6 @@ import {
 import { TextureAtlasPicker } from './texture-atlas-picker';
 import { PLAY_TEST_MESH_BAKE_OPTS } from './play-test-bake';
 import { worldScaleToUvRepeat } from './editor-mesh';
-import type { SelectionTransformOp } from './selection-transform';
 import { ModifyPanel } from './modify-panel';
 import { getKilrunModeInfo } from '@/lib/game-modes';
 import { PROTOTYPE_MODELS } from './prototype-catalog';
@@ -170,9 +144,8 @@ import { ensureMapPlayerEntity } from './player-avatar';
 import type { TpsViewSettings } from '../tps/tps-view-settings';
 import { sanitizeTpsView } from '../tps/tps-view-settings';
 import type { SkinAttachment } from '@/lib/player-skins';
-import { SNAP_FACE_LABELS, SnapFacePicker } from './snap-face-picker';
 import './engine/builtins';
-import { activateExtensionTool, emitPlaytest, listExtensionTools } from '@/lib/engine/plugin-sdk';
+import { emitPlaytest } from '@/lib/engine/plugin-sdk';
 import { getInspectorPlugins, getSidebarPlugin, getSidebarPlugins, isStudioPluginTab } from './engine/registry';
 import type { MapEditorBrains, MapEditorStudioOptions } from './engine/types';
 import { hydrateWeaponCatalogFromApi } from '@/lib/weapon-catalog';
@@ -348,9 +321,7 @@ export function MapEditor({
   const [activeLayerId, setActiveLayerId] = useState(starter.doc.layers[0]?.id ?? '');
   const [freeFly, setFreeFly] = useState(false);
   const [playTest, setPlayTest] = useState(false);
-  const [playTestRole, setPlayTestRole] = useState<
-    'runner' | 'trapper' | 'team_a' | 'team_b' | undefined
-  >(undefined);
+  const [playTestRole, setPlayTestRole] = useState<PlayTestRole | undefined>(undefined);
   const [playTestRolePrompt, setPlayTestRolePrompt] = useState(false);
   /** "Play Test (Live)" — real KilrunEngine game client (HUD/chat/admin/skill
    * menu) against a private practice room, instead of the lightweight local
@@ -2205,6 +2176,33 @@ export function MapEditor({
     }
   };
 
+  const bakeMismatchedSolidCollision = async () => {
+    const live = apiRef.current?.getDoc() ?? docRef.current;
+    const ids = collisionMismatchIds(live);
+    const targets = live.entities.filter((e) => ids.has(e.id));
+    if (!targets.length) {
+      toast({
+        title: 'Nothing to bake',
+        description: 'No amber-flagged solids left.',
+      });
+      return;
+    }
+    setBakingAllMesh(true);
+    let ok = 0;
+    let fail = 0;
+    for (const e of targets) {
+      const result = await apiRef.current?.bakeMeshCollision(e.id);
+      if (result?.ok) ok++;
+      else fail++;
+    }
+    setBakingAllMesh(false);
+    toast({
+      title: 'Flagged collision baked',
+      description: `${ok} solid${ok === 1 ? '' : 's'} fitted${fail ? ` (${fail} failed)` : ''}.`,
+      variant: fail && !ok ? 'destructive' : undefined,
+    });
+  };
+
   /** "Play Test (Live)" — same pre-play snapshot/pause/persist as startPlay,
    * but launches the real KilrunEngine against a private practice room
    * instead of the local MapPlayPreview renderer. */
@@ -2750,37 +2748,21 @@ export function MapEditor({
 
       {/* Top bar */}
       {!uiCollapsed && (
-      <div className={`h-12 border-b flex items-center gap-2 px-3 overflow-x-auto shrink-0 ${
-        variant === 'engine'
-          ? 'border-red-500/20 bg-[#0c1018] relative z-10'
-          : 'border-white/10 bg-[#121a24] relative z-[60]'
-      }`}>
-        <span className={`text-xs font-bold tracking-widest uppercase shrink-0 ${
-          variant === 'engine' ? 'text-red-300/90' : 'text-cyan-300/90'
-        }`}>{variant === 'engine' ? 'Map' : 'Map Editor'}</span>
-        <span
-          className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded shrink-0 ${modeInfo.badgeClass}`}
-          title={modeInfo.editorBlurb}
-        >
-          {modeInfo.shortTitle}
-        </span>
-        <input
-          className="ml-2 bg-black/40 border border-white/10 rounded px-2 py-1 text-sm w-40 sm:w-56 shrink-0"
-          value={doc.name}
-          onChange={(e) => {
-            const name = e.target.value;
+        <MapEditorTopBar
+          variant={variant}
+          modeInfo={modeInfo}
+          mapName={doc.name}
+          onMapName={(name) => {
             const live = apiRef.current?.getDoc() ?? docRef.current;
             const next = { ...live, name };
             docRef.current = next;
             setDoc(next);
             setDirty(true);
           }}
-        />
-        <select
-          className="bg-black/40 border border-white/10 rounded px-2 py-1 text-sm shrink-0"
-          value={mapId}
-          onChange={(e) => {
-            const id = e.target.value;
+          mapId={mapId}
+          maps={maps}
+          gameMode={gameMode}
+          onSwitchMap={(id) => {
             const loaded = loadMapDetailed(id);
             if (!loaded.ok) {
               toast({
@@ -2813,140 +2795,29 @@ export function MapEditor({
               });
             }
           }}
-        >
-          {maps
-            .filter((m) => (m.gameMode ?? 'deathrun') === gameMode)
-            .map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.corrupt ? `${m.name} (corrupted)` : m.name}
-            </option>
-          ))}
-        </select>
-
-        <Button
-          size="sm"
-          className="ml-2 bg-emerald-600 hover:bg-emerald-500 text-white shrink-0 font-semibold shadow-sm"
-          title="Instant Play Test (F5) — Test play with full physics and AAA HUD"
-          onClick={() => requestPlayTest('preview')}
-        >
-          <Play className="w-4 h-4 mr-1 fill-white" /> Play Test <span className="ml-1 text-[10px] opacity-75 font-mono">F5</span>
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="ml-1.5 border-amber-500/60 text-amber-300 hover:bg-amber-500/10 shrink-0 font-medium"
-          title="Play Test (Live) (Shift+F5) — Real practice room with live Colyseus game server"
-          onClick={() => requestPlayTest('live')}
-        >
-          <Play className="w-4 h-4 mr-1 text-amber-400" /> Live Test
-        </Button>
-        {variant !== 'engine' ? (
-        <Button
-          size="sm"
-          variant="secondary"
-          className={`shrink-0 ml-1.5 ${isLiveHere ? 'border border-emerald-400/50 text-emerald-200' : ''}`}
-          onClick={publishToMatch}
-          title={
-            isLiveHere
-              ? 'This is the cloud Active/MAIN map live matches load'
-              : cloudActive
-                ? liveCloudMismatchMessage(doc.name, cloudActive)
-                : 'Publish this map as the live match map for this mode'
-          }
-        >
-          {isLiveHere ? 'MAIN map ✓' : 'Set as MAIN map'}
-        </Button>
-        ) : (
-          <span className={`ml-2 shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded ${
-            isLiveHere ? 'border border-red-400/50 text-red-200 bg-red-500/15' : 'text-slate-400 bg-white/5'
-          }`}>
-            {isLiveHere ? 'MAIN' : dirty ? 'Unsaved' : 'Draft'}
-          </span>
-        )}
-
-        <Button
-          size="sm"
-          variant="secondary"
-          className="shrink-0"
-          disabled={bakingAllMesh}
-          onClick={() => bakeAllSolidMeshCollision({ force: true })}
-          title="Re-fit collision to the real mesh shape for every Solid prop, including ones with an existing bake — use this to pick up a fixed voxelizer/collision algorithm on props baked before the fix."
-        >
-          {bakingAllMesh ? 'Fitting collision…' : 'Fix Solid Collision'}
-        </Button>
-
-        {!isMobile && (
-          <Button
-            size="sm"
-            variant={freeFly ? 'default' : 'secondary'}
-            className={`shrink-0 ${freeFly ? 'bg-amber-600 hover:bg-amber-500' : ''}`}
-            onClick={() => apiRef.current?.setFreeFly(!freeFly)}
-            title="Toggle free fly — WASD move, mouse look, Space up, C down. Click again to exit."
-          >
-            <Navigation className="w-4 h-4 mr-1" /> {freeFly ? 'Free Fly ON' : 'Free Fly'}
-          </Button>
-        )}
-
-        <Button size="sm" variant="secondary" className="shrink-0" disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)">
-          <Undo2 className="w-4 h-4" />
-        </Button>
-        <Button size="sm" variant="secondary" className="shrink-0" disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Y)">
-          <Redo2 className="w-4 h-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="shrink-0"
-          onClick={() => setShowHelp((v) => !v)}
-          title="Quick tips overlay"
-        >
-          <HelpCircle className="w-4 h-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="shrink-0 border border-cyan-400/40 text-cyan-100"
-          onClick={toggleEditorUi}
-          title={shortcutTitle('toggle-ui', 'Hide all menus for placing — Ctrl+H / Esc / Show UI to restore')}
-        >
-          <EyeOff className="w-4 h-4 mr-1" /> Hide UI
-        </Button>
-
-        <div className="flex-1 min-w-2" />
-        {isLiveHere && (
-          <span
-            className="shrink-0 flex items-center gap-1.5 rounded-full border border-red-400/60 bg-red-500/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-red-200"
-            title="This document is the cloud Active/MAIN map live matches load — Save publishes to new matches."
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
-            Live map
-          </span>
-        )}
-        {variant !== 'engine' ? (
-        <>
-        <Button
-          size="sm"
-          variant="secondary"
-          className={`shrink-0 ${dirty ? 'border border-amber-400/60 text-amber-100 bg-amber-500/15' : ''}`}
-          onClick={() => handleManualSave()}
-          title={dirty ? 'Unsaved changes — click to save' : 'Saved'}
-        >
-          <Save className="w-4 h-4 mr-1" /> {dirty ? 'Save •' : 'Save'}
-        </Button>
-        <Button size="sm" variant="secondary" className="shrink-0" onClick={doExport}>
-          <Download className="w-4 h-4 mr-1" /> Export
-        </Button>
-        <Button size="sm" variant="secondary" className="shrink-0" onClick={() => fileRef.current?.click()}>
-          <Upload className="w-4 h-4 mr-1" /> Import
-        </Button>
-        </>
-        ) : null}
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/json,.json"
-          className="hidden"
-          onChange={async (e) => {
+          onPlayTest={() => requestPlayTest('preview')}
+          onLiveTest={() => requestPlayTest('live')}
+          isLiveHere={isLiveHere}
+          cloudActive={Boolean(cloudActive)}
+          liveMismatch={cloudActive ? liveCloudMismatchMessage(doc.name, cloudActive) : ''}
+          onPublish={publishToMatch}
+          dirty={dirty}
+          bakingAllMesh={bakingAllMesh}
+          onFixCollision={() => void bakeAllSolidMeshCollision({ force: true })}
+          isMobile={isMobile}
+          freeFly={freeFly}
+          onToggleFreeFly={() => apiRef.current?.setFreeFly(!freeFly)}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={undo}
+          onRedo={redo}
+          onToggleHelp={() => setShowHelp((v) => !v)}
+          onHideUi={toggleEditorUi}
+          onSave={() => handleManualSave()}
+          onExport={doExport}
+          onImportClick={() => fileRef.current?.click()}
+          fileRef={fileRef}
+          onImportFile={async (e) => {
             const f = e.target.files?.[0];
             if (!f) return;
             try {
@@ -2985,11 +2856,8 @@ export function MapEditor({
             }
             e.target.value = '';
           }}
+          onClose={requestClose}
         />
-        <Button size="sm" variant="destructive" className="shrink-0" onClick={requestClose} title={variant === 'engine' ? 'Back to projects (Esc)' : 'Exit (Esc)'}>
-          <X className="w-4 h-4" />
-        </Button>
-      </div>
       )}
 
       {!uiCollapsed && cloudActive && !isCloudLive && (
@@ -3377,610 +3245,65 @@ export function MapEditor({
           )}
 
           {!uiCollapsed && toolsOpen && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 border border-white/15 rounded-xl px-2 py-1.5 backdrop-blur z-[90] max-w-[calc(100vw-7rem)] overflow-x-auto">
-            <ToolBtn
-              active={editTool === 'select' && !pendingPlaceKind}
-              onClick={() => {
-                setExtensionToolId(null);
-                setEditTool('select');
-                apiRef.current?.clearPendingPlace();
-                setPendingPlaceKind(null);
-              }}
-              title="Select (V) — click objects; cancels spawn placement"
-            >
-              <MousePointer2 className="w-4 h-4" />
-            </ToolBtn>
-            <ToolBtn
-              active={editTool === 'brush'}
-              onClick={() => {
-                setEditTool('brush');
-                if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
-              }}
-              title={
-                brush && brush !== HAMMER_SOLID_MODEL
-                  ? `Brush (B) — click to place ${brush}`
-                  : 'Brush (B) — pick a model in Assets'
-              }
-            >
-              <Paintbrush className="w-4 h-4" />
-            </ToolBtn>
-            <ToolBtn
-              active={editTool === 'bucket'}
-              onClick={() => {
-                // If a scene object is selected, paint that model; else keep library brush.
-                const selModel = selected?.model;
-                if (selModel && selModel !== HAMMER_SOLID_MODEL) setBrush(selModel);
-                else if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
-                setEditTool('bucket');
-                if (freeFly) apiRef.current?.setFreeFly(false);
-              }}
-              title={
-                brush && brush !== HAMMER_SOLID_MODEL
-                  ? `Paint Bucket (P) — hold+drag paints ${brush}; camera locked`
-                  : 'Paint Bucket (P) — pick a model, then hold+drag'
-              }
-            >
-              <PaintBucket className="w-4 h-4 text-fuchsia-300" />
-            </ToolBtn>
-            <ToolBtn
-              active={editTool === 'hammer'}
-              onClick={() => {
-                setEditTool('hammer');
-                setMode('scale');
-                if (freeFly) apiRef.current?.setFreeFly(false);
-              }}
-              title="Hammer++ (H) — place solid shapes; hold-drag to paint; shape sticks until you change it"
-            >
-              <Hammer className="w-4 h-4 text-amber-300" />
-            </ToolBtn>
-            {editTool === 'hammer' && (
-              <label className="flex items-center gap-1 text-[10px] text-amber-100/90 ml-1">
-                <span className="uppercase tracking-wide text-white/40">Shape</span>
-                <select
-                  className="bg-black/50 border border-amber-500/40 rounded px-1.5 py-1 text-xs text-white max-w-[7.5rem]"
-                  value={hammerShape}
-                  onChange={(e) => setHammerShape(e.target.value as HammerPrimitive)}
-                  title="Sticky Hammer shape for the next solids you place"
-                >
-                  {HAMMER_PRIMITIVES.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <ToolBtn
-              active={editTool === 'paint'}
-              onClick={() => {
-                setExtensionToolId(null);
-                setEditTool('paint');
-                if (freeFly) apiRef.current?.setFreeFly(false);
-                selectLibraryTab('textures');
-              }}
-              title="Texture brush — tap objects to apply selected texture + UV tile"
-            >
-              <Palette className="w-4 h-4 text-sky-300" />
-            </ToolBtn>
-            {listExtensionTools().map((tool) => (
-              <ToolBtn
-                key={`${tool.moduleId}:${tool.id}`}
-                active={extensionToolId === `${tool.moduleId}:${tool.id}`}
-                onClick={() => {
-                  setEditTool('select');
-                  setExtensionToolId(`${tool.moduleId}:${tool.id}`);
-                  activateExtensionTool(tool.moduleId, tool.id);
-                }}
-                title={`${tool.label} — extension tool`}
-              >
-                <span className="text-[8px] font-bold leading-none px-0.5">{tool.label}</span>
-              </ToolBtn>
-            ))}
-            <div className="w-px h-6 bg-white/15 mx-1" />
-            <ToolBtn
-              active={viewLayout === 'single'}
-              onClick={() => setViewLayout('single')}
-              title="Single 3D view"
-            >
-              <Square className="w-4 h-4" />
-            </ToolBtn>
-            <ToolBtn
-              active={viewLayout === 'split'}
-              onClick={() => setViewLayout('split')}
-              title="Split: 3D + top (shared scene)"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </ToolBtn>
-            <ToolBtn
-              active={viewLayout === 'triple'}
-              onClick={() => setViewLayout('triple')}
-              title="Triple: 3D + top + side"
-            >
-              <Box className="w-4 h-4" />
-            </ToolBtn>
-            <ToolBtn
-              active={false}
-              onClick={() => apiRef.current?.setCameraPreset('top')}
-              title="Camera: top view"
-            >
-              <span className="text-[9px] font-bold">TOP</span>
-            </ToolBtn>
-            <ToolBtn
-              active={false}
-              onClick={() => apiRef.current?.setCameraPreset('side')}
-              title="Camera: side view"
-            >
-              <span className="text-[9px] font-bold">SIDE</span>
-            </ToolBtn>
-            <div className="w-px h-6 bg-white/15 mx-1" />
-            <ToolBtn
-              active={mode === 'translate'}
-              onClick={() => {
-                setEditTool('select');
-                setMode('translate');
-              }}
-              title="Move (W) — switch to Select so the gizmo can drag"
-            >
-              <Move3d className="w-4 h-4" />
-            </ToolBtn>
-            <div className="relative">
-              <ToolBtn
-                btnRef={rotateMenuBtnRef}
-                active={mode === 'rotate' || rotateMenuOpen}
-                onClick={() => {
-                  setEditTool('select');
-                  setMode('rotate');
-                  setRotateMenuAnchorRect(rotateMenuBtnRef.current?.getBoundingClientRect() ?? null);
-                  setRotateMenuOpen((v) => !v);
-                }}
-                title="Rotate (E) — click for 90° / flip presets (works on groups)"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </ToolBtn>
-              {rotateMenuOpen && (
-                <RotatePresetPicker
-                  anchorRect={rotateMenuAnchorRect}
-                  onPick={(op) => {
-                    const ok = apiRef.current?.transformSelection(op);
-                    setRotateMenuOpen(false);
-                    toast({
-                      title: ok ? 'Rotated' : 'Select an object first',
-                      description: ok
-                        ? 'Applied to the whole selection / group.'
-                        : 'Click an unlocked object, then use Rotate again.',
-                      ...(ok ? {} : { variant: 'destructive' as const }),
-                    });
-                  }}
-                  onClose={() => setRotateMenuOpen(false)}
-                />
-              )}
-            </div>
-            <ToolBtn
-              active={mode === 'scale'}
-              onClick={() => {
-                setEditTool('select');
-                setMode('scale');
-              }}
-              title="Scale (R) — switch to Select so the gizmo can drag"
-            >
-              <Maximize2 className="w-4 h-4" />
-            </ToolBtn>
-            <div className="w-px h-6 bg-white/15 mx-1" />
-            <ToolBtn active={gridSnap} onClick={() => setGridSnap((v) => !v)} title="Grid snap XZ (G)">
-              <Grid3x3 className="w-4 h-4" />
-            </ToolBtn>
-            <ToolBtn active={snapY} onClick={() => setSnapY((v) => !v)} title="Also snap Y height">
-              <span className="text-[10px] font-bold">Y</span>
-            </ToolBtn>
-            <div className="relative">
-              <ToolBtn
-                btnRef={snapMagnetBtnRef}
-                active={snapFaceMenuOpen}
-                onClick={applyMagnetSnap}
-                title={
-                  selectedIds.length >= 2
-                    ? 'Snap (magnet) — choose which side to join'
-                    : 'Attach to the nearest object (or the floor if nothing is close)'
-                }
-              >
-                <Magnet className="w-4 h-4 text-emerald-300" />
-              </ToolBtn>
-              {snapFaceMenuOpen && (
-                <SnapFacePicker
-                  anchorRect={snapFaceAnchorRect}
-                  onPick={(face, opts) => {
-                    const ok = apiRef.current?.snapSelectedToFace(face, selectedIds, opts);
-                    setSnapFaceMenuOpen(false);
-                    if (ok) {
-                      toast({
-                        title: 'Snapped',
-                        description: `Joined ${SNAP_FACE_LABELS[face]} of the first-selected object${
-                          opts.alignRotation ? ', turned to match its angle' : ''
-                        }.`,
-                      });
-                    } else {
-                      toast({
-                        title: 'Snap failed',
-                        description: 'Select 2+ unlocked objects, then try again.',
-                        variant: 'destructive',
-                      });
-                    }
-                  }}
-                  onSnapTogether={() => {
-                    const ok = apiRef.current?.snapSelectedTogether(selectedIds);
-                    setSnapFaceMenuOpen(false);
-                    toast({
-                      title: ok ? 'Lined up' : 'Line up failed',
-                      description: ok
-                        ? 'Shared bottom, edge to edge along X.'
-                        : 'Select 2+ unlocked objects, then try again.',
-                      variant: ok ? undefined : 'destructive',
-                    });
-                  }}
-                  onClose={() => setSnapFaceMenuOpen(false)}
-                />
-              )}
-            </div>
-            <ToolBtn
-              active={measureMode}
-              onClick={() => {
-                const next = !measureMode;
-                setMeasureMode(next);
-                apiRef.current?.setMeasureMode(next);
-                if (next && freeFly) apiRef.current?.setFreeFly(false);
-              }}
-              title="Measure distance (click two points)"
-            >
-              <Ruler className="w-4 h-4" />
-            </ToolBtn>
-            <ToolBtn
-              active={showAllCollisionGizmos}
-              onClick={() => {
-                const next = !showAllCollisionGizmos;
-                setShowAllCollisionGizmos(next);
-                apiRef.current?.setShowAllCollisionGizmos(next);
-              }}
-              title="Show all solid/collision pads (green) — not selection"
-            >
-              <span className="text-[9px] font-bold text-emerald-300">COL</span>
-            </ToolBtn>
-            <div className="flex items-center gap-0.5">
-              {([0.25, 0.5, 1, 2, 4] as const).map((g) => (
-                <button
-                  key={g}
-                  type="button"
-                  onClick={() => {
-                    scheduleHistory();
-                    const live = apiRef.current?.getDoc() ?? docRef.current;
-                    const next = { ...live, gridSize: g };
-                    docRef.current = next;
-                    setDoc(next);
-                    apiRef.current?.setGridSize(g);
-                    setDirty(true);
-                  }}
-                  className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${
-                    doc.gridSize === g
-                      ? 'bg-sky-500/80 text-white'
-                      : 'bg-white/10 text-white/60 hover:bg-white/20'
-                  }`}
-                  title={`Grid size ${g}`}
-                >
-                  {g}
-                </button>
-              ))}
-              <input
-                type="number"
-                min={0.1}
-                max={16}
-                step={0.25}
-                value={doc.gridSize}
-                className="w-12 bg-black/50 border border-white/10 rounded px-1 py-0.5 text-[10px] ml-0.5"
-                onChange={(e) => {
-                  const n = Math.max(0.1, Math.min(16, Number(e.target.value) || 1));
-                  scheduleHistory();
-                  const live = apiRef.current?.getDoc() ?? docRef.current;
-                  const next = { ...live, gridSize: n };
-                  docRef.current = next;
-                  setDoc(next);
-                  apiRef.current?.setGridSize(n);
-                  setDirty(true);
-                }}
-                title="Custom grid size"
-              />
-            </div>
-            <div className="flex items-center gap-0.5">
-              {(
-                [
-                  ['off', 'OFF', 'Drop where you let go — no attach'],
-                  ['face', 'FACE', 'Click flush onto the nearest neighbour face'],
-                  ['vertex', 'VERT', 'Snap the nearest corner onto a neighbour corner'],
-                  ['edge', 'EDGE', 'Snap the nearest edge midpoint onto a neighbour edge'],
-                ] as const
-              ).map(([value, label, title]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => {
-                    setSnapTarget(value);
-                    apiRef.current?.setSnapTarget(value);
-                  }}
-                  className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${
-                    snapTarget === value
-                      ? 'bg-emerald-500/80 text-white'
-                      : 'bg-white/10 text-white/60 hover:bg-white/20'
-                  }`}
-                  title={title}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-0.5">
-              {(
-                [
-                  ['median', 'MED', 'Rotate / scale about the average of the objects’ origins'],
-                  ['bounds', 'BOX', 'Rotate / scale about the selection’s bounding-box center'],
-                  ['active', 'ACT', 'Rotate / scale about the last-clicked object'],
-                ] as const
-              ).map(([value, label, title]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => {
-                    setPivotMode(value);
-                    apiRef.current?.setPivotMode(value);
-                  }}
-                  className={`px-1 py-0.5 rounded text-[9px] font-bold transition-colors ${
-                    pivotMode === value
-                      ? 'bg-violet-500/80 text-white'
-                      : 'bg-white/10 text-white/60 hover:bg-white/20'
-                  }`}
-                  title={title}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                const next: TransformSpace = transformSpace === 'world' ? 'local' : 'world';
-                setTransformSpace(next);
-                apiRef.current?.setTransformSpace(next);
-              }}
-              className="px-1 py-0.5 rounded text-[9px] font-bold bg-white/10 text-white/70 hover:bg-white/20 transition-colors"
-              title="Gizmo axes: world axes, or the selected object's own axes"
-            >
-              {transformSpace === 'world' ? 'WORLD' : 'LOCAL'}
-            </button>
-            <ToolBtn onClick={() => apiRef.current?.focusSelected()} title="Focus selection (F)">
-              <Crosshair className="w-4 h-4" />
-            </ToolBtn>
-            <ToolBtn
-              onClick={() => apiRef.current?.resetCamera()}
-              title="Reset camera to edit home (Start / spawn)"
-            >
-              <Home className="w-4 h-4 text-emerald-300" />
-            </ToolBtn>
-            <ToolBtn onClick={() => armPlaceSpawn('start')} title="Runner / Player spawn (invisible marker)">
-              <Flag className="w-4 h-4 text-emerald-400" />
-            </ToolBtn>
-            {gameMode === 'deathrun' && (
-              <>
-                <ToolBtn onClick={() => armPlaceSpawn('finish')} title="Finish (invisible unless you assign a model)">
-                  <FlagTriangleRight className="w-4 h-4 text-amber-300" />
-                </ToolBtn>
-                <ToolBtn onClick={() => armPlaceSpawn('spawn_trapper')} title="Trapper spawn (invisible)">
-                  <Flag className="w-4 h-4 text-red-400" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('button')}
-                  title="Button"
-                >
-                  <CircleDot className="w-4 h-4 text-amber-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('trap')}
-                  title="Trap"
-                >
-                  <Zap className="w-4 h-4 text-violet-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('hazard')}
-                  title="Death"
-                >
-                  <Skull className="w-4 h-4 text-red-400" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('spinner')}
-                  title="Rotating hazard (saw / blade / crushing bar)"
-                >
-                  <Fan className="w-4 h-4 text-red-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('door')}
-                  title="Door"
-                >
-                  <Box className="w-4 h-4 text-violet-200" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('jump_pad')}
-                  title="Jump pad"
-                >
-                  <Rocket className="w-4 h-4 text-sky-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('action')}
-                  title="Action trigger"
-                >
-                  <Zap className="w-4 h-4 text-amber-200" />
-                </ToolBtn>
-              </>
-            )}
-            {gameMode === 'horde' && (
-              <>
-                <ToolBtn
-                  onClick={() => armPlaceSpawn('spawn_monster')}
-                  title="Enemy spawn (invisible)"
-                >
-                  <Bug className="w-4 h-4 text-rose-400" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('wave_anchor')}
-                  title="Wave anchor (marks wave zone)"
-                >
-                  <Zap className="w-4 h-4 text-amber-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('red_zone')}
-                  title="Red death zone (damages players inside)"
-                >
-                  <Skull className="w-4 h-4 text-red-400" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('health_floor')}
-                  title="Health floor (heals players)"
-                >
-                  <Heart className="w-4 h-4 text-emerald-400" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('revive_pad')}
-                  title="Revive pad (resurrects fallen players)"
-                >
-                  <HeartPulse className="w-4 h-4 text-sky-400" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('jump_pad')}
-                  title="Jump pad"
-                >
-                  <Rocket className="w-4 h-4 text-sky-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('hazard')}
-                  title="Hazard / trap"
-                >
-                  <Zap className="w-4 h-4 text-violet-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('spinner')}
-                  title="Rotating hazard (saw / blade / crushing bar)"
-                >
-                  <Fan className="w-4 h-4 text-red-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('door')}
-                  title="Door"
-                >
-                  <Box className="w-4 h-4 text-violet-200" />
-                </ToolBtn>
-              </>
-            )}
-            {gameMode === 'competitive' && (
-              <>
-                <ToolBtn
-                  onClick={() => armPlaceSpawn('spawn_team_a')}
-                  title="Player A spawn (invisible)"
-                >
-                  <Flag className="w-4 h-4 text-sky-400" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceSpawn('spawn_team_b')}
-                  title="Player B spawn (invisible)"
-                >
-                  <Flag className="w-4 h-4 text-red-500" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('hazard')}
-                  title="Death zone / hazard"
-                >
-                  <Skull className="w-4 h-4 text-red-400" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('spinner')}
-                  title="Rotating hazard (saw / blade / crushing bar)"
-                >
-                  <Fan className="w-4 h-4 text-red-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('jump_pad')}
-                  title="Jump pad"
-                >
-                  <Rocket className="w-4 h-4 text-sky-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('button')}
-                  title="Button trigger"
-                >
-                  <CircleDot className="w-4 h-4 text-amber-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('action')}
-                  title="Action trigger"
-                >
-                  <Zap className="w-4 h-4 text-amber-200" />
-                </ToolBtn>
-            <ToolBtn
-              onClick={() => armPlaceEntity('door')}
-              title="Door"
-            >
-              <Box className="w-4 h-4 text-violet-200" />
-            </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('push_rail')}
-                  title="Push rail (payload track — place before the block)"
-                >
-                  <Route className="w-4 h-4 text-sky-300" />
-                </ToolBtn>
-                <ToolBtn
-                  onClick={() => armPlaceEntity('push_block')}
-                  title="Push payload (escort cart — stand near it to push along the rail)"
-                >
-                  <Package className="w-4 h-4 text-amber-300" />
-                </ToolBtn>
-              </>
-            )}
-            <ToolBtn
-              onClick={() => armPlaceEntity('light')}
-              title="Light bulb"
-            >
-              <Lightbulb className="w-4 h-4 text-amber-200" />
-            </ToolBtn>
-            <ToolBtn onClick={() => apiRef.current?.duplicateSelected()} title="Duplicate">
-              <Copy className="w-4 h-4" />
-            </ToolBtn>
-            <ToolBtn onClick={() => apiRef.current?.deleteSelected()} title="Delete">
-              <Trash2 className="w-4 h-4 text-red-300" />
-            </ToolBtn>
-            <ToolBtn
-              active={allAnimStopped}
-              onClick={() => {
-                if (allAnimStopped) {
-                  apiRef.current?.resumeAllAnim();
-                  setAllAnimStopped(false);
-                  setStoppedAnimIds(new Set());
-                  toast({ title: 'Animations resumed', description: 'Every object plays normally again.' });
-                } else {
-                  apiRef.current?.stopAllAnim();
-                  setAllAnimStopped(true);
-                  toast({
-                    title: 'Animations stopped',
-                    description: 'Every looping animation is frozen in the editor (Play Test / live match unaffected).',
-                  });
-                }
-              }}
-              title={
-                allAnimStopped
-                  ? 'Resume all animations in the editor'
-                  : 'Stop all animations in the editor (freeze looping objects like "Always" triggers)'
-              }
-            >
-              {allAnimStopped ? (
-                <Play className="w-4 h-4 text-emerald-300" />
-              ) : (
-                <Square className="w-4 h-4 text-rose-300" />
-              )}
-            </ToolBtn>
-          </div>
+          <MapEditorToolstrip
+            editTool={editTool}
+            setEditTool={setEditTool}
+            pendingPlaceKind={pendingPlaceKind}
+            setPendingPlaceKind={setPendingPlaceKind}
+            extensionToolId={extensionToolId}
+            setExtensionToolId={setExtensionToolId}
+            apiRef={apiRef}
+            brush={brush}
+            setBrush={setBrush}
+            selected={selected}
+            selectedIds={selectedIds}
+            freeFly={freeFly}
+            mode={mode}
+            setMode={setMode}
+            hammerShape={hammerShape}
+            setHammerShape={setHammerShape}
+            selectLibraryTab={selectLibraryTab}
+            viewLayout={viewLayout}
+            setViewLayout={setViewLayout}
+            rotateMenuBtnRef={rotateMenuBtnRef}
+            rotateMenuOpen={rotateMenuOpen}
+            setRotateMenuOpen={setRotateMenuOpen}
+            rotateMenuAnchorRect={rotateMenuAnchorRect}
+            setRotateMenuAnchorRect={setRotateMenuAnchorRect}
+            toast={toast}
+            gridSnap={gridSnap}
+            setGridSnap={setGridSnap}
+            snapY={snapY}
+            setSnapY={setSnapY}
+            snapMagnetBtnRef={snapMagnetBtnRef}
+            snapFaceMenuOpen={snapFaceMenuOpen}
+            setSnapFaceMenuOpen={setSnapFaceMenuOpen}
+            snapFaceAnchorRect={snapFaceAnchorRect}
+            applyMagnetSnap={applyMagnetSnap}
+            measureMode={measureMode}
+            setMeasureMode={setMeasureMode}
+            showAllCollisionGizmos={showAllCollisionGizmos}
+            setShowAllCollisionGizmos={setShowAllCollisionGizmos}
+            doc={doc}
+            setDoc={setDoc}
+            docRef={docRef}
+            setDirty={setDirty}
+            scheduleHistory={scheduleHistory}
+            bakingAllMesh={bakingAllMesh}
+            bakeMismatchedSolidCollision={bakeMismatchedSolidCollision}
+            snapTarget={snapTarget}
+            setSnapTarget={setSnapTarget}
+            pivotMode={pivotMode}
+            setPivotMode={setPivotMode}
+            transformSpace={transformSpace}
+            setTransformSpace={setTransformSpace}
+            gameMode={gameMode}
+            armPlaceSpawn={armPlaceSpawn}
+            armPlaceEntity={armPlaceEntity}
+            allAnimStopped={allAnimStopped}
+            setAllAnimStopped={setAllAnimStopped}
+            setStoppedAnimIds={setStoppedAnimIds}
+          />
           )}
 
           {!uiCollapsed && selected && !propsOpen && !anyStudioOpen && (
@@ -6546,164 +5869,58 @@ export function MapEditor({
         </div>
       </div>
       {playTestRolePrompt && (
-        <div className="fixed inset-0 z-[10060] bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-full max-w-sm space-y-3">
-            <p className="text-sm font-semibold text-slate-100">
-              Test as which player?
-            </p>
-            <p className="text-xs text-slate-400">
-              Spawns you at that role&apos;s placed spawn point (falls back to the
-              default spawn if none is placed yet).
-            </p>
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              {gameMode === 'deathrun' ? (
-                <>
-                  <Button
-                    size="sm"
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white"
-                    onClick={() => {
-                      setPlayTestRole('runner');
-                      setPlayTestRolePrompt(false);
-                      if (playTestPromptTarget === 'live') startPlayLive();
-                      else startPlay();
-                    }}
-                  >
-                    Runner
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="bg-rose-600 hover:bg-rose-500 text-white"
-                    onClick={() => {
-                      setPlayTestRole('trapper');
-                      setPlayTestRolePrompt(false);
-                      if (playTestPromptTarget === 'live') startPlayLive();
-                      else startPlay();
-                    }}
-                  >
-                    Trapper
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    size="sm"
-                    className="bg-rose-600 hover:bg-rose-500 text-white"
-                    onClick={() => {
-                      setPlayTestRole('team_a');
-                      setPlayTestRolePrompt(false);
-                      if (playTestPromptTarget === 'live') startPlayLive();
-                      else startPlay();
-                    }}
-                  >
-                    Team A
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="bg-blue-600 hover:bg-blue-500 text-white"
-                    onClick={() => {
-                      setPlayTestRole('team_b');
-                      setPlayTestRolePrompt(false);
-                      if (playTestPromptTarget === 'live') startPlayLive();
-                      else startPlay();
-                    }}
-                  >
-                    Team B
-                  </Button>
-                </>
-              )}
-            </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="w-full text-slate-400"
-              onClick={() => setPlayTestRolePrompt(false)}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
+        <MapEditorPlayTestRolePrompt
+          gameMode={gameMode}
+          onCancel={() => setPlayTestRolePrompt(false)}
+          onPick={(role) => {
+            setPlayTestRole(role);
+            setPlayTestRolePrompt(false);
+            if (playTestPromptTarget === 'live') void startPlayLive();
+            else void startPlay();
+          }}
+        />
       )}
       {uploadOpen && (
-        <div className="fixed inset-0 z-[10060] bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 w-full max-w-sm space-y-3">
-            <p className="text-sm font-semibold text-slate-100">Upload prefab model</p>
-            <p className="text-xs text-slate-400">
-              .glb, .gltf, or .fbx — appears in the catalog for every mapper immediately.
-            </p>
-            <input
-              type="file"
-              accept=".glb,.gltf,.fbx,.obj"
-              className="w-full text-xs text-white/70 file:mr-2 file:rounded file:border-0 file:bg-white/10 file:px-2 file:py-1 file:text-xs file:text-white"
-              onChange={(e) =>
-                setUploadForm((f) => ({ ...f, file: e.target.files?.[0] ?? null }))
-              }
-            />
-            <input
-              className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
-              placeholder="Name (e.g. Wooden Crate)"
-              value={uploadForm.name}
-              onChange={(e) => setUploadForm((f) => ({ ...f, name: e.target.value }))}
-            />
-            <input
-              className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm"
-              placeholder="Category (existing or new)"
-              list="prefab-category-options"
-              value={uploadForm.category}
-              onChange={(e) => setUploadForm((f) => ({ ...f, category: e.target.value }))}
-            />
-            <datalist id="prefab-category-options">
-              {libraryCategories.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
-            <div className="flex gap-2 pt-1">
-              <Button
-                size="sm"
-                disabled={uploadBusy || !uploadForm.file || !uploadForm.name.trim() || !uploadForm.category.trim()}
-                onClick={async () => {
-                  if (!uploadForm.file) return;
-                  setUploadBusy(true);
-                  try {
-                    const dataUrl = await new Promise<string>((resolve, reject) => {
-                      const reader = new FileReader();
-                      reader.onload = () => resolve(reader.result as string);
-                      reader.onerror = reject;
-                      reader.readAsDataURL(uploadForm.file!);
-                    });
-                    await adminUploadPrefabModel({
-                      name: uploadForm.name,
-                      category: uploadForm.category,
-                      modelDataUrl: dataUrl,
-                      originalFilename: uploadForm.file.name,
-                    });
-                    toast({ title: 'Prefab uploaded' });
-                    setUploadForm({ name: '', category: '', file: null });
-                    setUploadOpen(false);
-                    reloadPrefabLibrary();
-                  } catch (err) {
-                    toast({
-                      title: err instanceof Error ? err.message : 'Upload failed',
-                      variant: 'destructive',
-                    });
-                  } finally {
-                    setUploadBusy(false);
-                  }
-                }}
-              >
-                {uploadBusy ? 'Uploading…' : 'Upload'}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-slate-400"
-                onClick={() => setUploadOpen(false)}
-                disabled={uploadBusy}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </div>
+        <MapEditorPrefabUploadDialog
+          name={uploadForm.name}
+          category={uploadForm.category}
+          categories={libraryCategories}
+          busy={uploadBusy}
+          canSubmit={Boolean(uploadForm.file && uploadForm.name.trim() && uploadForm.category.trim())}
+          onFile={(file) => setUploadForm((f) => ({ ...f, file }))}
+          onName={(name) => setUploadForm((f) => ({ ...f, name }))}
+          onCategory={(category) => setUploadForm((f) => ({ ...f, category }))}
+          onCancel={() => setUploadOpen(false)}
+          onSubmit={async () => {
+            if (!uploadForm.file) return;
+            setUploadBusy(true);
+            try {
+              const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(uploadForm.file!);
+              });
+              await adminUploadPrefabModel({
+                name: uploadForm.name,
+                category: uploadForm.category,
+                modelDataUrl: dataUrl,
+                originalFilename: uploadForm.file.name,
+              });
+              toast({ title: 'Prefab uploaded' });
+              setUploadForm({ name: '', category: '', file: null });
+              setUploadOpen(false);
+              reloadPrefabLibrary();
+            } catch (err) {
+              toast({
+                title: err instanceof Error ? err.message : 'Upload failed',
+                variant: 'destructive',
+              });
+            } finally {
+              setUploadBusy(false);
+            }
+          }}
+        />
       )}
       {playTest && (
         <div className="fixed inset-0 z-[10050]">
@@ -6732,267 +5949,6 @@ export function MapEditor({
 
   if (variant === 'engine') return editorShell;
   return createPortal(editorShell, document.body);
-}
-
-function EditorGraphicsOverlay({
-  open,
-  perf,
-  toolsOpen,
-  onClose,
-  onToggleTools,
-  onTogglePerf,
-  onRestorePerf,
-  onOpenWorld,
-  onOpenSettings,
-}: {
-  open: boolean;
-  perf: EditorPerfMode;
-  toolsOpen: boolean;
-  onClose: () => void;
-  onToggleTools: () => void;
-  onTogglePerf: (key: keyof EditorPerfMode) => void;
-  onRestorePerf: () => void;
-  onOpenWorld: () => void;
-  onOpenSettings: () => void;
-}) {
-  if (!open) return null;
-  const rows: { key: keyof EditorPerfMode; label: string }[] = [
-    { key: 'disableBloom', label: 'Disable bloom (biggest GPU saving)' },
-    { key: 'capPixelRatio', label: 'Render at 1× pixel ratio' },
-    { key: 'skipCollisionGizmos', label: 'Skip collision wireframes' },
-    { key: 'hideFloor', label: 'Hide floor / void disc' },
-    { key: 'hideSkyTexture', label: 'Hide sky texture (solid color)' },
-    { key: 'hideVoidEffects', label: 'Hide void glow / shadow' },
-    { key: 'hideFog', label: 'Hide fog' },
-  ];
-  const dirty = rows.some(({ key }) => perf[key] !== DEFAULT_EDITOR_PERF_MODE[key]);
-  return (
-    <div className="fixed inset-0 z-[400] grid place-items-center bg-black/55 p-4" onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-2xl border border-amber-400/30 bg-[#0f1724] p-4 shadow-2xl space-y-3"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-black tracking-wide text-white">Editor graphics</p>
-          <button
-            type="button"
-            className="w-8 h-8 rounded-lg grid place-items-center text-white/70 hover:bg-white/10"
-            onClick={onClose}
-            aria-label="Close graphics"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <p className="text-[11px] text-white/50 leading-snug">
-          Cuts rendering work while editing. Play Test and live matches stay at full quality and
-          these flags are not saved into the map.
-        </p>
-        <label className="flex items-center justify-between gap-3 text-xs text-white/80">
-          <span>Show tool bar</span>
-          <input type="checkbox" className="h-4 w-4 accent-cyan-400" checked={toolsOpen} onChange={onToggleTools} />
-        </label>
-        {rows.map(({ key, label }) => (
-          <label key={key} className="flex items-center justify-between gap-3 text-xs text-white/80">
-            <span>{label}</span>
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-amber-400"
-              checked={perf[key]}
-              onChange={() => onTogglePerf(key)}
-            />
-          </label>
-        ))}
-        {dirty && (
-          <Button size="sm" variant="ghost" className="w-full text-xs text-amber-200" onClick={onRestorePerf}>
-            Restore all editor visuals
-          </Button>
-        )}
-        <div className="flex gap-2 pt-1">
-          <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={onOpenWorld}>
-            World panel
-          </Button>
-          <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={onOpenSettings}>
-            Match settings
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ToolBtn({
-  children,
-  active,
-  onClick,
-  title,
-  disabled,
-  btnRef,
-}: {
-  children: React.ReactNode;
-  active?: boolean;
-  onClick?: () => void;
-  title?: string;
-  disabled?: boolean;
-  btnRef?: React.Ref<HTMLButtonElement>;
-}) {
-  const btn = (
-    <button
-      ref={btnRef}
-      type="button"
-      aria-label={title}
-      disabled={disabled}
-      onClick={onClick}
-      className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-        disabled
-          ? 'text-white/25 cursor-not-allowed'
-          : active
-            ? 'bg-cyan-500/30 text-cyan-200'
-            : 'text-white/70 hover:bg-white/10'
-      }`}
-    >
-      {children}
-    </button>
-  );
-  if (!title) return btn;
-  return <EditorTip content={title}>{btn}</EditorTip>;
-}
-
-function RotatePresetPicker({
-  anchorRect,
-  onPick,
-  onClose,
-}: {
-  anchorRect: DOMRect | null;
-  onPick: (op: SelectionTransformOp) => void;
-  onClose: () => void;
-}) {
-  const btnCls =
-    'flex flex-col items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-white/85 hover:bg-cyan-500/20 hover:border-cyan-400/40 hover:text-cyan-100 active:scale-95 transition-colors';
-  const width = 288;
-  const left = anchorRect
-    ? Math.min(
-        Math.max(8, anchorRect.left + anchorRect.width / 2 - width / 2),
-        window.innerWidth - width - 8
-      )
-    : 8;
-  const bottom = anchorRect ? Math.max(8, window.innerHeight - anchorRect.top + 8) : 8;
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[9998]" onClick={onClose} />
-      <div
-        className="fixed z-[9999] w-72 rounded-xl border border-white/15 bg-slate-900/95 backdrop-blur p-3 shadow-2xl"
-        style={{ left, bottom }}
-      >
-        <p className="text-[10px] uppercase tracking-widest text-white/50 mb-1 text-center">
-          Easy rotate
-        </p>
-        <p className="text-[10px] text-white/40 mb-2.5 text-center leading-relaxed">
-          Turns the whole selection around its center — groups stay together. Drag the rings in
-          the viewport for free rotate.
-        </p>
-        <p className="text-[9px] uppercase tracking-widest text-white/35 mb-1.5">Yaw (turn)</p>
-        <div className="grid grid-cols-4 gap-1.5 mb-2.5">
-          {([0, 90, 180, 270] as const).map((deg) => (
-            <button
-              key={deg}
-              type="button"
-              className={btnCls}
-              onClick={() => onPick({ type: 'setYaw', deg })}
-              title={`Face ${deg}°`}
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-              <span className="text-[10px] leading-none">{deg}°</span>
-            </button>
-          ))}
-        </div>
-        <p className="text-[9px] uppercase tracking-widest text-white/35 mb-1.5">Nudge 90°</p>
-        <div className="grid grid-cols-3 gap-1.5 mb-2.5">
-          <button
-            type="button"
-            className={btnCls}
-            onClick={() => onPick({ type: 'rotateDelta', deg: [0, -90, 0] })}
-            title="Yaw −90°"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span className="text-[10px] leading-none">Left</span>
-          </button>
-          <button
-            type="button"
-            className={btnCls}
-            onClick={() => onPick({ type: 'rotateDelta', deg: [0, 90, 0] })}
-            title="Yaw +90°"
-          >
-            <RotateCw className="w-3.5 h-3.5" />
-            <span className="text-[10px] leading-none">Right</span>
-          </button>
-          <button
-            type="button"
-            className={btnCls}
-            onClick={() => onPick({ type: 'rotateDelta', deg: [0, 180, 0] })}
-            title="Yaw 180°"
-          >
-            <RotateCw className="w-3.5 h-3.5" />
-            <span className="text-[10px] leading-none">180</span>
-          </button>
-          <button
-            type="button"
-            className={btnCls}
-            onClick={() => onPick({ type: 'rotateDelta', deg: [90, 0, 0] })}
-            title="Pitch +90° (tilt)"
-          >
-            <span className="text-[10px] leading-none">Pitch +</span>
-          </button>
-          <button
-            type="button"
-            className={btnCls}
-            onClick={() => onPick({ type: 'rotateDelta', deg: [-90, 0, 0] })}
-            title="Pitch −90°"
-          >
-            <span className="text-[10px] leading-none">Pitch −</span>
-          </button>
-          <button
-            type="button"
-            className={btnCls}
-            onClick={() => onPick({ type: 'rotateDelta', deg: [0, 0, 90] })}
-            title="Roll +90°"
-          >
-            <span className="text-[10px] leading-none">Roll</span>
-          </button>
-        </div>
-        <p className="text-[9px] uppercase tracking-widest text-white/35 mb-1.5">Flip</p>
-        <div className="grid grid-cols-3 gap-1.5">
-          <button
-            type="button"
-            className={btnCls}
-            onClick={() => onPick({ type: 'flip', axis: 'y' })}
-            title="Flip horizontal (180° around up)"
-          >
-            <FlipHorizontal className="w-3.5 h-3.5" />
-            <span className="text-[10px] leading-none">Horiz</span>
-          </button>
-          <button
-            type="button"
-            className={btnCls}
-            onClick={() => onPick({ type: 'flip', axis: 'x' })}
-            title="Flip vertical (180° around right)"
-          >
-            <FlipVertical className="w-3.5 h-3.5" />
-            <span className="text-[10px] leading-none">Vert</span>
-          </button>
-          <button
-            type="button"
-            className={btnCls}
-            onClick={() => onPick({ type: 'flip', axis: 'z' })}
-            title="Flip side (180° around forward)"
-          >
-            <FlipHorizontal className="w-3.5 h-3.5 rotate-90" />
-            <span className="text-[10px] leading-none">Side</span>
-          </button>
-        </div>
-      </div>
-    </>,
-    document.body
-  );
 }
 
 export default MapEditor;

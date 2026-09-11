@@ -102,8 +102,11 @@ offline.
   the `server` permission to plugins from accounts you don't fully trust.
 - **Upload rate limiting** — the Engine staff upload endpoints
   (models/images/meshes/sounds) are rate-limited per staff account.
-- **Not yet done**: code signing and a silent in-app EXE auto-updater.
-  Official modules already hot-update without that.
+- **Not yet done**: a purchased code-signing certificate. The installer is
+  still unsigned (SmartScreen). In-app update **download** is wired: Engine
+  checks `KILRUN_ENGINE_LATEST_VERSION` + `KILRUN_ENGINE_DOWNLOAD_URL` and
+  opens the new Setup.exe. A silent Tauri updater needs the cert +
+  `tauri-plugin-updater` — do not enable `--sign` until the thumbprint is set.
 
 ## Rebuild (developers only)
 

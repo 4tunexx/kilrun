@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('fs');const p=require('path');const src='src/plugin-isolate-worker.mjs';const dest=p.join('dist','server','src','plugin-isolate-worker.mjs');fs.mkdirSync(p.dirname(dest),{recursive:true});fs.copyFileSync(src,dest);\"",
     "start": "node dist/server/src/index.js",
     "typecheck": "tsc --noEmit"
   },

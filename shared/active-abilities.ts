@@ -162,6 +162,41 @@ function setSlotCooldownEndsAt(host: AbilityHost, slot: AbilitySlotKind, endsAt:
   }
 }
 
+export type AbilityDenyReason =
+  | 'dead'
+  | 'finished'
+  | 'missing'
+  | 'unlearned'
+  | 'cooldown'
+  | 'energy';
+
+export type AbilityGate = { ok: true } | { ok: false; reason: AbilityDenyReason };
+
+/**
+ * Same deny rules `activateAbility` uses, without mutating the host.
+ * Pass `levels` when the client knows the skill tree; omit it to skip the
+ * unlearned check (live match may not have the tree loaded on the first tick).
+ */
+export function canActivateAbility(
+  host: AbilityHost,
+  abilityKey: string | null | undefined,
+  now: number,
+  levels?: Record<string, number> | null
+): AbilityGate {
+  if (!host.isAlive) return { ok: false, reason: 'dead' };
+  if (host.hasFinished) return { ok: false, reason: 'finished' };
+  if (!abilityKey) return { ok: false, reason: 'missing' };
+  if (levels) {
+    const level = levels[abilityKey] ?? 0;
+    if (level <= 0) return { ok: false, reason: 'unlearned' };
+  }
+  const slot = getAbilitySlotKind(abilityKey);
+  if (slot && getSlotCooldownEndsAt(host, slot) > now) return { ok: false, reason: 'cooldown' };
+  const energyCost = getEnergyCostForAbility(abilityKey);
+  if (energyCost > 0 && host.energy < energyCost) return { ok: false, reason: 'energy' };
+  return { ok: true };
+}
+
 /**
  * Generic activation: dispatches on the power's EFFECT TEMPLATE (timed_buff
  * buffKind / burst_effect kind), not the literal ability key — a custom
@@ -175,17 +210,12 @@ export function activateAbility(
   levels: Record<string, number>,
   pads?: Iterable<CorePad>
 ): boolean {
-  if (!host.isAlive || host.hasFinished) return false;
+  if (!canActivateAbility(host, abilityKey, now, levels).ok) return false;
   if (!abilityKey) return false;
 
   const level = levels[abilityKey] ?? 0;
-  if (level <= 0) return false;
-
   const slot = getAbilitySlotKind(abilityKey);
-  if (slot && getSlotCooldownEndsAt(host, slot) > now) return false;
-
   const energyCost = getEnergyCostForAbility(abilityKey);
-  if (energyCost > 0 && host.energy < energyCost) return false;
 
   const applied = applyAbilityEffect(host, abilityKey, level, now, pads);
   if (!applied) return false;

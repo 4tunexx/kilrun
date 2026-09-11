@@ -10,6 +10,7 @@ import { isPluginPermission, pluginHasPermission, type PluginPermission } from '
 import { kindAllowsServer, parseModuleKind, type ModuleKind } from '@/lib/engine/module-kind';
 import type { MapPluginBundle } from '@/lib/engine/plugin-runtime-store';
 import { clipPluginSource, comparePluginVersions } from '@shared/plugin-source';
+import { reportEngineIssue } from '@/lib/engine/engine-errors';
 
 export type PluginModePublic = {
   id: string;
@@ -52,7 +53,8 @@ export function parseCatalogManifestJson(raw: string): CatalogManifestPayload {
       name: typeof row.name === 'string' ? row.name : undefined,
       version: typeof row.version === 'string' ? row.version : undefined,
     };
-  } catch {
+  } catch (err) {
+    reportEngineIssue('plugin-catalog', err instanceof Error ? err : new Error('Invalid plugin manifest JSON'));
     return {};
   }
 }

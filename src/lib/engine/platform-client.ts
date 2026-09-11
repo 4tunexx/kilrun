@@ -331,8 +331,24 @@ export async function listCloudMapDocuments(mode: KilrunMode): Promise<CloudMapD
   return data.maps ?? [];
 }
 
-export async function getCloudMapDocument(_id: string) {
-  return null;
+export function pickCloudMapDocument(
+  rows: CloudMapDocumentRow[],
+  id: string
+): CloudMapDocumentRow | null {
+  return rows.find((row) => row.id === id || row.localId === id) ?? null;
+}
+
+export async function getCloudMapDocument(id: string): Promise<CloudMapDocumentRow | null> {
+  if (!platform.token || !id) return null;
+  const res = await engineFetch(`/api/engine/maps?id=${encodeURIComponent(id)}`);
+  if (res.status === 404 || res.status === 401) return null;
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as {
+    map?: CloudMapDocumentRow | null;
+    maps?: CloudMapDocumentRow[];
+  };
+  if (data.map) return data.map;
+  return pickCloudMapDocument(data.maps ?? [], id);
 }
 
 export async function getActiveCloudMapDocument(mode?: string) {
@@ -560,4 +576,42 @@ export async function persistEditorModelDataUrl(
 
 export async function persistEditorImageFile(file: File, kind = 'misc'): Promise<string> {
   return uploadSiteImageFile(file, kind);
+}
+
+export async function fetchEngineGhost(mapId: string) {
+  if (!platform.token || !mapId) return null;
+  const res = await engineFetch(`/api/engine/ghosts?mapId=${encodeURIComponent(mapId)}`);
+  if (!res.ok) return null;
+  const data = (await res.json().catch(() => ({}))) as { record?: unknown };
+  return data.record ?? null;
+}
+
+export async function submitEngineGhost(input: {
+  mapId: string;
+  finishMs: number;
+  samples: Array<{ t: number; x: number; y: number; z: number }>;
+}) {
+  if (!platform.token) {
+    return { ok: false as const, unavailable: true, reason: 'Link live game to save ghosts' };
+  }
+  const res = await engineFetch('/api/engine/ghosts', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    personalBest?: boolean;
+    worldRecord?: boolean;
+    finishMs?: number;
+    error?: string;
+  };
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Could not save ghost');
+  }
+  return {
+    ok: true as const,
+    personalBest: Boolean(data.personalBest),
+    worldRecord: Boolean(data.worldRecord),
+    finishMs: data.finishMs ?? input.finishMs,
+  };
 }

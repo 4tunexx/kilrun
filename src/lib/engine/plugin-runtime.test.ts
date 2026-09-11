@@ -4,7 +4,8 @@ import {
   parsePluginManifest,
   pluginHasPermission,
 } from './plugin-manifest';
-import { catalogSourceForPublish } from './plugin-catalog';
+import { catalogSourceForPublish, parseCatalogManifestJson } from './plugin-catalog';
+import { clearEngineIssues, getLastEngineIssue } from './engine-errors';
 import {
   attachPluginRuntimeToDoc,
   catalogWeaponToShopItem,
@@ -49,6 +50,12 @@ describe('plugin permissions', () => {
 
   it('treats missing permissions as legacy allow', () => {
     expect(hostMessageAllowed(undefined, 'registerWeapon')).toBe(true);
+  });
+
+  it('reports invalid catalog manifest JSON instead of failing silently', () => {
+    clearEngineIssues();
+    expect(parseCatalogManifestJson('{not-json')).toEqual({});
+    expect(getLastEngineIssue()?.source).toBe('plugin-catalog');
   });
 
   it('gates extension tools and addon themes', () => {

@@ -1,5 +1,6 @@
 import { isKilrunEngineDesktop } from './runtime';
 import { KILRUN_ENGINE_VERSION } from './version';
+import { reportEngineIssue } from './engine-errors';
 import type { MapDocument } from '@/components/game/editor/map-document';
 import type { InstalledPlugin } from './plugin-manifest';
 import { parseModuleKind, type ModuleKind } from './module-kind';
@@ -45,7 +46,7 @@ let writeChain: Promise<void> = Promise.resolve();
 
 function enqueueWrite(task: () => Promise<void>) {
   writeChain = writeChain.then(task).catch((err) => {
-    console.warn('[kilrun-engine] desktop project write failed', err);
+    reportEngineIssue('desktop-write', err);
   });
 }
 
@@ -62,7 +63,7 @@ export async function desktopEngineInfo(): Promise<{
   try {
     return await invoke('engine_info');
   } catch (err) {
-    console.warn('[kilrun-engine] engine_info failed', err);
+    reportEngineIssue('engine_info', err);
     return null;
   }
 }
@@ -73,7 +74,7 @@ export async function listDesktopProjects(): Promise<DesktopProjectListItem[]> {
   try {
     return await invoke('list_projects');
   } catch (err) {
-    console.warn('[kilrun-engine] list_projects failed', err);
+    reportEngineIssue('list_projects', err);
     return [];
   }
 }
@@ -84,7 +85,7 @@ export async function readDesktopProject(id: string): Promise<DesktopProjectFile
   try {
     return await invoke('read_project', { id });
   } catch (err) {
-    console.warn('[kilrun-engine] read_project failed', err);
+    reportEngineIssue('read_project', err);
     return null;
   }
 }
@@ -132,7 +133,7 @@ export async function startDesktopAuthLoopback(): Promise<number | null> {
   try {
     return await invoke<number>('start_auth_loopback');
   } catch (err) {
-    console.warn('[kilrun-engine] auth loopback failed', err);
+    reportEngineIssue('auth_loopback', err);
     return null;
   }
 }
@@ -243,14 +244,14 @@ export async function listDesktopModules(kind?: ModuleKind): Promise<InstalledPl
     return rows.map((row) => withKind(row, kind));
   } catch (err) {
     if (kind && kind !== 'plugin') {
-      console.warn('[kilrun-engine] list_modules failed', err);
+      reportEngineIssue('list_modules', err);
       return [];
     }
     try {
       const rows = await invoke<InstalledPlugin[]>('list_plugins');
       return rows.map((row) => withKind(row, 'plugin'));
     } catch (legacyErr) {
-      console.warn('[kilrun-engine] list_plugins failed', legacyErr);
+      reportEngineIssue('list_plugins', legacyErr);
       return [];
     }
   }

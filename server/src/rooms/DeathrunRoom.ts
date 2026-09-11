@@ -97,6 +97,8 @@ interface JoinOptions {
   isStaff?: boolean;
   /** Compact SkinAttachment[] JSON for remote cosmetics. */
   equippedSkinsJson?: string;
+  /** HMAC loadout minted from DB — preferred over client skins JSON. */
+  loadoutToken?: string;
   /** Optional weapon combat override (clamped server-side). */
   weaponCombat?: {
     kind?: string;
@@ -767,7 +769,7 @@ export class DeathrunRoom extends Room<RoomState> {
       claims.username || `Player${client.sessionId.slice(0, 4)}`;
     player.avatarUrl = claims.avatarUrl || '';
     this.steamIdBySession.set(client.sessionId, claims.steamId || '');
-    const trusted = await fetchTrustedLoadout(player.userId);
+    const trusted = await fetchTrustedLoadout(player.userId, options.loadoutToken);
     applyLoadoutToPlayer(player, trusted ?? options);
     // Stash the real equipped weapon before forcing melee below — restored
     // only for whoever becomes trapper each round (see applyRoleWeapon).

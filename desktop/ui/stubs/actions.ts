@@ -14,6 +14,10 @@ export async function getSessionUser() {
   return DESKTOP_USER;
 }
 
+export async function mintMyLoadoutToken(): Promise<string | null> {
+  return null;
+}
+
 export async function mintMyGameJoinToken(): Promise<string | null> {
   const claims = {
     userId: 'desktop-editor',
@@ -35,18 +39,21 @@ export async function getMyMetricCounts() {
   return {};
 }
 
+/** Offline Engine has no Mongo rewards pipeline — return zeros, never fake XP. */
+const OFFLINE_REWARDS = { xpEarned: 0, vpEarned: 0 };
+
 export async function recordMatchStat(_input: unknown) {
-  return { ok: true };
+  return { ok: false as const, unavailable: true };
 }
 
 export async function recordDeathrunResult(_input: unknown) {
-  return { ok: true };
+  return OFFLINE_REWARDS;
 }
 
 export async function recordHordeResult(_input: unknown) {
-  return { ok: true };
+  return OFFLINE_REWARDS;
 }
 
 export async function recordCompetitiveResult(_input: unknown) {
-  return { ok: true };
+  return { ...OFFLINE_REWARDS, kpDelta: 0, kp: 0, rank: 'Unranked' };
 }

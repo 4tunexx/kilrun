@@ -41,6 +41,7 @@ import {
   ensureSolidFx,
 } from './map-document';
 import { bakeMeshCollisionForEntity, meshCollisionBakeKeyFor } from './mesh-voxelize';
+import { collisionMismatchIds } from './collision-mismatch';
 import {
   applySelectionTransformOp,
   nearestObbFaceAttach,
@@ -2076,6 +2077,7 @@ export function createEditorViewport(
     const selectedSet = new Set(
       selectedIds.length ? selectedIds : selectedId ? [selectedId] : []
     );
+    const mismatchIds = collisionMismatchIds(doc);
     for (const ent of doc.entities) {
       const isSelected = selectedSet.has(ent.id);
       const drawCollision = showAllCollisionGizmos || isSelected;
@@ -2108,7 +2110,11 @@ export function createEditorViewport(
 
       const showSolid = entityExportsAsPlatform(ent);
       if (drawCollision && showSolid && !isHz) {
-        const color = ent.jumpPad?.enabled || ent.kind === 'jump_pad' ? 0x38bdf8 : 0x22c55e;
+        const color = mismatchIds.has(ent.id)
+          ? 0xf59e0b
+          : ent.jumpPad?.enabled || ent.kind === 'jump_pad'
+            ? 0x38bdf8
+            : 0x22c55e;
         const hammerVol =
           ent.primitive === 'box' ||
           isHammerPrimitive(ent.primitive) ||

@@ -885,3 +885,34 @@ export async function mintMyGameJoinToken(): Promise<string | null> {
     return null;
   }
 }
+
+/** HMAC loadout from DB skins/weapon — Colyseus verifies before applying cosmetics. */
+export async function mintMyLoadoutToken(): Promise<string | null> {
+  const user = await getSessionUser();
+  if (!user) throw new Error('Not authenticated');
+  if (user.isBanned) throw new Error('Account banned');
+  const { flattenEquippedSkinsMap } = await import('@/lib/player-skins');
+  const { compactSkinsForMatch } = await import('@/lib/match-loadout');
+  const { resolveWeaponCombat, findWeaponAttachment } = await import('@/lib/weapons');
+  const { signLoadoutToken, loadoutSecretFromEnv } = await import('@shared/signed-loadout');
+  const secret = loadoutSecretFromEnv();
+  if (!secret) return null;
+  const row = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { equippedSkins: true },
+  });
+  const attachments = flattenEquippedSkinsMap(row?.equippedSkins as never);
+  const packed = compactSkinsForMatch(attachments);
+  try {
+    return signLoadoutToken(
+      {
+        userId: user.id,
+        equippedSkinsJson: JSON.stringify(packed),
+        weaponCombat: resolveWeaponCombat(findWeaponAttachment(packed)),
+      },
+      secret
+    );
+  } catch {
+    return null;
+  }
+}

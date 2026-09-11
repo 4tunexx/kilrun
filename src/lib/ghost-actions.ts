@@ -91,18 +91,10 @@ export async function getMyMapGhost(
   };
 }
 
-/** Upsert PB if finishMs is better (or first). Returns whether WR improved. */
-export async function submitGhostRun(input: {
-  mapId: string;
-  finishMs: number;
-  samples: GhostSample[];
-}): Promise<{ ok: true; personalBest: boolean; worldRecord: boolean; finishMs: number }> {
-  const session = await auth();
-  const steamId = (session?.user as { steamId?: string } | undefined)?.steamId;
-  if (!steamId) throw new Error('Sign in to save ghosts');
-  const user = await prisma.user.findUnique({ where: { steamId } });
-  if (!user || user.isBanned) throw new Error('Not allowed');
-
+export async function submitGhostRunForUser(
+  user: { id: string; username: string | null },
+  input: { mapId: string; finishMs: number; samples: GhostSample[] }
+): Promise<{ ok: true; personalBest: boolean; worldRecord: boolean; finishMs: number }> {
   const mapId = input.mapId.trim();
   const finishMs = Math.max(1, Math.round(input.finishMs));
   if (!mapId || !input.samples?.length) {
@@ -142,4 +134,18 @@ export async function submitGhostRun(input: {
   const worldRecord = !!wr && wr.userId === user.id && wr.finishMs === finishMs && personalBest;
 
   return { ok: true, personalBest, worldRecord, finishMs };
+}
+
+/** Upsert PB if finishMs is better (or first). Returns whether WR improved. */
+export async function submitGhostRun(input: {
+  mapId: string;
+  finishMs: number;
+  samples: GhostSample[];
+}): Promise<{ ok: true; personalBest: boolean; worldRecord: boolean; finishMs: number }> {
+  const session = await auth();
+  const steamId = (session?.user as { steamId?: string } | undefined)?.steamId;
+  if (!steamId) throw new Error('Sign in to save ghosts');
+  const user = await prisma.user.findUnique({ where: { steamId } });
+  if (!user || user.isBanned) throw new Error('Not allowed');
+  return submitGhostRunForUser(user, input);
 }

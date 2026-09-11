@@ -57,10 +57,20 @@ function getPark() {
   return park;
 }
 
-function clampDamage(amount: unknown): number {
+export function clampPluginDamage(amount: unknown): number {
   const n = typeof amount === 'number' ? amount : Number(amount);
   if (!Number.isFinite(n)) return 0;
   return Math.min(250, Math.max(0, n));
+}
+
+export function isPluginSandboxEnvelope(data: unknown): data is {
+  ns: string;
+  pluginId: string;
+  type?: string;
+} {
+  if (!data || typeof data !== 'object') return false;
+  const rec = data as Record<string, unknown>;
+  return rec.ns === NS_FROM && typeof rec.pluginId === 'string';
 }
 
 function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermission[]): string {
@@ -236,7 +246,12 @@ function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermi
       }
     }
     if (d.type === 'playtest') {
-      (play[d.event] || []).forEach(function (fn) { try { fn(d.payload || {}); } catch (err) {} });
+      (play[d.event] || []).forEach(function (fn) {
+        try { fn(d.payload || {}); }
+        catch (err) {
+          send({ type: 'toast', title: 'Plugin playtest failed', description: String(err && err.message || err), variant: 'destructive' });
+        }
+      });
     }
     if (d.type === 'entity') {
       var list = d.entities || [];
@@ -255,7 +270,9 @@ function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermi
         try {
           if (handlers.onTick) handlers.onTick(payload);
           if (ent.hit && handlers.onTouch) handlers.onTouch(payload);
-        } catch (err) {}
+        } catch (err) {
+          send({ type: 'toast', title: 'Plugin entity script failed', description: String(err && err.message || err), variant: 'destructive' });
+        }
       }
     }
   });
@@ -273,7 +290,7 @@ function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermi
 
 function onHostMessage(ev: MessageEvent) {
   const data = ev.data as Record<string, unknown> | null;
-  if (!data || data.ns !== NS_FROM || typeof data.pluginId !== 'string') return;
+  if (!isPluginSandboxEnvelope(data)) return;
   const pluginId = data.pluginId;
   const rec = sandboxes.get(pluginId);
   if (!rec || ev.source !== rec.iframe.contentWindow) return;
@@ -282,7 +299,7 @@ function onHostMessage(ev: MessageEvent) {
   const type = String(data.type || '');
   if (!hostMessageAllowed(rec.permissions, type)) return;
   if (type === 'damage') {
-    playtestDamage?.(clampDamage(data.amount));
+    playtestDamage?.(clampPluginDamage(data.amount));
     return;
   }
   if (!handlers) return;
@@ -334,6 +351,14 @@ function onHostMessage(ev: MessageEvent) {
   }
   if (type === 'mutateDoc') {
     handlers.onMutateDoc(pluginId, data.doc);
+    return;
+  }
+  if (type === 'error') {
+    handlers.onToast({
+      title: 'Plugin failed',
+      description: String(data.error || 'Unknown plugin error'),
+      variant: 'destructive',
+    });
     return;
   }
   if (type === 'toast') {

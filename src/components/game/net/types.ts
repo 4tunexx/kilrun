@@ -32,6 +32,8 @@ export interface NetAbilityLoadoutState {
   bulletCooldownEndsAt?: number;
   thunderCooldownEndsAt?: number;
   backflipCooldownEndsAt?: number;
+  /** Server-trusted skill-tree JSON — same object activateAbility reads. */
+  levelsJson?: string;
 }
 
 export interface NetPlayerState {

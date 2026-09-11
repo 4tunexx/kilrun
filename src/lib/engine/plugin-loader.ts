@@ -31,13 +31,18 @@ export type PluginLoadResult = {
   errors: { id: string; error: string }[];
 };
 
-export async function syncOfficialModules(): Promise<{ installed: string[]; skipped: number }> {
-  const result = { installed: [] as string[], skipped: 0 };
+export async function syncOfficialModules(): Promise<{
+  installed: string[];
+  skipped: number;
+  error?: string;
+}> {
+  const result = { installed: [] as string[], skipped: 0, error: undefined as string | undefined };
   if (!isKilrunEngineDesktop()) return result;
   let catalog: OfficialCatalogRow[] = [];
   try {
     catalog = await fetchOfficialCatalog();
-  } catch {
+  } catch (err) {
+    result.error = err instanceof Error ? err.message : 'Official catalog fetch failed';
     return result;
   }
   if (!catalog.length) return result;

@@ -1,3 +1,5 @@
+import { fetchEngineGhost, submitEngineGhost } from '@/lib/engine/platform-client';
+
 export type GhostSample = {
   t: number;
   x: number;
@@ -5,10 +7,18 @@ export type GhostSample = {
   z: number;
 };
 
-export async function getMapWorldRecord(_mapId: string) {
-  return null;
+export async function getMapWorldRecord(mapId: string) {
+  return fetchEngineGhost(mapId);
 }
 
-export async function submitGhostRun(_input: unknown) {
-  return { ok: true };
+export async function getMyMapGhost(mapId: string) {
+  return fetchEngineGhost(mapId);
+}
+
+export async function submitGhostRun(input: {
+  mapId: string;
+  finishMs: number;
+  samples: GhostSample[];
+}) {
+  return submitEngineGhost(input);
 }

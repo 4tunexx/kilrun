@@ -2,6 +2,7 @@ import { Client, Room } from 'colyseus';
 import { ObstacleState, PlayerState, PlatformState, RoomState } from '../schema/RoomState.js';
 import type { CustomMoveDef } from '../../../shared/custom-moves.js';
 import { PadSpatialIndex } from '../../../shared/platform-spatial.js';
+import { astarPadPath, buildPadNavGraph, nextNavWaypoint } from '../sim/horde-nav.js';
 import {
   createFromBlueprints,
   createObstaclesFromBlueprints,
@@ -103,6 +104,7 @@ interface JoinOptions {
   isStaff?: boolean;
   kp?: number;
   equippedSkinsJson?: string;
+  loadoutToken?: string;
   weaponCombat?: {
     kind?: string;
     range?: number;
@@ -246,6 +248,7 @@ export class HordeRoom extends Room<RoomState> {
   private baseCapacity = 4;
   protected minPlayersToStart = HORDE_MIN_PLAYERS_TO_START;
   private padIndex = new PadSpatialIndex<PlatformState>();
+  private monsterNav: ReturnType<typeof buildPadNavGraph> | null = null;
   private solidFx = new SolidFxHost();
 
   private latestInputs = new Map<string, PlayerInput>();
@@ -366,6 +369,7 @@ export class HordeRoom extends Room<RoomState> {
       ])
     );
     this.padIndex.rebuild(this.state.platforms);
+    this.monsterNav = buildPadNavGraph(Array.from(this.state.platforms));
     this.playerSpawns = [{ x: 0, y: 0, z: 0.5 }];
     this.monsterSpawnPoints = [
       {
@@ -736,6 +740,7 @@ export class HordeRoom extends Room<RoomState> {
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(platforms));
       this.padIndex.rebuild(this.state.platforms);
+    this.monsterNav = buildPadNavGraph(Array.from(this.state.platforms));
       this.solidFx.load(platforms);
       this.platformMotion.clear();
       this.matchElapsedMs = 0;
@@ -857,6 +862,7 @@ export class HordeRoom extends Room<RoomState> {
       while (this.state.platforms.length > 0) this.state.platforms.pop();
       this.state.platforms.push(...createFromBlueprints(pads));
       this.padIndex.rebuild(this.state.platforms);
+    this.monsterNav = buildPadNavGraph(Array.from(this.state.platforms));
       this.solidFx.load(pads);
       this.platformMotion.clear();
       this.matchElapsedMs = 0;
@@ -970,7 +976,7 @@ export class HordeRoom extends Room<RoomState> {
     this.steamIdBySession.set(client.sessionId, claims.steamId || '');
     player.role = 'survivor';
     player.kp = claims.kp;
-    const trusted = await fetchTrustedLoadout(player.userId);
+    const trusted = await fetchTrustedLoadout(player.userId, options.loadoutToken);
     applyLoadoutToPlayer(player, trusted ?? options);
     applyAbilityStatsToPlayer(player, trusted?.abilityStatBonuses);
     applyAbilityLevelsToPlayer(player, trusted?.abilityLevels ?? null);
@@ -1319,6 +1325,7 @@ export class HordeRoom extends Room<RoomState> {
       this.matchElapsedMs
     );
     this.padIndex.rebuild(this.state.platforms);
+    this.monsterNav = buildPadNavGraph(Array.from(this.state.platforms));
     this.tickSolidFx();
     this.tickSpawnQueue();
     this.tickMonsters(dtMs / 1000);
@@ -1530,12 +1537,29 @@ export class HordeRoom extends Room<RoomState> {
       const py = nx * mon.strafeSign;
 
       if (dist > attackRadius) {
+        let mx = nx;
+        let my = ny;
+        if (this.monsterNav && this.monsterNav.walkable.size > 0) {
+          const path = astarPadPath(this.monsterNav.walkable, mon, nearest);
+          const wp = nextNavWaypoint(path, mon.x, mon.y);
+          if (wp) {
+            const wdx = wp.x - mon.x;
+            const wdy = wp.y - mon.y;
+            const wdist = Math.hypot(wdx, wdy) || 1;
+            mx = wdx / wdist;
+            my = wdy / wdist;
+          }
+        }
         const flank = dist > attackRadius * 3 ? 0.18 : 0.45;
-        const mx = nx * (1 - flank) + px * flank;
-        const my = ny * (1 - flank) + py * flank;
-        const mag = Math.hypot(mx, my) || 1;
-        mon.x += (mx / mag) * mon.speed * dtSec;
-        mon.y += (my / mag) * mon.speed * dtSec;
+        const sx = mx * (1 - flank) + px * flank;
+        const sy = my * (1 - flank) + py * flank;
+        const mag = Math.hypot(sx, sy) || 1;
+        mon.x += (sx / mag) * mon.speed * dtSec;
+        mon.y += (sy / mag) * mon.speed * dtSec;
+        const cellZ = this.monsterNav?.heightAt.get(
+          `${Math.round(mon.x / 1.2)}:${Math.round(mon.y / 1.2)}`
+        );
+        if (typeof cellZ === 'number') mon.z = cellZ;
       } else if (mon.kind === 'fast' || mon.kind === 'basic') {
         const orbit = mon.speed * 0.85 * dtSec;
         mon.x += px * orbit;

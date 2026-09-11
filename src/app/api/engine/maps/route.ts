@@ -21,8 +21,13 @@ export function OPTIONS(req: NextRequest) {
 export async function GET(req: NextRequest) {
   try {
     await requireEngineStaff(req);
+    const id = req.nextUrl.searchParams.get('id');
     const mode = req.nextUrl.searchParams.get('mode') || 'deathrun';
     const maps = await listCloudMapDocumentsForStaff(mode);
+    if (id) {
+      const map = maps.find((row) => row.id === id || row.localId === id) ?? null;
+      return engineJson(req, { ok: true, map, maps: map ? [map] : [] });
+    }
     return engineJson(req, { ok: true, maps });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to list maps';

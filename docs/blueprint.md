@@ -48,4 +48,4 @@ A powerful command center for platform operators:
 - **Styling:** Tailwind CSS with ShadCN UI components.
 - **Icons:** Lucide React.
 - **Data Visualization:** Recharts.
-- **Game Engine:** Custom HTML5 Canvas-based pseudo-3D engine.
+- **Game Engine:** Kilrun Engine — Three.js WebGL client, shared `stepSim` physics (`shared/sim-core.ts`), Colyseus authoritative rooms, and a Tauri 2 Windows studio (map / model / plugin editor). Not a Canvas pseudo-3D renderer.

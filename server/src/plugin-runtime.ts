@@ -1,4 +1,7 @@
 import vm from 'node:vm';
+import { Worker } from 'node:worker_threads';
+import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
 import { wrapPluginSourceAsCjs, clipPluginSource } from '../../shared/plugin-source.js';
 import {
   collectShopFromRuntime,
@@ -146,12 +149,21 @@ if (__h) {
 }
 `;
 
+function isolateWorkerPath(): string {
+  const nextToMe = fileURLToPath(new URL('./plugin-isolate-worker.mjs', import.meta.url));
+  if (fs.existsSync(nextToMe)) return nextToMe;
+  return fileURLToPath(new URL('../../../src/plugin-isolate-worker.mjs', import.meta.url));
+}
+
 export class RoomPluginRuntime {
   private vms: LoadedVm[] = [];
   private disabled = new Set<string>();
   private entities: PluginEntitySim[] = [];
   private lastTouch = new Map<string, number>();
   private shopItems: Array<Record<string, unknown> & { id: string }> = [];
+  private worker: Worker | null = null;
+  private queuedDamage = 0;
+  private isolateReady = false;
 
   shopPool() {
     return this.shopItems;
@@ -163,10 +175,50 @@ export class RoomPluginRuntime {
     this.entities = [];
     this.lastTouch.clear();
     this.shopItems = [];
+    this.queuedDamage = 0;
+    this.isolateReady = false;
+    this.worker?.terminate().catch(() => undefined);
+    this.worker = null;
     if (!payload) return;
     this.entities = asEntities(payload.pluginEntities);
     const runtime = overlayCatalogOnRuntime(payload.pluginRuntime);
     this.shopItems = collectShopFromRuntime(runtime);
+    if (!Array.isArray(runtime)) return;
+    try {
+      const strippedEnv = {
+        NODE_ENV: process.env.NODE_ENV || 'production',
+        PATH: process.env.PATH || '',
+      };
+      this.worker = new Worker(isolateWorkerPath(), {
+        env: strippedEnv,
+        workerData: { isolated: true },
+      });
+      this.worker.on('message', (msg: { type?: string; amount?: number; message?: string }) => {
+        if (msg?.type === 'loaded') this.isolateReady = true;
+        if (msg?.type === 'damage') {
+          const add = Number(msg.amount) || 0;
+          if (add > 0) this.queuedDamage = Math.min(MAX_DMG_PER_TICK, this.queuedDamage + add);
+        }
+        if (msg?.type === 'warn') console.warn('[plugin-isolate]', msg.message);
+      });
+      this.worker.on('error', (err) => {
+        console.warn('[plugin-isolate] worker failed — falling back to in-process vm', err);
+        this.worker = null;
+        this.loadInProcess(runtime);
+      });
+      this.worker.postMessage({
+        type: 'load',
+        pluginEntities: this.entities,
+        pluginRuntime: runtime,
+      });
+      return;
+    } catch (err) {
+      console.warn('[plugin-isolate] spawn failed — in-process vm', err);
+    }
+    this.loadInProcess(runtime);
+  }
+
+  private loadInProcess(runtime: unknown) {
     if (!Array.isArray(runtime)) return;
     for (const bundle of runtime.slice(0, 16)) {
       if (!bundle || typeof bundle !== 'object') continue;
@@ -186,6 +238,14 @@ export class RoomPluginRuntime {
     now: number,
     damage: (amount: number) => void
   ) {
+    if (this.queuedDamage > 0) {
+      damage(this.queuedDamage);
+      this.queuedDamage = 0;
+    }
+    if (this.worker) {
+      this.worker.postMessage({ type: 'tick', player, dt, now });
+      return;
+    }
     if (!this.entities.length || !this.vms.length) return;
     let dealt = 0;
 

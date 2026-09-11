@@ -71,8 +71,8 @@ import { HitMarker } from './ui/hit-marker';
 import { KillFeed } from './ui/kill-feed';
 import { LiveChatOverlay } from './ui/live-chat-overlay';
 import { AdminInGamePanel } from './ui/admin-in-game-panel';
-import { SLOT_FIELDS } from './ui/ability-hud';
-import { getAbilitySlotKind, getEnergyCostForAbility } from '@shared/power-definitions';
+import { canActivateAbility, defaultAbilityHostState } from '@shared/active-abilities';
+import { parseAbilityLevels } from '@shared/ability-progression';
 import {
   loadTpsViewSettings,
   mouseSensRadians,
@@ -130,7 +130,11 @@ import {
   type SimScratch,
 } from '@/lib/platformer-sim';
 import { advanceMovingPads, applyPadCarry } from '@shared/moving-platform';
-import { reconcilePredictedBody } from '@/lib/client-prediction';
+import {
+  predictCombatHit,
+  reconcilePredictedBody,
+  type CombatPredictTarget,
+} from '@/lib/client-prediction';
 import { loadMapPlayable } from './editor/map-storage';
 import type { MapDocument } from './editor/map-document';
 import { ensureEnvironment, shopItemsForMode, shopPowerUpsForMode, shopSkinsForMode, ensureShopSettings, ensureCombatSettings } from './editor/map-document';
@@ -274,6 +278,8 @@ export default function KilrunEngine({
     gameMenuOpenRef.current = gameMenuOpen;
   }, [gameMenuOpen]);
   const gameProgression = useGameProgression(joinOptions.userId);
+  const abilityLevelsRef = useRef<Record<string, number>>({});
+  abilityLevelsRef.current = gameProgression.progression?.abilities ?? {};
   useEffect(() => {
     if (room.phase !== 'results') return;
     gameProgression.refresh();
@@ -744,13 +750,21 @@ export default function KilrunEngine({
       .catch(() => {});
     const damageNumbers = new DamageNumberFx(hostElement);
     const pendingImpactRef: {
-      current: { at: number; kind: 'melee' | 'hitscan'; range: number } | null;
+      current: {
+        at: number;
+        kind: 'melee' | 'hitscan';
+        range: number;
+        hitConfirmed: boolean;
+      } | null;
     } = { current: null };
+    let predictedHitUntil = 0;
     const hitFxConnection = connectionRef.current;
     hitFxConnection?.onHitFx((msg) => {
       pendingImpactRef.current = null;
       damageNumbers.spawn(msg.x, msg.y, msg.z, msg.amount, msg.kind);
-      setHitMarker((h) => ({ token: h.token + 1, kind: msg.kind }));
+      if (performance.now() > predictedHitUntil) {
+        setHitMarker((h) => ({ token: h.token + 1, kind: msg.kind }));
+      }
     });
     hitFxConnection?.onKillFeed((msg) => {
       setKillFeedEvent((prev) => ({ ...msg, token: (prev?.token ?? 0) + 1 }));
@@ -1264,7 +1278,7 @@ export default function KilrunEngine({
         }
         const cue = pendingImpactCue({
           fireKind: pending.kind,
-          hitConfirmed: false,
+          hitConfirmed: pending.hitConfirmed,
           metalHit,
         });
         if (cue) playSound(cue);
@@ -1637,15 +1651,45 @@ export default function KilrunEngine({
           // Always send: the server is authoritative and our cooldown/energy
           // view can be a tick stale, so a local check only picks the cue.
           connectionRef.current?.sendActivateAbility(abilityPulse);
-          const slot = getAbilitySlotKind(abilityPulse);
-          const cooldownEndsAt = slot
-            ? localState.ability?.[SLOT_FIELDS[slot].cooldownEndsAt] ?? 0
-            : 0;
-          const energyCost = getEnergyCostForAbility(abilityPulse);
-          const denied =
-            cooldownEndsAt > Date.now() ||
-            (energyCost > 0 && (localState.energy ?? 0) < energyCost);
-          playSound(denied ? 'power_denied' : `power_${abilityPulse}`);
+          let fromServer: Record<string, number> | null = null;
+          if (typeof localState.ability?.levelsJson === 'string') {
+            try {
+              fromServer = parseAbilityLevels(JSON.parse(localState.ability.levelsJson));
+            } catch {
+              fromServer = null;
+            }
+          }
+          const fromTree = abilityLevelsRef.current;
+          const levels =
+            fromServer ??
+            (Object.values(fromTree).some((n) => n > 0) ? fromTree : null);
+          const gate = canActivateAbility(
+            {
+              isAlive: localState.isAlive !== false,
+              hasFinished: Boolean(localState.hasFinished),
+              energy: localState.energy ?? 0,
+              x: localState.x,
+              y: localState.y,
+              z: localState.z ?? 0,
+              vz: localState.vz ?? 0,
+              aimAngle: cameraYaw,
+              isInvisible: false,
+              ability: {
+                ...defaultAbilityHostState(),
+                visibilityCooldownEndsAt: localState.ability?.visibilityCooldownEndsAt ?? 0,
+                flyCooldownEndsAt: localState.ability?.flyCooldownEndsAt ?? 0,
+                hookCooldownEndsAt: localState.ability?.hookCooldownEndsAt ?? 0,
+                berserkCooldownEndsAt: localState.ability?.berserkCooldownEndsAt ?? 0,
+                bulletCooldownEndsAt: localState.ability?.bulletCooldownEndsAt ?? 0,
+                thunderCooldownEndsAt: localState.ability?.thunderCooldownEndsAt ?? 0,
+                backflipCooldownEndsAt: localState.ability?.backflipCooldownEndsAt ?? 0,
+              },
+            },
+            abilityPulse,
+            Date.now(),
+            Object.keys(levels).length ? levels : null
+          );
+          playSound(gate.ok ? `power_${abilityPulse}` : 'power_denied');
         }
         const shootNow = inputManager.isShootPressed() || inputManager.isAttackPressed();
         const localWep = localSessionId ? playersRef.current.get(localSessionId) : undefined;
@@ -1676,10 +1720,63 @@ export default function KilrunEngine({
           );
           const isMelee = combat.kind === 'melee' || localWep?.weaponKind === 'melee';
           if (combat.kind !== 'cosmetic') {
+            const range = localWep?.weaponRange || combat.range || 14;
+            const origin = predictedBody
+              ? { x: predictedBody.x, y: predictedBody.y, z: predictedBody.z }
+              : localState
+                ? { x: localState.x, y: localState.y, z: localState.z ?? 0 }
+                : null;
+            const targets: CombatPredictTarget[] = [];
+            playersRef.current.forEach((p, id) => {
+              if (id === localSessionId || !p.isAlive) return;
+              targets.push({
+                id,
+                kind: 'player',
+                x: p.x,
+                y: p.y,
+                z: p.z,
+                role: p.role,
+              });
+            });
+            obstaclesRef.current.forEach((o) => {
+              if (!o.id?.startsWith('mon_') || o.active === false) return;
+              targets.push({
+                id: o.id,
+                kind: 'monster',
+                x: o.x,
+                y: o.y,
+                z: o.z,
+                height: o.height,
+                radius: Math.max(0.2, (o.width || 0.8) / 2),
+              });
+            });
+            const predicted =
+              origin &&
+              predictCombatHit({
+                shooterX: origin.x,
+                shooterY: origin.y,
+                shooterZ: origin.z,
+                aimAngle: cameraYaw,
+                aimPitch: cameraPitch,
+                range,
+                cone: localWep?.weaponConeRadians || 0.18,
+                aimHeld,
+                adsConeScale: localWep?.weaponAdsConeScale,
+                hipfireConeScale: localWep?.weaponHipfireConeScale,
+                excludeId: localSessionId ?? undefined,
+                shooterRole: localState?.role,
+                mode: simMode,
+                targets,
+              });
+            if (predicted) {
+              predictedHitUntil = performance.now() + 280;
+              setHitMarker((h) => ({ token: h.token + 1, kind: predicted.kind }));
+            }
             pendingImpactRef.current = {
               at: performance.now() + (isMelee ? 220 : 90),
               kind: isMelee ? 'melee' : 'hitscan',
-              range: localWep?.weaponRange || combat.range || 14,
+              range,
+              hitConfirmed: Boolean(predicted),
             };
           }
           // Weapon Editor's Recoil tab documents "0 = use Combat Editor

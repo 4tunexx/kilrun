@@ -1,6 +1,6 @@
 {
   "name": "kilrun",
-  "version": "0.1.0",
+  "version": "0.1.10",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
@@ -15,6 +15,7 @@
     "db:seed-sounds": "tsx scripts/seed-sound-pack.ts",
     "db:seed-guides": "tsx scripts/seed-guides.ts",
     "test": "vitest run",
+    "engine:test": "cargo test --manifest-path desktop/src-tauri/Cargo.toml --offline || cargo test --manifest-path desktop/src-tauri/Cargo.toml",
     "test:watch": "vitest",
     "engine:ui:dev": "vite --config desktop/ui/vite.config.ts",
     "engine:ui:build": "vite build --config desktop/ui/vite.config.ts",
