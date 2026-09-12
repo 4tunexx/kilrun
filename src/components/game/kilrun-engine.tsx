@@ -1663,6 +1663,7 @@ export default function KilrunEngine({
           const levels =
             fromServer ??
             (Object.values(fromTree).some((n) => n > 0) ? fromTree : null);
+          const activeLevels = levels && Object.keys(levels).length ? levels : null;
           const gate = canActivateAbility(
             {
               isAlive: localState.isAlive !== false,
@@ -1687,7 +1688,7 @@ export default function KilrunEngine({
             },
             abilityPulse,
             Date.now(),
-            Object.keys(levels).length ? levels : null
+            activeLevels
           );
           playSound(gate.ok ? `power_${abilityPulse}` : 'power_denied');
         }

@@ -46,7 +46,28 @@ function RingGlyph({ icon }: { icon: string | LucideIcon }) {
 /** Default slide cooldown when the HUD was not passed CombatSettings.slideCooldownMs. */
 const SLIDE_COOLDOWN_MS_DEFAULT = 800;
 
-export const SLOT_FIELDS: Record<AbilitySlotKind, { endsAt: keyof NetAbilityLoadoutState; cooldownEndsAt: keyof NetAbilityLoadoutState }> = {
+type AbilityTimestampField = keyof Pick<
+  NetAbilityLoadoutState,
+  | 'visibilityEndsAt'
+  | 'flyEndsAt'
+  | 'berserkEndsAt'
+  | 'bulletEndsAt'
+  | 'hookEndsAt'
+  | 'backflipEndsAt'
+  | 'thunderEndsAt'
+  | 'visibilityCooldownEndsAt'
+  | 'flyCooldownEndsAt'
+  | 'berserkCooldownEndsAt'
+  | 'bulletCooldownEndsAt'
+  | 'hookCooldownEndsAt'
+  | 'backflipCooldownEndsAt'
+  | 'thunderCooldownEndsAt'
+>;
+
+export const SLOT_FIELDS: Record<
+  AbilitySlotKind,
+  { endsAt: AbilityTimestampField; cooldownEndsAt: AbilityTimestampField }
+> = {
   visibility: { endsAt: 'visibilityEndsAt', cooldownEndsAt: 'visibilityCooldownEndsAt' },
   fly: { endsAt: 'flyEndsAt', cooldownEndsAt: 'flyCooldownEndsAt' },
   berserk: { endsAt: 'berserkEndsAt', cooldownEndsAt: 'berserkCooldownEndsAt' },

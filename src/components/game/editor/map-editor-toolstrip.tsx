@@ -1,6 +1,5 @@
 'use client';
 
-import type { ReactNode } from 'react';
 import {
   Box,
   CircleDot,
@@ -43,6 +42,7 @@ import { HAMMER_SOLID_MODEL, type EditorEntity, type HammerPrimitive, type MapDo
 import { activateExtensionTool, listExtensionTools } from '@/lib/engine/plugin-sdk';
 import type { EditTool, EditorViewLayout, PivotMode, SnapTarget, TransformMode, TransformSpace } from './editor-viewport';
 import type { EditorViewportApi } from './editor-viewport';
+import type { useToast } from '@/hooks/use-toast';
 
 export type MapEditorToolstripProps = {
   editTool: EditTool;
@@ -69,7 +69,7 @@ export type MapEditorToolstripProps = {
   setRotateMenuOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   rotateMenuAnchorRect: DOMRect | null;
   setRotateMenuAnchorRect: (rect: DOMRect | null) => void;
-  toast: (opts: { title?: ReactNode; description?: ReactNode; variant?: 'default' | 'destructive' }) => void;
+  toast: ReturnType<typeof useToast>['toast'];
   gridSnap: boolean;
   setGridSnap: (v: boolean | ((prev: boolean) => boolean)) => void;
   snapY: boolean;

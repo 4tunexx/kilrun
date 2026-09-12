@@ -67,7 +67,7 @@ export function isPluginSandboxEnvelope(data: unknown): data is {
   ns: string;
   pluginId: string;
   type?: string;
-} {
+} & Record<string, unknown> {
   if (!data || typeof data !== 'object') return false;
   const rec = data as Record<string, unknown>;
   return rec.ns === NS_FROM && typeof rec.pluginId === 'string';
