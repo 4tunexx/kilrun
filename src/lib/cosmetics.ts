@@ -35,6 +35,8 @@ export type { SkinAttachSlot };
 export const PUBLIC_USER_COSMETIC_SELECT = {
   equippedFrameConfig: true,
   equippedNicknameConfig: true,
+  /** Needed by isVipActive()/withActiveVip() so expired VIP never shows perks. */
+  vipExpiresAt: true,
 } as const;
 
 /** Common author/peer select used by chat, friends, forum, messages. */

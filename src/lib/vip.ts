@@ -106,3 +106,23 @@ export function activeVipWhere(now: Date = new Date()) {
     OR: [{ vipExpiresAt: null }, { vipExpiresAt: { gt: now } }],
   } as const;
 }
+
+/**
+ * Normalise a user-shaped object for the client: `isVip` becomes "VIP is active right now"
+ * (so an expired-but-not-yet-cleaned row never shows perks) and `vipExpiresAt` is serialised.
+ * Generic so it keeps every other field's type. Rows without VIP fields pass through unchanged
+ * apart from `isVip: false`.
+ */
+export function withActiveVip<T extends VipLike>(
+  row: T,
+  now: number = Date.now()
+): Omit<T, 'isVip' | 'vipExpiresAt'> & { isVip: boolean; vipExpiresAt: string | null } {
+  const { isVip: _isVip, vipExpiresAt, ...rest } = row as T & { isVip?: unknown };
+  void _isVip;
+  const t = vipExpiresAt == null || vipExpiresAt === '' ? null : new Date(vipExpiresAt as Date | string);
+  return {
+    ...(rest as Omit<T, 'isVip' | 'vipExpiresAt'>),
+    isVip: isVipActive(row, now),
+    vipExpiresAt: t && !Number.isNaN(t.getTime()) ? t.toISOString() : null,
+  };
+}

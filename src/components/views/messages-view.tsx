@@ -26,6 +26,7 @@ type Conversation = {
     avatarUrl: string;
     role?: string;
     isVip?: boolean;
+    vipExpiresAt?: string | null;
     equippedFrameConfig?: unknown | null;
     equippedNicknameConfig?: unknown | null;
   };
@@ -51,6 +52,7 @@ export default function MessagesView({ userId }: { userId: string }) {
     avatarUrl: string;
     role?: string;
     isVip?: boolean;
+    vipExpiresAt?: string | null;
     equippedFrameConfig?: unknown | null;
     equippedNicknameConfig?: unknown | null;
   } | null>(null);

@@ -139,7 +139,10 @@ export interface SessionPlayer {
   /** Killrun Points — competitive Elo. */
   kp?: number;
   role: string;
+  /** Platform VIP active right now (computed with isVipActive on the server). */
   isVip: boolean;
+  /** ISO expiry of timed VIP; null = permanent VIP (or not VIP). */
+  vipExpiresAt?: string | null;
   isPremium?: boolean;
   premiumExpiresAt?: string | null;
   bio: string;

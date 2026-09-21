@@ -3,6 +3,7 @@ import { auth } from '@/auth';
 import { withPrismaRetry } from '@/lib/prisma';
 import GameHubInterface from '@/components/game-hub-interface';
 import { isPremiumActive } from '@/lib/premium';
+import { isVipActive } from '@/lib/vip';
 import { getRankForKp, KP_DEFAULT } from '@/lib/kp';
 import { getSiteSettings } from '@/lib/progression-actions';
 
@@ -63,7 +64,8 @@ export default async function Page() {
         currentRank: premium ? kpRank : 'Go Premium',
         kp,
         role: user.role,
-        isVip: user.isVip,
+        isVip: isVipActive(user),
+        vipExpiresAt: user.vipExpiresAt ? new Date(user.vipExpiresAt).toISOString() : null,
         isPremium: premium,
         premiumExpiresAt: premiumExpiresAt
           ? new Date(premiumExpiresAt).toISOString()

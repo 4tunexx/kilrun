@@ -26,6 +26,7 @@ import { upsertStoreItemAsStaff } from '@/lib/store-item-core';
 import { getLevelFromXp } from '@/lib/progression';
 import { getInventorySlotCap } from '@/lib/inventory-slots';
 import { sanitizeDashboardPanelPrefs } from '@/lib/dashboard-panels';
+import { activeVipWhere, isVipActive, withActiveVip } from '@/lib/vip';
 
 async function requireSessionUser() {
   const session = await auth();
@@ -605,7 +606,7 @@ export async function getLeaderboard(opts?: {
       xpProgress: u.xpProgress ?? 0,
       vpCurrency: u.vpCurrency ?? 0,
       currentRank: premium ? getRankForKp(kp) : 'Go Premium',
-      isVip: !!u.isVip,
+      isVip: isVipActive(u),
       isPremium: premium,
       kp,
       role: u.role,
@@ -669,7 +670,7 @@ export async function getLeaderboard(opts?: {
 
 /** Public profile snippet for messaging / profile deep-links. */
 export async function getUserBrief(userId: string) {
-  return prisma.user.findFirst({
+  const brief = await prisma.user.findFirst({
     where: { id: userId, ...NOT_BANNED },
     select: {
       id: true,
@@ -682,6 +683,7 @@ export async function getUserBrief(userId: string) {
       ...PUBLIC_USER_COSMETIC_SELECT,
     },
   });
+  return brief ? withActiveVip(brief) : null;
 }
 
 /** Presence window: hub polls every 30s — treat as online if seen within 2 minutes. */
@@ -729,7 +731,7 @@ export async function getFriends() {
       },
     },
   });
-  return rows.map((f) => withPresence(f.userAId === user.id ? f.userB : f.userA));
+  return rows.map((f) => withActiveVip(withPresence(f.userAId === user.id ? f.userB : f.userA)));
 }
 
 /** Map of otherUserId → friendship UI status for the current user. */
@@ -753,13 +755,14 @@ export async function getMyFriendshipMap() {
 
 export async function getFriendRequests() {
   const user = await requireSessionUser();
-  return prisma.friendship.findMany({
+  const rows = await prisma.friendship.findMany({
     where: { userBId: user.id, status: 'pending' },
     include: {
       userA: { select: PUBLIC_USER_CARD_SELECT },
     },
     orderBy: { createdAt: 'desc' },
   });
+  return rows.map((r) => ({ ...r, userA: withActiveVip(r.userA) }));
 }
 
 /** Outgoing pending friend requests (for UI “Pending” state). */
@@ -859,6 +862,7 @@ export async function getConversations() {
         avatarUrl: string;
         role: string;
         isVip: boolean;
+        vipExpiresAt: string | null;
         equippedFrameConfig: unknown | null;
         equippedNicknameConfig: unknown | null;
       };
@@ -869,7 +873,7 @@ export async function getConversations() {
   >();
 
   for (const msg of messages) {
-    const peer = msg.senderId === user.id ? msg.receiver : msg.sender;
+    const peer = withActiveVip(msg.senderId === user.id ? msg.receiver : msg.sender);
     const existing = byPeer.get(peer.id);
     if (!existing) {
       byPeer.set(peer.id, {
@@ -954,7 +958,7 @@ export async function deleteConversation(peerId: string) {
 }
 
 export async function getForumPosts(take = 30) {
-  return prisma.forumPost.findMany({
+  const posts = await prisma.forumPost.findMany({
     orderBy: { createdAt: 'desc' },
     take,
     include: {
@@ -962,6 +966,7 @@ export async function getForumPosts(take = 30) {
       _count: { select: { replies: true } },
     },
   });
+  return posts.map((p) => ({ ...p, author: withActiveVip(p.author) }));
 }
 
 export async function createForumPost(input: {
@@ -988,13 +993,14 @@ export async function createForumPost(input: {
 }
 
 export async function getForumReplies(postId: string) {
-  return prisma.forumReply.findMany({
+  const replies = await prisma.forumReply.findMany({
     where: { postId },
     orderBy: { createdAt: 'asc' },
     include: {
       author: { select: PUBLIC_USER_CARD_SELECT },
     },
   });
+  return replies.map((r) => ({ ...r, author: withActiveVip(r.author) }));
 }
 
 export async function createForumReply(postId: string, body: string) {
@@ -1977,7 +1983,7 @@ export async function getMyReputationVote(targetUserId: string) {
 
 export async function adminListUsers(take = 50) {
   await requireStaff();
-  return prisma.user.findMany({
+  const rows = await prisma.user.findMany({
     orderBy: { createdAt: 'desc' },
     take,
     select: {
@@ -1987,6 +1993,7 @@ export async function adminListUsers(take = 50) {
       avatarUrl: true,
       role: true,
       isVip: true,
+      vipExpiresAt: true,
       isBanned: true,
       isMuted: true,
       vpCurrency: true,
@@ -1995,6 +2002,8 @@ export async function adminListUsers(take = 50) {
       createdAt: true,
     },
   });
+  // Admins keep the RAW isVip flag (to spot drift) plus the computed `vipActive`.
+  return rows.map((r) => ({ ...r, vipActive: isVipActive(r) }));
 }
 
 /** Adjust VP (+ give / − take). Floor at 0. Admin-only. */
@@ -2053,6 +2062,8 @@ export async function adminGetUserDetail(userId: string) {
       avatarUrl: true,
       role: true,
       isVip: true,
+      vipExpiresAt: true,
+      premiumExpiresAt: true,
       isBanned: true,
       isMuted: true,
       vpCurrency: true,
@@ -2097,7 +2108,14 @@ export async function adminGetUserDetail(userId: string) {
         take: 80,
       }),
     ]);
-  return { user, inventory, purchases, badges, achievements, missions };
+  return {
+    user: { ...user, vipActive: isVipActive(user) },
+    inventory,
+    purchases,
+    badges,
+    achievements,
+    missions,
+  };
 }
 
 /** Site-wide mass message — lands in the mail inbox (not the bell). */
@@ -2215,7 +2233,7 @@ export async function searchPlayers(query: string) {
   }
 
   return rows.map((row) => ({
-    ...row,
+    ...withActiveVip(row),
     username: row.username || 'Player',
     avatarUrl: row.avatarUrl || '',
     xpProgress: row.xpProgress ?? 0,

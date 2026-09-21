@@ -149,3 +149,38 @@ describe('constants', () => {
     expect(VIP_DURATION_DAYS).toBe(30);
   });
 });
+
+describe('withActiveVip', () => {
+  it('rewrites isVip from the expiry and serialises vipExpiresAt', async () => {
+    const { withActiveVip } = await import('./vip');
+    const expired = withActiveVip(
+      { id: 'u1', username: 'a', isVip: true, role: 'vip', vipExpiresAt: new Date(NOW - DAY) },
+      NOW
+    );
+    expect(expired.isVip).toBe(false);
+    expect(expired.vipExpiresAt).toBe(new Date(NOW - DAY).toISOString());
+    expect(expired.id).toBe('u1');
+    expect(expired.username).toBe('a');
+  });
+
+  it('keeps permanent and future VIP active, and null expiry as null', async () => {
+    const { withActiveVip } = await import('./vip');
+    expect(withActiveVip({ isVip: true, vipExpiresAt: null }, NOW)).toMatchObject({
+      isVip: true,
+      vipExpiresAt: null,
+    });
+    expect(withActiveVip({ isVip: true, vipExpiresAt: new Date(NOW + DAY) }, NOW).isVip).toBe(true);
+  });
+
+  it('handles a row with no VIP fields and an unparseable expiry', async () => {
+    const { withActiveVip } = await import('./vip');
+    expect(withActiveVip({ id: 'x' } as { id: string; isVip?: boolean }, NOW)).toMatchObject({
+      id: 'x',
+      isVip: false,
+      vipExpiresAt: null,
+    });
+    const bad = withActiveVip({ isVip: true, vipExpiresAt: 'garbage' }, NOW);
+    expect(bad.isVip).toBe(false);
+    expect(bad.vipExpiresAt).toBeNull();
+  });
+});
