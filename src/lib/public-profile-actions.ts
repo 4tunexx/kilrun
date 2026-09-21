@@ -15,6 +15,7 @@ import {
 import { resolveShowcaseEntries } from '@/lib/showcase-actions';
 import { PUBLIC_USER_CARD_SELECT } from '@/lib/cosmetics';
 import { isStaffRole } from '@/lib/roles';
+import { isVipActive } from '@/lib/vip';
 
 async function getViewer() {
   const session = await auth();
@@ -121,7 +122,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
       statusMessage: '',
       countryCode: '',
       role: target.role,
-      isVip: target.isVip,
+      isVip: isVipActive(target),
       isPremium: false,
       currentRank: 'Unranked',
       peakRank: 'Unranked',
@@ -262,7 +263,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     statusMessage: target.statusMessage ?? '',
     countryCode: target.countryCode ?? '',
     role: target.role,
-    isVip: target.isVip,
+    isVip: isVipActive(target),
     isPremium: premium,
     currentRank: displayRank,
     peakRank,
@@ -380,7 +381,7 @@ export async function getPublicProfileSummary(userId: string) {
     avatarUrl: target.avatarUrl,
     statusMessage: target.statusMessage ?? '',
     role: target.role,
-    isVip: target.isVip,
+    isVip: isVipActive(target),
     isPremium: isPremiumActive({
       isVip: target.isVip,
       premiumExpiresAt: (target as { premiumExpiresAt?: Date | null }).premiumExpiresAt,

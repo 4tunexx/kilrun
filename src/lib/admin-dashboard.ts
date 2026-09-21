@@ -4,6 +4,7 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { canAccessAdmin } from '@/lib/roles';
 import { getSiteSecretValue } from '@/lib/site-secrets';
+import { activeVipWhere } from '@/lib/vip';
 
 async function requireStaff() {
   const session = await auth();
@@ -120,7 +121,7 @@ export async function adminGetDashboardOverview(): Promise<AdminDashboardOvervie
     prisma.user.count(),
     prisma.user.count({ where: { isBanned: true } }),
     prisma.user.count({ where: { isMuted: true } }),
-    prisma.user.count({ where: { isVip: true } }),
+    prisma.user.count({ where: activeVipWhere() }),
     prisma.user.count({ where: { emailVerified: true } }),
     prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
     prisma.supportTicket.count({ where: { status: 'open' } }),

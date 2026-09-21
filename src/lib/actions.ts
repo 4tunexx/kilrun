@@ -8,6 +8,7 @@ import {
 import { missionPeriodKey } from '@/lib/daily-missions';
 import { resolveShopImageUrl } from '@/lib/shop-images';
 import { canAccessAdmin } from '@/lib/roles';
+import { withActiveVip } from '@/lib/vip';
 
 export type StatsSummary = {
   totalRuns: number;
@@ -170,6 +171,7 @@ export type LandingTopPlayer = {
   xpProgress: number;
   currentRank: string;
   isVip: boolean;
+  vipExpiresAt?: string | null;
   role: string;
 };
 
@@ -242,6 +244,7 @@ export async function getLandingPageData(): Promise<{
           xpProgress: true,
           currentRank: true,
           isVip: true,
+          vipExpiresAt: true,
           role: true,
         },
       })
@@ -254,6 +257,7 @@ export async function getLandingPageData(): Promise<{
           xpProgress: number;
           currentRank: string;
           isVip: boolean;
+          vipExpiresAt: Date | null;
           role: string;
         }>;
       }),
@@ -359,7 +363,7 @@ export async function getLandingPageData(): Promise<{
       vpEarned: vpAgg._sum.vpEarned ?? 0,
     },
     topPlayers: topPlayers.map((p) => ({
-      ...p,
+      ...withActiveVip(p),
       username: p.username || 'Player',
       avatarUrl: p.avatarUrl || '',
       xpProgress: p.xpProgress ?? 0,

@@ -10,6 +10,15 @@ import {
 import { auth } from '@/auth';
 import { isAdminRole } from '@/lib/roles';
 import { getAnnouncementActivityCutoff } from '@/lib/announcement-carousel-utils';
+import { activeVipWhere, withActiveVip } from '@/lib/vip';
+
+type RawAnnouncementUser = NonNullable<AnnouncementItem['user']> & {
+  vipExpiresAt?: Date | string | null;
+};
+
+function normalizeAnnouncementUser(u: RawAnnouncementUser): NonNullable<AnnouncementItem['user']> {
+  return withActiveVip(u);
+}
 
 export type AnnouncementItem = {
   id: string;
@@ -22,6 +31,7 @@ export type AnnouncementItem = {
     avatarUrl: string;
     role: string;
     isVip: boolean;
+    vipExpiresAt?: string | null;
     equippedNicknameConfig: unknown | null;
   } | null;
   /** Short text describing the event. */
@@ -65,6 +75,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
       avatarUrl: true,
       role: true,
       isVip: true,
+      vipExpiresAt: true,
       equippedNicknameConfig: true,
     };
 
@@ -195,7 +206,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
 
             case 'user_got_vip': {
               const users = await prisma.user.findMany({
-                where: { isVip: true, createdAt: { gt: cutoff }, profilePrivate: { not: true } },
+                where: { ...activeVipWhere(now), createdAt: { gt: cutoff }, profilePrivate: { not: true } },
                 orderBy: { createdAt: 'desc' },
                 take: PER_TYPE_LIMIT,
                 select: { ...userSelect, createdAt: true },
@@ -312,6 +323,12 @@ export async function getAnnouncementCarouselItems(): Promise<{
         }
       })
     );
+
+    // Every attached user was selected with vipExpiresAt: derive `isVip` from it once, here,
+    // so an expired VIP never shows a crown in ANY announcement type.
+    for (const item of items) {
+      if (item.user) item.user = normalizeAnnouncementUser(item.user);
+    }
 
     // Shuffle so types are interleaved. If the configured activity types produce
     // no items, surface the latest news items so the carousel still has content.

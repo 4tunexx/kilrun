@@ -12,6 +12,7 @@ import {
 import { getLevelFromXp, getLevelProgress } from '@/lib/progression';
 import { getRankForKp, KP_DEFAULT, clampKp } from '@/lib/kp';
 import { canAccessAdmin, isAdminRole } from '@/lib/roles';
+import { isVipActive } from '@/lib/vip';
 import { isTrustedServerContext } from '@/lib/trusted-server';
 
 export type WebsiteActionMetric =
@@ -1139,7 +1140,7 @@ export async function bootstrapHubProgression() {
   if (user.emailVerified) {
     await processWebsiteAction(user.id, 'email');
   }
-  if (user.isVip) {
+  if (isVipActive(user)) {
     await processWebsiteAction(user.id, 'vip');
   }
   return getLivePlayerState(user.id);
@@ -1271,7 +1272,8 @@ export async function getLivePlayerState(userId?: string) {
     peakRank,
     currentRank: premiumActive ? kpRank : 'Go Premium',
     role: user.role,
-    isVip: user.isVip,
+    isVip: isVipActive(user),
+    vipExpiresAt: user.vipExpiresAt ? new Date(user.vipExpiresAt).toISOString() : null,
     isPremium: premiumActive,
     rankedAccess,
     freeRankedWeek,
@@ -1702,6 +1704,7 @@ export async function getGlobalChat(take = 40) {
           avatarUrl: true,
           role: true,
           isVip: true,
+          vipExpiresAt: true,
           emailVerified: true,
           equippedFrameConfig: true,
           equippedNicknameConfig: true,

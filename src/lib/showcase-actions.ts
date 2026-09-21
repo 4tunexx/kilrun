@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { Prisma } from '@/generated/prisma';
 import { getLevelFromXp, getLevelProgress, getRankForLevel } from '@/lib/progression';
 import { normalizeBannerConfig } from '@/lib/banner';
+import { isVipActive } from '@/lib/vip';
 import {
   getShowcaseSlotCount,
   normalizeShowcaseLayout,
@@ -116,7 +117,7 @@ export async function getMyShowcaseEditor() {
       avatarUrl: user.avatarUrl,
       statusMessage: user.statusMessage ?? '',
       role: user.role,
-      isVip: user.isVip,
+      isVip: isVipActive(user),
       currentRank: user.currentRank || getRankForLevel(level),
       level,
       xpIntoLevel: progress.xpIntoLevel,

@@ -51,7 +51,8 @@ async function requireAdmin() {
 }
 
 export async function getCurrentUserProfile() {
-  return requireSessionUser();
+  // `isVip` is derived from vipExpiresAt so the client never receives a stale VIP flag.
+  return withActiveVip(await requireSessionUser());
 }
 
 export async function updateProfileBio(bio: string) {
