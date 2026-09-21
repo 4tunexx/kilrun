@@ -33,8 +33,11 @@ model User {
   notifyPush  Boolean  @default(true)
   notifyEmail Boolean  @default(true)
   isBanned    Boolean  @default(false)
-  /// Platform VIP — permanent hub perks (crown, orange name, VIP cosmetics).
+  /// Platform VIP — hub perks (crown, orange name, VIP cosmetics). Read via isVipActive().
   isVip       Boolean  @default(false)
+  /// When platform VIP expires. null + isVip=true means PERMANENT VIP (staff, giveaways, legacy);
+  /// a date means a timed monthly membership. Independent of premiumExpiresAt.
+  vipExpiresAt DateTime?
   /// When Kilrun Premium (Ranked Competitive) expires. Independent of isVip.
   premiumExpiresAt DateTime?
   isMuted     Boolean  @default(false)
@@ -394,6 +397,8 @@ model SiteSettings {
   hubChromeJson      String  @default("{}")
   /// JSON: Premium pricing, offers, free Ranked week — see premium-config.ts.
   premiumConfigJson  String  @default("{}")
+  /// JSON: platform VIP pricing/duration/offers — see vip-config.ts.
+  vipConfigJson      String  @default("{}")
   /// JSON: Competitive rank tiers (name, minKp, imageUrl) — see rank-config.ts.
   rankConfigJson     String  @default("{}")
   /// JSON: Hub announcement carousel config (enabled, types, speed, direction, thickness).
