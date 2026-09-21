@@ -126,3 +126,42 @@ export function withActiveVip<T extends VipLike>(
     vipExpiresAt: t && !Number.isNaN(t.getTime()) ? t.toISOString() : null,
   };
 }
+
+/** Outcome of deciding what a VIP purchase click should do. Pure: no DB access. */
+export type VipPurchasePlan =
+  | { kind: 'already_permanent' }
+  | { kind: 'insufficient_vp'; cost: number }
+  | {
+      kind: 'charge';
+      cost: number;
+      /** New expiry, stacked on the current one if VIP is still active. */
+      nextExpiresAt: Date;
+      /** True when the user already had active timed VIP (extension, not first purchase). */
+      isRenewal: boolean;
+      /** Role to write: 'vip' only if the user is a plain player; staff roles are never touched. */
+      nextRole: string;
+    };
+
+/**
+ * Decide what a VIP purchase does for this user. Rules:
+ *  - Permanent VIP (flag set, no expiry) is never charged.
+ *  - Timed VIP stacks on top of the remaining time; expired VIP restarts from `now`.
+ *  - Staff roles (admin/moderator) keep their role; only role 'player' (or an already-'vip') becomes 'vip'.
+ */
+export function planVipPurchase(
+  user: VipLike & { vpCurrency: number },
+  offer: { vpCost: number; durationDays: number },
+  now: number = Date.now()
+): VipPurchasePlan {
+  if (isVipPermanent(user) && isVipActive(user, now)) return { kind: 'already_permanent' };
+  const cost = Math.max(0, Math.floor(offer.vpCost));
+  if (user.vpCurrency < cost) return { kind: 'insufficient_vp', cost };
+  const active = isVipActive(user, now);
+  return {
+    kind: 'charge',
+    cost,
+    nextExpiresAt: addVipDays(user.vipExpiresAt, offer.durationDays, now),
+    isRenewal: active,
+    nextRole: user.role === 'player' || user.role === 'vip' || !user.role ? 'vip' : user.role,
+  };
+}

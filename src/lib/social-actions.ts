@@ -208,7 +208,13 @@ export async function getMyProfileActivity() {
 }
 
 /** Grant / equip VIP cosmetic perks (frame + banner + nickname). */
-async function grantVipCosmetics(userId: string) {
+/**
+ * Ensure the user owns the VIP cosmetics and has them equipped.
+ * `fillEmptySlotsOnly` (renewal): only equip a VIP item into a slot that is currently EMPTY or already
+ * holds that VIP item, so a cosmetic the user picked after their VIP lapsed is never overwritten.
+ * Default (first purchase) keeps the original behaviour of equipping all three unconditionally.
+ */
+async function grantVipCosmetics(userId: string, opts: { fillEmptySlotsOnly?: boolean } = {}) {
   const vipFrame = {
     itemSku: 'vip-crown-frame',
     itemName: 'VIP Crown Frame',
@@ -286,105 +292,162 @@ async function grantVipCosmetics(userId: string) {
     where: { userId, itemSku: 'vip-nickname' },
   });
 
-  if (frame) {
-    await prisma.inventoryItem.updateMany({
-      where: { userId, cosmeticSlot: 'frame', isEquipped: true },
-      data: { isEquipped: false },
-    });
-    await prisma.inventoryItem.update({
-      where: { id: frame.id },
-      data: { isEquipped: true },
-    });
-  }
-  if (banner) {
-    await prisma.inventoryItem.updateMany({
-      where: { userId, cosmeticSlot: 'banner', isEquipped: true },
-      data: { isEquipped: false },
-    });
-    await prisma.inventoryItem.update({
-      where: { id: banner.id },
-      data: { isEquipped: true },
-    });
-  }
-  if (nick) {
-    await prisma.inventoryItem.updateMany({
-      where: { userId, cosmeticSlot: 'nickname', isEquipped: true },
-      data: { isEquipped: false },
-    });
-    await prisma.inventoryItem.update({
-      where: { id: nick.id },
-      data: { isEquipped: true },
-    });
-  }
+  const equipVipItem = async (
+    item: { id: string } | null,
+    slot: 'frame' | 'banner' | 'nickname'
+  ): Promise<boolean> => {
+    if (!item) return false;
+    if (opts.fillEmptySlotsOnly) {
+      // Renewal: leave the slot alone if the user equipped something else in the meantime.
+      const other = await prisma.inventoryItem.findFirst({
+        where: { userId, cosmeticSlot: slot, isEquipped: true, NOT: { id: item.id } },
+        select: { id: true },
+      });
+      if (other) return false;
+    } else {
+      await prisma.inventoryItem.updateMany({
+        where: { userId, cosmeticSlot: slot, isEquipped: true },
+        data: { isEquipped: false },
+      });
+    }
+    await prisma.inventoryItem.update({ where: { id: item.id }, data: { isEquipped: true } });
+    return true;
+  };
+  const frameEquipped = await equipVipItem(frame, 'frame');
+  const bannerEquipped = await equipVipItem(banner, 'banner');
+  const nickEquipped = await equipVipItem(nick, 'nickname');
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      equippedFrameItemName: frame?.itemName ?? 'VIP Crown Frame',
-      equippedFrameConfig: (frame?.cosmeticConfig ??
-        vipFrame.cosmeticConfig) as unknown as Prisma.InputJsonValue,
-      equippedBannerItemName: banner?.itemName ?? 'VIP Banner',
-      equippedBannerConfig: (banner?.bannerConfig ??
-        vipBanner.bannerConfig) as unknown as Prisma.InputJsonValue,
-      equippedNicknameItemName: nick?.itemName ?? 'VIP Nickname',
-      equippedNicknameConfig: (nick?.cosmeticConfig ??
-        vipNick.cosmeticConfig) as unknown as Prisma.InputJsonValue,
-    },
-  });
+  const snapshot: Prisma.UserUpdateInput = {};
+  if (frameEquipped) {
+    snapshot.equippedFrameItemName = frame?.itemName ?? 'VIP Crown Frame';
+    snapshot.equippedFrameConfig = (frame?.cosmeticConfig ??
+      vipFrame.cosmeticConfig) as unknown as Prisma.InputJsonValue;
+  }
+  if (bannerEquipped) {
+    snapshot.equippedBannerItemName = banner?.itemName ?? 'VIP Banner';
+    snapshot.equippedBannerConfig = (banner?.bannerConfig ??
+      vipBanner.bannerConfig) as unknown as Prisma.InputJsonValue;
+  }
+  if (nickEquipped) {
+    snapshot.equippedNicknameItemName = nick?.itemName ?? 'VIP Nickname';
+    snapshot.equippedNicknameConfig = (nick?.cosmeticConfig ??
+      vipNick.cosmeticConfig) as unknown as Prisma.InputJsonValue;
+  }
+  if (Object.keys(snapshot).length > 0) {
+    await prisma.user.update({ where: { id: userId }, data: snapshot });
+  }
 }
 
-export async function unlockVipWithVp() {
-  const { VIP_UNLOCK_VP_COST } = await import('@/lib/vip');
+/**
+ * Buy or renew monthly platform VIP with VP. Price/duration come from SiteSettings.vipConfigJson
+ * (or a named offer). Renewal stacks on remaining time; permanent VIP is never charged.
+ * Does not touch Kilrun Premium.
+ */
+export async function purchaseVipWithVp(offerId?: string) {
+  const { planVipPurchase } = await import('@/lib/vip');
+  const { parseVipConfig, resolveVipOffer } = await import('@/lib/vip-config');
+  const { getSiteSettings } = await import('@/lib/progression-actions');
   const user = await requireSessionUser();
-  if (user.isVip || user.role === 'vip') {
-    return { ok: true as const, already: true };
+
+  const settings = await getSiteSettings();
+  const cfg = parseVipConfig((settings as { vipConfigJson?: string }).vipConfigJson ?? '{}');
+  const offer = resolveVipOffer(cfg, offerId);
+  if (!offer) return { ok: false as const, error: 'Offer not available' };
+
+  const plan = planVipPurchase(user, offer);
+  if (plan.kind === 'already_permanent') {
+    return { ok: true as const, already: true as const, permanent: true as const };
+  }
+  if (plan.kind === 'insufficient_vp') {
+    return { ok: false as const, error: `Need ${plan.cost} VP` };
   }
 
-  const nextRole = user.role === 'player' ? 'vip' : user.role;
-  const updated = await prisma.user.updateMany({
+  // Compare-and-set: the write only succeeds if the balance and the expiry are exactly what we
+  // planned against. Two simultaneous clicks therefore cannot both charge for the same extension.
+  const paid = await prisma.user.updateMany({
     where: {
       id: user.id,
-      isVip: false,
-      vpCurrency: { gte: VIP_UNLOCK_VP_COST },
+      vpCurrency: { gte: plan.cost },
+      vipExpiresAt: user.vipExpiresAt ?? null,
     },
     data: {
-      vpCurrency: { decrement: VIP_UNLOCK_VP_COST },
+      vpCurrency: { decrement: plan.cost },
       isVip: true,
-      role: nextRole,
+      vipExpiresAt: plan.nextExpiresAt,
+      role: plan.nextRole,
     },
   });
 
-  if (updated.count === 0) {
+  if (paid.count === 0) {
+    // Lost a race (or balance dropped). Re-read so the caller gets the truth, and never double-charge.
     const fresh = await prisma.user.findUnique({ where: { id: user.id } });
-    if (fresh?.isVip || fresh?.role === 'vip') {
-      return { ok: true as const, already: true };
+    if (fresh && fresh.vpCurrency < plan.cost) {
+      return { ok: false as const, error: `Need ${plan.cost} VP` };
     }
-    return { ok: false as const, error: 'Not enough VP' };
+    return { ok: false as const, error: 'Your VIP changed while purchasing. Please try again.' };
+  }
+
+  const { writeSystemAuditLog } = await import('@/lib/system-audit');
+
+  try {
+    await prisma.purchase.create({
+      data: {
+        userId: user.id,
+        itemSku: 'vip-subscription',
+        itemName: `VIP — ${offer.label}`,
+        vpSpent: plan.cost,
+      },
+    });
+  } catch (err) {
+    // The purchase record is bookkeeping; the user has paid and has VIP. Record the gap, don't fail.
+    await writeSystemAuditLog({
+      action: 'vip_purchase_record_failed',
+      targetUserId: user.id,
+      detail: `cost=${plan.cost} error=${err instanceof Error ? err.message : String(err)}`,
+    });
   }
 
   try {
-    await grantVipCosmetics(user.id);
+    await grantVipCosmetics(user.id, { fillEmptySlotsOnly: plan.isRenewal || user.vipExpiresAt != null });
   } catch (err) {
-    // Cosmetics are best-effort — VIP flag already applied and the VP has
-    // been spent, so don't fail the purchase. But silently swallowing this
-    // meant a failed grant left the user VIP with no visible perks and no
-    // record anywhere. Log it so support/admins can spot and re-grant.
-    const { writeAuditLog } = await import('@/lib/audit');
-    await writeAuditLog({
+    await writeSystemAuditLog({
       action: 'vip_cosmetic_grant_failed',
-      detail: `userId=${user.id} error=${err instanceof Error ? err.message : String(err)}`,
-    }).catch(() => {});
+      targetUserId: user.id,
+      detail: `error=${err instanceof Error ? err.message : String(err)}`,
+    });
   }
-  await prisma.notification.create({
-    data: {
-      userId: user.id,
-      title: 'VIP unlocked',
-      body: `Welcome to VIP! Orange name color, crown badge, exclusive banner, frame, and nickname effect are yours. More in-game VIP perks coming soon.`,
-      type: 'vip',
-    },
-  });
+
+  await prisma.notification
+    .create({
+      data: {
+        userId: user.id,
+        title: plan.isRenewal ? 'VIP renewed' : 'VIP activated',
+        body: `Kilrun VIP (${offer.label}) is active until ${plan.nextExpiresAt.toLocaleDateString()}. Orange name, crown badge, banner, frame and nickname effect are yours while VIP is active.`,
+        type: 'vip',
+      },
+    })
+    .catch(() => {});
   await processWebsiteAction(user.id, 'vip');
-  return { ok: true as const, already: false };
+
+  const fresh = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { vpCurrency: true },
+  });
+
+  return {
+    ok: true as const,
+    already: false as const,
+    permanent: false as const,
+    renewed: plan.isRenewal,
+    vpSpent: plan.cost,
+    vpBalance: fresh?.vpCurrency ?? Math.max(0, user.vpCurrency - plan.cost),
+    vipExpiresAt: plan.nextExpiresAt.toISOString(),
+  };
+}
+
+/** @deprecated Use purchaseVipWithVp(). Kept so existing imports keep compiling. */
+export async function unlockVipWithVp() {
+  return purchaseVipWithVp();
 }
 
 /**
@@ -2161,16 +2224,37 @@ export async function adminBroadcastAnnouncement(input: {
   return { ok: true as const, count: users.length };
 }
 
-export async function adminSetUserRole(userId: string, role: string) {
+/**
+ * Change a user's role. Promoting to 'vip' grants PERMANENT VIP unless `vipExpiresAt` is given
+ * (then it is timed). Demoting to 'player' clears VIP and its expiry. Staff roles leave VIP alone.
+ */
+export async function adminSetUserRole(
+  userId: string,
+  role: string,
+  opts?: { vipExpiresAt?: string | Date | null }
+) {
   const staff = await requireStaff();
   if (staff.role !== 'admin') throw new Error('Only admins can change roles');
   if (!isAccountRole(role)) throw new Error('Invalid role');
+
+  let vipData: { isVip?: boolean; vipExpiresAt?: Date | null } = {};
+  if (role === 'vip') {
+    let expires: Date | null = null;
+    if (opts?.vipExpiresAt != null && opts.vipExpiresAt !== '') {
+      expires = new Date(opts.vipExpiresAt);
+      if (Number.isNaN(expires.getTime())) throw new Error('Invalid VIP expiry date');
+    }
+    vipData = { isVip: true, vipExpiresAt: expires };
+  } else if (role === 'player') {
+    vipData = { isVip: false, vipExpiresAt: null };
+  }
+
   const updated = await prisma.user.update({
     where: { id: userId },
     data: {
       role: role as AccountRole,
       // VIP is a paid/unlocked flag — not automatic for staff roles.
-      ...(role === 'vip' ? { isVip: true } : role === 'player' ? { isVip: false } : {}),
+      ...vipData,
     },
   });
   const { writeAuditLog } = await import('@/lib/audit');
@@ -2180,9 +2264,53 @@ export async function adminSetUserRole(userId: string, role: string) {
     action: 'set_role',
     targetUserId: updated.id,
     targetUsername: updated.username,
-    detail: `Role → ${role}`,
+    detail:
+      role === 'vip'
+        ? `Role → vip (${updated.vipExpiresAt ? `until ${updated.vipExpiresAt.toISOString()}` : 'permanent'})`
+        : `Role → ${role}`,
   });
   return updated;
+}
+
+/**
+ * Set or clear a user's VIP expiry. `null` = permanent VIP. Admin only. Audited.
+ * Grants the VIP flag if the user does not have it yet (role is only promoted from 'player').
+ */
+export async function adminSetVipExpiry(userId: string, expiresAt: string | Date | null) {
+  const staff = await requireStaff();
+  if (staff.role !== 'admin') throw new Error('Only admins can change VIP');
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  if (!target) throw new Error('User not found');
+
+  let expires: Date | null = null;
+  if (expiresAt != null && expiresAt !== '') {
+    expires = new Date(expiresAt);
+    if (Number.isNaN(expires.getTime())) throw new Error('Invalid VIP expiry date');
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      isVip: true,
+      vipExpiresAt: expires,
+      // Only promote plain players; never change staff roles.
+      ...(target.role === 'player' ? { role: 'vip' } : {}),
+    },
+  });
+  const { writeAuditLog } = await import('@/lib/audit');
+  await writeAuditLog({
+    action: 'set_vip_expiry',
+    targetUserId: updated.id,
+    targetUsername: updated.username,
+    detail: `VIP ${expires ? `until ${expires.toISOString()}` : 'permanent'} (was ${
+      target.vipExpiresAt ? target.vipExpiresAt.toISOString() : target.isVip ? 'permanent' : 'none'
+    })`,
+  });
+  return {
+    ok: true as const,
+    isVip: isVipActive(updated),
+    vipExpiresAt: updated.vipExpiresAt ? updated.vipExpiresAt.toISOString() : null,
+  };
 }
 
 /** Find players by username for friend add / discovery (excludes self). */

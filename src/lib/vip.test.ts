@@ -184,3 +184,72 @@ describe('withActiveVip', () => {
     expect(bad.vipExpiresAt).toBeNull();
   });
 });
+
+describe('planVipPurchase', () => {
+  const offer = { vpCost: 2500, durationDays: 30 };
+  const base = { vpCurrency: 10_000, role: 'player' as string | null };
+
+  it('never charges permanent VIP', async () => {
+    const { planVipPurchase } = await import('./vip');
+    expect(planVipPurchase({ ...base, isVip: true, role: 'vip', vipExpiresAt: null }, offer, NOW)).toEqual({
+      kind: 'already_permanent',
+    });
+  });
+
+  it('rejects when VP is short and reports the price', async () => {
+    const { planVipPurchase } = await import('./vip');
+    expect(planVipPurchase({ ...base, vpCurrency: 2499, isVip: false }, offer, NOW)).toEqual({
+      kind: 'insufficient_vp',
+      cost: 2500,
+    });
+  });
+
+  it('charges exactly the price when the balance equals it', async () => {
+    const { planVipPurchase } = await import('./vip');
+    const plan = planVipPurchase({ ...base, vpCurrency: 2500, isVip: false }, offer, NOW);
+    expect(plan.kind).toBe('charge');
+  });
+
+  it('first purchase: starts from now, promotes a player to vip, not a renewal', async () => {
+    const { planVipPurchase } = await import('./vip');
+    const plan = planVipPurchase({ ...base, isVip: false }, offer, NOW);
+    expect(plan).toMatchObject({ kind: 'charge', cost: 2500, isRenewal: false, nextRole: 'vip' });
+    if (plan.kind === 'charge') expect(plan.nextExpiresAt.getTime()).toBe(NOW + 30 * DAY);
+  });
+
+  it('renewal while active stacks on remaining time', async () => {
+    const { planVipPurchase } = await import('./vip');
+    const plan = planVipPurchase(
+      { ...base, isVip: true, role: 'vip', vipExpiresAt: new Date(NOW + 10 * DAY) },
+      offer,
+      NOW
+    );
+    expect(plan).toMatchObject({ kind: 'charge', isRenewal: true });
+    if (plan.kind === 'charge') expect(plan.nextExpiresAt.getTime()).toBe(NOW + 40 * DAY);
+  });
+
+  it('renewal AFTER expiry restarts from now (the reported user) and is not a renewal', async () => {
+    const { planVipPurchase } = await import('./vip');
+    const plan = planVipPurchase(
+      { ...base, isVip: true, role: 'vip', vipExpiresAt: new Date(NOW - 200 * DAY) },
+      offer,
+      NOW
+    );
+    expect(plan).toMatchObject({ kind: 'charge', isRenewal: false });
+    if (plan.kind === 'charge') expect(plan.nextExpiresAt.getTime()).toBe(NOW + 30 * DAY);
+  });
+
+  it('never changes an admin or moderator role', async () => {
+    const { planVipPurchase } = await import('./vip');
+    for (const role of ['admin', 'moderator']) {
+      const plan = planVipPurchase({ ...base, role, isVip: false }, offer, NOW);
+      expect(plan).toMatchObject({ kind: 'charge', nextRole: role });
+    }
+  });
+
+  it('a free offer (cost 0) still charges nothing and never goes negative', async () => {
+    const { planVipPurchase } = await import('./vip');
+    const plan = planVipPurchase({ ...base, vpCurrency: 0, isVip: false }, { vpCost: -5, durationDays: 7 }, NOW);
+    expect(plan).toMatchObject({ kind: 'charge', cost: 0 });
+  });
+});
