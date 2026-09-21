@@ -1135,7 +1135,7 @@ export class CompetitiveRoom extends Room<RoomState> {
       this.surrenderVote = null;
     }
     switch (this.state.phase) {
-      case 'lobby':
+      case 'lobby': {
         this.lobbyElapsedMs += dtMs;
         // Same-rank bracket opens to everyone if not enough peers after wait.
         if (
@@ -1164,6 +1164,7 @@ export class CompetitiveRoom extends Room<RoomState> {
           this.state.countdownMs = this.lobbyCountdownMs;
         }
         break;
+      }
       case 'countdown':
         this.state.countdownMs -= dtMs;
         this.state.buyPhaseMs = this.matchStarted
