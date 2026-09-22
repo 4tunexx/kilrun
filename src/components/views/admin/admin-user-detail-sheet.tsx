@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -19,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { adminGetUserDetail } from '@/lib/social-actions';
+import { adminGetUserDetail, adminSetVipExpiry } from '@/lib/social-actions';
 import {
   adminGrantGameXp,
   adminAdjustGameSkillPoints,
@@ -60,6 +61,9 @@ export function AdminUserDetailSheet({
   const [loading, setLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const { toast } = useToast();
+
+  const [vipExpiryInput, setVipExpiryInput] = useState('');
+  const [savingVip, setSavingVip] = useState(false);
 
   const [caseOptions, setCaseOptions] = useState<CaseOption[]>([]);
   const [caseGrants, setCaseGrants] = useState<CaseGrant[]>([]);
@@ -116,6 +120,30 @@ export function AdminUserDetailSheet({
       cancelled = true;
     };
   }, [open, userId]);
+
+  // Keep the expiry input in sync with the loaded (or just-saved) detail.
+  useEffect(() => {
+    if (!detail) return;
+    const d = (detail as unknown as { vipExpiresAt?: string | Date | null }).vipExpiresAt;
+    setVipExpiryInput(d ? new Date(d).toISOString().slice(0, 16) : '');
+  }, [detail]);
+
+  const saveVipExpiry = async (nextValue: string | null) => {
+    if (!userId) return;
+    setSavingVip(true);
+    try {
+      await adminSetVipExpiry(userId, nextValue ? new Date(nextValue).toISOString() : null);
+      toast({ title: nextValue ? 'VIP expiry updated' : 'VIP set to permanent' });
+      await reloadDetail();
+    } catch (e: unknown) {
+      toast({
+        title: e instanceof Error ? e.message : 'Could not update VIP expiry',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingVip(false);
+    }
+  };
 
   const awardCrate = async () => {
     if (!userId || !selectedCaseId) return;
@@ -200,9 +228,19 @@ export function AdminUserDetailSheet({
                   <Badge variant="outline" className="capitalize text-[10px]">
                     {u.role}
                   </Badge>
-                  {u.isVip && (
-                    <Badge className="bg-orange-500 text-black text-[10px]">VIP</Badge>
-                  )}
+                  {'vipActive' in u && u.vipActive ? (
+                    <Badge className="bg-orange-500 text-black text-[10px]">
+                      VIP{u.vipExpiresAt ? '' : ' (permanent)'}
+                    </Badge>
+                  ) : u.isVip ? (
+                    <Badge
+                      variant="outline"
+                      className="text-orange-300/70 border-orange-400/40 text-[10px]"
+                      title="isVip is set but the expiry date has passed — perks are hidden hub-wide."
+                    >
+                      VIP (expired)
+                    </Badge>
+                  ) : null}
                   {u.isMuted && (
                     <Badge variant="outline" className="text-amber-400 text-[10px]">
                       Muted
@@ -216,6 +254,47 @@ export function AdminUserDetailSheet({
                 </div>
               </div>
             </div>
+
+            {isAdmin && u.role !== 'admin' && u.role !== 'moderator' && (
+              <div className="rounded-md border border-slate-700/40 bg-slate-800/30 px-3 py-2.5 space-y-2">
+                <p className="text-xs font-medium text-slate-300">Platform VIP expiry</p>
+                <p className="text-[11px] text-slate-500">
+                  Leave empty for permanent VIP. A date grants/extends timed VIP; clearing an
+                  existing date makes VIP permanent again.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="datetime-local"
+                    value={vipExpiryInput}
+                    onChange={(e) => setVipExpiryInput(e.target.value)}
+                    className="h-8 text-xs w-auto"
+                    disabled={savingVip}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={savingVip}
+                    onClick={() => void saveVipExpiry(vipExpiryInput || null)}
+                  >
+                    {savingVip ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={savingVip || (!vipExpiryInput && !u.isVip)}
+                    onClick={() => {
+                      setVipExpiryInput('');
+                      void saveVipExpiry(null);
+                    }}
+                  >
+                    Make permanent
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <Tabs defaultValue="inventory">
               <TabsList className="w-full flex flex-wrap h-auto gap-1">
