@@ -25,6 +25,7 @@ import {
   Trophy,
   Users,
   Gem,
+  Crown,
   Package,
   ListChecks,
   Radio,
@@ -61,6 +62,7 @@ import { AdminSiteLayoutPanel } from '@/components/views/admin/admin-site-layout
 import { AdminNewsPanel } from '@/components/views/admin/admin-news-panel';
 import { AdminGuidesPanel } from '@/components/views/admin/admin-guides-panel';
 import { AdminPremiumPanel } from '@/components/views/admin/admin-premium-panel';
+import { AdminVipPanel } from '@/components/views/admin/admin-vip-panel';
 import { AdminRanksPanel } from '@/components/views/admin/admin-ranks-panel';
 import { AdminAnnouncementCarouselPanel } from '@/components/views/admin/admin-announcement-carousel-panel';
 import { AdminAssetBrowser } from '@/components/views/admin/admin-asset-browser';
@@ -145,6 +147,7 @@ const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   inventory: { label: 'Inventory', icon: <Package className="h-3.5 w-3.5" /> },
   assets: { label: 'Assets', icon: <Database className="h-3.5 w-3.5" /> },
   premium: { label: 'Premium', icon: <Gem className="h-3.5 w-3.5 text-amber-300 fill-amber-400/30" /> },
+  vip: { label: 'VIP', icon: <Crown className="h-3.5 w-3.5 text-amber-300" /> },
   ranks: { label: 'Ranks', icon: <Trophy className="h-3.5 w-3.5" /> },
   maps: { label: 'Map Editor', icon: <MapIcon className="h-3.5 w-3.5" /> },
   engineInvites: { label: 'Engine invites', icon: <Hammer className="h-3.5 w-3.5" /> },
@@ -175,6 +178,7 @@ const ADMIN_TABS = [
   'inventory',
   'assets',
   'premium',
+  'vip',
   'ranks',
   'maps',
   'engineInvites',
@@ -2351,6 +2355,12 @@ export default function AdminView({
         {isAdmin && (
           <TabsContent value="premium" className="mt-4">
             <AdminPremiumPanel />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="vip" className="mt-4">
+            <AdminVipPanel />
           </TabsContent>
         )}
 

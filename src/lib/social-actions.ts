@@ -26,7 +26,7 @@ import { upsertStoreItemAsStaff } from '@/lib/store-item-core';
 import { getLevelFromXp } from '@/lib/progression';
 import { getInventorySlotCap } from '@/lib/inventory-slots';
 import { sanitizeDashboardPanelPrefs } from '@/lib/dashboard-panels';
-import { activeVipWhere, isVipActive, withActiveVip } from '@/lib/vip';
+import { isVipActive, withActiveVip } from '@/lib/vip';
 
 async function requireSessionUser() {
   const session = await auth();

@@ -1455,6 +1455,9 @@ export async function getSiteSettings() {
     premiumConfigJson: String(
       (settings as { premiumConfigJson?: string }).premiumConfigJson ?? '{}'
     ),
+    vipConfigJson: String(
+      (settings as { vipConfigJson?: string }).vipConfigJson ?? '{}'
+    ),
     rankConfigJson: String(
       (settings as { rankConfigJson?: string }).rankConfigJson ?? '{}'
     ),
@@ -1488,6 +1491,7 @@ export async function updateSiteSettings(data: {
   hubNavJson?: string;
   hubChromeJson?: string;
   premiumConfigJson?: string;
+  vipConfigJson?: string;
   rankConfigJson?: string;
   inventoryConfigJson?: string;
   matchRewardsConfigJson?: string;
@@ -1518,6 +1522,7 @@ export async function updateSiteSettings(data: {
   const { serializePremiumConfig, parsePremiumConfig } = await import(
     '@/lib/premium-config'
   );
+  const { serializeVipConfig, parseVipConfig } = await import('@/lib/vip-config');
   const { serializeRankConfig, parseRankConfig } = await import('@/lib/rank-config');
   const { serializeInventoryConfig, parseInventoryConfig } = await import(
     '@/lib/inventory-config'
@@ -1599,6 +1604,9 @@ export async function updateSiteSettings(data: {
     payload.premiumConfigJson = serializePremiumConfig(
       parsePremiumConfig(data.premiumConfigJson)
     );
+  }
+  if (typeof data.vipConfigJson === 'string') {
+    payload.vipConfigJson = serializeVipConfig(parseVipConfig(data.vipConfigJson));
   }
   if (typeof data.rankConfigJson === 'string') {
     payload.rankConfigJson = serializeRankConfig(parseRankConfig(data.rankConfigJson));

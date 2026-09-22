@@ -20,7 +20,7 @@ import { invalidateSoundDefinitionsCache } from '@/lib/sound-definitions';
 const execFileAsync = promisify(execFile);
 
 /** Schema readiness version — bump when new fields need a push. */
-const DB_SCHEMA_SYNC_VERSION = '2026-08-23-engine-module-catalog';
+const DB_SCHEMA_SYNC_VERSION = '2026-09-22-vip-monthly-expiry';
 
 async function requireAdmin() {
   const session = await auth();
@@ -269,6 +269,28 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     );
   }
 
+  // Runtime verify: VIP membership expiry (monthly membership; null = permanent VIP)
+  try {
+    const current = await prisma.user.findUnique({
+      where: { id: staff.id },
+      select: { vipExpiresAt: true },
+    });
+    const existing = current?.vipExpiresAt ?? null;
+    await prisma.user.update({
+      where: { id: staff.id },
+      data: { vipExpiresAt: existing },
+    });
+    steps.push(
+      `vipExpiresAt field verified (read/write OK, value=${existing ? existing.toISOString() : 'null'})`
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`vipExpiresAt verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — User.vipExpiresAt not writable. Run Sync again after deploy. (${msg})`
+    );
+  }
+
   // Runtime verify: peak KP / peak rank (kept after Premium expires)
   try {
     const current = await prisma.user.findUnique({
@@ -319,6 +341,31 @@ export async function adminSyncDatabaseSchema(): Promise<AdminDbSyncResult> {
     steps.push(`premiumConfigJson verify failed: ${msg}`);
     throw new Error(
       `Schema sync incomplete — SiteSettings.premiumConfigJson not writable. (${msg})`
+    );
+  }
+
+  // Runtime verify: SiteSettings.vipConfigJson (admin VIP editor)
+  try {
+    const settings = await prisma.siteSettings.findUnique({
+      where: { singletonKey: 'default' },
+    });
+    const raw = (settings as { vipConfigJson?: string } | null)?.vipConfigJson ?? '{}';
+    if (settings) {
+      await prisma.siteSettings.update({
+        where: { singletonKey: 'default' },
+        data: { vipConfigJson: raw },
+      });
+    } else {
+      await prisma.siteSettings.create({
+        data: { singletonKey: 'default', vipConfigJson: '{}' },
+      });
+    }
+    steps.push('vipConfigJson field verified (read/write OK)');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error';
+    steps.push(`vipConfigJson verify failed: ${msg}`);
+    throw new Error(
+      `Schema sync incomplete — SiteSettings.vipConfigJson not writable. (${msg})`
     );
   }
 

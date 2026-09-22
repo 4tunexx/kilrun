@@ -54,7 +54,8 @@ import AdminView from '@/components/views/admin-view';
 import PremiumView from '@/components/views/premium-view';
 import type { KilrunMode, CompetitiveQueue } from '@/components/views/play-view';
 import { canAccessAdmin, VIP_UNLOCK_VP_COST, isPremiumActive } from '@/lib/roles';
-import { unlockVipWithVp } from '@/lib/social-actions';
+import { purchaseVipWithVp } from '@/lib/social-actions';
+import { formatVipCountdown } from '@/lib/vip';
 import { isPulsarActive, setPulsarActive } from '@/lib/pulsar-anticheat';
 import {
   getLivePlayerState,
@@ -271,6 +272,9 @@ export default function GameHubInterface({
     () => initialSiteSettings?.homeHeroImage ?? ''
   );
   const [isVip, setIsVip] = useState(user.isVip);
+  const [vipExpiresAt, setVipExpiresAt] = useState<string | null>(user.vipExpiresAt ?? null);
+  const isVipPermanent = isVip && !vipExpiresAt;
+  const vipMsLeft = vipExpiresAt ? Math.max(0, new Date(vipExpiresAt).getTime() - Date.now()) : Infinity;
   const [isPremium, setIsPremium] = useState(
     user.isPremium ??
       isPremiumActive({ isVip: user.isVip, premiumExpiresAt: user.premiumExpiresAt })
@@ -390,6 +394,7 @@ export default function GameHubInterface({
         setCurrentRank(live.currentRank);
         if (typeof live.kp === 'number') setKp(live.kp);
         setIsVip(live.isVip);
+        setVipExpiresAt(live.vipExpiresAt ?? null);
         setIsPremium(!!live.isPremium);
         setPremiumExpiresAt(live.premiumExpiresAt ?? null);
         setRankedAccess(!!(live.rankedAccess ?? live.isPremium));
@@ -429,6 +434,7 @@ export default function GameHubInterface({
       setCurrentRank(live.currentRank);
       if (typeof live.kp === 'number') setKp(live.kp);
       setIsVip(live.isVip);
+      setVipExpiresAt(live.vipExpiresAt ?? null);
       setIsPremium(!!live.isPremium);
       setPremiumExpiresAt(live.premiumExpiresAt ?? null);
       setRankedAccess(!!(live.rankedAccess ?? live.isPremium));
@@ -658,22 +664,29 @@ export default function GameHubInterface({
     navigate('play');
   };
 
-  const handleUnlockVip = async () => {
-    const result = await unlockVipWithVp();
+  const handlePurchaseVip = async () => {
+    const result = await purchaseVipWithVp();
     if (!result.ok) {
       toast({
-        title: 'Not enough VP',
-        description: `VIP costs ${VIP_UNLOCK_VP_COST} VP. Play matches to earn more.`,
+        title: 'Could not activate VIP',
+        description: result.error ?? `VIP costs ${VIP_UNLOCK_VP_COST} VP. Play matches to earn more.`,
         variant: 'destructive',
       });
       return;
     }
     setIsVip(true);
-    if (!result.already) {
-      setVpBalance((v) => v - VIP_UNLOCK_VP_COST);
+    if (result.permanent) {
+      setIsVipDialogOpen(false);
+      toast({ title: 'You already have permanent VIP', description: 'No charge — enjoy your perks.' });
+      return;
     }
+    setVpBalance(result.vpBalance);
+    setVipExpiresAt(result.vipExpiresAt);
     setIsVipDialogOpen(false);
-    toast({ title: 'VIP unlocked', description: 'Welcome to VIP.' });
+    toast({
+      title: result.renewed ? 'VIP renewed' : 'VIP activated',
+      description: `Active until ${new Date(result.vipExpiresAt).toLocaleDateString()}.`,
+    });
   };
 
   const handleTogglePulsar = () => {
@@ -1031,8 +1044,10 @@ export default function GameHubInterface({
                     </DialogTitle>
                     <DialogDescription className="text-slate-400">
                       {isVip
-                        ? 'Your VIP perks are active across the hub.'
-                        : `Spend ${VIP_UNLOCK_VP_COST} VP (balance: ${vpBalance}) for exclusive hub + future in-game perks.`}
+                        ? isVipPermanent
+                          ? 'Your VIP perks are active across the hub — permanent membership.'
+                          : `Active until ${vipExpiresAt ? new Date(vipExpiresAt).toLocaleDateString() : ''} (${formatVipCountdown(vipMsLeft)} left). Renew any time — extra time stacks on what you have left.`
+                        : `Spend ${VIP_UNLOCK_VP_COST} VP (balance: ${vpBalance}) for a 30-day VIP membership: exclusive hub perks + future in-game perks.`}
                     </DialogDescription>
                   </DialogHeader>
                   <div className="py-2 space-y-2 text-sm">
@@ -1068,9 +1083,9 @@ export default function GameHubInterface({
                       </div>
                     ))}
                   </div>
-                  {!isVip && (
-                    <Button size="lg" className="w-full text-lg" onClick={handleUnlockVip}>
-                      Unlock for {VIP_UNLOCK_VP_COST} VP
+                  {!isVipPermanent && (
+                    <Button size="lg" className="w-full text-lg" onClick={handlePurchaseVip}>
+                      {isVip ? `Renew (+30 days) for ${VIP_UNLOCK_VP_COST} VP` : `Get VIP (30 days) for ${VIP_UNLOCK_VP_COST} VP`}
                     </Button>
                   )}
                 </DialogContent>
@@ -1127,6 +1142,7 @@ export default function GameHubInterface({
                       setEquippedFrameConfig(u.equippedFrameConfig ?? null);
                       setEquippedNicknameConfig(u.equippedNicknameConfig ?? null);
                       setIsVip(u.isVip);
+                      setVipExpiresAt(u.vipExpiresAt ?? null);
                       setVpBalance(u.vpCurrency);
                       const expires =
                         (u as { premiumExpiresAt?: Date | string | null }).premiumExpiresAt ??
