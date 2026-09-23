@@ -12,7 +12,7 @@ import { isAdminRole } from '@/lib/roles';
 import { getAnnouncementActivityCutoff } from '@/lib/announcement-carousel-utils';
 import { activeVipWhere, withActiveVip } from '@/lib/vip';
 
-type RawAnnouncementUser = NonNullable<AnnouncementItem['user']> & {
+type RawAnnouncementUser = Omit<NonNullable<AnnouncementItem['user']>, 'vipExpiresAt'> & {
   vipExpiresAt?: Date | string | null;
 };
 
@@ -128,7 +128,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
                   id: `earn_vp-${r.id}`,
                   type: 'user_earn_vp',
                   label: 'VP Earned',
-                  user: r.user,
+                  user: normalizeAnnouncementUser(r.user),
                   detail: `earned ${r.vpEarned} VP in ${r.mode}`,
                   createdAt: r.playedAt.toISOString(),
                 });
@@ -152,7 +152,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
                   id: `won_match-${r.id}`,
                   type: 'user_won_match',
                   label: 'Won Match',
-                  user: r.user,
+                  user: normalizeAnnouncementUser(r.user),
                   detail: `won a ${r.mode} match`,
                   createdAt: r.playedAt.toISOString(),
                 });
@@ -172,7 +172,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
                   id: `registered-${u.id}`,
                   type: 'user_registered',
                   label: 'New Member',
-                  user: u,
+                  user: normalizeAnnouncementUser(u),
                   detail: 'just joined Kilrun!',
                   createdAt: u.createdAt.toISOString(),
                 });
@@ -196,7 +196,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
                   id: `premium-${p.id}`,
                   type: 'user_is_premium',
                   label: 'Premium',
-                  user: p.user,
+                  user: normalizeAnnouncementUser(p.user),
                   detail: 'unlocked Kilrun Premium',
                   createdAt: p.createdAt.toISOString(),
                 });
@@ -216,7 +216,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
                   id: `vip-${u.id}`,
                   type: 'user_got_vip',
                   label: 'VIP',
-                  user: u,
+                  user: normalizeAnnouncementUser(u),
                   detail: 'became a VIP member',
                   createdAt: u.createdAt.toISOString(),
                 });
@@ -239,7 +239,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
                   id: `badge-${ub.id}`,
                   type: 'user_got_badge',
                   label: 'Badge',
-                  user: ub.user,
+                  user: normalizeAnnouncementUser(ub.user),
                   detail: `earned the "${ub.badge.title}" badge`,
                   createdAt: ub.earnedAt.toISOString(),
                 });
@@ -262,7 +262,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
                   id: `achievement-${ua.id}`,
                   type: 'user_earn_achievement',
                   label: 'Achievement',
-                  user: ua.user,
+                  user: normalizeAnnouncementUser(ua.user),
                   detail: `unlocked "${ua.achievement.title}"`,
                   createdAt: ua.unlockedAt.toISOString(),
                 });
@@ -290,7 +290,7 @@ export async function getAnnouncementCarouselItems(): Promise<{
                   id: `crate_opened-${o.id}`,
                   type: 'crate_opened',
                   label: 'Crate Opened',
-                  user: u,
+                  user: normalizeAnnouncementUser(u),
                   detail: `opened a crate and got ${o.wonName} (${o.wonRarity})`,
                   createdAt: o.openedAt.toISOString(),
                 });

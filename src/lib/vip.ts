@@ -104,7 +104,7 @@ export function activeVipWhere(now: Date = new Date()) {
   return {
     isVip: true,
     OR: [{ vipExpiresAt: null }, { vipExpiresAt: { gt: now } }],
-  } as const;
+  };
 }
 
 /**

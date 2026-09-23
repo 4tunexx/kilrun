@@ -170,7 +170,7 @@ export type AbilityDenyReason =
   | 'cooldown'
   | 'energy';
 
-export type AbilityGate = { ok: true } | { ok: false; reason: AbilityDenyReason };
+export type AbilityGate = { ok: true; reason?: never } | { ok: false; reason: AbilityDenyReason };
 
 /**
  * Same deny rules `activateAbility` uses, without mutating the host.
