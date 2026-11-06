@@ -29,8 +29,9 @@ export class InputManager {
 
   constructor(element: HTMLElement, private isMobile: boolean) {
     this.keyboard = new KeyboardHandler();
-    // Bind mouse to the canvas host so free-look + pointer-lock work without RMB
-    this.mouse = new MouseHandler(isMobile ? window : element);
+    // Keep pointer/button listeners scoped to this game surface on desktop and
+    // mobile so unrelated page interactions never affect gameplay.
+    this.mouse = new MouseHandler(element);
     this.joystick = new DualJoystick(element);
   }
 

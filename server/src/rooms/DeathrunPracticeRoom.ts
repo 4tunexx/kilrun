@@ -20,6 +20,7 @@ import { DeathrunRoom } from './DeathrunRoom.js';
 export class DeathrunPracticeRoom extends DeathrunRoom {
   maxClients = 1;
   protected usePublishedActiveMap = false;
+  protected minPlayersToStart = 1;
 
   onCreate(options?: unknown) {
     super.onCreate();

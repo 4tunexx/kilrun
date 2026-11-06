@@ -5,6 +5,7 @@ import * as catalog from '@/lib/api-routes/engine/catalog';
 import * as desktopLogin from '@/lib/api-routes/engine/desktop-login';
 import * as download from '@/lib/api-routes/engine/download';
 import * as ghosts from '@/lib/api-routes/engine/ghosts';
+import * as joinToken from '@/lib/api-routes/engine/join-token';
 import * as maps from '@/lib/api-routes/engine/maps';
 import * as plugins from '@/lib/api-routes/engine/plugins';
 import * as session from '@/lib/api-routes/engine/session';
@@ -19,6 +20,7 @@ const routes = {
   'desktop-login': { GET: desktopLogin.GET },
   download: { GET: download.GET },
   ghosts: { GET: ghosts.GET, POST: ghosts.POST },
+  'join-token': { POST: joinToken.POST, OPTIONS: joinToken.OPTIONS },
   maps: { GET: maps.GET, POST: maps.POST },
   plugins: { POST: plugins.POST },
   session: {

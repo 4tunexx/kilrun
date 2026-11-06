@@ -5,7 +5,7 @@
 import { prisma } from '@/lib/prisma';
 import type { EditorEntity } from '@/components/game/editor/map-document';
 import { persistSiteImage } from '@/lib/site-asset-upload';
-import { stripHeavyEntity } from '@/lib/game-prefab-strip';
+import { assertNoOversizedInlineModels, stripHeavyEntity } from '@/lib/game-prefab-strip';
 
 export { stripHeavyEntity } from '@/lib/game-prefab-strip';
 
@@ -80,6 +80,7 @@ export async function publishCloudPrefabAsStaff(
   }
 ): Promise<CloudPrefabRow> {
   if (!input.entities?.length) throw new Error('Select entities first');
+  assertNoOversizedInlineModels(input.entities);
   const cleaned = input.entities.map(stripHeavyEntity);
   const entitiesJson = JSON.stringify(cleaned);
   if (entitiesJson.length > 1_500_000) {

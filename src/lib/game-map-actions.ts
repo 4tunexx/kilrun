@@ -177,6 +177,13 @@ export async function deleteCloudMapsMatching(input: {
   const rows = await prisma.gameMap.findMany({ where: { mode, OR: or } });
   if (!rows.length) return { deleted: 0, names: [] };
 
+  const active = rows.find((row) => row.isActive);
+  if (active) {
+    throw new Error(
+      `"${active.name}" is the live Active map for ${active.mode} — matches would have no map until another is activated.`
+    );
+  }
+
   await prisma.gameMap.deleteMany({
     where: { id: { in: rows.map((r) => r.id) } },
   });

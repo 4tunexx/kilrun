@@ -263,6 +263,7 @@ export default function KilrunEngine({
 
   const isMobile = detectTouchDevice();
   const [assetsReady, setAssetsReady] = useState(false);
+  const [customMapLoadError, setCustomMapLoadError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
   const [scoreboardOpen, setScoreboardOpen] = useState(false);
@@ -698,6 +699,7 @@ export default function KilrunEngine({
 
     let disposed = false;
     let raf = 0;
+    setCustomMapLoadError(null);
     const world = createThreeWorld(hostElement);
     world.setBloomEnabled(matchSettingsRef.current.bloom);
     applyPlayerMatchAudio(matchSettingsRef.current);
@@ -795,10 +797,22 @@ export default function KilrunEngine({
       });
       // Match editor cavern default lights a bit warmer when map uses authored env.
       world.ambient.color.set(0xffffff);
-      void overlay.load(playDoc).then(() => {
-        if (disposed) return;
-        cameraCollidables = [map.root, ...overlay.getCollidableRoots()];
-      });
+      void overlay
+        .load(playDoc)
+        .then(() => {
+          if (disposed) return;
+          cameraCollidables = [map.root, ...overlay.getCollidableRoots()];
+        })
+        .catch((err: unknown) => {
+          if (disposed) return;
+          cameraCollidables = [map.root, ...overlay.getCollidableRoots()];
+          console.error('[KilrunEngine] custom map overlay failed to load', err);
+          setCustomMapLoadError(
+            err instanceof Error
+              ? err.message
+              : 'An unexpected error occurred while loading custom map visuals.'
+          );
+        });
       {
         const localDeathrunId = getActivePlayMapIdForMode('deathrun');
         const localDeathrun = localDeathrunId ? loadMapPlayable(localDeathrunId) : null;
@@ -2309,6 +2323,15 @@ export default function KilrunEngine({
             <div className="bg-amber-500/90 text-slate-950 text-sm font-bold px-4 py-1.5 rounded-full shadow-lg">
               Reconnecting to game server…
             </div>
+          </div>
+        )}
+
+        {customMapLoadError && (
+          <div
+            role="alert"
+            className="absolute top-14 left-1/2 -translate-x-1/2 z-[250] max-w-lg rounded-lg border border-amber-400/40 bg-slate-950/90 px-4 py-2 text-sm text-amber-100"
+          >
+            Custom map visuals failed to load: {customMapLoadError}
           </div>
         )}
       </MobilePlayGate>
