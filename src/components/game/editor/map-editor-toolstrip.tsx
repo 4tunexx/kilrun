@@ -118,13 +118,16 @@ export function MapEditorToolstrip(p: MapEditorToolstripProps) {
     pivotMode, setPivotMode, transformSpace, setTransformSpace, gameMode,
     armPlaceSpawn, armPlaceEntity, allAnimStopped, setAllAnimStopped, setStoppedAnimIds,
   } = p;
+  const switchToStandardTool = (tool: EditTool) => {
+    setExtensionToolId(null);
+    setEditTool(tool);
+  };
   return (
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 border border-white/15 rounded-xl px-2 py-1.5 backdrop-blur z-[90] max-w-[calc(100vw-7rem)] overflow-x-auto">
             <ToolBtn
               active={editTool === 'select' && !pendingPlaceKind}
               onClick={() => {
-                setExtensionToolId(null);
-                setEditTool('select');
+                switchToStandardTool('select');
                 apiRef.current?.clearPendingPlace();
                 setPendingPlaceKind(null);
               }}
@@ -135,7 +138,7 @@ export function MapEditorToolstrip(p: MapEditorToolstripProps) {
             <ToolBtn
               active={editTool === 'brush'}
               onClick={() => {
-                setEditTool('brush');
+                switchToStandardTool('brush');
                 if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
               }}
               title={
@@ -149,11 +152,11 @@ export function MapEditorToolstrip(p: MapEditorToolstripProps) {
             <ToolBtn
               active={editTool === 'bucket'}
               onClick={() => {
+                switchToStandardTool('bucket');
                 // If a scene object is selected, paint that model; else keep library brush.
                 const selModel = selected?.model;
                 if (selModel && selModel !== HAMMER_SOLID_MODEL) setBrush(selModel);
                 else if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
-                setEditTool('bucket');
                 if (freeFly) apiRef.current?.setFreeFly(false);
               }}
               title={
@@ -167,7 +170,7 @@ export function MapEditorToolstrip(p: MapEditorToolstripProps) {
             <ToolBtn
               active={editTool === 'hammer'}
               onClick={() => {
-                setEditTool('hammer');
+                switchToStandardTool('hammer');
                 setMode('scale');
                 if (freeFly) apiRef.current?.setFreeFly(false);
               }}
@@ -195,8 +198,7 @@ export function MapEditorToolstrip(p: MapEditorToolstripProps) {
             <ToolBtn
               active={editTool === 'paint'}
               onClick={() => {
-                setExtensionToolId(null);
-                setEditTool('paint');
+                switchToStandardTool('paint');
                 if (freeFly) apiRef.current?.setFreeFly(false);
                 selectLibraryTab('textures');
               }}
@@ -258,7 +260,7 @@ export function MapEditorToolstrip(p: MapEditorToolstripProps) {
             <ToolBtn
               active={mode === 'translate'}
               onClick={() => {
-                setEditTool('select');
+                switchToStandardTool('select');
                 setMode('translate');
               }}
               title="Move (W) — switch to Select so the gizmo can drag"
@@ -270,7 +272,7 @@ export function MapEditorToolstrip(p: MapEditorToolstripProps) {
                 btnRef={rotateMenuBtnRef}
                 active={mode === 'rotate' || rotateMenuOpen}
                 onClick={() => {
-                  setEditTool('select');
+                  switchToStandardTool('select');
                   setMode('rotate');
                   setRotateMenuAnchorRect(rotateMenuBtnRef.current?.getBoundingClientRect() ?? null);
                   setRotateMenuOpen((v) => !v);
@@ -300,7 +302,7 @@ export function MapEditorToolstrip(p: MapEditorToolstripProps) {
             <ToolBtn
               active={mode === 'scale'}
               onClick={() => {
-                setEditTool('select');
+                switchToStandardTool('select');
                 setMode('scale');
               }}
               title="Scale (R) — switch to Select so the gizmo can drag"

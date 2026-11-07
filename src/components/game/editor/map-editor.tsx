@@ -1298,13 +1298,12 @@ export function MapEditor({
         if (!e.repeat) toggleEditorUi();
         return;
       }
-      // F5 starts Play Test, matching the convention almost every game
-      // engine/editor uses. Must win over the browser's own F5 (page
-      // reload) the same way Ctrl+S/Ctrl+H already do above, or the whole
-      // app reloads (losing unsaved work) instead of starting a test.
+      // F5 / Shift+F5 start preview / live Play Test. These must win over the
+      // browser's reload shortcut, while still going through the same mode
+      // routing as the Play Test buttons.
       if (e.key === 'F5') {
         e.preventDefault();
-        if (!e.repeat) void startPlay();
+        if (!e.repeat) requestPlayTest(e.shiftKey ? 'live' : 'preview');
         return;
       }
 
@@ -1362,27 +1361,33 @@ export function MapEditor({
       if (freeFly) return;
 
       if (e.key === 'w' || e.key === 'W') {
+        setExtensionToolId(null);
         setEditTool('select');
         setMode('translate');
       }
       if (e.key === 'e' || e.key === 'E') {
+        setExtensionToolId(null);
         setEditTool('select');
         setMode('rotate');
       }
       if (e.key === 'r' || e.key === 'R') {
+        setExtensionToolId(null);
         setEditTool('select');
         setMode('scale');
       }
       if (e.key === 'v' || e.key === 'V') {
+        setExtensionToolId(null);
         setEditTool('select');
         apiRef.current?.clearPendingPlace();
         setPendingPlaceKind(null);
       }
       if (e.key === 'b' || e.key === 'B') {
+        setExtensionToolId(null);
         setEditTool('brush');
         if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
       }
-      if (e.key === 'p' || e.key === 'P') {
+      if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey) {
+        setExtensionToolId(null);
         const selModel = docRef.current.entities.find((ent) => ent.id === selectedId)?.model;
         if (selModel && selModel !== HAMMER_SOLID_MODEL) setBrush(selModel);
         else if (!brush || brush === HAMMER_SOLID_MODEL) setBrush('floor-square');
@@ -1391,6 +1396,7 @@ export function MapEditor({
       }
       if (e.key === 'h' || e.key === 'H') {
         if (e.ctrlKey || e.metaKey) return;
+        setExtensionToolId(null);
         setEditTool('hammer');
         setMode('scale');
         if (freeFly) apiRef.current?.setFreeFly(false);
@@ -1414,7 +1420,7 @@ export function MapEditor({
         // OS key auto-repeat would otherwise flap this toggle rapidly while held.
         if (!e.repeat) setGridSnap((v) => !v);
       }
-      if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p')) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         if (e.shiftKey) requestPlayTest('live');
         else requestPlayTest('preview');

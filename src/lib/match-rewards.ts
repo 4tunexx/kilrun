@@ -1,6 +1,6 @@
 /**
  * Shared server-authored match reward application.
- * Used by the Colyseus → Next.js API route and by thin client record* fallbacks.
+ * Used by the secret-authenticated Colyseus → Next.js API route.
  * Do NOT add `'use server'` — this module is imported by route handlers.
  */
 

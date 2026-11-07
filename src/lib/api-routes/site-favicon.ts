@@ -27,8 +27,8 @@ export async function GET() {
     if (url.startsWith('http://') || url.startsWith('https://')) {
       const res = await fetch(url, { next: { revalidate: 300 } });
       if (!res.ok) throw new Error('upstream favicon failed');
-      const buf = Buffer.from(await res.arrayBuffer());
-      return new NextResponse(buf, {
+      const body = await res.arrayBuffer();
+      return new NextResponse(body, {
         headers: {
           'Content-Type': res.headers.get('content-type') || 'image/png',
           'Cache-Control': 'public, max-age=300',

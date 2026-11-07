@@ -46,20 +46,6 @@ async function requireSelfOrStaffUserId(claimedUserId: string) {
   throw new Error('Forbidden');
 }
 
-const MATCH_RATE_LIMIT_MS = 15_000;
-
-async function assertMatchRateLimit(userId: string, mode: string) {
-  const recent = await prisma.matchResult.findFirst({
-    where: {
-      userId,
-      mode,
-      playedAt: { gte: new Date(Date.now() - MATCH_RATE_LIMIT_MS) },
-    },
-    orderBy: { playedAt: 'desc' },
-  });
-  if (recent) throw new Error('Too many requests');
-}
-
 function clampNonNegInt(value: number | undefined, max: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(max, Math.floor(value)));
@@ -507,9 +493,13 @@ export async function recordMatchStat(input: {
   });
 }
 
+const MATCH_REWARD_ACTION_ERROR =
+  'Match rewards can only be recorded by the trusted game server';
+
 /**
- * Client/dev fallback: persist a Deathrun result when Colyseus could not reach
- * the web API. Prefer server-authored awards via `/api/game/match-result`.
+ * Kept as a rejecting compatibility stub: server actions are public endpoints,
+ * so match results must only be accepted through the secret-authenticated
+ * Colyseus `/api/game/match-result` route.
  */
 export async function recordDeathrunResult(input: {
   userId: string;
@@ -520,47 +510,11 @@ export async function recordDeathrunResult(input: {
   /** When set, skips duplicate if this match was already recorded. */
   matchId?: string;
 }): Promise<{ xpEarned: number; vpEarned: number }> {
-  await requireSelfUserId(input.userId);
-  const {
-    applyServerMatchBatch,
-    findMatchResultByMatchId,
-  } = await import('@/lib/match-rewards');
-
-  const matchId =
-    typeof input.matchId === 'string' && input.matchId.trim()
-      ? input.matchId.trim()
-      : `client-deathrun-${input.userId}-${Date.now()}`;
-
-  if (input.matchId) {
-    const existing = await findMatchResultByMatchId(input.userId, matchId);
-    if (existing) {
-      return { xpEarned: existing.xpEarned, vpEarned: existing.vpEarned };
-    }
-  } else {
-    await assertMatchRateLimit(input.userId, 'deathrun');
-  }
-
-  const batch = await applyServerMatchBatch({
-    matchId,
-    mode: 'deathrun',
-    players: [
-      {
-        userId: input.userId,
-        role: input.role,
-        outcome: input.outcome,
-        score: input.score,
-        distance: input.distance,
-      },
-    ],
-  });
-  const award = batch.players[0];
-  return {
-    xpEarned: award?.xpEarned ?? 0,
-    vpEarned: award?.vpEarned ?? 0,
-  };
+  void input;
+  throw new Error(MATCH_REWARD_ACTION_ERROR);
 }
 
-/** Client/dev fallback for Horde — prefer server-authored match-result API. */
+/** Rejects legacy client-authored Horde reward requests. */
 export async function recordHordeResult(input: {
   userId: string;
   outcome: 'win' | 'loss' | 'survived' | 'eliminated';
@@ -569,52 +523,11 @@ export async function recordHordeResult(input: {
   score?: number;
   matchId?: string;
 }): Promise<{ xpEarned: number; vpEarned: number }> {
-  await requireSelfUserId(input.userId);
-  const {
-    applyServerMatchBatch,
-    findMatchResultByMatchId,
-  } = await import('@/lib/match-rewards');
-
-  const matchId =
-    typeof input.matchId === 'string' && input.matchId.trim()
-      ? input.matchId.trim()
-      : `client-horde-${input.userId}-${Date.now()}`;
-
-  if (input.matchId) {
-    const existing = await findMatchResultByMatchId(input.userId, matchId);
-    if (existing) {
-      return { xpEarned: existing.xpEarned, vpEarned: existing.vpEarned };
-    }
-  } else {
-    await assertMatchRateLimit(input.userId, 'horde');
-  }
-
-  const batch = await applyServerMatchBatch({
-    matchId,
-    mode: 'horde',
-    players: [
-      {
-        userId: input.userId,
-        role: 'survivor',
-        outcome: input.outcome,
-        wavesCleared: input.wavesCleared,
-        kills: input.kills,
-        score: input.score,
-      },
-    ],
-  });
-  const award = batch.players[0];
-  return {
-    xpEarned: award?.xpEarned ?? 0,
-    vpEarned: award?.vpEarned ?? 0,
-  };
+  void input;
+  throw new Error(MATCH_REWARD_ACTION_ERROR);
 }
 
-/**
- * Client/dev fallback for Competitive.
- * - ranked (Premium): Elo KP applied
- * - casual: XP/VP + missions only — no KP / rank change
- */
+/** Rejects legacy client-authored Competitive XP/VP/KP requests. */
 export async function recordCompetitiveResult(input: {
   userId: string;
   team: 'team_a' | 'team_b';
@@ -627,64 +540,8 @@ export async function recordCompetitiveResult(input: {
   queue?: 'casual' | 'ranked';
   matchId?: string;
 }): Promise<{ xpEarned: number; vpEarned: number; kpDelta: number; kp: number; rank: string }> {
-  await requireSelfUserId(input.userId);
-  const {
-    applyServerMatchBatch,
-    findMatchResultByMatchId,
-  } = await import('@/lib/match-rewards');
-  const { KP_DEFAULT, getRankForKp } = await import('@/lib/kp');
-
-  const queue = input.queue ?? 'ranked';
-  const modeTag = queue === 'ranked' ? 'competitive_ranked' : 'competitive';
-  const matchId =
-    typeof input.matchId === 'string' && input.matchId.trim()
-      ? input.matchId.trim()
-      : `client-competitive-${input.userId}-${Date.now()}`;
-
-  if (input.matchId) {
-    const existing = await findMatchResultByMatchId(input.userId, matchId);
-    if (existing) {
-      const user = await prisma.user.findUnique({ where: { id: input.userId } });
-      const kp =
-        typeof (user as { kp?: number } | null)?.kp === 'number'
-          ? (user as { kp: number }).kp
-          : KP_DEFAULT;
-      return {
-        xpEarned: existing.xpEarned,
-        vpEarned: existing.vpEarned,
-        kpDelta: existing.kpDelta ?? 0,
-        kp,
-        rank: user?.currentRank || getRankForKp(kp),
-      };
-    }
-  } else {
-    await assertMatchRateLimit(input.userId, modeTag);
-  }
-
-  const batch = await applyServerMatchBatch({
-    matchId,
-    mode: modeTag,
-    players: [
-      {
-        userId: input.userId,
-        role: input.team,
-        outcome: input.outcome,
-        opponentAvgKp: input.opponentAvgKp,
-        roundsWon: input.roundsWon,
-        roundsLost: input.roundsLost,
-        kills: input.kills,
-        queue,
-      },
-    ],
-  });
-  const award = batch.players[0];
-  return {
-    xpEarned: award?.xpEarned ?? 0,
-    vpEarned: award?.vpEarned ?? 0,
-    kpDelta: award?.kpDelta ?? 0,
-    kp: award?.kp ?? KP_DEFAULT,
-    rank: award?.rank ?? getRankForKp(KP_DEFAULT),
-  };
+  void input;
+  throw new Error(MATCH_REWARD_ACTION_ERROR);
 }
 
 /** Bootstrap missions for the current session user (safe to call often). */

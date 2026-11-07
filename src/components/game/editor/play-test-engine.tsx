@@ -98,7 +98,7 @@ export function PlayTestEngine({
       }) => {
         setSessionUser(user);
       };
-      const useOffline = (
+      const applyOfflineFallback = (
         user: {
           userId: string;
           username: string;
@@ -135,7 +135,7 @@ export function PlayTestEngine({
             if (!minted.user) applyUser(DEFAULT_EDITOR_USER);
             return;
           } else {
-            useOffline(
+            applyOfflineFallback(
               minted.user
                 ? {
                     userId: minted.user.id,
@@ -167,7 +167,7 @@ export function PlayTestEngine({
           setJoinToken(token);
           setLiveJoinFailed(false);
         } else {
-          useOffline(
+          applyOfflineFallback(
             user
               ? {
                   userId: user.id,
@@ -179,7 +179,7 @@ export function PlayTestEngine({
           );
         }
       } catch {
-        if (!cancelled) useOffline();
+        if (!cancelled) applyOfflineFallback();
       } finally {
         if (!cancelled) setReady(true);
       }

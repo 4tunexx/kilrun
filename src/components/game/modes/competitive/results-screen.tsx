@@ -1,12 +1,18 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Trophy, Skull, Star, Coins, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { NetPlayerState, NetRoomState } from '../../net/types';
-import { recordCompetitiveResult } from '@/lib/actions';
 import { notifyProgressionChanged } from '@/lib/game-progression-client';
 import { KP_DEFAULT } from '@/lib/kp';
+import {
+  getRewardDisplayValue,
+  isPracticeRoom,
+  lockFirstValidCompetitiveTeam,
+  type CompetitiveTeam,
+  type RewardDisplayStatus,
+} from '../../net/results-state';
 
 interface Props {
   room: NetRoomState;
@@ -19,18 +25,27 @@ interface Props {
 export const CompetitiveResultsScreen: React.FC<Props> = ({
   room,
   player,
-  players,
   queue = 'casual',
   onContinue,
 }) => {
   const hasRecordedRef = useRef(false);
+  const isPractice = isPracticeRoom(room.modeTag);
   const [rewards, setRewards] = useState<{
     xpEarned: number;
     vpEarned: number;
     kpDelta: number;
     kp: number;
     rank: string;
-  } | null>(null);
+  } | null>(isPractice ? {
+    xpEarned: 0,
+    vpEarned: 0,
+    kpDelta: 0,
+    kp: KP_DEFAULT,
+    rank: '',
+  } : null);
+  const [rewardStatus, setRewardStatus] = useState<RewardDisplayStatus>(
+    isPractice ? 'confirmed' : 'pending'
+  );
 
   // player.role is a shared enum across modes ('trapper' | 'runner' | 'survivor'
   // | 'team_a' | 'team_b') — a reconnect mid-match can momentarily deliver a
@@ -38,49 +53,39 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
   // onto the first valid team_a/team_b we see instead of silently defaulting
   // to team_a, which would flip a real win into a shown loss (and vice versa)
   // for anyone actually on team_b whose role hasn't synced yet.
-  const lockedTeamRef = useRef<'team_a' | 'team_b' | null>(null);
-  if (player.role === 'team_a' || player.role === 'team_b') {
-    lockedTeamRef.current = player.role;
-  } else if (!lockedTeamRef.current) {
+  const lockedTeamRef = useRef<CompetitiveTeam | null>(null);
+  lockedTeamRef.current = lockFirstValidCompetitiveTeam(lockedTeamRef.current, player.role);
+  if (!lockedTeamRef.current) {
     console.error(`[CompetitiveResultsScreen] unexpected player.role "${player.role}" — awaiting valid team assignment`);
   }
   const team = lockedTeamRef.current ?? 'team_a';
-  const won = room.winnerRole === team;
-  const outcome: 'win' | 'loss' = won ? 'win' : 'loss';
+  const lockedWinnerRef = useRef<CompetitiveTeam | null>(null);
+  lockedWinnerRef.current = lockFirstValidCompetitiveTeam(lockedWinnerRef.current, room.winnerRole);
+  const resultKnown = lockedWinnerRef.current !== null;
+  const won = lockedWinnerRef.current === team;
   const ranked = queue === 'ranked' || room.modeTag === 'competitive_ranked';
 
-  const opponentAvgKp = useMemo(() => {
-    const enemyRole = team === 'team_a' ? 'team_b' : 'team_a';
-    const enemies: number[] = [];
-    players.forEach((p) => {
-      if (p.role === enemyRole) enemies.push(typeof p.kp === 'number' ? p.kp : KP_DEFAULT);
-    });
-    if (!enemies.length) return KP_DEFAULT;
-    return enemies.reduce((a, b) => a + b, 0) / enemies.length;
-  }, [players, team]);
-
-  // Keeps the latest live values available to the one-shot fallback timer
-  // below without making it a dependency — the room keeps pushing periodic
-  // full-state resyncs after the match ends, and a naive dependency array
-  // covering all of these kept re-triggering the effect, clearing and
-  // restarting the 2500ms timer on every tick so a player under network
-  // jitter could sit on "…" well past the intended fallback window.
-  const latestRef = useRef({ player, room, team, outcome, opponentAvgKp, ranked });
-  latestRef.current = { player, room, team, outcome, opponentAvgKp, ranked };
-
-  // Reacts immediately whenever the server (or the wasCancelled short-circuit)
-  // delivers a real result — independent of the fallback timer's schedule.
+  // Only accept the server-authored reward snapshot. Client-side stats are
+  // display data, not evidence that a reward was granted.
   useEffect(() => {
     if (!player.userId) return;
-    // Admin-cancelled: rewardsReady never becomes true, so without this
-    // guard the fallback client-authored recordCompetitiveResult() below
-    // would still fire — critically, that would also touch Ranked KP for
-    // a match that was voided, not actually lost.
     if (room.wasCancelled) {
       hasRecordedRef.current = true;
       return;
     }
-    if (room.rewardsReady || (player.xpEarned ?? 0) > 0 || (player.vpEarned ?? 0) > 0) {
+    if (isPractice) {
+      hasRecordedRef.current = true;
+      setRewards({
+        xpEarned: 0,
+        vpEarned: 0,
+        kpDelta: 0,
+        kp: typeof player.kp === 'number' ? player.kp : KP_DEFAULT,
+        rank: '',
+      });
+      setRewardStatus('confirmed');
+      return;
+    }
+    if (room.rewardsReady) {
       setRewards({
         xpEarned: player.xpEarned ?? 0,
         vpEarned: player.vpEarned ?? 0,
@@ -88,65 +93,24 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
         kp: typeof player.kp === 'number' ? player.kp : KP_DEFAULT,
         rank: '',
       });
-      if (room.rewardsReady) {
+      setRewardStatus('confirmed');
+      if (!hasRecordedRef.current) {
         hasRecordedRef.current = true;
         notifyProgressionChanged();
       }
     }
-  }, [
-    player.userId,
-    player.xpEarned,
-    player.vpEarned,
-    player.kpDelta,
-    player.kp,
-    room.rewardsReady,
-    room.wasCancelled,
-  ]);
+  }, [player.userId, player.xpEarned, player.vpEarned, player.kpDelta, player.kp, room.rewardsReady, room.wasCancelled, isPractice]);
 
-  // One-shot fallback: give the server 2500ms to deliver rewardsReady, then
-  // record client-side. Scheduled exactly once per mount (guarded by
-  // timerScheduledRef) — NOT re-armed by subsequent room state pushes.
-  const timerScheduledRef = useRef(false);
+  // Missing server awards resolve to an explicit unavailable state; never
+  // manufacture a client-authored reward. Practice rooms intentionally award zero.
   useEffect(() => {
-    if (!player.userId || room.wasCancelled || timerScheduledRef.current) return;
-    timerScheduledRef.current = true;
-
+    if (!player.userId || room.wasCancelled || isPractice || hasRecordedRef.current) return;
     const timer = window.setTimeout(() => {
-      if (hasRecordedRef.current) return;
-      const { player: p, room: r, team: t, outcome: o, opponentAvgKp: avgKp, ranked: rk } =
-        latestRef.current;
-      if (r.rewardsReady) {
-        hasRecordedRef.current = true;
-        setRewards({
-          xpEarned: p.xpEarned ?? 0,
-          vpEarned: p.vpEarned ?? 0,
-          kpDelta: p.kpDelta ?? 0,
-          kp: typeof p.kp === 'number' ? p.kp : KP_DEFAULT,
-          rank: '',
-        });
-        return;
-      }
-      hasRecordedRef.current = true;
-      recordCompetitiveResult({
-        userId: p.userId,
-        team: t,
-        outcome: o,
-        opponentAvgKp: avgKp,
-        roundsWon: t === 'team_a' ? r.scoreA ?? 0 : r.scoreB ?? 0,
-        roundsLost: t === 'team_a' ? r.scoreB ?? 0 : r.scoreA ?? 0,
-        kills: p.kills ?? 0,
-        queue: rk ? 'ranked' : 'casual',
-        matchId: r.matchId || undefined,
-      })
-        .then((result) => {
-          setRewards(result);
-          notifyProgressionChanged();
-        })
-        .catch(() => {});
+      if (!hasRecordedRef.current) setRewardStatus('unavailable');
     }, 2500);
 
     return () => window.clearTimeout(timer);
-  }, [player.userId, room.wasCancelled]);
+  }, [player.userId, room.wasCancelled, isPractice]);
 
   if (room.wasCancelled) {
     return (
@@ -166,21 +130,21 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
 
   return (
     <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 z-[300]">
-      {won ? (
+      {resultKnown && won ? (
         <Trophy className="w-20 h-20 text-yellow-400 mb-4" />
-      ) : (
+      ) : resultKnown ? (
         <Skull className="w-20 h-20 text-red-500 mb-4" />
-      )}
+      ) : null}
       <h2
         className={`text-6xl font-black mb-2 uppercase italic ${
-          won ? 'text-yellow-400' : 'text-red-500'
+          !resultKnown ? 'text-slate-300' : won ? 'text-yellow-400' : 'text-red-500'
         }`}
       >
-        {won ? 'Match Win' : 'Match Loss'}
+        {!resultKnown ? 'Result Pending' : won ? 'Match Win' : 'Match Loss'}
       </h2>
       <p className="text-slate-400 uppercase font-bold tracking-widest mb-2">
         {ranked ? 'Ranked Premium' : 'Casual'} · {room.scoreA ?? 0} – {room.scoreB ?? 0} · Team{' '}
-        {team === 'team_a' ? 'A' : 'B'}
+        {lockedTeamRef.current ? (team === 'team_a' ? 'A' : 'B') : '—'}
       </p>
       <div className="bg-slate-900/60 p-6 rounded-2xl border border-white/5 mb-10 flex gap-8 flex-wrap justify-center">
         <div className="text-center">
@@ -189,7 +153,7 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
             <p className="text-xs uppercase font-bold">XP</p>
           </div>
           <p className="text-3xl font-black text-white">
-            {rewards ? `+${rewards.xpEarned}` : '...'}
+            {getRewardDisplayValue(rewards?.xpEarned, rewardStatus)}
           </p>
         </div>
         <div className="text-center">
@@ -198,7 +162,7 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
             <p className="text-xs uppercase font-bold">VP</p>
           </div>
           <p className="text-3xl font-black text-white">
-            {rewards ? `+${rewards.vpEarned}` : '...'}
+            {getRewardDisplayValue(rewards?.vpEarned, rewardStatus)}
           </p>
         </div>
         {ranked && (
@@ -208,9 +172,9 @@ export const CompetitiveResultsScreen: React.FC<Props> = ({
               <p className="text-xs uppercase font-bold">KP</p>
             </div>
             <p className="text-3xl font-black text-white">
-              {rewards
-                ? `${rewards.kpDelta >= 0 ? '+' : ''}${rewards.kpDelta}`
-                : '...'}
+              {rewardStatus === 'confirmed'
+                ? `${(rewards?.kpDelta ?? 0) >= 0 ? '+' : ''}${rewards?.kpDelta ?? 0}`
+                : rewardStatus === 'pending' ? 'Pending' : 'Unavailable'}
             </p>
             {rewards ? (
               <p className="text-[11px] text-slate-400 mt-1">
