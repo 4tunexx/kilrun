@@ -32,14 +32,14 @@ describe('Engine API preflight routing', () => {
     expect(response.headers.get('access-control-allow-methods')).toContain('POST');
   });
 
-  it('does not allow a non-desktop origin', async () => {
+  it.each(['https://untrusted.example', 'null'])('does not allow origin %s', async (origin) => {
     const request = new NextRequest('https://kilrun.example/api/engine/maps', {
       method: 'OPTIONS',
-      headers: { origin: 'https://untrusted.example' },
+      headers: { origin },
     });
 
     const response = await OPTIONS(request, { params: Promise.resolve({ path: ['maps'] }) });
 
-    expect(response.headers.get('access-control-allow-origin')).toBe('null');
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
   });
 });

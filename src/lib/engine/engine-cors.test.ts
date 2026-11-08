@@ -13,12 +13,17 @@ describe('engineCorsHeaders', () => {
     expect(headers['Access-Control-Allow-Methods']).toContain('DELETE');
   });
 
-  it('rejects non-desktop origins', () => {
+  it.each(['https://evil.example', 'null'])('rejects origin %s', (origin) => {
     const headers = engineCorsHeaders(
       new Request('https://kilrun.example/api/engine/sounds', {
-        headers: { origin: 'https://evil.example' },
+        headers: { origin },
       })
     );
-    expect(headers['Access-Control-Allow-Origin']).toBe('null');
+    expect(headers['Access-Control-Allow-Origin']).toBeUndefined();
+  });
+
+  it('allows requests without an origin', () => {
+    const headers = engineCorsHeaders(new Request('https://kilrun.example/api/engine/sounds'));
+    expect(headers['Access-Control-Allow-Origin']).toBe('*');
   });
 });

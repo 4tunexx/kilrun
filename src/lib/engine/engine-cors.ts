@@ -17,7 +17,7 @@ export function engineCorsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get('origin') || '';
   const allow = !origin || isDesktopOrigin(origin);
   return {
-    'Access-Control-Allow-Origin': allow ? origin || '*' : 'null',
+    ...(allow ? { 'Access-Control-Allow-Origin': origin || '*' } : {}),
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Max-Age': '86400',
