@@ -16,13 +16,13 @@ export const dynamic = 'force-dynamic';
 
 const routes = {
   'accept-invite': { GET: acceptInvite.GET },
-  catalog: { GET: catalog.GET },
+  catalog: { GET: catalog.GET, OPTIONS: catalog.OPTIONS },
   'desktop-login': { GET: desktopLogin.GET },
-  download: { GET: download.GET },
-  ghosts: { GET: ghosts.GET, POST: ghosts.POST },
+  download: { GET: download.GET, OPTIONS: download.OPTIONS },
+  ghosts: { GET: ghosts.GET, POST: ghosts.POST, OPTIONS: ghosts.OPTIONS },
   'join-token': { POST: joinToken.POST, OPTIONS: joinToken.OPTIONS },
-  maps: { GET: maps.GET, POST: maps.POST },
-  plugins: { POST: plugins.POST },
+  maps: { GET: maps.GET, POST: maps.POST, OPTIONS: maps.OPTIONS },
+  plugins: { POST: plugins.POST, OPTIONS: plugins.OPTIONS },
   session: {
     GET: session.GET,
     POST: session.POST,
@@ -30,7 +30,7 @@ const routes = {
     DELETE: session.DELETE,
     OPTIONS: session.OPTIONS,
   },
-  version: { GET: version.GET },
+  version: { GET: version.GET, OPTIONS: version.OPTIONS },
 };
 
 export function GET(req: NextRequest, context: ApiCatchAllContext) {
