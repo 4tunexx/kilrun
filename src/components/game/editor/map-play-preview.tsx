@@ -300,6 +300,7 @@ export function MapPlayPreview({
   const pausedRef = useRef(false);
   pausedRef.current = paused;
   const [matchSettings, setMatchSettings] = useState<PlayerMatchSettings>(() => loadPlayerMatchSettings());
+  const { masterVolume, sfxVolume, musicVolume } = matchSettings;
   const matchSettingsRef = useRef(matchSettings);
   matchSettingsRef.current = matchSettings;
   const { toggle: toggleFullscreen } = useGameFullscreen(shellRef, false);
@@ -326,8 +327,8 @@ export function MapPlayPreview({
     };
   }, []);
   useEffect(() => {
-    applyPlayerMatchAudio(matchSettings);
-  }, [matchSettings.masterVolume, matchSettings.sfxVolume, matchSettings.musicVolume]);
+    applyPlayerMatchAudio({ masterVolume, sfxVolume, musicVolume });
+  }, [masterVolume, sfxVolume, musicVolume]);
 
   useEffect(() => {
     setMusicDuck(paused ? 0.22 : 1);
@@ -653,7 +654,7 @@ export function MapPlayPreview({
     let playerId: string | null = null;
     let playerBaseScale: [number, number, number] = [1, 1, 1];
     let bodyYaw = 0;
-    let mouseButtons = new Set<number>();
+    const mouseButtons = new Set<number>();
     let aimHeldUi = false;
     let hpLocal = 100;
     // Set every frame inside the powers block below, read by the void-fall

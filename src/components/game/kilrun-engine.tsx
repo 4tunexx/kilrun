@@ -271,6 +271,7 @@ export default function KilrunEngine({
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const [keyBindings, setKeyBindings] = useState<Record<KeyBindAction, string>>(DEFAULT_KEY_BINDINGS);
   const [matchSettings, setMatchSettings] = useState<PlayerMatchSettings>(() => loadPlayerMatchSettings());
+  const { masterVolume, sfxVolume, musicVolume } = matchSettings;
   const [slideCooldownMs, setSlideCooldownMs] = useState(800);
   const matchSettingsRef = useRef(matchSettings);
   matchSettingsRef.current = matchSettings;
@@ -434,7 +435,7 @@ export default function KilrunEngine({
     return () => {
       cancelled = true;
     };
-  }, [mode, draftDoc]);
+  }, [mode, simMode, draftDoc]);
 
   // Load progression metrics for weapon unlock gates in the buy shop.
   useEffect(() => {
@@ -461,7 +462,7 @@ export default function KilrunEngine({
     return () => {
       cancelled = true;
     };
-  }, [mode, cloudReady, room.buyPhaseMs]);
+  }, [mode, simMode, cloudReady, room.buyPhaseMs]);
 
   // Push Active editor map for this mode to the server when lobby is ready
   useEffect(() => {
@@ -576,8 +577,8 @@ export default function KilrunEngine({
   }, [cloudReady, room.phase, connectionRef, playerCount, connectionError, connectionState, mode, practiceRole, draftDoc]);
 
   useEffect(() => {
-    applyPlayerMatchAudio(matchSettings);
-  }, [matchSettings.masterVolume, matchSettings.sfxVolume, matchSettings.musicVolume]);
+    applyPlayerMatchAudio({ masterVolume, sfxVolume, musicVolume });
+  }, [masterVolume, sfxVolume, musicVolume]);
 
   useEffect(() => {
     setMusicDuck(paused || editorOpen ? 0.22 : 1);
