@@ -73,17 +73,25 @@ export function isPluginSandboxEnvelope(data: unknown): data is {
   return rec.ns === NS_FROM && typeof rec.pluginId === 'string';
 }
 
-function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermission[]): string {
+export function buildPluginSandboxDocument(pluginId: string, source: string, permissions?: PluginPermission[]): string {
   const wrapped = wrapPluginSourceAsCjs(source);
   const payload = JSON.stringify({
     pluginId,
-    wrapped,
     version: KILRUN_ENGINE_VERSION,
     permissions: permissions ?? null,
   });
+  const pluginScript = `try {
+    (function (Kilrun) {
+${wrapped}
+    })(window.Kilrun);
+    parent.postMessage({ ns: '${NS_FROM}', pluginId: ${JSON.stringify(pluginId)}, type: 'ready' }, '*');
+  } catch (err) {
+    parent.postMessage({ ns: '${NS_FROM}', pluginId: ${JSON.stringify(pluginId)}, type: 'error', error: String(err && err.message || err) }, '*');
+  }`;
+  const pluginUrl = JSON.stringify(`data:text/javascript;charset=utf-8,${encodeURIComponent(pluginScript)}`);
   const csp = [
     "default-src 'none'",
-    "script-src 'unsafe-inline'",
+    'script-src data:',
     "style-src 'unsafe-inline'",
     "img-src data: blob:",
     "font-src data:",
@@ -95,19 +103,7 @@ function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermi
     "base-uri 'none'",
     "form-action 'none'",
   ].join('; ');
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="${csp}" />
-<style>
-  html,body{margin:0;padding:0;background:transparent;color:#e2e8f0;font:12px/1.45 system-ui,sans-serif;}
-  #panel{min-height:100%;}
-</style>
-</head>
-<body>
-<div id="panel"></div>
-<script>
+  const bootstrap = `
 (function () {
   var boot = ${payload};
   var PLUGIN_ID = boot.pluginId;
@@ -276,14 +272,29 @@ function buildSrcDoc(pluginId: string, source: string, permissions?: PluginPermi
       }
     }
   });
-  try {
-    (new Function('Kilrun', boot.wrapped))(Kilrun);
-    send({ type: 'ready' });
-  } catch (err) {
-    send({ type: 'error', error: String(err && err.message || err) });
-  }
+  window.addEventListener('error', function (event) {
+    send({ type: 'error', error: event.message || 'Plugin script failed to load' });
+  });
+  var script = document.createElement('script');
+  script.src = ${pluginUrl};
+  script.onerror = function () { send({ type: 'error', error: 'Plugin script failed to load' }); };
+  document.body.appendChild(script);
 })();
-</script>
+`;
+  const bootstrapUrl = `data:text/javascript;charset=utf-8,${encodeURIComponent(bootstrap)}`;
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="${csp}" />
+<style>
+  html,body{margin:0;padding:0;background:transparent;color:#e2e8f0;font:12px/1.45 system-ui,sans-serif;}
+  #panel{min-height:100%;}
+</style>
+</head>
+<body>
+<div id="panel"></div>
+<script src="${bootstrapUrl}"></script>
 </body>
 </html>`;
 }
@@ -436,9 +447,14 @@ export async function createPluginSandbox(
     window.addEventListener('message', onReady);
   });
 
-  iframe.srcdoc = buildSrcDoc(pluginId, source, permissions);
+  iframe.srcdoc = buildPluginSandboxDocument(pluginId, source, permissions);
   getPark()?.appendChild(iframe);
-  await ready;
+  try {
+    await ready;
+  } catch (err) {
+    if (sandboxes.get(pluginId) === rec) destroyPluginSandbox(pluginId);
+    throw err;
+  }
 }
 
 export function destroyPluginSandbox(pluginId: string) {

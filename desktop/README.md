@@ -85,9 +85,12 @@ offline.
 - **Session token** — the live-site sign-in token is encrypted at rest with
   Windows DPAPI (`CryptProtectData`), bound to your Windows user account.
   It is never stored as plaintext on disk.
-- **Content Security Policy** — the app window runs under an explicit CSP
-  (script-src limited to the bundled app; no arbitrary remote script
-  execution), not a disabled one.
+- **Content Security Policy** — the app window allows bundled scripts and
+  `data:` scripts for plugin sandbox startup, but not arbitrary remote scripts
+  or `eval`. Allowing `data:` weakens protection against injected script tags
+  in the app window; keep untrusted content out of its HTML. Plugins run in
+  script-only, opaque-origin iframes with a separate policy blocking network,
+  nested frames, and workers.
 - **Plugin permissions** — a plugin's manifest must explicitly declare
   `"permissions": ["server"]` to have its server-executable code shipped to
   the live catalog; omitting `permissions` no longer implicitly grants it.
