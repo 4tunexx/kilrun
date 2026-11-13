@@ -66,7 +66,7 @@ export default {
         xl: "0px",
         "2xl": "0px",
         "3xl": "0px",
-        full: "0px",
+        full: "9999px",
       },
       keyframes: {
         "accordion-down": {

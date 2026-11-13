@@ -151,7 +151,7 @@ body,
 
 *::-webkit-scrollbar-thumb {
   background: hsl(222 16% 38%);
-  border-radius: 0;
+  border-radius: 999px;
   border: 2px solid hsl(222 32% 9%);
   background-clip: padding-box;
 }
@@ -181,7 +181,7 @@ input[type='range'] {
 
 input[type='range']::-webkit-slider-runnable-track {
   height: 6px;
-  border-radius: 0;
+  border-radius: 999px;
   background: hsl(222 20% 22%);
 }
 
@@ -191,7 +191,7 @@ input[type='range']::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
   margin-top: -4px;
-  border-radius: 0;
+  border-radius: 999px;
   background: hsl(356 73% 56%);
   border: 2px solid hsl(222 32% 12%);
   box-shadow: 0 0 0 1px hsl(356 73% 56% / 0.35);
@@ -199,14 +199,14 @@ input[type='range']::-webkit-slider-thumb {
 
 input[type='range']::-moz-range-track {
   height: 6px;
-  border-radius: 0;
+  border-radius: 999px;
   background: hsl(222 20% 22%);
 }
 
 input[type='range']::-moz-range-thumb {
   width: 14px;
   height: 14px;
-  border-radius: 0;
+  border-radius: 999px;
   background: hsl(356 73% 56%);
   border: 2px solid hsl(222 32% 12%);
 }
@@ -220,13 +220,6 @@ input[type='range']::-moz-range-thumb {
 
 .engine-sheen {
   background-size: 200% 200%;
-}
-
-/* Square, angular UI: no rounded corners anywhere (also beats inline styles). */
-*,
-*::before,
-*::after {
-  border-radius: 0 !important;
 }
 
 /*
