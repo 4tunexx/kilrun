@@ -107,7 +107,7 @@ function SlidePanel({
   return createPortal(
     <div
       data-hub-popover
-      className="fixed z-[9999] w-80 max-w-[min(20rem,calc(100vw-1rem))] rounded-xl border border-slate-700/40 bg-slate-900/95 backdrop-blur-md shadow-2xl overflow-hidden origin-top animate-in fade-in-0 zoom-in-95 duration-150"
+      className="fixed z-[9999] w-80 max-w-[min(20rem,calc(100vw-1rem))] rounded-xl border border-white/10 bg-slate-900/95 bg-gradient-to-br from-white/[0.06] to-transparent backdrop-blur-xl shadow-2xl overflow-hidden origin-top animate-in fade-in-0 zoom-in-95 duration-150"
       style={{ top: pos.top, right: pos.right }}
     >
       {children}

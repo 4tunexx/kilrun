@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { Gift, Loader2, Package, ShieldCheck, ShoppingBag, Sparkles, Trash2, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, Gift, Loader2, Package, ShieldCheck, ShoppingBag, Sparkles, Trash2, Upload } from 'lucide-react';
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetHeader,
   SheetTitle,
@@ -508,6 +509,7 @@ export function InventoryDrawer({
   onEquipChange,
   username,
   avatarUrl,
+  backgroundUrl,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -515,6 +517,7 @@ export function InventoryDrawer({
   onEquipChange?: () => void;
   username?: string;
   avatarUrl?: string;
+  backgroundUrl: string;
 }) {
   const [items, setItems] = useState<InventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -531,6 +534,7 @@ export function InventoryDrawer({
   const [invCfg, setInvCfg] = useState<InventoryConfig>(DEFAULT_INVENTORY_CONFIG);
   const [unboxResult, setUnboxResult] = useState<CaseOpenResultDto | null>(null);
   const [slots, setSlots] = useState<{ used: number; cap: number } | null>(null);
+  const [equipmentExpanded, setEquipmentExpanded] = useState(true);
   const { toast } = useToast();
 
   const resellRate = invCfg.resellRate > 0 ? invCfg.resellRate : INVENTORY_RESELL_RATE;
@@ -809,7 +813,7 @@ export function InventoryDrawer({
           className={cn(
             'w-full max-w-full sm:w-[min(var(--inv-max,1100px),95vw)] sm:max-w-[min(var(--inv-max,1100px),95vw)] h-[100dvh]',
             'p-0 gap-0 overflow-hidden flex flex-col',
-            'bg-slate-900/95 backdrop-blur-md border-slate-700/30 text-white',
+            'bg-slate-950/80 backdrop-blur-xl border-slate-600/40 text-white',
             'shadow-[0_30px_80px_-10px_rgba(0,0,0,0.65)]'
           )}
             style={
@@ -818,9 +822,23 @@ export function InventoryDrawer({
               } as CSSProperties
             }
         >
-          <SheetHeader className="relative shrink-0 px-4 sm:px-6 pt-5 pb-3 pr-12 border-b border-slate-700/30 bg-gradient-to-b from-slate-800/60 to-transparent">
+          <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={backgroundUrl} alt="" className="h-full w-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-br from-slate-950/85 via-slate-900/80 to-slate-950/90" />
+          </div>
+          <SheetHeader className="relative shrink-0 px-4 sm:px-6 pt-5 pb-3 pr-12 border-b border-white/10 bg-slate-900/40 backdrop-blur-md">
             <SheetTitle className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-xl font-black tracking-wide">
               <div className="flex items-center gap-3">
+                <SheetClose asChild>
+                  <button
+                    type="button"
+                    aria-label="Collapse inventory"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center bg-primary text-white transition-colors hover:bg-red-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </button>
+                </SheetClose>
                 <div className="h-9 w-9 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center text-primary">
                   <Package className="h-5 w-5" />
                 </div>
@@ -860,7 +878,7 @@ export function InventoryDrawer({
                       <TabsTrigger
                         key={t.id}
                         value={t.id}
-                        className="h-7 px-3 sm:px-4 text-xs font-bold uppercase tracking-[0.14em] data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:shadow-inner data-[state=active]:border data-[state=active]:border-primary/30 border border-transparent rounded-md"
+                        className="h-7 px-3 sm:px-4 text-xs font-bold uppercase tracking-[0.14em] transition-colors hover:bg-white/10 hover:text-white data-[state=active]:bg-primary/20 data-[state=active]:text-primary data-[state=active]:shadow-inner data-[state=active]:border data-[state=active]:border-primary/30 border border-transparent rounded-md"
                       >
                         {t.label}
                       </TabsTrigger>
@@ -898,7 +916,7 @@ export function InventoryDrawer({
                 : 'grid-cols-1 md:grid-rows-[minmax(0,1fr)]'
             )}
           >
-            <section className="flex flex-col md:min-h-0 border-b md:border-b-0 md:border-r border-slate-700/30 p-4 sm:p-5 gap-4">
+            <section className="relative flex flex-col md:min-h-0 border-b md:border-b-0 md:border-r border-white/10 bg-slate-900/20 p-4 sm:p-5 gap-4">
               {pageTab === 'crates' ? (
                 <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:pr-1 md:-mr-1 space-y-3">
                   <div className="flex items-center justify-between">
@@ -923,7 +941,7 @@ export function InventoryDrawer({
                       {crateItems.map((item) => (
                         <Card
                           key={item.id}
-                          className="bg-slate-900/60 border-slate-700/40 overflow-hidden"
+                          className="bg-slate-900/60 border-slate-600/50 overflow-hidden backdrop-blur-md transition-[background-color,border-color,transform,box-shadow] duration-200 hover:-translate-y-1 hover:border-amber-400/50 hover:bg-slate-800/80 hover:shadow-lg hover:shadow-amber-500/10 motion-reduce:transform-none"
                         >
                           <CardContent className="p-3 space-y-2">
                             <div className="relative aspect-square rounded-lg bg-slate-950/60 border border-amber-500/20 flex items-center justify-center overflow-hidden p-2">
@@ -1027,7 +1045,7 @@ export function InventoryDrawer({
                       <TabsTrigger
                         key={t.id}
                         value={t.id}
-                        className="h-8 px-3 text-xs font-semibold data-[state=active]:bg-primary/20 data-[state=active]:text-primary border border-transparent data-[state=active]:border-primary/30 rounded-md"
+                        className="h-8 px-3 text-xs font-semibold transition-colors hover:bg-white/10 hover:text-white data-[state=active]:bg-primary/20 data-[state=active]:text-primary border border-transparent data-[state=active]:border-primary/30 rounded-md"
                       >
                         <span className="mr-1">{t.label}</span>
                         <span className="text-[10px] opacity-60">{count}</span>
@@ -1055,29 +1073,34 @@ export function InventoryDrawer({
                 }}
                 className={cn(
                   'rounded-xl border transition-colors shrink-0',
-                  'p-3 bg-slate-900/60 border-slate-700/40',
+                  'p-3 bg-slate-900/55 border-white/10 backdrop-blur-md shadow-lg shadow-black/20',
                   dragOverSlot === '__equip__'
                     ? 'ring-2 ring-primary/70 bg-primary/10 border-primary/40'
                     : ''
                 )}
               >
-                <div className="flex items-center justify-between mb-2 gap-2">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400 font-bold">
-                    Equipped ·{' '}
-                    {pageTab === 'cosmetics'
-                      ? 'Drop cosmetics here'
-                      : pageTab === 'powers'
-                        ? 'Drop powers here'
-                        : 'Drop gear here'}
-                  </p>
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    aria-expanded={equipmentExpanded}
+                    aria-controls="inventory-equipment-slots"
+                    onClick={() => setEquipmentExpanded((expanded) => !expanded)}
+                    className="flex items-center gap-2 py-1 text-left text-[11px] uppercase tracking-[0.2em] text-slate-300 font-bold transition-colors hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                  >
+                    <ChevronDown className={cn('h-4 w-4 transition-transform motion-reduce:transition-none', !equipmentExpanded && '-rotate-90')} />
+                    Equipped
+                  </button>
                   <Badge className="hidden sm:inline-flex bg-slate-800/60 text-slate-300 border-slate-700/40 text-[10px] h-5">
                     <Upload className="h-3 w-3 mr-1" />
                     {invCfg.enableDragDrop ? 'Drag & drop' : 'Click to equip'}
                   </Badge>
                 </div>
                 <div
+                  id="inventory-equipment-slots"
+                  hidden={!equipmentExpanded}
                   className={cn(
-                    'grid gap-2 md:gap-3',
+                    'mt-2 grid gap-2 md:gap-3',
+                    !equipmentExpanded && 'hidden',
                     pageTab === 'skins'
                       ? 'grid-cols-3 sm:grid-cols-6'
                       : pageTab === 'cosmetics'
@@ -1112,7 +1135,7 @@ export function InventoryDrawer({
                           'bg-gradient-to-b from-slate-900/80 to-slate-950/80',
                           isOver
                             ? 'ring-2 ring-primary border-primary/60 scale-[1.03]'
-                            : 'border-slate-700/40 hover:border-primary/40'
+                            : 'border-slate-700/40 hover:border-primary/60 hover:brightness-125 hover:shadow-lg hover:shadow-primary/10'
                         )}
                       >
                         {equipped ? (
@@ -1202,14 +1225,14 @@ export function InventoryDrawer({
                             onDragEnd={() => setDragOverSlot(null)}
                             onClick={() => setSelectedItemId(item.id)}
                             className={cn(
-                              'select-none relative bg-slate-900/60 backdrop-blur-md overflow-hidden cursor-pointer transition-all',
+                              'select-none relative bg-slate-900/60 backdrop-blur-md overflow-hidden cursor-pointer transition-[background-color,border-color,transform,box-shadow] duration-200 motion-reduce:transform-none',
                               'border-slate-700/40',
                               item.isEquipped
                                 ? 'ring-1 ring-primary/50 border-primary/30'
                                 : '',
                               isSelected
                                 ? 'ring-2 ring-primary -translate-y-0.5 shadow-lg shadow-primary/10'
-                                : 'hover:border-primary/30 hover:-translate-y-0.5'
+                                : 'hover:border-primary/60 hover:bg-slate-800/80 hover:-translate-y-1 hover:shadow-lg hover:shadow-primary/10'
                             )}
                           >
                             {draggable && (
@@ -1330,7 +1353,7 @@ export function InventoryDrawer({
                 )}
               </div>
 
-              <div className="rounded-xl border border-slate-700/40 bg-slate-900/60 p-3 min-h-[90px] shrink-0">
+              <div className="rounded-xl border border-white/10 bg-slate-900/55 backdrop-blur-md shadow-lg shadow-black/20 p-3 min-h-[90px] shrink-0">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-2">
                   Item detail
                 </p>
@@ -1376,7 +1399,7 @@ export function InventoryDrawer({
             </section>
 
             {invCfg.showPreviewColumn && pageTab !== 'crates' && (
-            <section className="relative md:min-h-0 flex flex-col p-4 sm:p-5 gap-4 md:overflow-y-auto bg-gradient-to-br from-slate-900/70 via-slate-800/50 to-slate-900/70">
+            <section className="relative md:min-h-0 flex flex-col p-4 sm:p-5 gap-4 md:overflow-y-auto bg-gradient-to-br from-slate-900/40 via-slate-800/30 to-slate-900/50">
               <div className="absolute inset-0 pointer-events-none opacity-40">
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(239,68,68,0.14),transparent_60%)]" />
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(148,163,184,0.12),transparent_55%)]" />
@@ -1453,7 +1476,7 @@ export function InventoryDrawer({
                   return (
                     <div
                       key={slot.key}
-                      className="rounded-lg border transition-all bg-slate-900/60 border-slate-700/40 p-2.5"
+                      className="rounded-lg border transition-colors bg-slate-900/50 backdrop-blur-md border-white/10 hover:border-primary/40 hover:bg-slate-800/70 p-2.5"
                     >
                       <div className="flex items-center gap-2">
                         <div

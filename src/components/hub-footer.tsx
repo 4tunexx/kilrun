@@ -3,7 +3,7 @@
 import { resolveMarkLogo } from '@/lib/branding';
 
 const PANEL =
-  'bg-slate-900/60 backdrop-blur-md border-t border-slate-700/30';
+  'bg-slate-900/60 bg-gradient-to-r from-white/[0.04] to-transparent backdrop-blur-md border-t border-white/10';
 
 export function HubFooter({
   markLogoUrl,

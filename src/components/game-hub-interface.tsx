@@ -981,12 +981,12 @@ export default function GameHubInterface({
             <div
               className={
                 isMobile
-                  ? `fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-[50] w-20 bg-slate-900/95 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 overflow-y-auto overflow-x-hidden overscroll-contain transition-all duration-300 ${
+                  ? `fixed left-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-[50] w-20 bg-slate-900/95 bg-gradient-to-b from-white/[0.05] to-transparent backdrop-blur-xl flex flex-col items-center py-6 space-y-4 border-r border-white/10 overflow-y-auto overflow-x-hidden overscroll-contain transition-all duration-300 ${
                       isLeftMenuOpen
                         ? 'translate-x-0 opacity-100'
                         : '-translate-x-full opacity-0 pointer-events-none'
                     }`
-                  : `w-20 sm:w-24 bg-slate-900/60 backdrop-blur-md flex flex-col items-center py-6 space-y-4 border-r border-slate-700/30 h-full overflow-y-auto overflow-x-hidden transition-opacity duration-300 ${
+                  : `w-20 sm:w-24 bg-slate-900/60 bg-gradient-to-b from-white/[0.05] to-transparent backdrop-blur-xl flex flex-col items-center py-6 space-y-4 border-r border-white/10 h-full overflow-y-auto overflow-x-hidden transition-opacity duration-300 ${
                       isLeftMenuOpen ? 'opacity-100' : 'opacity-0'
                     }`
               }
@@ -1134,6 +1134,7 @@ export default function GameHubInterface({
               <InventoryDrawer
                 open={isInventoryOpen}
                 onOpenChange={setIsInventoryOpen}
+                backgroundUrl={bgUrl}
                 username={user.username}
                 avatarUrl={user.avatarUrl}
                 onEquipChange={() => {
@@ -1232,10 +1233,10 @@ export default function GameHubInterface({
             <div
               className={
                 isMobile
-                  ? `fixed right-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-[50] bg-slate-900/95 backdrop-blur-md border-l border-slate-700/30 overflow-hidden transition-all duration-300 ${
+                  ? `fixed right-0 top-[env(safe-area-inset-top)] bottom-[env(safe-area-inset-bottom)] z-[50] bg-slate-900/95 bg-gradient-to-b from-white/[0.05] to-transparent backdrop-blur-xl border-l border-white/10 overflow-hidden transition-all duration-300 ${
                       isMenuOpen ? 'w-72 translate-x-0 opacity-100' : 'w-72 translate-x-full opacity-0 pointer-events-none'
                     }`
-                  : `bg-slate-900/60 backdrop-blur-md border-l border-slate-700/30 transition-all duration-300 ease-in-out overflow-hidden h-full ${
+                  : `bg-slate-900/60 bg-gradient-to-b from-white/[0.05] to-transparent backdrop-blur-xl border-l border-white/10 transition-all duration-300 ease-in-out overflow-hidden h-full ${
                       isMenuOpen ? 'w-72 sm:w-80' : 'w-0'
                     }`
               }
