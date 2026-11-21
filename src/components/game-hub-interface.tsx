@@ -970,28 +970,24 @@ export default function GameHubInterface({
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-9 gap-1.5 px-2 text-slate-300 hover:text-white"
+              size="icon"
+              className="h-10 w-10 rounded-lg text-slate-300 transition-all hover:bg-primary/15 hover:text-primary"
               onClick={handleGoBack}
               disabled={currentPage === 'home' && pageHistoryRef.current.length === 0}
               aria-label="Go back to the previous page"
-              title="Back"
             >
-              <ArrowLeft className="h-4 w-4" />
-              <span className="hidden sm:inline">Back</span>
+              <ArrowLeft className="h-5 w-5" />
             </Button>
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-9 gap-1.5 px-2 text-slate-300 hover:text-white"
+              size="icon"
+              className="h-10 w-10 rounded-lg text-slate-300 transition-all hover:bg-primary/15 hover:text-primary"
               onClick={() => navigate('home')}
               disabled={currentPage === 'home'}
               aria-label="Go to Home"
-              title="Home"
             >
-              <Home className="h-4 w-4" />
-              <span className="hidden sm:inline">Home</span>
+              <Home className="h-5 w-5" />
             </Button>
           </div>
         }
@@ -1026,7 +1022,7 @@ export default function GameHubInterface({
             alt=""
             className="absolute inset-0 h-full w-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-br from-slate-950/95 via-slate-950/90 to-slate-950/95" />
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-900/80 via-slate-800/70 to-slate-900/85" />
         </div>
 
         <div className="relative z-10 flex h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))]">
