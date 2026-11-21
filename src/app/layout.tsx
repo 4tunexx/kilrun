@@ -4,6 +4,7 @@ import { SessionProvider } from 'next-auth/react';
 import { ClerkProvider } from '@clerk/nextjs';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
+import { SiteThemeProvider } from '@/components/site-theme-provider';
 import { cn } from '@/lib/utils';
 
 const spaceGrotesk = SpaceGrotesk({
@@ -30,9 +31,9 @@ export default function RootLayout({
       appearance={{
         baseTheme: undefined,
         variables: {
-          colorPrimary: 'hsl(356, 73%, 56%)',
-          colorBackground: 'hsl(222, 47%, 11%)',
-          colorTextOnPrimaryBackground: 'hsl(0, 0%, 98%)',
+          colorPrimary: 'hsl(var(--primary))',
+          colorBackground: 'hsl(var(--background))',
+          colorTextOnPrimaryBackground: 'hsl(var(--primary-foreground))',
         },
       }}
     >
@@ -45,8 +46,10 @@ export default function RootLayout({
           )}
         >
           <SessionProvider>
-            {children}
-            <Toaster />
+            <SiteThemeProvider>
+              {children}
+              <Toaster />
+            </SiteThemeProvider>
           </SessionProvider>
         </body>
       </html>

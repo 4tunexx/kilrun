@@ -1,4 +1,4 @@
-/** Browser event so hub/landing pick up admin logo changes without a full reload. */
+/** Browser event so clients pick up saved site settings without a full reload. */
 export const SITE_SETTINGS_UPDATED = 'kilrun:site-settings-updated';
 
 export type SiteBrandingDetail = {
@@ -14,6 +14,7 @@ export type SiteBrandingDetail = {
   hubPagesJson?: string | null;
   hubNavJson?: string | null;
   hubChromeJson?: string | null;
+  themePaletteJson?: string | null;
 };
 
 export function broadcastSiteSettings(settings: SiteBrandingDetail) {

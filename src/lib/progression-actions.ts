@@ -14,6 +14,7 @@ import { getRankForKp, KP_DEFAULT, clampKp } from '@/lib/kp';
 import { canAccessAdmin, isAdminRole } from '@/lib/roles';
 import { isVipActive } from '@/lib/vip';
 import { isTrustedServerContext } from '@/lib/trusted-server';
+import { serializeThemePalette } from '@/lib/theme-palette';
 
 export type WebsiteActionMetric =
   | 'friends'
@@ -1429,6 +1430,11 @@ export async function getSiteSettings() {
             (settings as { defaultTpsViewJson?: string }).defaultTpsViewJson ??
             '{}'
         ),
+        themePaletteJson: String(
+          doc.themePaletteJson ??
+            (settings as { themePaletteJson?: string }).themePaletteJson ??
+            '{}'
+        ),
       };
     }
   } catch {
@@ -1470,6 +1476,9 @@ export async function getSiteSettings() {
     defaultTpsViewJson: String(
       (settings as { defaultTpsViewJson?: string }).defaultTpsViewJson ?? '{}'
     ),
+    themePaletteJson: String(
+      (settings as { themePaletteJson?: string }).themePaletteJson ?? '{}'
+    ),
   };
 }
 
@@ -1496,6 +1505,7 @@ export async function updateSiteSettings(data: {
   inventoryConfigJson?: string;
   matchRewardsConfigJson?: string;
   defaultTpsViewJson?: string;
+  themePaletteJson?: string;
 }) {
   // Every caller of this action in the admin UI (Site Layout, Premium,
   // Game Balance, Ranks, Inventory panels) is gated `isAdmin`-only in
@@ -1599,6 +1609,9 @@ export async function updateSiteSettings(data: {
   }
   if (typeof data.hubChromeJson === 'string') {
     payload.hubChromeJson = JSON.stringify(parseHubChrome(data.hubChromeJson));
+  }
+  if (typeof data.themePaletteJson === 'string') {
+    payload.themePaletteJson = serializeThemePalette(data.themePaletteJson);
   }
   if (typeof data.premiumConfigJson === 'string') {
     payload.premiumConfigJson = serializePremiumConfig(

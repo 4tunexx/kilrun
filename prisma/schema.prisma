@@ -407,6 +407,8 @@ model SiteSettings {
   inventoryConfigJson String @default("{}")
   /// JSON: custom/edited requirement metrics + shop unlock channels — see requirement-catalog.ts.
   requirementCatalogJson String @default("{}")
+  /// JSON: saved platform color palette — see theme-palette.ts.
+  themePaletteJson String @default("{}")
   /// JSON: admin-tunable match reward tables + XP bonus formula constants — see match-rewards-config.ts.
   matchRewardsConfigJson String @default("{}")
   /// JSON: admin-tunable global TPS camera/crosshair/player-view default — see tps-view-settings.ts.

@@ -27,6 +27,7 @@ import {
   Gem,
   Crown,
   Package,
+  Palette,
   ListChecks,
   Radio,
   KeyRound,
@@ -77,6 +78,7 @@ import { AdminSecretsVaultPanel } from '@/components/views/admin/admin-secrets-v
 import { AdminClansPanel } from '@/components/views/admin/admin-clans-panel';
 import { AdminCasesPanel } from '@/components/views/admin/admin-cases-panel';
 import { AdminEngineInvitesPanel } from '@/components/views/admin/admin-engine-invites-panel';
+import { AdminThemePalettePanel } from '@/components/views/admin/admin-theme-palette-panel';
 import {
   DEFAULT_HEADER_LOGO_STYLE,
   normalizeHeaderLogoStyle,
@@ -135,6 +137,7 @@ const TAB_META: Record<string, { label: string; icon: ReactNode }> = {
   live: { label: 'Live', icon: <Radio className="h-3.5 w-3.5" /> },
   secrets: { label: 'Secrets', icon: <KeyRound className="h-3.5 w-3.5" /> },
   site: { label: 'Site', icon: <Settings2 className="h-3.5 w-3.5" /> },
+  theme: { label: 'Theme', icon: <Palette className="h-3.5 w-3.5" /> },
   users: { label: 'Users', icon: <Users className="h-3.5 w-3.5" /> },
   moderation: { label: 'Moderation', icon: <Shield className="h-3.5 w-3.5" /> },
   audit: { label: 'Audit', icon: <ScrollText className="h-3.5 w-3.5" /> },
@@ -166,6 +169,7 @@ const ADMIN_TABS = [
   'live',
   'secrets',
   'site',
+  'theme',
   'users',
   'moderation',
   'audit',
@@ -789,6 +793,12 @@ export default function AdminView({
             </Card>
 
             <AdminSiteLayoutPanel />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="theme" className="mt-4">
+            <AdminThemePalettePanel />
           </TabsContent>
         )}
 

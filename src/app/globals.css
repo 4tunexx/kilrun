@@ -4,7 +4,12 @@
 
 @layer components {
   .glass-surface {
-    background-image: linear-gradient(135deg, rgb(255 255 255 / 0.06), transparent 55%, rgb(2 6 23 / 0.2));
+    background-image: linear-gradient(
+      135deg,
+      hsl(var(--foreground) / 0.06),
+      transparent 55%,
+      hsl(var(--background) / 0.2)
+    );
   }
 }
 
@@ -18,14 +23,14 @@
 }
 
 .hub-glass-panel {
-  background-color: rgb(15 23 42 / 0.9);
+  background-color: hsl(var(--card) / 0.9);
   background-image: linear-gradient(
     135deg,
-    rgb(255 255 255 / 0.08),
-    rgb(30 41 59 / 0.08) 48%,
-    rgb(2 6 23 / 0.18)
+    hsl(var(--foreground) / 0.08),
+    hsl(var(--card) / 0.08) 48%,
+    hsl(var(--background) / 0.18)
   );
-  border-color: rgb(148 163 184 / 0.2);
+  border-color: hsl(var(--border) / 0.75);
   -webkit-backdrop-filter: blur(20px) saturate(130%);
   backdrop-filter: blur(20px) saturate(130%);
 }
@@ -34,21 +39,21 @@
 .hub-glass-inset,
 :where(div, section, article, li)[class*='bg-slate-900/'][class*='border'][class*='rounded']:not(.hub-glass-panel),
 :where(div, section, article, li)[class*='bg-slate-800/'][class*='border'][class*='rounded']:not(.hub-glass-panel) {
-  background-color: rgb(15 23 42 / 0.72);
+  background-color: hsl(var(--card) / 0.72);
   background-image: linear-gradient(
     135deg,
-    rgb(255 255 255 / 0.06),
-    rgb(30 41 59 / 0.05) 52%,
-    rgb(2 6 23 / 0.16)
+    hsl(var(--foreground) / 0.06),
+    hsl(var(--card) / 0.05) 52%,
+    hsl(var(--background) / 0.16)
   );
-  border-color: rgb(148 163 184 / 0.16);
+  border-color: hsl(var(--border) / 0.7);
   -webkit-backdrop-filter: blur(14px) saturate(120%);
   backdrop-filter: blur(14px) saturate(120%);
 }
 
 :where(div, section, article, li)[class*='bg-slate-900/'][class*='border'][class*='rounded'][class*='hover:bg-']:not(.hub-glass-panel):hover,
 :where(div, section, article, li)[class*='bg-slate-800/'][class*='border'][class*='rounded'][class*='hover:bg-']:not(.hub-glass-panel):hover {
-  background-color: rgb(30 41 59 / 0.84);
+  background-color: hsl(var(--secondary) / 0.84);
 }
 
 .hub-glass-inset-interactive {
@@ -59,8 +64,8 @@
 }
 
 .hub-glass-inset-interactive:hover:not(:disabled) {
-  background-color: rgb(30 41 59 / 0.84);
-  border-color: rgb(251 146 60 / 0.55);
+  background-color: hsl(var(--secondary) / 0.84);
+  border-color: hsl(var(--primary) / 0.55);
 }
 
 .hub-loading-shimmer {
@@ -218,7 +223,7 @@ html,
 body,
 * {
   scrollbar-width: thin;
-  scrollbar-color: hsl(222 18% 42%) hsl(222 32% 9%);
+  scrollbar-color: hsl(var(--muted-foreground) / 0.55) hsl(var(--background));
 }
 
 *::-webkit-scrollbar {
@@ -228,18 +233,18 @@ body,
 
 *::-webkit-scrollbar-track,
 *::-webkit-scrollbar-corner {
-  background: hsl(222 32% 9%);
+  background: hsl(var(--background));
 }
 
 *::-webkit-scrollbar-thumb {
-  background: hsl(222 16% 38%);
+  background: hsl(var(--muted-foreground) / 0.55);
   border-radius: 999px;
-  border: 2px solid hsl(222 32% 9%);
+  border: 2px solid hsl(var(--background));
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: hsl(356 62% 48%);
+  background: hsl(var(--primary));
 }
 
 input,
@@ -255,7 +260,7 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 input[type='range'] {
-  accent-color: hsl(356 73% 56%);
+  accent-color: hsl(var(--primary));
   height: 6px;
   background: transparent;
   cursor: pointer;
@@ -264,7 +269,7 @@ input[type='range'] {
 input[type='range']::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 999px;
-  background: hsl(222 20% 22%);
+  background: hsl(var(--secondary));
 }
 
 input[type='range']::-webkit-slider-thumb {
@@ -274,29 +279,29 @@ input[type='range']::-webkit-slider-thumb {
   height: 14px;
   margin-top: -4px;
   border-radius: 999px;
-  background: hsl(356 73% 56%);
-  border: 2px solid hsl(222 32% 12%);
-  box-shadow: 0 0 0 1px hsl(356 73% 56% / 0.35);
+  background: hsl(var(--primary));
+  border: 2px solid hsl(var(--background));
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.35);
 }
 
 input[type='range']::-moz-range-track {
   height: 6px;
   border-radius: 999px;
-  background: hsl(222 20% 22%);
+  background: hsl(var(--secondary));
 }
 
 input[type='range']::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 999px;
-  background: hsl(356 73% 56%);
-  border: 2px solid hsl(222 32% 12%);
+  background: hsl(var(--primary));
+  border: 2px solid hsl(var(--background));
 }
 
 .engine-grid {
   background-image:
-    linear-gradient(rgba(226, 61, 74, 0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(226, 61, 74, 0.07) 1px, transparent 1px);
+    linear-gradient(hsl(var(--primary) / 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--primary) / 0.07) 1px, transparent 1px);
   background-size: 48px 48px;
 }
 
