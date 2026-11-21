@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
 import { MiniProfileCard, type MiniProfileSummary } from '@/components/user-hover-card';
 import { getPublicProfileSummary } from '@/lib/public-profile-actions';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 
 const REFRESH_MS = 45_000;
 
@@ -67,9 +67,10 @@ export default function EmbedProfileClient({ userId }: { userId: string }) {
 
   if (!summary) {
     return (
-      <div className="flex h-[320px] w-[288px] items-center justify-center rounded-xl border border-slate-700 bg-slate-950 text-slate-400">
-        <Loader2 className="h-5 w-5 animate-spin" />
-      </div>
+      <HubLoadingState
+        label="Loading embedded profile"
+        className="h-[320px] w-[288px] p-4"
+      />
     );
   }
 

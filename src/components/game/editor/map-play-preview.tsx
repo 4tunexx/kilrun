@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Button } from '@/components/ui/button';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { X } from 'lucide-react';
 import type { MapDocument } from './map-document';
 import { ensureCombatSettings, ensurePlatformMotion, ensureSolidFx, DEFAULT_WEAPON_DEF } from './map-document';
@@ -2094,7 +2095,7 @@ export function MapPlayPreview({
         )}
         {loading && (
           <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 pointer-events-none">
-            <p className="text-sm font-semibold text-white/80 tracking-wide">Loading play test…</p>
+            <HubLoadingState label="Loading play test" className="w-full max-w-sm p-5" compact />
           </div>
         )}
         {autoStartNote && !loading && (

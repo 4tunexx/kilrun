@@ -21,6 +21,7 @@ import {
   setClanLobbyQueueRoom,
   type ClanLobbyDto,
 } from '@/lib/clan-lobby-actions';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 
 interface LobbyViewProps {
   mode: KilrunMode;
@@ -347,14 +348,19 @@ const LobbyView: React.FC<LobbyViewProps> = ({
   // Wait for equipped skins + join token so privileges are server-minted.
   if (!skinsReady || !rankReady || !tokenReady || !partyReady || !clanLobbyReady) {
     return (
-      <div className="fixed inset-0 z-[200] bg-[#0a1220] flex items-center justify-center text-white/60 text-sm">
-        {waitingForLeaderRoom
-          ? clanLobbyId
-            ? 'Waiting for your clan lobby leader…'
-            : 'Waiting for party leader…'
-          : mode === 'competitive' && competitiveQueue === 'ranked'
-            ? 'Finding Ranked match…'
-            : 'Loading avatar skins…'}
+      <div className="fixed inset-0 z-[200] bg-[#0a1220] flex items-center justify-center p-4">
+        <HubLoadingState
+          label={
+            waitingForLeaderRoom
+              ? clanLobbyId
+                ? 'Waiting for your clan lobby leader'
+                : 'Waiting for party leader'
+              : mode === 'competitive' && competitiveQueue === 'ranked'
+                ? 'Finding Ranked match'
+                : 'Loading avatar skins'
+          }
+          className="w-full max-w-md p-6"
+        />
       </div>
     );
   }

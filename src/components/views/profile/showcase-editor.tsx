@@ -213,7 +213,7 @@ export function ShowcaseEditor() {
                 return (
                   <div
                     key={slot}
-                    className="aspect-square rounded-lg border border-slate-700/40 bg-slate-900/30 flex flex-col items-center justify-center text-slate-500 gap-1"
+                    className="hub-glass-inset aspect-square rounded-lg border flex flex-col items-center justify-center text-slate-500 gap-1"
                   >
                     <Lock className="h-4 w-4" />
                     <span className="text-[10px] text-center px-1">Lv {unlockLevel}</span>
@@ -264,7 +264,7 @@ export function ShowcaseEditor() {
                   type="button"
                   disabled={busySlot === slot}
                   onClick={() => setPickerSlot(slot)}
-                  className="aspect-square rounded-lg border border-dashed border-slate-600 bg-slate-900/20 flex flex-col items-center justify-center text-slate-500 hover:border-primary/60 hover:text-primary transition-colors"
+                  className="hub-glass-inset aspect-square rounded-lg border border-dashed flex flex-col items-center justify-center text-slate-500 hover:border-primary/60 hover:text-primary transition-colors"
                 >
                   {busySlot === slot ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
@@ -276,7 +276,7 @@ export function ShowcaseEditor() {
             })}
           </div>
 
-          <div className="rounded-lg border border-slate-700/40 bg-slate-900/30 p-4 space-y-3">
+          <div className="hub-glass-inset rounded-lg border p-4 space-y-3">
             <p className="text-sm font-semibold text-slate-200">Mini-card layout</p>
             <div className="flex flex-wrap gap-2">
               {(
@@ -343,7 +343,7 @@ export function ShowcaseEditor() {
             <MiniProfileCard summary={previewSummary} layoutOverride={draftLayout} />
           </div>
 
-          <div className="space-y-2 rounded-lg border border-slate-700/40 bg-slate-900/40 p-3">
+          <div className="hub-glass-inset space-y-2 rounded-lg border p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               Share / embed
             </p>

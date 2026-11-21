@@ -32,14 +32,25 @@ export function CharacterAssetPicker({
   const [category, setCategory] = useState<AssetCategory | 'all'>('all');
   const [q, setQ] = useState('');
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    void listCharacterAssets({ category: categories }).then((list) => {
-      if (cancelled) return;
-      setAssets(list);
-      setLoaded(true);
-    });
+    setLoaded(false);
+    setLoadError(false);
+    void listCharacterAssets({ category: categories })
+      .then((list) => {
+        if (cancelled) return;
+        setAssets(list);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('[character-asset-picker] failed to load character assets', error);
+        setLoadError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -66,7 +77,11 @@ export function CharacterAssetPicker({
     <div className={className ?? 'space-y-1.5'}>
       <p className="text-[10px] tracking-widest text-white/50 uppercase">{label}</p>
       {!loaded ? (
-        <p className="text-[11px] text-white/40">Loading pack…</p>
+        <div className="hub-loading-shimmer h-8 border border-white/10" role="status" aria-label="Loading character assets" />
+      ) : loadError ? (
+        <p className="text-[11px] text-amber-200/80" role="alert">
+          Could not load character assets. Refresh the editor to try again.
+        </p>
       ) : assets.length === 0 ? (
         <p className="text-[11px] text-amber-200/80">
           No character assets yet. Run{' '}

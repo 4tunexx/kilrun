@@ -21,6 +21,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { X, Save, Trash2, Plus, Sparkles, Lock, RefreshCw, Upload, Image as ImageIcon, Eraser } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { getPowerTreeConfig, updatePowerTreeConfig, type PowerTreeConfig } from '@/lib/power-tree-config';
 import {
   costForLevelFormula,
@@ -530,7 +531,7 @@ export function PowerEditor({ onClose, embedded }: { onClose: () => void; embedd
               )}
             </div>
           {loading ? (
-            <p className="text-white/40 text-sm">Loading…</p>
+            <HubLoadingState label="Loading power definitions" className="p-4" compact />
           ) : (
             <div ref={treeRef} className="relative" style={{ width: tree.width, height: tree.height }}>
               <svg className="absolute inset-0 pointer-events-none" width={tree.width} height={tree.height}>

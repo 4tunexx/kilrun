@@ -8,6 +8,7 @@ import { Loader2, ShieldCheck, KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmailVerificationForm } from '@/components/email-verification-form';
 import { getSessionUser } from '@/lib/actions';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 
 function VerifyEmailContent() {
   const { data: session, status: sessionStatus } = useSession();
@@ -67,8 +68,7 @@ function VerifyEmailContent() {
   if (sessionStatus === 'loading' || !ready) {
     return (
       <div className="flex flex-col items-center justify-center py-12 gap-3 text-slate-400">
-        <Loader2 className="w-6 h-6 animate-spin text-primary" />
-        Checking your session...
+        <HubLoadingState label="Checking your session" className="w-full max-w-md p-6" />
         <Button
           variant="ghost"
           size="sm"

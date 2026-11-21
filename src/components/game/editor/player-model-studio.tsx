@@ -20,6 +20,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { useToast } from '@/hooks/use-toast';
 import type {
   EditorEntity,
@@ -618,8 +619,8 @@ export function PlayerModelStudio({
       <div className="relative shrink-0 h-44 sm:h-52 bg-gradient-to-b from-[#152033] to-[#0a1018] border-b border-white/10">
         <div ref={canvasHostRef} className="absolute inset-0" />
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-xs text-white/70">
-            Loading model…
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+            <HubLoadingState label="Loading player model" className="m-3 p-3" compact />
           </div>
         )}
         {error && (

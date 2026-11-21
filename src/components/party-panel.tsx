@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Copy,
-  Loader2,
   LogOut,
   PartyPopper,
   UserMinus,
@@ -26,6 +25,7 @@ import {
   type SteamPartyInviteRow,
 } from '@/lib/party-actions';
 import { useToast } from '@/hooks/use-toast';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { isKilrunMode, type KilrunMode } from '@/lib/game-modes';
 import type { CompetitiveQueue } from '@/components/views/play-view';
 
@@ -151,11 +151,7 @@ export function PartyPanel({ userId, onFollowLeader }: PartyPanelProps) {
   };
 
   if (loading) {
-    return (
-      <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 px-4 py-3 flex items-center gap-2 text-sm text-slate-400">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading party…
-      </div>
-    );
+    return <HubLoadingState label="Loading your party" className="p-4" compact />;
   }
 
   if (!party) {

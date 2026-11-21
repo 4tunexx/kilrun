@@ -254,11 +254,7 @@ function ThreadReplies({
   };
 
   if (loading) {
-    return (
-      <div className="text-slate-500 text-sm flex items-center gap-2 py-2">
-        <Loader2 className="w-4 h-4 animate-spin" /> Loading replies…
-      </div>
-    );
+    return <HubLoadingState label="Loading discussion replies" className="p-3" compact />;
   }
 
   return (

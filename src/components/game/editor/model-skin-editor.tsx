@@ -30,6 +30,7 @@ import {
   Minimize2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import type { EditorEntity } from './map-document';
 import { PROTOTYPE_MODELS } from './prototype-catalog';
 import { CharacterAssetPicker } from './character-asset-picker';
@@ -534,9 +535,9 @@ export function ModelSkinEditor({
           className={previewExpanded ? 'absolute inset-0' : 'absolute inset-0'}
         />
         {loading && (
-          <p className="absolute inset-0 flex items-center justify-center text-xs text-white/50">
-            Loading…
-          </p>
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+            <HubLoadingState label="Loading model preview" className="m-3 p-3" compact />
+          </div>
         )}
         {error && (
           <p className="absolute bottom-2 left-2 right-2 text-[10px] text-red-300 z-10">{error}</p>

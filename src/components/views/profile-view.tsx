@@ -80,6 +80,7 @@ import { PowerSkillTreeLauncher } from '@/components/power-skill-tree-launcher';
 import { useToast } from '@/hooks/use-toast';
 import { EmailVerificationForm } from '@/components/email-verification-form';
 import { COUNTRIES, flagUrl, getCountryName } from '@/lib/countries';
+import { HubLoadErrorState, HubLoadingState } from '@/components/ui/hub-loading-state';
 
 type InventoryRow = Awaited<ReturnType<typeof getMyInventory>>[number];
 type ProfileActivity = Awaited<ReturnType<typeof getMyProfileActivity>>;
@@ -94,6 +95,7 @@ export default function ProfileView({ userId }: { userId: string }) {
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
   const [activity, setActivity] = useState<ProfileActivity | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [bio, setBio] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [countryCode, setCountryCode] = useState('');
@@ -128,6 +130,8 @@ export default function ProfileView({ userId }: { userId: string }) {
 
   useEffect(() => {
     let isMounted = true;
+    setIsLoading(true);
+    setLoadError(false);
     Promise.all([
       getSessionUser(),
       getStatsSummary(userId),
@@ -138,6 +142,7 @@ export default function ProfileView({ userId }: { userId: string }) {
       getModeStatsBundle(userId),
     ]).then(([u, s, _h, inv, act, rk, modes]) => {
       if (!isMounted) return;
+      setLoadError(false);
       setUser(u);
       setBio(u?.bio ?? '');
       setStatusMessage(u?.statusMessage ?? '');
@@ -161,6 +166,7 @@ export default function ProfileView({ userId }: { userId: string }) {
       if (u && !u.emailVerified) setShowEmailForm(true);
     }).catch(() => {
       if (!isMounted) return;
+      setLoadError(true);
       setIsLoading(false);
       toast({
         title: 'Failed to load profile',
@@ -226,6 +232,22 @@ export default function ProfileView({ userId }: { userId: string }) {
       setSaving(false);
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="px-4 py-6 sm:px-8">
+        <HubLoadingState label="Loading your profile" className="p-6" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="px-4 py-6 sm:px-8">
+        <HubLoadErrorState label="your profile" className="p-6" />
+      </div>
+    );
+  }
 
   const saveNotificationPrefs = async (next: {
     notifyPush?: boolean;
@@ -322,7 +344,7 @@ export default function ProfileView({ userId }: { userId: string }) {
 
         <div className="px-4 sm:px-8 relative z-20">
       <Tabs defaultValue="profile" className="w-full">
-        <TabsList className="w-full h-auto flex flex-wrap justify-start gap-1 bg-slate-800/60 p-1 mb-4">
+        <TabsList className="hub-glass-inset w-full h-auto flex flex-wrap justify-start gap-1 p-1 mb-4">
           <TabsTrigger value="profile" className="flex-none">
             Profile
           </TabsTrigger>
@@ -511,7 +533,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                   Your flag appears on your public profile next to your name.
                 </p>
               </div>
-              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-700/40 bg-slate-900/40 px-3 py-3">
+              <div className="hub-glass-inset flex items-center justify-between gap-4 rounded-lg border px-3 py-3">
                 <div className="min-w-0">
                   <Label htmlFor="profilePrivate">Private public profile</Label>
                   <p className="text-xs text-slate-500 mt-1">
@@ -524,7 +546,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                   onCheckedChange={setProfilePrivate}
                 />
               </div>
-              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-700/40 bg-slate-900/40 px-3 py-3">
+              <div className="hub-glass-inset flex items-center justify-between gap-4 rounded-lg border px-3 py-3">
                 <div className="min-w-0">
                   <Label htmlFor="profileCommentsEnabled">Allow profile comments</Label>
                   <p className="text-xs text-slate-500 mt-1">
@@ -595,19 +617,19 @@ export default function ProfileView({ userId }: { userId: string }) {
               <CardDescription>Distance / score from MatchStat telemetry.</CardDescription>
             </CardHeader>
             <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center bg-slate-900/40 p-3 rounded-lg">
+              <div className="hub-glass-inset text-center p-3 rounded-lg">
                 <p className="text-2xl font-black text-primary">{summary?.totalRuns ?? 0}</p>
                 <p className="text-xs text-slate-400">Total Runs</p>
               </div>
-              <div className="text-center bg-slate-900/40 p-3 rounded-lg">
+              <div className="hub-glass-inset text-center p-3 rounded-lg">
                 <p className="text-2xl font-black text-primary">{summary?.bestScore ?? 0}</p>
                 <p className="text-xs text-slate-400">Best Score</p>
               </div>
-              <div className="text-center bg-slate-900/40 p-3 rounded-lg">
+              <div className="hub-glass-inset text-center p-3 rounded-lg">
                 <p className="text-2xl font-black text-primary">{summary?.bestDistance ?? 0}m</p>
                 <p className="text-xs text-slate-400">Best Distance</p>
               </div>
-              <div className="text-center bg-slate-900/40 p-3 rounded-lg">
+              <div className="hub-glass-inset text-center p-3 rounded-lg">
                 <p className="text-2xl font-black text-primary">{summary?.avgScore ?? 0}</p>
                 <p className="text-xs text-slate-400">Avg Score</p>
               </div>
@@ -630,7 +652,7 @@ export default function ProfileView({ userId }: { userId: string }) {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
+                <div className="hub-glass-inset text-center p-4 rounded-lg border">
                   <div className="flex items-center justify-center mb-1">
                     <RankLabel
                       rank={ranked?.currentRank || 'Unranked'}
@@ -642,14 +664,14 @@ export default function ProfileView({ userId }: { userId: string }) {
                   </div>
                   <p className="text-xs text-slate-400">Current rank</p>
                 </div>
-                <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
+                <div className="hub-glass-inset text-center p-4 rounded-lg border">
                   <Trophy className="w-5 h-5 mx-auto mb-1 text-amber-300" />
                   <p className="text-2xl font-black tabular-nums">
                     {(ranked?.kp ?? 1000).toLocaleString()}
                   </p>
                   <p className="text-xs text-slate-400">Live KP</p>
                 </div>
-                <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
+                <div className="hub-glass-inset text-center p-4 rounded-lg border">
                   <RankLabel
                     rank={ranked?.peakRank || 'Unranked'}
                     imageUrl={ranked?.peakRankImage}
@@ -661,7 +683,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                     Peak · {(ranked?.peakKp ?? 1000).toLocaleString()} KP
                   </p>
                 </div>
-                <div className="text-center bg-slate-900/40 p-4 rounded-lg border border-slate-700/30">
+                <div className="hub-glass-inset text-center p-4 rounded-lg border">
                   <p className="text-2xl font-black tabular-nums">
                     {ranked?.matchesPlayed ?? 0}
                   </p>
@@ -669,7 +691,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg bg-slate-900/40 border border-slate-700/30 p-4">
+                <div className="hub-glass-inset rounded-lg border p-4">
                   <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">
                     Ranked (KP)
                   </p>
@@ -679,7 +701,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                     <span className="text-rose-400">{ranked?.rankedLosses ?? 0}L</span>
                   </p>
                 </div>
-                <div className="rounded-lg bg-slate-900/40 border border-slate-700/30 p-4">
+                <div className="hub-glass-inset rounded-lg border p-4">
                   <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">
                     Casual (no KP)
                   </p>
@@ -762,7 +784,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                   {activity.forumPosts.map((post) => (
                     <li
                       key={post.id}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-700/40 bg-slate-900/40 px-3 py-2.5"
+                      className="hub-glass-inset flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
                     >
                       <div className="min-w-0">
                         <p className="font-semibold truncate">{post.title}</p>
@@ -789,9 +811,7 @@ export default function ProfileView({ userId }: { userId: string }) {
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <div className="flex items-center justify-center py-12 text-slate-400">
-                  <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading match history...
-                </div>
+                <HubLoadingState label="Loading match history" className="p-4" compact />
               ) : !modeBundle?.history?.length ? (
                 <p className="text-center py-12 text-slate-400">
                   No matches recorded yet. Play Deathrun, Horde, or Competitive to build history.
@@ -887,7 +907,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                         }`}
                       >
                         <BannerFill banner={cfg} className="h-12 w-full" />
-                        <div className="p-2 bg-slate-900/40 space-y-1">
+                        <div className="hub-glass-inset p-2 space-y-1">
                           <p className="text-xs font-semibold truncate flex items-center gap-1">
                             {item.itemName}
                             {item.isEquipped && (
@@ -949,7 +969,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                   {frames.map((item) => (
                     <div
                       key={item.id}
-                      className={`rounded-lg border p-3 bg-slate-900/40 space-y-2 ${
+                      className={`hub-glass-inset rounded-lg border p-3 space-y-2 ${
                         item.isEquipped
                           ? 'border-primary ring-2 ring-primary'
                           : 'border-slate-700/50'
@@ -1021,7 +1041,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                   {nicknames.map((item) => (
                     <div
                       key={item.id}
-                      className={`rounded-lg border p-3 bg-slate-900/40 space-y-2 ${
+                      className={`hub-glass-inset rounded-lg border p-3 space-y-2 ${
                         item.isEquipped
                           ? 'border-primary ring-2 ring-primary'
                           : 'border-slate-700/50'
@@ -1079,7 +1099,7 @@ export default function ProfileView({ userId }: { userId: string }) {
               {DASHBOARD_PANEL_KEYS.map((key) => (
                 <div
                   key={key}
-                  className="flex items-center justify-between gap-4 rounded-lg border border-slate-700/40 bg-slate-900/30 px-4 py-3"
+                  className="hub-glass-inset flex items-center justify-between gap-4 rounded-lg border px-4 py-3"
                 >
                   <p className="font-semibold">{DASHBOARD_PANEL_LABELS[key]}</p>
                   <Switch
@@ -1102,7 +1122,7 @@ export default function ProfileView({ userId }: { userId: string }) {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-700/40 bg-slate-900/30 px-4 py-3">
+              <div className="hub-glass-inset flex items-center justify-between gap-4 rounded-lg border px-4 py-3">
                 <div>
                   <p className="font-semibold">Push notifications</p>
                   <p className="text-xs text-slate-400">In-hub alerts for badges, missions, and more.</p>
@@ -1113,7 +1133,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                   onCheckedChange={(checked) => saveNotificationPrefs({ notifyPush: checked })}
                 />
               </div>
-              <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-700/40 bg-slate-900/30 px-4 py-3">
+              <div className="hub-glass-inset flex items-center justify-between gap-4 rounded-lg border px-4 py-3">
                 <div>
                   <p className="font-semibold">Email notifications</p>
                   <p className="text-xs text-slate-400">
@@ -1153,7 +1173,7 @@ export default function ProfileView({ userId }: { userId: string }) {
                 />
               </div>
 
-              <div className="space-y-3 rounded-lg border border-slate-700/50 bg-slate-900/30 p-4">
+              <div className="hub-glass-inset space-y-3 rounded-lg border p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <Label className="flex items-center gap-2">
                     <Mail className="w-4 h-4" /> Email
@@ -1273,7 +1293,7 @@ export default function ProfileView({ userId }: { userId: string }) {
 
 function ModeStatCell({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="text-center bg-slate-900/40 p-3 rounded-lg border border-slate-700/30">
+    <div className="hub-glass-inset text-center p-3 rounded-lg border">
       <p className="text-2xl font-black tabular-nums text-primary">{value}</p>
       <p className="text-[11px] text-slate-400">{label}</p>
     </div>

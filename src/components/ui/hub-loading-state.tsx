@@ -17,8 +17,8 @@ export function HubLoadingState({
     >
       <div className="flex items-center gap-3">
         <span className="relative flex h-9 w-9 shrink-0 items-center justify-center">
-          <span className="absolute inset-0 animate-ping border border-primary/30" aria-hidden="true" />
-          <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden="true" />
+          <span className="absolute inset-0 motion-safe:animate-ping border border-primary/30" aria-hidden="true" />
+          <Loader2 className="h-5 w-5 motion-safe:animate-spin text-primary" aria-hidden="true" />
         </span>
         <span className="text-sm font-semibold text-slate-200">{label}</span>
       </div>

@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -201,9 +202,7 @@ export function AdminUserDetailSheet({
         </SheetHeader>
 
         {loading || !u ? (
-          <div className="py-16 flex justify-center text-slate-400">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…
-          </div>
+          <HubLoadingState label="Loading player details" className="mt-4 p-5" />
         ) : (
           <div className="mt-4 space-y-4">
             <div className="flex items-center gap-3">

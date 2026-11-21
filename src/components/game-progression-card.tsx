@@ -15,6 +15,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { HubLoadErrorState, HubLoadingState } from '@/components/ui/hub-loading-state';
 
 /** Renders an ability's `icon` as an uploaded image when it's a URL, else as
  * the plain emoji glyph — same convention as power-editor.tsx / game-menu.tsx.
@@ -38,6 +39,7 @@ function AbilityIcon({ icon, className }: { icon: string; className?: string }) 
 export function GameProgressionCard({ userId }: { userId: string }) {
   const [snap, setSnap] = useState<GameProgressionSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   // Fetched explicitly rather than read off the shared ABILITY_DEFINITIONS
   // singleton — that object is mutated by applyDynamicPowerDefinitions()
   // running on the server (inside the getGameProgression server action),
@@ -50,11 +52,18 @@ export function GameProgressionCard({ userId }: { userId: string }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoadError(false);
+    setSnap(null);
     Promise.all([getGameProgression(userId), getPowerDefinitionsForMenu()])
       .then(([res, defs]) => {
         if (cancelled) return;
         setSnap(res);
         if (Array.isArray(defs) && defs.length > 0) setPowers(defs);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('[game-progression-card] failed to load progression', error);
+        setLoadError(true);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -65,15 +74,10 @@ export function GameProgressionCard({ userId }: { userId: string }) {
   }, [userId]);
 
   if (loading) {
-    return (
-      <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
-        <CardContent className="pt-5">
-          <p className="text-sm text-slate-400">Loading in-game stats…</p>
-        </CardContent>
-      </Card>
-    );
+    return <HubLoadingState label="Loading in-game progression" className="p-5" compact />;
   }
 
+  if (loadError) return <HubLoadErrorState label="in-game progression" className="p-5" />;
   if (!snap) return null;
 
   return (
@@ -125,10 +129,10 @@ export function GameProgressionCard({ userId }: { userId: string }) {
               <Popover key={key}>
                 <PopoverTrigger asChild>
                   <button
-                    className={`rounded-lg border p-2.5 flex items-center gap-2 transition-all cursor-help text-left w-full ${
+                    className={`hub-glass-inset hub-glass-inset-interactive rounded-lg border p-2.5 flex items-center gap-2 cursor-help text-left w-full ${
                       locked
-                        ? 'border-slate-700/25 bg-slate-900/20 opacity-50'
-                        : 'border-slate-700/40 bg-slate-900/40 hover:border-orange-400/50 hover:bg-slate-900/60'
+                        ? 'opacity-50'
+                        : ''
                     }`}
                   >
                     <AbilityIcon

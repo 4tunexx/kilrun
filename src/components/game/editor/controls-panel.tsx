@@ -19,6 +19,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Keyboard, RotateCcw, Save, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { getKeyBindings, updateKeyBindings } from '@/lib/key-bindings-config';
 import {
   DEFAULT_KEY_BINDINGS,
@@ -213,7 +214,7 @@ export function ControlsPanel({
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-6">
         {loading ? (
-          <p className="text-sm text-white/50">Loading…</p>
+          <HubLoadingState label="Loading editor controls" className="p-4" compact />
         ) : (
           <>
             {GROUPS.map((group) => (

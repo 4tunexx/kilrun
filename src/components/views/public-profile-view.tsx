@@ -576,7 +576,7 @@ export default function PublicProfileView({
                 xpForNextLevel={profile.xpForNextLevel}
                 percent={profile.levelProgressPercent}
               />
-              <div className="rounded-lg bg-slate-900/40 border border-slate-700/30 p-3 text-center">
+              <div className="hub-glass-inset rounded-lg border p-3 text-center">
                 <p className="text-xs text-slate-400">
                   {profile.isPremium ? 'Ranked rank' : 'Highest Ranked rank'}
                 </p>
@@ -598,14 +598,14 @@ export default function PublicProfileView({
                   </p>
                 )}
               </div>
-              <div className="rounded-lg bg-slate-900/40 border border-slate-700/30 p-3 text-center">
+              <div className="hub-glass-inset rounded-lg border p-3 text-center">
                 <p className="text-xs text-slate-400">Leaderboard</p>
                 <p className="text-lg font-bold flex items-center justify-center gap-1">
                   <Trophy className="h-4 w-4 text-primary" /> #{profile.leaderboardPosition} of{' '}
                   {profile.totalPlayers}
                 </p>
               </div>
-              <div className="flex items-center justify-between rounded-lg bg-slate-900/40 border border-slate-700/30 p-3">
+              <div className="hub-glass-inset flex items-center justify-between rounded-lg border p-3">
                 <span className="flex items-center gap-2 text-sm text-slate-300">
                   <Gauge className="h-4 w-4 text-primary" /> Reputation
                 </span>
@@ -670,7 +670,7 @@ export default function PublicProfileView({
                   {comments.map((c) => (
                     <li
                       key={c.id}
-                      className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-3"
+                      className="hub-glass-inset rounded-lg border p-3"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-start gap-2 min-w-0">

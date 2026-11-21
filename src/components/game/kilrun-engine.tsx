@@ -63,6 +63,7 @@ import { LobbyOverlay } from './modes/deathrun/lobby-overlay';
 import { CountdownOverlay } from './modes/deathrun/countdown-overlay';
 import { ResultsScreen } from './modes/deathrun/results-screen';
 import { MobilePlayGate } from './ui/mobile-play-gate';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { WeaponShop, type WeaponPreset, mapShopItemsToPresets, mapPowerUpsToPresets, mapShopSkinsToPresets } from './ui/weapon-shop';
 import { JoystickOverlay } from './ui/joystick-overlay';
 import { MobileActionButtons } from './ui/mobile-action-buttons';
@@ -1965,7 +1966,7 @@ export default function KilrunEngine({
 
         {!assetsReady && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 z-[105] pointer-events-none">
-            <p className="text-white font-bold tracking-wide animate-pulse">Loading map & character…</p>
+            <HubLoadingState label="Loading map and character" className="w-full max-w-sm p-6" />
           </div>
         )}
 

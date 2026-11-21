@@ -34,6 +34,7 @@ import {
 } from '@/lib/asset-registry';
 import { packBodyThumbnailPath, parsePackBodyName } from '@/lib/pack-body-colors';
 import { cn } from '@/lib/utils';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 
 type AssetRow = Awaited<ReturnType<typeof adminListAssets>>['items'][number];
 
@@ -789,9 +790,7 @@ export function AdminAssetBrowser() {
       <div className="grid xl:grid-cols-[1fr_340px] gap-4">
         <div className="max-h-[640px] overflow-auto rounded-lg border border-border/60 bg-slate-950/40 p-3">
           {loading ? (
-            <div className="flex items-center justify-center py-20 text-slate-400 gap-2">
-              <Loader2 className="h-5 w-5 animate-spin" /> Loading skins…
-            </div>
+            <HubLoadingState label="Loading skins" className="p-5" compact />
           ) : items.length === 0 ? (
             <div className="py-16 text-center text-slate-400 text-sm space-y-2">
               <p>No skins found.</p>

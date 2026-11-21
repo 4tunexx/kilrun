@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import {
   REQUIREMENT_CATEGORY_LABELS,
   type CatalogMetric,
@@ -106,11 +107,7 @@ export function AdminRequirementTypesPanel() {
   }, [catalog, q]);
 
   if (loading || !catalog) {
-    return (
-      <div className="flex items-center justify-center py-16 text-slate-400">
-        <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading requirement types…
-      </div>
-    );
+    return <HubLoadingState label="Loading requirement types" className="p-6" />;
   }
 
   return (

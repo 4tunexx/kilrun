@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Newspaper } from 'lucide-react';
+import { Newspaper } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,7 @@ import {
 import { RichContent } from '@/components/ui/rich-content';
 import { getNewsPost } from '@/lib/social-actions';
 import { formatDistanceToNow } from 'date-fns';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 
 export type NewsArticle = {
   id: string;
@@ -80,9 +81,7 @@ export function NewsArticleDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="bg-slate-900/95 border-slate-700 text-white max-w-2xl mx-4 max-h-[85vh] overflow-y-auto p-0">
         {loading ? (
-          <div className="flex items-center justify-center gap-2 p-12 text-slate-400">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading article…
-          </div>
+          <HubLoadingState label="Loading article" className="m-4 p-5" compact />
         ) : error || !post ? (
           <div className="p-8 text-center text-slate-400">{error ?? 'Article not found.'}</div>
         ) : (

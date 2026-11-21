@@ -68,6 +68,7 @@ import type { SkinAttachment } from '@/lib/player-skins';
 import { InventoryAvatarPreview } from './inventory-avatar-preview';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 
 type InventoryRow = Awaited<ReturnType<typeof getMyInventory>>[number];
 type SortMode = 'newest' | 'oldest' | 'name' | 'value';
@@ -928,9 +929,7 @@ export function InventoryDrawer({
                     </Badge>
                   </div>
                   {loading ? (
-                    <div className="py-12 flex items-center justify-center text-slate-400">
-                      <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading inventory...
-                    </div>
+                    <HubLoadingState label="Loading unopened crates" className="p-4" compact />
                   ) : crateItems.length === 0 ? (
                     <div className="py-12 text-center text-slate-400 space-y-2">
                       <Gift className="w-10 h-10 mx-auto opacity-40" />
@@ -1183,9 +1182,7 @@ export function InventoryDrawer({
                   </Badge>
                 </div>
                 {loading ? (
-                  <div className="py-12 flex items-center justify-center text-slate-400">
-                    <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading inventory...
-                  </div>
+                  <HubLoadingState label="Loading your inventory" className="p-4" compact />
                 ) : items.length === 0 ? (
                   <div className="py-12 text-center text-slate-400 space-y-2">
                     <ShoppingBag className="w-10 h-10 mx-auto opacity-40" />

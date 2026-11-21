@@ -35,6 +35,7 @@ import { loadCharacterAssetManifest } from '@/lib/asset-registry';
 import { packBodyThumbnailPath } from '@/lib/pack-body-colors';
 import { formatFireSaleCountdown } from '@/lib/shop-catalog';
 import { cn } from '@/lib/utils';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 
 type ListableAsset = {
   assetId: string;
@@ -331,9 +332,7 @@ export function PackSkinListingPanel({ onCreated }: { onCreated?: () => void }) 
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-16 text-slate-400 gap-2">
-            <Loader2 className="h-5 w-5 animate-spin" /> Loading activated assets…
-          </div>
+          <HubLoadingState label="Loading activated assets" className="p-5" />
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sm text-slate-400 space-y-1">
             <p>No activated skins.</p>

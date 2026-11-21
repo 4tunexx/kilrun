@@ -16,6 +16,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { X, Volume2, Upload, Play, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { useToast } from '@/hooks/use-toast';
 import { SOUND_EVENTS, type SoundEventDef, type SoundEventCategory } from '@shared/sound-events';
 import { getAudioContext, getProcessedBuffer, playProcessedBuffer, clearProcessedAudioCache, type SoundFxParams } from '@/lib/audio-fx';
@@ -321,7 +322,7 @@ export function SoundBoardEditor({
         {/* Event list, grouped by category */}
         <div className="w-72 shrink-0 border-r border-white/10 overflow-y-auto p-2">
           {loading ? (
-            <p className="text-white/40 text-sm p-2">Loading…</p>
+            <HubLoadingState label="Loading sound board" className="p-4" compact />
           ) : (
             categories.map((cat) => (
               <div key={cat} className="mb-3">

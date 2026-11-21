@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Check, Copy, KeyRound, Link2, Loader2, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Button } from '@/components/ui/button';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -127,9 +128,7 @@ export function AdminEngineInvitesPanel() {
         </Button>
 
         {loading ? (
-          <p className="text-sm text-slate-500 flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading stored invites…
-          </p>
+          <HubLoadingState label="Loading stored engine invites" className="p-4" compact />
         ) : rows.length === 0 ? (
           <p className="text-sm text-slate-500">No invite links stored yet.</p>
         ) : (

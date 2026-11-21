@@ -164,9 +164,7 @@ function SlotPacksEditor() {
 
         <div className="space-y-2">
           {loading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-400 py-3">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading packs…
-            </div>
+            <HubLoadingState label="Loading inventory packs" className="p-4" compact />
           ) : packs.length === 0 ? (
             <p className="text-xs text-slate-500 py-2">No slot packs yet.</p>
           ) : (
