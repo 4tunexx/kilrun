@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { signOut } from 'next-auth/react';
 import {
   Store,
@@ -11,6 +11,7 @@ import {
   User,
   ChevronRight,
   ChevronLeft,
+  ArrowLeft,
   Home,
   Play,
   CheckSquare,
@@ -236,6 +237,7 @@ export default function GameHubInterface({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isLeftMenuOpen, setIsLeftMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState('home');
+  const pageHistoryRef = useRef<string[]>([]);
   const [isVipDialogOpen, setIsVipDialogOpen] = useState(false);
   const [pulsarOn, setPulsarOn] = useState(false);
   const [pulsarBanner, setPulsarBanner] = useState(false);
@@ -340,6 +342,31 @@ export default function GameHubInterface({
     }
   };
 
+  const handleGoBack = () => {
+    let previous = 'home';
+    while (pageHistoryRef.current.length > 0) {
+      const candidate = pageHistoryRef.current.pop();
+      if (
+        candidate &&
+        candidate !== 'lobby' &&
+        isHubPageEnabled(hubPages, candidate, isStaff)
+      ) {
+        previous = candidate;
+        break;
+      }
+    }
+    if (currentPage === 'public-profile') setViewingProfileUserId(null);
+    if (currentPage === 'lobby') {
+      setLobbyMode(null);
+      setClanLobbyQueueId(null);
+    }
+    setCurrentPage(previous);
+    if (isMobile) {
+      setIsMenuOpen(false);
+      setIsLeftMenuOpen(false);
+    }
+  };
+
   const { level, xpIntoLevel, xpForNextLevel, percent: levelProgressPercent } =
     getLevelProgress(xpProgress);
 
@@ -376,10 +403,12 @@ export default function GameHubInterface({
 
   useEffect(() => {
     if (currentPage === 'public-profile' && !viewingProfileUserId) {
-      navigate(previousPage === 'public-profile' ? 'home' : previousPage);
+      navigate(previousPage === 'public-profile' ? 'home' : previousPage, {
+        replaceCurrent: true,
+      });
     }
     if (currentPage === 'lobby' && !lobbyMode) {
-      navigate('play');
+      navigate('play', { replaceCurrent: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, viewingProfileUserId, lobbyMode]);
@@ -522,7 +551,7 @@ export default function GameHubInterface({
     });
   }, []);
 
-  const navigate = (page: string) => {
+  const navigate = (page: string, { replaceCurrent = false }: { replaceCurrent?: boolean } = {}) => {
     if (!isHubPageEnabled(hubPages, page, isStaff)) {
       toast({
         title: 'Page unavailable',
@@ -530,6 +559,13 @@ export default function GameHubInterface({
         variant: 'destructive',
       });
       return;
+    }
+    if (page !== currentPage) {
+      if (replaceCurrent) {
+        pageHistoryRef.current.pop();
+      } else {
+        pageHistoryRef.current.push(currentPage);
+      }
     }
     setCurrentPage(page);
     if (isMobile) {
@@ -554,7 +590,7 @@ export default function GameHubInterface({
   };
 
   const handleBackFromProfile = () => {
-    navigate(previousPage === 'public-profile' ? 'home' : previousPage);
+    handleGoBack();
   };
 
   const handleMessage = (peerId?: string) => {
@@ -649,7 +685,7 @@ export default function GameHubInterface({
     setLobbyMode(null);
     setClanLobbyQueueId(null);
     setCompetitiveQueue('casual');
-    navigate('play');
+    navigate('play', { replaceCurrent: true });
   };
 
   /** Clan Wars: matched clan lobby leader/members queue into Competitive Casual. */
@@ -928,6 +964,36 @@ export default function GameHubInterface({
         title={currentPage === 'home' ? homeTitle : PAGE_META[currentPage].title}
         subtitle={
           currentPage === 'home' ? homeSubtitle : PAGE_META[currentPage].subtitle
+        }
+        navigation={
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 gap-1.5 px-2 text-slate-300 hover:text-white"
+              onClick={handleGoBack}
+              disabled={currentPage === 'home' && pageHistoryRef.current.length === 0}
+              aria-label="Go back to the previous page"
+              title="Back"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="hidden sm:inline">Back</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 gap-1.5 px-2 text-slate-300 hover:text-white"
+              onClick={() => navigate('home')}
+              disabled={currentPage === 'home'}
+              aria-label="Go to Home"
+              title="Home"
+            >
+              <Home className="h-4 w-4" />
+              <span className="hidden sm:inline">Home</span>
+            </Button>
+          </div>
         }
         toolbar={
           <HubHeaderToolbar

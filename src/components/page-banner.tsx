@@ -8,24 +8,29 @@ const PANEL =
 export function PageBanner({
   title,
   subtitle,
+  navigation,
   toolbar,
 }: {
   title: string;
   subtitle?: string;
+  navigation?: ReactNode;
   toolbar?: ReactNode;
 }) {
   return (
     <div className={`${PANEL} shrink-0 relative z-20 overflow-visible`}>
       <div className="px-4 sm:px-8 py-3 sm:py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 sm:gap-4 overflow-visible">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-4xl font-black tracking-tight truncate">
-            {title}
-          </h1>
-          {subtitle ? (
-            <p className="text-slate-400 mt-1 text-sm sm:text-base line-clamp-2">
-              {subtitle}
-            </p>
-          ) : null}
+        <div className="flex min-w-0 items-center gap-3">
+          {navigation}
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-4xl font-black tracking-tight truncate">
+              {title}
+            </h1>
+            {subtitle ? (
+              <p className="text-slate-400 mt-1 text-sm sm:text-base line-clamp-2">
+                {subtitle}
+              </p>
+            ) : null}
+          </div>
         </div>
         {toolbar ? (
           <div className="shrink-0 w-full lg:w-auto relative z-30 overflow-visible">
