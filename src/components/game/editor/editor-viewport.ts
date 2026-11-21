@@ -4286,14 +4286,14 @@ export function createEditorViewport(
         const pads = await bakeMeshCollisionForEntity(e);
         const cur = doc.entities.find((x) => x.id === id);
         if (!cur) return { ok: false, error: 'Object was removed while baking.' };
-        // Stamp what this bake was derived from so Play Test can skip it next
-        // time (see needsMeshCollisionBake). Keyed off `cur`, not `e`, in case
-        // the model changed while the load was in flight.
-        const bakeKey = meshCollisionBakeKeyFor(cur) ?? undefined;
+        const bakeKey = meshCollisionBakeKeyFor(e);
+        if (bakeKey !== meshCollisionBakeKeyFor(cur)) {
+          return { ok: false, error: 'Model changed while collision was baking. Please retry.' };
+        }
         doc = {
           ...doc,
           entities: doc.entities.map((x) =>
-            x.id === id ? { ...x, meshCollisionPads: pads, meshCollisionBakeKey: bakeKey } : x
+            x.id === id ? { ...x, meshCollisionPads: pads, meshCollisionBakeKey: bakeKey ?? undefined } : x
           ),
         };
         handlers.onDocChange(doc);

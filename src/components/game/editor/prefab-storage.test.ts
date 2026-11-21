@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
 import type { MapDocument } from './map-document';
 import {
   mapDocSpawnPoints,
@@ -209,6 +210,42 @@ describe('mapDocToSimPlatforms', () => {
     // Local box y=0..2 flipped 180° around X occupies y=0..-2.
     expect(pads[0].z).toBeCloseTo(0, 1);
     expect(pads[0].z - (pads[0].height ?? 0)).toBeCloseTo(-2, 1);
+  });
+
+  it('aligns a baked collision box with the rendered mesh under combined rotations', () => {
+    const position: [number, number, number] = [3, 2, -4];
+    const rotation: [number, number, number] = [35, 40, 20];
+    const pad = { cx: 0.8, cy: 1.2, cz: -0.5, hx: 0.4, hy: 0.7, hz: 0.3 };
+    const doc = baseDoc([{
+      id: 'combined-rotation',
+      name: 'Rotated prop',
+      kind: 'prop',
+      model: 'crate',
+      solid: true,
+      collideMaterial: 'solid',
+      meshCollisionPads: [pad],
+      layerId: 'l1',
+      position,
+      rotation,
+      scale: [1, 1, 1],
+    }]);
+    const euler = new THREE.Euler(...rotation.map(THREE.MathUtils.degToRad) as [number, number, number], 'XYZ');
+    const points: THREE.Vector3[] = [];
+    for (const x of [-pad.hx, pad.hx]) {
+      for (const y of [-pad.hy, pad.hy]) {
+        for (const z of [-pad.hz, pad.hz]) {
+          points.push(new THREE.Vector3(pad.cx + x, pad.cy + y, pad.cz + z)
+            .applyEuler(euler).add(new THREE.Vector3(...position)));
+        }
+      }
+    }
+    const bounds = new THREE.Box3().setFromPoints(points);
+    const [collision] = mapDocToSimPlatforms(doc);
+    expect(collision.x).toBeCloseTo((bounds.min.z + bounds.max.z) / 2, 5);
+    expect(collision.y).toBeCloseTo((bounds.min.x + bounds.max.x) / 2, 5);
+    expect(collision.z).toBeCloseTo(bounds.max.y, 5);
+    expect(collision.width).toBeCloseTo(bounds.max.z - bounds.min.z + 0.06, 5);
+    expect(collision.depth).toBeCloseTo(bounds.max.x - bounds.min.x + 0.06, 5);
   });
 
   it('leaves a slightly-off-axis flat solid alone (tolerance, not over-subdividing walls)', () => {

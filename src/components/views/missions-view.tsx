@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Gift, Loader2, Target } from 'lucide-react';
+import { CheckCircle, Gift, Target } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { HubLoadErrorState, HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -17,16 +18,24 @@ import type { ActiveMission } from '@/generated/prisma';
 export default function MissionsView({ userId }: { userId: string }) {
   const [missions, setMissions] = useState<ActiveMission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
+    setIsLoading(true);
+    setLoadError(false);
     (async () => {
       await bootstrapMyMissions();
       const data = await getActiveMissions(userId);
       if (!isMounted) return;
       setMissions(data);
       setIsLoading(false);
-    })();
+    })().catch((error) => {
+      console.error('[missions-view] failed to load missions', error);
+      if (!isMounted) return;
+      setLoadError(true);
+      setIsLoading(false);
+    });
     return () => {
       isMounted = false;
     };
@@ -41,12 +50,18 @@ export default function MissionsView({ userId }: { userId: string }) {
 
   const dailyDone = daily.filter((m) => m.isCompleted).length;
 
+  if (loadError) {
+    return (
+      <div className="px-4 sm:px-8 py-6">
+        <HubLoadErrorState label="your missions" className="p-6" />
+      </div>
+    );
+  }
+
   return (
     <div className="px-4 sm:px-8 py-6">
       {isLoading ? (
-        <div className="flex items-center justify-center py-12 text-slate-400">
-          <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading missions...
-        </div>
+        <HubLoadingState label="Loading missions" className="p-6" />
       ) : (
         <Tabs defaultValue="daily">
           <TabsList className="bg-slate-800/60 flex flex-wrap h-auto gap-1">

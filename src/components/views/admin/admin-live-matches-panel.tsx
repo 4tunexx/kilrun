@@ -36,6 +36,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -164,9 +165,7 @@ export function AdminLiveMatchesPanel() {
       </CardHeader>
       <CardContent className="space-y-3">
         {loading ? (
-          <div className="flex items-center text-muted-foreground text-sm py-4">
-            <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...
-          </div>
+          <HubLoadingState label="Loading live matches" className="p-4" compact />
         ) : fetchError ? (
           <p className="text-sm text-destructive">
             {fetchError} — is the game server deployed with a matching

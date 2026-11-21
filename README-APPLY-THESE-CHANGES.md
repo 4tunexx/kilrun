@@ -1,5 +1,8 @@
 # Kilrun — In-Game Leveling System + Carousel Fix
 
+> Historical change notes, not installation instructions. Use the current
+> [README](./README.md) and [KilrunP hosting guide](./docs/KILRUNP_INSTALL.md).
+
 This zip contains the FULL, final versions of every file that was changed
 or added. Each file's path inside this zip matches its real path in your
 repo (e.g. `src/lib/actions.ts` in this zip → `src/lib/actions.ts` in your

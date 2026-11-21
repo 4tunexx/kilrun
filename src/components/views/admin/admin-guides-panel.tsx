@@ -5,6 +5,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { BookOpen, Eye, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -136,11 +137,7 @@ export function AdminGuidesPanel() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-16 text-slate-400">
-        <Loader2 className="h-5 w-5 animate-spin" /> Loading guides editor…
-      </div>
-    );
+    return <HubLoadingState label="Loading the guides editor" className="p-6" />;
   }
 
   const visibleGuides = filter === 'all' ? guides : guides.filter((g) => g.category === filter);

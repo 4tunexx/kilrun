@@ -1,5 +1,9 @@
 # KILRUN — Coding Agent Phase Prompts
 
+> Historical planning snapshot. Findings and commands below describe the
+> project at the time of writing, not necessarily its current state. For
+> current setup see [README.md](./README.md).
+
 Paste **one phase at a time** into your coding agent. Do not skip ahead: later phases assume earlier ones are merged. After each phase, run the **Gate** commands yourself before starting the next.
 
 **Order and why**

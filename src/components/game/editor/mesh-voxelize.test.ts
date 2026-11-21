@@ -1,9 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
-import { voxelizeGeometryToPads, compactCollisionPads } from './mesh-voxelize';
+import { voxelizeGeometryToPads, compactCollisionPads, collisionGeometryFromScene } from './mesh-voxelize';
 
 describe('voxelizeGeometryToPads', () => {
+  it('merges indexed and non-indexed meshes before fitting collision', () => {
+    const scene = new THREE.Group();
+    const indexed = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+    const nonIndexed = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1).toNonIndexed());
+    nonIndexed.position.x = 3;
+    scene.add(indexed, nonIndexed);
+
+    const geometry = collisionGeometryFromScene(scene);
+    expect(geometry.index).toBeNull();
+    expect(geometry.getAttribute('position').count).toBe(72);
+    geometry.computeBoundingBox();
+    expect(geometry.boundingBox?.min.x).toBeCloseTo(-2);
+    expect(geometry.boundingBox?.max.x).toBeCloseTo(2);
+    expect(voxelizeGeometryToPads(geometry).length).toBeGreaterThan(0);
+    geometry.dispose();
+  });
+
   it('a plain solid box voxelizes to a single box matching its bounds', () => {
     const geo = new THREE.BoxGeometry(2, 2, 2);
     const pads = voxelizeGeometryToPads(geo, { resolution: 6 });

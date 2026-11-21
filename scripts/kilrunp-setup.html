@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KilrunP setup</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0c101b; color: #eef2ff; }
+    body { max-width: 760px; margin: 3rem auto; padding: 0 1.2rem; }
+    main { background: #171d2c; padding: 2rem; border: 1px solid #39425a; }
+    h1 { margin-top: 0; } p { line-height: 1.5; color: #c4cce0; }
+    label { display: block; margin: 1.1rem 0 .4rem; font-weight: 600; }
+    input:not([type=checkbox]) { box-sizing: border-box; width: 100%; padding: .8rem; background: #0c101b; border: 1px solid #58647c; color: white; }
+    small { display: block; color: #aab6cd; margin-top: .35rem; }
+    button { margin-top: 1.5rem; padding: .8rem 1.2rem; border: 0; background: #e44c5d; color: white; font-weight: bold; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: wait; } #status { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>KilrunP setup</h1>
+  <p>Prepare your website, multiplayer server and database. This private setup page is available only through your host's local connection or an SSH tunnel.</p>
+  <p>Use a new, empty MongoDB database. Installation will install dependencies, update its schema, load initial content and build the application. This does not start your hosting services or configure HTTPS.</p>
+  <form id="setup">
+    <label for="siteUrl">Website origin</label>
+    <input id="siteUrl" type="url" placeholder="https://example.com" required>
+    <label for="gameUrl">Game server origin</label>
+    <input id="gameUrl" type="url" placeholder="wss://game.example.com" required>
+    <small>Configure your host's TLS proxy to forward WebSocket traffic to the game server.</small>
+    <label for="databaseUrl">MongoDB connection string</label>
+    <input id="databaseUrl" type="password" autocomplete="off" required>
+    <small>Use a dedicated database with replica-set support. URL-encode special characters in the connection string.</small>
+    <label for="adminSteamId">Owner SteamID64</label>
+    <input id="adminSteamId" inputmode="numeric" pattern="[0-9]{17}" required>
+    <label for="steamApiKey">Steam Web API key</label>
+    <input id="steamApiKey" type="password" autocomplete="off" required>
+    <label for="clerkPublishableKey">Clerk publishable key</label>
+    <input id="clerkPublishableKey" autocomplete="off" required>
+    <label for="clerkSecretKey">Clerk secret key</label>
+    <input id="clerkSecretKey" type="password" autocomplete="off" required>
+    <label for="clerkWebhookSecret">Clerk webhook signing secret</label>
+    <input id="clerkWebhookSecret" type="password" autocomplete="off" required>
+    <small>Configure the Clerk webhook at your website origin followed by /api/webhooks/clerk.</small>
+    <label><input id="confirmFreshDatabase" type="checkbox" required> This is a new, empty database dedicated to this installation; I understand setup changes its schema and loads initial content.</label>
+    <button id="submit" type="submit">Install KilrunP</button>
+  </form>
+  <p id="status" role="status"></p>
+</main>
+<script>
+  const token = location.hash.slice(1);
+  history.replaceState(null, '', location.pathname);
+  const form = document.getElementById('setup');
+  const button = document.getElementById('submit');
+  const status = document.getElementById('status');
+  const headers = { 'x-kilrunp-token': token, 'content-type': 'application/json' };
+  let configured = false;
+  async function refresh() {
+    const response = await fetch('/status', { headers, cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    configured = data.configured;
+    form.querySelectorAll('input').forEach(input => { input.disabled = configured; });
+    button.textContent = configured ? 'Retry installation' : 'Install KilrunP';
+    button.disabled = data.phase === 'running' || data.phase === 'complete';
+    status.textContent = data.message;
+    if (data.phase === 'running') setTimeout(poll, 1500);
+  }
+  async function poll() {
+    try { await refresh(); } catch (error) { status.textContent = error.message; }
+  }
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    button.disabled = true;
+    try {
+      const data = {};
+      if (!configured) {
+        for (const input of form.querySelectorAll('input')) data[input.id] = input.type === 'checkbox' ? input.checked : input.value;
+      }
+      const response = await fetch('/install', { method: 'POST', headers, body: JSON.stringify(data) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      form.querySelectorAll('input[type=password]').forEach(input => { input.value = ''; });
+      await refresh();
+    } catch (error) {
+      status.textContent = error.message;
+      button.disabled = false;
+    }
+  });
+  if (!token) {
+    button.disabled = true;
+    status.textContent = 'Open the complete setup URL printed in your terminal.';
+  } else {
+    poll();
+  }
+</script>
+</body>
+</html>

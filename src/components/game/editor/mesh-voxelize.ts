@@ -40,7 +40,7 @@ export const MAX_MESH_COLLISION_PADS = 48;
  * `EditorEntity.meshCollisionBakeKey` stops matching, so existing maps quietly
  * re-bake at the current accuracy on their next Play Test.
  */
-export const VOXELIZER_VERSION = 1;
+export const VOXELIZER_VERSION = 2;
 
 /** Clamp exactly as voxelizeGeometryToPads does, so the key records the
  * options the bake actually ran with rather than what was requested. */
@@ -289,29 +289,28 @@ export function voxelizeGeometryToPads(
   return compactCollisionPads(pads, maxPads);
 }
 
-/** Local (pre-entity-transform) merged geometry loaded from this entity's
- * catalog model / uploaded GLB — matches how `plantLocalFeet` positions it
- * (bottom-aligned, XZ-centered) so voxel space lines up with where the mesh
- * actually renders relative to entity.position. */
-async function entityLocalRenderGeometry(e: EditorEntity): Promise<THREE.BufferGeometry> {
-  const src = resolveModelSrc(e.model, e.customModelUrl);
-  if (!src) throw new Error('This model type isn\'t supported for mesh collision baking yet.');
-  const scene = isFbxUrl(src) ? (await loadFbxModel(src)).scene : (await loadGltf(src)).scene;
+/** Merge a model's meshes in the same planted local space used by the renderer. */
+export function collisionGeometryFromScene(scene: THREE.Object3D): THREE.BufferGeometry {
   scene.updateMatrixWorld(true);
   const geometries: THREE.BufferGeometry[] = [];
   scene.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh || !mesh.geometry) return;
-    const g = mesh.geometry.clone();
+    let g = mesh.geometry.clone();
     g.applyMatrix4(mesh.matrixWorld);
     for (const key of Object.keys(g.attributes)) {
       if (key !== 'position') g.deleteAttribute(key);
     }
-    if (g.index) g.toNonIndexed();
+    if (g.index) {
+      const nonIndexed = g.toNonIndexed();
+      g.dispose();
+      g = nonIndexed;
+    }
     geometries.push(g);
   });
   if (!geometries.length) throw new Error('No mesh geometry found in this model.');
   const merged = geometries.length === 1 ? geometries[0] : mergeGeometries(geometries, false);
+  if (geometries.length > 1) geometries.forEach((g) => g.dispose());
   if (!merged) throw new Error('Could not merge model geometry.');
 
   // Same bottom-align + XZ-center convention every renderer applies via
@@ -325,6 +324,13 @@ async function entityLocalRenderGeometry(e: EditorEntity): Promise<THREE.BufferG
   return merged;
 }
 
+async function entityLocalRenderGeometry(e: EditorEntity): Promise<THREE.BufferGeometry> {
+  const src = resolveModelSrc(e.model, e.customModelUrl);
+  if (!src) throw new Error('This model type isn\'t supported for mesh collision baking yet.');
+  const scene = isFbxUrl(src) ? (await loadFbxModel(src)).scene : (await loadGltf(src)).scene;
+  return collisionGeometryFromScene(scene);
+}
+
 /** Bake mesh collision for a catalog/library prop — loads its real geometry
  * and voxelizes it. Throws on unsupported model types / load failures; the
  * caller (Properties panel) is expected to catch and surface that message. */
@@ -333,9 +339,13 @@ export async function bakeMeshCollisionForEntity(
   opts?: VoxelizeOptions
 ): Promise<CsgLocalPad[]> {
   const geometry = await entityLocalRenderGeometry(e);
-  const pads = voxelizeGeometryToPads(geometry, opts);
-  if (!pads.length) {
-    throw new Error('Could not find any solid volume in this model to bake.');
+  try {
+    const pads = voxelizeGeometryToPads(geometry, opts);
+    if (!pads.length) {
+      throw new Error('Could not find any solid volume in this model to bake.');
+    }
+    return pads;
+  } finally {
+    geometry.dispose();
   }
-  return pads;
 }

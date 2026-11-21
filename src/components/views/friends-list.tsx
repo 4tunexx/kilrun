@@ -14,6 +14,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -142,8 +143,8 @@ export const FriendsList = ({
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center justify-center text-slate-400">
-        <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading friends...
+      <div className="p-4 sm:p-6">
+        <HubLoadingState label="Loading friends" className="p-6" />
       </div>
     );
   }

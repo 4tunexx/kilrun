@@ -5,6 +5,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { Eye, Loader2, Newspaper, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { RichPostEditor } from '@/components/ui/rich-post-editor';
@@ -125,11 +126,7 @@ export function AdminNewsPanel() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-16 text-slate-400">
-        <Loader2 className="h-5 w-5 animate-spin" /> Loading news editor…
-      </div>
-    );
+    return <HubLoadingState label="Loading the news editor" className="p-6" />;
   }
 
   return (

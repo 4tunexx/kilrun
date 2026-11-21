@@ -571,9 +571,8 @@ export function stairEntityToSimPads(stairs: EditorEntity, steps = 18): SimPlatf
 
 /**
  * Rotate a local-space point by an entity's full [x,y,z] Euler rotation
- * (degrees), matching three.js's default 'XYZ' order used when actually
- * rendering entities (`obj.rotation.set(rx, ry, rz)`). Sequential X → Y → Z,
- * each using the previous step's updated coordinates.
+ * (degrees), matching three.js's default 'XYZ' Euler order. The resulting
+ * rotation matrix applies Z, then Y, then X to a local-space point.
  */
 function rotateLocalXYZ(
   [x, y, z]: [number, number, number],
@@ -582,13 +581,11 @@ function rotateLocalXYZ(
   const rx = (rxDeg * Math.PI) / 180;
   const ry = (ryDeg * Math.PI) / 180;
   const rz = (rzDeg * Math.PI) / 180;
-  const y1 = y * Math.cos(rx) - z * Math.sin(rx);
-  const z1 = y * Math.sin(rx) + z * Math.cos(rx);
-  const x2 = x * Math.cos(ry) + z1 * Math.sin(ry);
-  const z2 = -x * Math.sin(ry) + z1 * Math.cos(ry);
-  const x3 = x2 * Math.cos(rz) - y1 * Math.sin(rz);
-  const y3 = x2 * Math.sin(rz) + y1 * Math.cos(rz);
-  return [x3, y3, z2];
+  const x1 = x * Math.cos(rz) - y * Math.sin(rz);
+  const y1 = x * Math.sin(rz) + y * Math.cos(rz);
+  const x2 = x1 * Math.cos(ry) + z * Math.sin(ry);
+  const z2 = -x1 * Math.sin(ry) + z * Math.cos(ry);
+  return [x2, y1 * Math.cos(rx) - z2 * Math.sin(rx), y1 * Math.sin(rx) + z2 * Math.cos(rx)];
 }
 
 function entityEulerDeg(e: EditorEntity): [number, number, number] {

@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Award, CheckCircle, Loader2, Lock, Trophy } from 'lucide-react';
+import { Award, CheckCircle, Lock, Trophy } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { HubLoadErrorState, HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { getPlayerAchievements, getPlayerBadges } from '@/lib/progression-actions';
@@ -12,6 +13,7 @@ export default function BadgesView({ userId }: { userId: string }) {
   const [achievements, setAchievements] = useState<Awaited<ReturnType<typeof getPlayerAchievements>>>([]);
   const [badges, setBadges] = useState<Awaited<ReturnType<typeof getPlayerBadges>>>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -20,6 +22,10 @@ export default function BadgesView({ userId }: { userId: string }) {
         if (!mounted) return;
         setAchievements(a);
         setBadges(b);
+      })
+      .catch((error) => {
+        console.error('[badges-view] failed to load badges', error);
+        if (mounted) setLoadError(true);
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -32,12 +38,18 @@ export default function BadgesView({ userId }: { userId: string }) {
   const gameAch = achievements.filter((a) => a.category === 'game');
   const webAch = achievements.filter((a) => a.category === 'website');
 
+  if (loadError) {
+    return (
+      <div className="px-4 sm:px-8 py-6">
+        <HubLoadErrorState label="your badges" className="p-6" />
+      </div>
+    );
+  }
+
   return (
     <div className="px-4 sm:px-8 py-6 space-y-4">
       {loading ? (
-        <div className="text-slate-400 flex items-center gap-2 py-12 justify-center">
-          <Loader2 className="w-5 h-5 animate-spin" /> Loading...
-        </div>
+        <HubLoadingState label="Loading your badges" className="p-6" />
       ) : (
         <Tabs defaultValue="badges">
           <TabsList className="bg-slate-800/60">

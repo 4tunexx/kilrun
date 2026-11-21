@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -238,8 +239,8 @@ export function AdminDashboardPanel({ isAdmin }: { isAdmin: boolean }) {
 
   if (loading && !data) {
     return (
-      <div className="flex items-center justify-center py-16 text-slate-400">
-        <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading dashboard…
+      <div className="py-2">
+        <HubLoadingState label="Loading the operations dashboard" className="p-6" />
       </div>
     );
   }

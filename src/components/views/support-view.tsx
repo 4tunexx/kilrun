@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -117,9 +118,7 @@ export default function SupportView({ userId }: { userId?: string }) {
         </CardHeader>
         <CardContent className="space-y-3">
           {loading ? (
-            <div className="text-slate-400 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" /> Loading...
-            </div>
+            <HubLoadingState label="Loading support tickets" compact className="p-3" />
           ) : tickets.length === 0 ? (
             <p className="text-slate-400 text-sm">No tickets yet.</p>
           ) : (

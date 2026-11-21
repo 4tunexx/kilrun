@@ -1,5 +1,8 @@
 # Kilrun audit — modes, Premium, ranks, matchmaking
 
+> Historical audit snapshot. Verify its findings against current code; for
+> current hosting guidance see [KilrunP setup](./KILRUNP_INSTALL.md).
+
 _Last updated: 2026-07-22 (branch `cursor/home-daily-missions-count-200f`)_
 
 ## Merge

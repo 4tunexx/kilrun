@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeftRight, Eye, EyeOff, LayoutGrid, Loader2, PanelTop, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getSiteSettings, updateSiteSettings } from '@/lib/progression-actions';
@@ -82,11 +83,7 @@ export function AdminSiteLayoutPanel() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-slate-400 py-8 justify-center">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading layout…
-      </div>
-    );
+    return <HubLoadingState label="Loading site layout" className="p-6" />;
   }
 
   return (

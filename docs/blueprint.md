@@ -1,5 +1,8 @@
 # Kilrun Platform Blueprint
 
+> Historical product vision and prototype notes, not a current feature
+> inventory. See the [README](../README.md) for the current platform.
+
 ## 1. Project Vision
 Kilrun is a high-performance gaming hub and "Deathrun" arcade experience. It serves as both a community ecosystem for competitive players and a launcher for the Kilrun game itself. The platform is designed for cross-platform accessibility, ensuring a premium experience on desktop, tablet, and mobile devices.
 

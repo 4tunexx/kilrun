@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Send, Trash2 } from 'lucide-react';
+import { Send, Trash2 } from 'lucide-react';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { NicknameEffectText } from '@/components/nickname-effect';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -146,9 +147,7 @@ export default function MessagesView({ userId }: { userId: string }) {
           <ScrollArea className="flex-1">
             <div className="p-2 space-y-1">
               {loading ? (
-                <div className="p-6 text-slate-400 flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Loading...
-                </div>
+                <HubLoadingState label="Loading conversations" compact className="m-2 p-3" />
               ) : conversations.length === 0 ? (
                 <p className="p-6 text-sm text-slate-400">
                   No conversations yet. Message someone from Friends or Leaderboard.

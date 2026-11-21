@@ -49,6 +49,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
 import { ImageUploadField } from '@/components/ui/image-upload-field';
@@ -393,8 +394,8 @@ export default function AdminView({
 
   if (loading) {
     return (
-      <div className="px-4 py-16 flex items-center justify-center text-slate-400">
-        <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading admin panel...
+      <div className="px-4 sm:px-8 py-6">
+        <HubLoadingState label="Loading the admin panel" className="p-6" />
       </div>
     );
   }

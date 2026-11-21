@@ -4,8 +4,14 @@ Kilrun Engine is a **standalone Windows application** built on Tauri 2 (Rust
 backend + WebView2 frontend). Install the setup file and double-click
 **Kilrun Engine** — there is no `npm run dev`, no browser, and no website to
 start. It's the map/model editor and content-authoring tool for Kilrun;
-actual live multiplayer matches are still played on the website
-(`kilrun.vercel.app`) in a browser.
+actual live multiplayer matches are still played on the configured Kilrun
+website in a browser.
+
+For an independent KilrunP deployment, build a separate installer for that
+deployment's HTTPS origin by setting `KILRUN_PLATFORM_URL` (or
+`NEXT_PUBLIC_SITE_URL`) before `npm run engine:build`. Do not assume an
+existing seller-provided executable points to the buyer's website. The web
+setup wizard does not build the Windows executable.
 
 ## What it does
 

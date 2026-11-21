@@ -22,6 +22,7 @@ import { UserHoverCard } from '@/components/user-hover-card';
 import { useProfileNavigation } from '@/components/providers/profile-navigation-context';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 
 type FriendStatus = 'friends' | 'pending_out' | 'pending_in';
 
@@ -110,9 +111,7 @@ export default function LeaderboardView({ userId }: { userId?: string }) {
       </p>
 
       {loading ? (
-        <div className="text-slate-400 flex items-center gap-2 py-16 justify-center">
-          <Loader2 className="w-5 h-5 animate-spin" /> Loading rankings...
-        </div>
+        <HubLoadingState label="Loading rankings" className="p-6" />
       ) : podium.length === 0 ? (
         <p className="text-slate-400 text-center py-12">
           {sort === 'ranked'

@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Save, Swords } from 'lucide-react';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -123,11 +124,7 @@ export function AdminWeaponCatalogPanel() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-slate-400 py-10 justify-center">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading weapon catalog…
-      </div>
-    );
+    return <HubLoadingState label="Loading the weapon catalog" className="p-6" />;
   }
 
   return (

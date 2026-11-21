@@ -20,6 +20,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { HubLoadErrorState, HubLoadingState } from '@/components/ui/hub-loading-state';
 import { PowerSkillTreeLauncher } from '@/components/power-skill-tree-launcher';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LevelBar } from '@/components/ui/level-bar';
@@ -50,7 +51,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { flagUrl, getCountryName } from '@/lib/countries';
 import { Textarea } from '@/components/ui/textarea';
 
-const PANEL = 'bg-slate-900/60 backdrop-blur-md border border-slate-700/30';
+const PANEL = 'hub-glass-panel border';
 
 export default function PublicProfileView({
   userId,
@@ -63,6 +64,7 @@ export default function PublicProfileView({
 }) {
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [comments, setComments] = useState<ProfileCommentRow[]>([]);
   const [commentBody, setCommentBody] = useState('');
@@ -71,6 +73,7 @@ export default function PublicProfileView({
 
   const reload = () => {
     setLoading(true);
+    setLoadError(false);
     getPublicProfile(userId)
       .then((p) => {
         setProfile(p);
@@ -79,6 +82,10 @@ export default function PublicProfileView({
         } else {
           setComments([]);
         }
+      })
+      .catch((error) => {
+        console.error('[public-profile-view] failed to load profile', error);
+        setLoadError(true);
       })
       .finally(() => setLoading(false));
   };
@@ -90,8 +97,16 @@ export default function PublicProfileView({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24 text-slate-400">
-        <Loader2 className="mr-2 h-6 w-6 animate-spin" /> Loading profile...
+      <div className="px-4 sm:px-8 py-6">
+        <HubLoadingState label="Loading player profile" className="p-6" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="px-4 sm:px-8 py-6">
+        <HubLoadErrorState label="this player profile" className="p-6" />
       </div>
     );
   }

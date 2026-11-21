@@ -27,6 +27,7 @@ import {
 import { startAuthentication, startRegistration, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -154,11 +155,7 @@ export function AdminSecretsVaultPanel() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center text-muted-foreground text-sm py-6">
-        <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading vault status...
-      </div>
-    );
+    return <HubLoadingState label="Loading vault status" className="p-6" />;
   }
 
   if (!status) return null;
@@ -377,11 +374,7 @@ function UnlockedVault({
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center text-muted-foreground text-sm py-6">
-        <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading secrets...
-      </div>
-    );
+    return <HubLoadingState label="Loading stored secrets" className="p-6" />;
   }
 
   return (

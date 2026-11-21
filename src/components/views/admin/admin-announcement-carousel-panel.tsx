@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, Radio, Save, Flame, Trophy, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
@@ -65,13 +66,7 @@ export function AdminAnnouncementCarouselPanel() {
   };
 
   if (loading) {
-    return (
-      <Card className="bg-slate-800/40 border-slate-700/30">
-        <CardContent className="py-8 flex justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-        </CardContent>
-      </Card>
-    );
+    return <HubLoadingState label="Loading announcement settings" className="p-6" />;
   }
 
   return (

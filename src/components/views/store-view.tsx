@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Coins, Flame, Gift, Loader2, PackagePlus, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Badge } from '@/components/ui/badge';
 import {
   Select,
@@ -332,9 +333,7 @@ export default function StoreView({
       )}
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-[40vh] text-slate-400">
-          <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading catalog...
-        </div>
+        <HubLoadingState label="Loading the store" className="p-6" />
       ) : items.length === 0 ? (
         <Card className="bg-slate-800/40 backdrop-blur-sm border-slate-700/30">
           <CardContent className="py-16 text-center text-slate-400">

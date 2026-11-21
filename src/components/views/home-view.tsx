@@ -61,7 +61,7 @@ import { PlayerAvatar } from '@/components/ui/player-avatar';
 const CHAT_COLLAPSE_KEY = 'kilrun.chatCollapsed';
 
 const PANEL =
-  'bg-slate-900/60 backdrop-blur-md border border-slate-700/30';
+  'hub-glass-panel border';
 
 interface HomeViewProps {
   onLaunchGame?: () => void;
@@ -95,6 +95,7 @@ export default function HomeView({
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [panelPrefs, setPanelPrefs] = useState<DashboardPanelPrefs>({});
   /** Admin SiteSettings win over any prop/default. */
   const [wordmarkSrc, setWordmarkSrc] = useState(
@@ -126,6 +127,8 @@ export default function HomeView({
   useEffect(() => {
     let isMounted = true;
     (async () => {
+      setIsLoading(true);
+      setLoadError(false);
       // Wait for hub bootstrap so Daily Login (and other login-day sync) is
       // reflected before we snapshot the board for the home panel.
       try {
@@ -134,51 +137,59 @@ export default function HomeView({
         // Still load the board; panel may briefly lag until next visit.
       }
       if (!isMounted) return;
-      const [m, s, n, c, settings, forum, sessionUser] = await Promise.all([
-        getActiveMissions(userId),
-        getStatsSummary(userId),
-        getNewsPosts(),
-        getGlobalChat(40),
-        getSiteSettings(),
-        getForumPosts(5),
-        getSessionUser(),
-      ]);
-      if (!isMounted) return;
-      setPanelPrefs(
-        ((sessionUser as { dashboardPanelPrefs?: DashboardPanelPrefs } | null)
-          ?.dashboardPanelPrefs ?? {}) as DashboardPanelPrefs
-      );
-      const daily = m.filter(isDailyMissionRow);
-      const main = m.filter((mission) => !isDailyMissionRow(mission));
-      // Show the full daily board so completed missions (e.g. Daily Login)
-      // stay counted and visible — do not clip incomplete-first to 5.
-      setDailyMissions(daily);
-      setMainMissions(main);
-      setSummary(s);
-      setNews(n.slice(0, 3));
-      setForumTopics(forum.slice(0, 5));
-      setChat([...c].reverse());
-      setChatEnabled(settings.chatEnabled);
-      // Prefer fetched settings (including empty clears) over stale props.
-      setWordmarkSrc(
-        resolveHeaderLogo(settings.headerLogoUrl ?? headerLogoUrlProp)
-      );
-      setLogoStyle(
-        normalizeHeaderLogoStyle(
-          (settings as { headerLogoStyle?: string }).headerLogoStyle ??
-            headerLogoStyleProp ??
-            DEFAULT_HEADER_LOGO_STYLE
-        )
-      );
-      setHeroSrc(
-        resolveHomeHeroImage(settings.homeHeroImage ?? homeHeroImage)
-      );
-      setIsLoading(false);
+      try {
+        const [m, s, n, c, settings, forum, sessionUser] = await Promise.all([
+          getActiveMissions(userId),
+          getStatsSummary(userId),
+          getNewsPosts(),
+          getGlobalChat(40),
+          getSiteSettings(),
+          getForumPosts(5),
+          getSessionUser(),
+        ]);
+        if (!isMounted) return;
+        setPanelPrefs(
+          ((sessionUser as { dashboardPanelPrefs?: DashboardPanelPrefs } | null)
+            ?.dashboardPanelPrefs ?? {}) as DashboardPanelPrefs
+        );
+        const daily = m.filter(isDailyMissionRow);
+        const main = m.filter((mission) => !isDailyMissionRow(mission));
+        // Show the full daily board so completed missions stay visible.
+        setDailyMissions(daily);
+        setMainMissions(main);
+        setSummary(s);
+        setNews(n.slice(0, 3));
+        setForumTopics(forum.slice(0, 5));
+        setChat([...c].reverse());
+        setChatEnabled(settings.chatEnabled);
+        setWordmarkSrc(
+          resolveHeaderLogo(settings.headerLogoUrl ?? headerLogoUrlProp)
+        );
+        setLogoStyle(
+          normalizeHeaderLogoStyle(
+            (settings as { headerLogoStyle?: string }).headerLogoStyle ??
+              headerLogoStyleProp ??
+              DEFAULT_HEADER_LOGO_STYLE
+          )
+        );
+        setHeroSrc(resolveHomeHeroImage(settings.homeHeroImage ?? homeHeroImage));
+      } catch (error) {
+        console.error('[home-view] failed to load dashboard data', error);
+        if (!isMounted) return;
+        setLoadError(true);
+        toast({
+          title: 'Could not load dashboard',
+          description: 'Check your connection and refresh the page to try again.',
+          variant: 'destructive',
+        });
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
     })();
     return () => {
       isMounted = false;
     };
-  }, [userId, homeHeroImage, headerLogoUrlProp, headerLogoStyleProp]);
+  }, [userId, homeHeroImage, headerLogoUrlProp, headerLogoStyleProp, toast]);
 
   useEffect(() => {
     return onSiteSettingsUpdated((s) => {
@@ -374,9 +385,14 @@ export default function HomeView({
                 <>
                   <div className="min-h-[14rem] flex-1 overflow-y-auto space-y-2 rounded-lg bg-slate-900/40 p-3 border border-slate-700/40">
                     {isLoading ? (
-                      <div className="flex items-center justify-center text-slate-400 text-sm py-8">
-                        <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...
+                      <div className="space-y-3 py-2" role="status" aria-label="Loading chat">
+                        <span className="sr-only">Loading chat</span>
+                        <div className="hub-loading-shimmer h-8 w-3/4 border border-white/5" />
+                        <div className="hub-loading-shimmer ml-auto h-8 w-2/3 border border-white/5" />
+                        <div className="hub-loading-shimmer h-8 w-1/2 border border-white/5" />
                       </div>
+                    ) : loadError ? (
+                      <p className="text-sm text-amber-200">Chat could not be loaded. Refresh to try again.</p>
                     ) : chat.length === 0 ? (
                       <p className="text-slate-500 text-sm text-center py-8">
                         No messages yet — say hello!
@@ -473,9 +489,14 @@ export default function HomeView({
             </CardHeader>
             <CardContent className="space-y-4">
               {isLoading ? (
-                <div className="flex items-center justify-center py-8 text-slate-400">
-                  <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...
+                <div className="space-y-3 py-2" role="status" aria-label="Loading daily missions">
+                  <span className="sr-only">Loading daily missions</span>
+                  <div className="hub-loading-shimmer h-10 border border-white/5" />
+                  <div className="hub-loading-shimmer h-10 border border-white/5" />
+                  <div className="hub-loading-shimmer h-10 border border-white/5" />
                 </div>
+              ) : loadError ? (
+                <p className="text-sm text-amber-200">Dashboard data could not be loaded. Refresh to try again.</p>
               ) : dailyMissions.length === 0 ? (
                 <p className="text-slate-400 text-sm">No daily missions yet.</p>
               ) : (
@@ -547,9 +568,13 @@ export default function HomeView({
             </CardHeader>
             <CardContent className="space-y-2">
               {isLoading ? (
-                <div className="flex items-center text-slate-400 text-sm py-2">
-                  <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...
+                <div className="space-y-2 py-2" role="status" aria-label="Loading missions">
+                  <span className="sr-only">Loading missions</span>
+                  <div className="hub-loading-shimmer h-5 w-4/5 border border-white/5" />
+                  <div className="hub-loading-shimmer h-5 w-2/3 border border-white/5" />
                 </div>
+              ) : loadError ? (
+                <p className="text-sm text-amber-200">Dashboard data could not be loaded. Refresh to try again.</p>
               ) : (
                 <>
                   {mainMissions.slice(0, 4).map((m) => (
@@ -599,9 +624,13 @@ export default function HomeView({
             </CardHeader>
             <CardContent className="space-y-2">
               {isLoading ? (
-                <div className="flex items-center text-slate-400 text-sm py-2">
-                  <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading...
+                <div className="space-y-2 py-2" role="status" aria-label="Loading discussions">
+                  <span className="sr-only">Loading discussions</span>
+                  <div className="hub-loading-shimmer h-10 border border-white/5" />
+                  <div className="hub-loading-shimmer h-10 border border-white/5" />
                 </div>
+              ) : loadError ? (
+                <p className="text-sm text-amber-200">Dashboard data could not be loaded. Refresh to try again.</p>
               ) : forumTopics.length === 0 ? (
                 <p className="text-sm text-slate-500">No topics yet.</p>
               ) : (

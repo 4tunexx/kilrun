@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 
 const PANEL =
-  'bg-slate-900/60 backdrop-blur-md border-b border-slate-700/30';
+  'hub-glass-panel border-b';
 
 export function PageBanner({
   title,

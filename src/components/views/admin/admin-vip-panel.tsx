@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Crown, Loader2, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -66,11 +67,7 @@ export function AdminVipPanel() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-slate-400 py-10 justify-center">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading VIP config…
-      </div>
-    );
+    return <HubLoadingState label="Loading VIP settings" className="p-6" />;
   }
 
   return (

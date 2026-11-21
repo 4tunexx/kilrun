@@ -79,7 +79,7 @@ Editor Save (localStorage and/or Documents/Kilrun/Projects)
 
 ## Remaining pain points (still true)
 
-1. **Collision is pads, not raw triangles.** Voxel bake + AABB/OBB. Amber COL gizmos + BAKE flag solids that still need a mesh bake; physics never walks GLB triangles.
+1. **Collision is pads, not raw triangles.** Voxel bake + AABB/OBB. Amber COL gizmos + BAKE flag solids that still need a mesh bake; physics never walks GLB triangles. A tilted baked box uses a world-aligned approximation, so it can still cover empty space around diagonal surfaces. Check collision with Play Test and the COL gizmos before publishing.
 2. **Two map truths if you skip publish.** Local can be newer than cloud; other machines miss overlay meshes.
 3. **Combat / ability prediction is feel-only.** Hitscan uses `shared/hitscan.ts`; ability cues use `canActivateAbility` (same deny rules as the server). Damage, traps, and the actual buff still stay server-authoritative.
 4. **Horde AI is pad-graph A\*, not a navmesh.** Authored solids become walkable pads; no recast/detour mesh.
@@ -125,5 +125,11 @@ Editor Save (localStorage and/or Documents/Kilrun/Projects)
 4. Play Test. Then Save → Set MAIN / Push to live.
 5. Join the mode from any signed-in client after cloud publish (not only the authoring browser).
 6. Mark walls **Solid**. Bake stairs. Enable wall-jump in Combat if the course needs it.
+
+Play Test automatically re-bakes stale mesh collision; if a model cannot be
+fitted, the editor reports the failure and its existing fallback collision may
+still be inaccurate. Correct the model or collision and retry before publishing.
+Older saved maps pick up voxelizer fixes when re-baked and saved; published maps
+must then be published again to update live matches.
 
 *Re-run this smoke list after sim-core, publish, or plugin-runtime changes.*

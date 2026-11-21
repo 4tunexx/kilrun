@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Copy,
   Crown,
-  Loader2,
   LogOut,
   Settings2,
   Shield,
@@ -20,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
 import { ClanImageUploadField } from '@/components/ui/clan-image-upload-field';
 import { useToast } from '@/hooks/use-toast';
@@ -162,8 +162,8 @@ export default function ClansView({
 
   if (loading) {
     return (
-      <div className="px-4 sm:px-8 py-10 flex items-center gap-2 text-sm text-slate-400">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading clans…
+      <div className="px-4 sm:px-8 py-6">
+        <HubLoadingState label="Loading clans" className="p-6" />
       </div>
     );
   }

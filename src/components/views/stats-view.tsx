@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { BarChart3, Gauge, Loader2, TrendingUp } from 'lucide-react';
+import { BarChart3, Gauge, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { HubLoadErrorState, HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { getMatchStats, getStatsSummary, type StatsSummary } from '@/lib/actions';
@@ -11,14 +12,21 @@ export default function StatsView({ userId }: { userId: string }) {
   const [summary, setSummary] = useState<StatsSummary | null>(null);
   const [history, setHistory] = useState<MatchStat[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
     setIsLoading(true);
+    setLoadError(false);
     Promise.all([getStatsSummary(userId), getMatchStats(userId, 20)]).then(([s, h]) => {
       if (!isMounted) return;
       setSummary(s);
       setHistory(h);
+      setIsLoading(false);
+    }).catch((error) => {
+      console.error('[stats-view] failed to load stats', error);
+      if (!isMounted) return;
+      setLoadError(true);
       setIsLoading(false);
     });
     return () => {
@@ -44,10 +52,18 @@ export default function StatsView({ userId }: { userId: string }) {
     .reverse()
     .map((m, i) => ({ name: `Run ${i + 1}`, distance: m.distance }));
 
+  if (loadError) {
+    return (
+      <div className="px-4 sm:px-8 py-6">
+        <HubLoadErrorState label="your stats" className="p-6" />
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
-      <div className="px-12 py-8 flex items-center justify-center h-[60vh] text-slate-400">
-        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading live stats...
+      <div className="px-4 sm:px-8 py-6">
+        <HubLoadingState label="Loading your stats" className="p-6" />
       </div>
     );
   }

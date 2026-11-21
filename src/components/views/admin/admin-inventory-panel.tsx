@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import {
   DEFAULT_INVENTORY_CONFIG,
   parseInventoryConfig,
@@ -266,11 +267,7 @@ export function AdminInventoryPanel() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16 text-slate-400 gap-2">
-        <Loader2 className="h-5 w-5 animate-spin" /> Loading inventory settings…
-      </div>
-    );
+    return <HubLoadingState label="Loading inventory settings" className="p-6" />;
   }
 
   return (

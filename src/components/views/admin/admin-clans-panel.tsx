@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Copy,
   Crown,
-  Loader2,
   RefreshCcw,
   Search,
   Shield,
@@ -28,6 +27,7 @@ import {
   type AdminClanRow,
 } from '@/lib/admin-clan-actions';
 import type { ClanDto } from '@/lib/clan-actions';
+import { HubLoadErrorState, HubLoadingState } from '@/components/ui/hub-loading-state';
 
 export function AdminClansPanel({ isAdmin }: { isAdmin: boolean }) {
   const { toast } = useToast();
@@ -36,16 +36,21 @@ export function AdminClansPanel({ isAdmin }: { isAdmin: boolean }) {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [openClanId, setOpenClanId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ClanDto | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const data = await adminListClans({ query, page, pageSize: 20 });
       setRows(data.rows);
       setTotalPages(data.totalPages);
+    } catch (error) {
+      console.error('[admin-clans-panel] failed to load clans', error);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -114,9 +119,9 @@ export function AdminClansPanel({ isAdmin }: { isAdmin: boolean }) {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-slate-400 py-8 justify-center">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading clans…
-        </div>
+        <HubLoadingState label="Loading clans" className="p-4" compact />
+      ) : loadError ? (
+        <HubLoadErrorState label="clans" className="p-4" />
       ) : rows.length === 0 ? (
         <p className="text-sm text-slate-500 py-8 text-center">No clans found.</p>
       ) : (
@@ -145,9 +150,7 @@ export function AdminClansPanel({ isAdmin }: { isAdmin: boolean }) {
                 {openClanId === c.id && (
                   <div className="mt-3 pt-3 border-t border-slate-800 space-y-3">
                     {busy === 'detail' || !detail ? (
-                      <div className="flex items-center gap-2 text-slate-400 text-sm py-4 justify-center">
-                        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-                      </div>
+                      <HubLoadingState label="Loading clan details" className="p-4" compact />
                     ) : (
                       <>
                         <div className="flex flex-wrap gap-2">

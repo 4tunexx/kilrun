@@ -40,6 +40,22 @@ docs/
   MAP_EDITOR_AND_PHYSICS_AUDIT.md
 ```
 
+## Independent hosting
+
+Kilrun is not a PHP application. Copying files by FTP alone cannot run it:
+the host needs a Node.js process for the website, a separate persistent Node.js
+process with WebSocket support for the game server, and a MongoDB deployment
+compatible with Prisma transactions. HTTPS and a WebSocket-capable reverse
+proxy are needed for a public installation. Steam and Clerk configuration is
+also required, and uploads need persistent storage.
+
+The private KilrunP browser setup wizard prepares configuration, installs
+dependencies, initializes a new database and builds both services. DNS, HTTPS,
+permanent process management and the Windows engine build still need separate
+setup; an external end-to-end deployment has not yet been verified. See
+[`docs/KILRUNP_INSTALL.md`](./docs/KILRUNP_INSTALL.md) for requirements,
+security and buyer instructions.
+
 ## Getting started
 
 Install **Kilrun Engine** with the Windows installer (no npm, no browser). After
@@ -106,7 +122,13 @@ See `.env.example` for the full commented list.
 | `GAME_JOIN_TOKEN_SECRET` | **Web + game** | HMAC join tokens (falls back to admin secret) |
 | `WEB_APP_URL` | **Game** | HTTPS origin of Next.js so Colyseus can POST `/api/game/match-result` |
 | `CLIENT_ORIGIN` | Game | CORS + fallback for `WEB_APP_URL` |
-| `ADMIN_STEAM_IDS` | Web | Extra SteamID64s promoted to admin (owner `76561198001993310` is always admin in code) |
+| `ADMIN_STEAM_IDS` | Web | Comma-separated SteamID64s promoted to admin on login |
+
+For an independent self-hosted installation, set `KILRUN_SELF_HOSTED=1` and
+put the new owner's SteamID64 in `ADMIN_STEAM_IDS`. This disables the original
+site's built-in owner promotion without changing the existing deployment. It
+does not revoke administrator roles already stored in an existing database; use
+a fresh database for a new installation or review existing administrators.
 
 > **Steam auth on Vercel**: login/callback derive origin + secure cookies from the request (`req.nextUrl`), not from `NEXTAUTH_URL`.
 
@@ -116,7 +138,7 @@ See `.env.example` for the full commented list.
 
 ## Admin panel (post-deploy checklist)
 
-Admins open the hub → **Admin**. Owner Steam ID is always promoted on login; add others via `ADMIN_STEAM_IDS`.
+Admins open the hub → **Admin**. The original deployment promotes its built-in owner on login; add others via `ADMIN_STEAM_IDS`. Independent installations should set `KILRUN_SELF_HOSTED=1` as described above.
 
 ### After every schema / progression deploy
 

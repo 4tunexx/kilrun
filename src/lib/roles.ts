@@ -1,7 +1,7 @@
 export const ACCOUNT_ROLES = ['player', 'vip', 'moderator', 'admin'] as const;
 export type AccountRole = (typeof ACCOUNT_ROLES)[number];
 
-/** Hardcoded owner SteamID64 — always promoted to admin on Steam login. */
+/** Original deployment owner, excluded when self-hosted mode is enabled. */
 export const OWNER_STEAM_IDS = ['76561198001993310'] as const;
 
 export function isAccountRole(value: string): value is AccountRole {
@@ -32,7 +32,7 @@ export function isStaffRole(role: string | null | undefined): boolean {
 
 /**
  * Steam IDs promoted to admin on every login:
- * - hardcoded owner IDs (always)
+ * - hardcoded owner IDs on the original deployment
  * - plus any extras from ADMIN_STEAM_IDS env (comma-separated)
  */
 export function steamIdsPromotedToAdmin(): Set<string> {
@@ -40,7 +40,8 @@ export function steamIdsPromotedToAdmin(): Set<string> {
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean);
-  return new Set([...OWNER_STEAM_IDS, ...fromEnv]);
+  const defaultOwners = process.env.KILRUN_SELF_HOSTED === '1' ? [] : OWNER_STEAM_IDS;
+  return new Set([...defaultOwners, ...fromEnv]);
 }
 
 export { VIP_UNLOCK_VP_COST } from '@/lib/vip';

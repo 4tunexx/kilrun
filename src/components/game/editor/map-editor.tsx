@@ -2166,18 +2166,26 @@ export function MapEditor({
     setBakingAllMesh(true);
     let ok = 0;
     let fail = 0;
+    let firstError = '';
     for (const e of targets) {
       const result = await apiRef.current?.bakeMeshCollision(e.id);
       if (result?.ok) ok++;
-      else fail++;
+      else {
+        fail++;
+        if (!firstError) firstError = `${e.name || e.id}: ${result?.error ?? 'Editor is unavailable.'}`;
+      }
     }
     setBakingAllMesh(false);
-    if (!opts?.silent) {
+    if (fail) {
+      toast({
+        title: 'Some mesh collision could not be fitted',
+        description: `${fail} prop${fail === 1 ? '' : 's'} may still use inaccurate collision. ${firstError}`,
+        variant: 'destructive',
+      });
+    } else if (!opts?.silent) {
       toast({
         title: 'Mesh collision fitted',
-        description: `${ok} prop${ok === 1 ? '' : 's'} updated to match their real shape${
-          fail ? ` (${fail} failed)` : ''
-        }.`,
+        description: `${ok} prop${ok === 1 ? '' : 's'} updated to match their real shape.`,
       });
     }
   };

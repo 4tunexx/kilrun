@@ -1,5 +1,8 @@
 # Phase 0 — CI + baseline
 
+> Historical baseline; the results below are not current test results. See
+> [docs/CI.md](./docs/CI.md) for the current checks.
+
 ## Changed
 - `.github/workflows/ci.yml` (new): web / game-server / audit jobs.
 - `server/.eslintrc.json` (new) + `npm run lint:server`: the authoritative game server was never linted.

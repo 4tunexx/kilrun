@@ -16,6 +16,8 @@
     "db:seed-sounds": "tsx scripts/seed-sound-pack.ts",
     "db:seed-guides": "tsx scripts/seed-guides.ts",
     "test": "vitest run",
+    "setup": "node scripts/kilrunp-setup.mjs",
+    "test:setup": "node --test scripts/kilrunp-setup.test.mjs",
     "engine:test": "cargo test --manifest-path desktop/src-tauri/Cargo.toml --offline || cargo test --manifest-path desktop/src-tauri/Cargo.toml",
     "test:watch": "vitest",
     "engine:ui:dev": "vite --config desktop/ui/vite.config.ts",

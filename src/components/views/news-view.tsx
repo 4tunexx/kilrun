@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Newspaper } from 'lucide-react';
+import { Newspaper } from 'lucide-react';
+import { HubLoadErrorState, HubLoadingState } from '@/components/ui/hub-loading-state';
 import { getNewsPosts } from '@/lib/social-actions';
 import { NewsArticleDialog, type NewsArticle } from '@/components/news-article-dialog';
 import { resolveNewsThumbnail } from '@/lib/news-thumbnail';
@@ -12,12 +13,17 @@ const OPEN_NEWS_KEY = 'kilrun.openNewsId';
 export default function NewsView() {
   const [posts, setPosts] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [readingId, setReadingId] = useState<string | null>(null);
   const [readingPost, setReadingPost] = useState<NewsArticle | null>(null);
 
   useEffect(() => {
     getNewsPosts()
       .then((list) => setPosts(list as NewsArticle[]))
+      .catch((error) => {
+        console.error('[news-view] failed to load news', error);
+        setLoadError(true);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -41,8 +47,16 @@ export default function NewsView() {
 
   if (loading) {
     return (
-      <div className="text-slate-400 flex items-center gap-2 py-12 justify-center">
-        <Loader2 className="w-5 h-5 animate-spin" /> Loading news...
+      <div className="px-4 sm:px-8 py-6">
+        <HubLoadingState label="Loading news" className="p-6" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="px-4 sm:px-8 py-6">
+        <HubLoadErrorState label="news" className="p-6" />
       </div>
     );
   }

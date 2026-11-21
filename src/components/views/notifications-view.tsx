@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Check, CheckCheck, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import {
   deleteAllNotifications,
   deleteNotification,
@@ -94,9 +95,7 @@ export default function NotificationsView() {
       </div>
 
       {loading ? (
-        <div className="text-slate-400 flex items-center gap-2 py-12 justify-center">
-          <Loader2 className="w-5 h-5 animate-spin" /> Loading...
-        </div>
+        <HubLoadingState label="Loading notifications" className="p-6" />
       ) : items.length === 0 ? (
         <p className="text-slate-400 text-center py-12">You&apos;re all caught up.</p>
       ) : (

@@ -2,6 +2,8 @@
 
 Authoritative real-time multiplayer server for Kilrun, built on [Colyseus](https://colyseus.io/). This is a **separate deployable** from the Next.js app in the repo root — it needs an always-on Node/WebSocket process, which Vercel’s serverless functions cannot provide.
 
+For independent KilrunP installations, see the [hosting and setup guide](../docs/KILRUNP_INSTALL.md).
+
 ## Rooms
 
 | Room name | Class | Notes |
@@ -37,54 +39,24 @@ Use the **same** `GAME_SERVER_ADMIN_SECRET` / join secret on the Next.js `.env`.
 
 Deploy to any host that supports an always-on Node process with WebSocket support. Vercel is not suitable for this piece.
 
-> **Note on "free" hosting (as of 2026):** Fly.io removed its permanent free tier in 2024 — new accounts only get a one-time trial. For genuinely free (no card), use **Koyeb** (Option A). Fly.io / Railway are fine if you can pay a few dollars/month.
+Keep the complete repository available when building: the game server imports
+code from `../shared/`, so deploying only the `server/` directory is
+insufficient. Install and build with `npm ci --prefix server` and
+`npm run build --prefix server`, then run `npm start` with `server/` as the
+working directory and the environment below supplied by the process manager.
+For the KilrunP wizard's generated `server/.env`, use the Node `--env-file`
+startup command in the [hosting guide](../docs/KILRUNP_INSTALL.md).
 
-### Option A: Koyeb (free tier)
-
-1. Push this repo to GitHub.
-2. On [koyeb.com](https://www.koyeb.com): new Service → GitHub → **Root directory** `/server`.
-3. Free instance; set env vars below (`CLIENT_ORIGIN`, `WEB_APP_URL`, secrets).
-4. Public URL → use `wss://…` as `NEXT_PUBLIC_GAME_SERVER_URL` on Vercel.
-
-### Option B: Fly.io
-
-```bash
-# From the repo root so `shared/` is in the image
-fly launch --no-deploy --dockerfile server/Dockerfile
-fly secrets set CLIENT_ORIGIN=https://your-nextjs-app.vercel.app
-fly secrets set WEB_APP_URL=https://your-nextjs-app.vercel.app
-fly secrets set GAME_SERVER_ADMIN_SECRET=...
-fly secrets set GAME_JOIN_TOKEN_SECRET=...
-fly deploy --dockerfile server/Dockerfile
-```
-
-Expose internal port `2567` with TCP/HTTP+TLS handlers (see Dockerfile `EXPOSE 2567`).
-
-### Option C: Railway
-
-1. Deploy from GitHub, root directory `/server`.
-2. Set the same env vars as above.
-3. Use `wss://<railway-domain>` on the Next.js app.
-
-### Option D: Render
-
-1. New + → Web Service → connect the GitHub repo.
-2. **Root Directory** `server`, **Build Command** `npm install && npm run build`,
-   **Start Command** `npm start`, **Health Check Path** `/healthz`.
-3. Environment tab → set `CLIENT_ORIGIN`, `WEB_APP_URL`, `GAME_SERVER_ADMIN_SECRET`,
-   `GAME_JOIN_TOKEN_SECRET` (Render's "Add from .env" accepts a pasted block).
-   `PORT` is auto-injected by Render — nothing to set, the server already reads it.
-4. Public URL is `https://<service>.onrender.com` → use `wss://<service>.onrender.com`
-   as `NEXT_PUBLIC_GAME_SERVER_URL` on Vercel.
-5. **Free plan spins down after 15 min idle** (~30-50s cold start on the next
-   connection) — if players see intermittent join failures/timeouts after a
-   quiet period, that's why. Upgrade to Starter to keep it always-on.
+Hosts and pricing change; verify that the chosen plan supports an always-on
+process, WebSocket upgrades, the full build context and a public TLS endpoint.
+Services that sleep when idle can interrupt matches.
 
 ### Environment variables
 
 | Variable | Required | Description |
 | --- | --- | --- |
 | `PORT` | No | Defaults to `2567` |
+| `GAME_SERVER_HOST` | No | Bind address; defaults to all interfaces. KilrunP setup uses `127.0.0.1` behind a reverse proxy |
 | `CLIENT_ORIGIN` | Recommended | CORS for `/healthz`, `/monitor`, `/admin/restart`. Also fallback base URL for match-result reporting |
 | `WEB_APP_URL` | **Yes for rewards** | HTTPS origin of Next.js. Colyseus POSTs to `${WEB_APP_URL}/api/game/match-result` |
 | `GAME_SERVER_ADMIN_SECRET` | **Yes for prod** | Restart + match-result auth (must match web) |

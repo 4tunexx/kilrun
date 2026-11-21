@@ -33,6 +33,7 @@ interface AdminControllableRoom {
 }
 
 const PORT = Number(process.env.PORT ?? 2567);
+const HOST = process.env.GAME_SERVER_HOST || undefined;
 const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN ?? '*';
 
 // join-token.ts's authenticateJoin() has a dev-only fallback: when no join
@@ -371,7 +372,7 @@ setInterval(() => {
   void syncPluginRooms(gameServer);
 }, 30_000);
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, HOST, () => {
   // eslint-disable-next-line no-console
-  console.log(`Kilrun game server listening on ws://localhost:${PORT}`);
+  console.log(`Kilrun game server listening on ${HOST || 'all interfaces'}:${PORT}`);
 });

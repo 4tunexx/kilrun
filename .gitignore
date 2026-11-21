@@ -46,6 +46,9 @@ yarn-error.log*
 next-env.d.ts
 
 .env*
+.kilrunp-configured
+.kilrunp-installed
+.kilrunp-setup.lock
 !.env.example
 # clerk configuration (can include secrets)
 /.clerk/

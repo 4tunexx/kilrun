@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Gift, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -88,9 +89,7 @@ export default function CasesView() {
       {result && <CrateUnboxModal result={result} onClose={closeUnbox} />}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-slate-400 py-12 justify-center">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading cases…
-        </div>
+        <HubLoadingState label="Loading cases" className="p-6" />
       ) : cases.length === 0 ? (
         <p className="text-sm text-slate-500 py-12 text-center">No cases available right now.</p>
       ) : (

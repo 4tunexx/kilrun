@@ -31,6 +31,7 @@ import { UserHoverCard } from '@/components/user-hover-card';
 import { RichPostEditor } from '@/components/ui/rich-post-editor';
 import { RichContent } from '@/components/ui/rich-content';
 import { PlayerAvatar } from '@/components/ui/player-avatar';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { useToast } from '@/hooks/use-toast';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -144,9 +145,7 @@ export default function DiscussionsView() {
       )}
 
       {loading ? (
-        <div className="text-slate-400 flex items-center gap-2 py-12 justify-center">
-          <Loader2 className="w-5 h-5 animate-spin" /> Loading discussions...
-        </div>
+        <HubLoadingState label="Loading discussions" className="p-6" />
       ) : filtered.length === 0 ? (
         <p className="text-slate-400 text-center py-12">No posts yet. Be the first.</p>
       ) : (

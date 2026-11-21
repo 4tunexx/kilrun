@@ -46,6 +46,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { getSiteUrl } from '@/lib/site-url';
+import { HubLoadErrorState, HubLoadingState } from '@/components/ui/hub-loading-state';
 
 type Editor = NonNullable<Awaited<ReturnType<typeof getMyShowcaseEditor>>>;
 
@@ -68,6 +69,7 @@ const TYPE_LABELS: Record<ShowcaseItemType, string> = {
 export function ShowcaseEditor() {
   const [data, setData] = useState<Editor | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
   const [busySlot, setBusySlot] = useState<number | null>(null);
   const [layoutBusy, setLayoutBusy] = useState(false);
@@ -76,10 +78,16 @@ export function ShowcaseEditor() {
   const { toast } = useToast();
 
   const reload = () => {
+    setLoading(true);
+    setLoadError(false);
     getMyShowcaseEditor()
       .then((next) => {
         setData(next);
         setDraftLayout(next.layout);
+      })
+      .catch((error) => {
+        console.error('[showcase-editor] failed to load showcase', error);
+        setLoadError(true);
       })
       .finally(() => setLoading(false));
   };
@@ -118,9 +126,14 @@ export function ShowcaseEditor() {
 
   if (loading || !data || !draftLayout || !previewSummary) {
     return (
-      <div className="flex items-center justify-center py-16 text-slate-400">
-        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading showcase...
-      </div>
+      loadError ? (
+        <div className="space-y-3">
+          <HubLoadErrorState label="your showcase" className="p-4" />
+          <Button variant="outline" onClick={reload}>Try again</Button>
+        </div>
+      ) : (
+        <HubLoadingState label="Loading your showcase" className="p-4" />
+      )
     );
   }
 

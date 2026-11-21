@@ -437,13 +437,13 @@ export default function ProfileView({ userId }: { userId: string }) {
               <CardContent className="pt-5 space-y-1 text-sm">
                 <p className="text-xs text-slate-400">Equipped cosmetics</p>
                 <p className="text-slate-300 truncate">
-                  Banner: {user?.equippedBannerItemName || 'None'}
+                  Banner: {user?.equippedBannerItemName || 'Not equipped'}
                 </p>
                 <p className="text-slate-300 truncate">
-                  Frame: {user?.equippedFrameItemName || 'None'}
+                  Frame: {user?.equippedFrameItemName || 'Not equipped'}
                 </p>
                 <p className="text-slate-300 truncate">
-                  Nickname: {user?.equippedNicknameItemName || 'None'}
+                  Nickname: {user?.equippedNicknameItemName || 'Not equipped'}
                 </p>
               </CardContent>
             </Card>

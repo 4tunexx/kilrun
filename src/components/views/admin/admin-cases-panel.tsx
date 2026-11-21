@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { Plus, Search, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -29,6 +29,7 @@ import {
   adminUpdateCaseItem,
 } from '@/lib/admin-case-actions';
 import { groupRequirementTypes, REQUIREMENT_CATEGORY_LABELS } from '@/lib/requirement-types';
+import { HubLoadErrorState, HubLoadingState } from '@/components/ui/hub-loading-state';
 
 type CaseRow = Awaited<ReturnType<typeof adminListCases>>[number];
 
@@ -47,6 +48,7 @@ export function AdminCasesPanel() {
   const { toast } = useToast();
   const [cases, setCases] = useState<CaseRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pickerOpenFor, setPickerOpenFor] = useState<string | null>(null);
@@ -77,8 +79,12 @@ export function AdminCasesPanel() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       setCases(await adminListCases());
+    } catch (error) {
+      console.error('[admin-cases-panel] failed to load cases', error);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -255,9 +261,9 @@ export function AdminCasesPanel() {
       </Card>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-slate-400 py-8 justify-center">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading cases…
-        </div>
+        <HubLoadingState label="Loading cases" className="p-4" compact />
+      ) : loadError ? (
+        <HubLoadErrorState label="cases" className="p-4" />
       ) : cases.length === 0 ? (
         <p className="text-sm text-slate-500 py-8 text-center">No cases yet.</p>
       ) : (

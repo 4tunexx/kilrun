@@ -18,7 +18,6 @@ import {
   Coins,
   Crown,
   ShoppingBag,
-  Loader2,
 } from 'lucide-react';
 import {
   Carousel,
@@ -165,6 +164,7 @@ export default function LandingPageClient({
   const [topPlayers, setTopPlayers] = useState<LandingTopPlayer[]>([]);
   const [popularItems, setPopularItems] = useState<LandingStoreItem[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
+  const [dataError, setDataError] = useState(false);
 
   const applyBranding = (s: LandingInitialSettings) => {
     if (s.headerTitle) setHeaderTitle(s.headerTitle);
@@ -206,6 +206,7 @@ export default function LandingPageClient({
       })
       .catch((err) => {
         console.error('[landing-page] getLandingPageData failed', err);
+        setDataError(true);
       })
       .finally(() => setDataLoading(false));
   }, []);
@@ -361,7 +362,9 @@ export default function LandingPageClient({
                 <Users className="w-10 h-10 mb-3 text-primary" />
                 <div className="text-4xl font-black">
                   {dataLoading ? (
-                    <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+                    <span className="hub-loading-shimmer h-8 w-24 border border-white/5" role="status" aria-label="Loading player count" />
+                  ) : dataError ? (
+                    '—'
                   ) : (
                     <AnimatedCounter end={stats.registeredPlayers} />
                   )}
@@ -374,7 +377,9 @@ export default function LandingPageClient({
                 <Gamepad2 className="w-10 h-10 mb-3 text-primary" />
                 <div className="text-4xl font-black">
                   {dataLoading ? (
-                    <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+                    <span className="hub-loading-shimmer h-8 w-24 border border-white/5" role="status" aria-label="Loading match count" />
+                  ) : dataError ? (
+                    '—'
                   ) : (
                     <AnimatedCounter end={stats.matchesPlayed} />
                   )}
@@ -392,7 +397,9 @@ export default function LandingPageClient({
                 <Coins className="w-10 h-10 mb-3 text-yellow-400" />
                 <div className="text-4xl font-black">
                   {dataLoading ? (
-                    <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+                    <span className="hub-loading-shimmer h-8 w-24 border border-white/5" role="status" aria-label="Loading VP total" />
+                  ) : dataError ? (
+                    '—'
                   ) : (
                     <AnimatedCounter end={stats.vpEarned} />
                   )}
@@ -411,12 +418,18 @@ export default function LandingPageClient({
               </h2>
             </div>
             {dataLoading ? (
-              <div className="flex justify-center py-12 text-slate-400">
-                <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading store...
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" role="status" aria-label="Loading store">
+                <span className="sr-only">Loading store</span>
+                <div className="hub-loading-shimmer h-56 border border-white/5" />
+                <div className="hub-loading-shimmer h-56 border border-white/5" />
+                <div className="hub-loading-shimmer h-56 border border-white/5" />
+                <div className="hub-loading-shimmer h-56 border border-white/5" />
               </div>
             ) : popularItems.length === 0 ? (
-              <p className="text-center text-slate-400 py-8">
-                Store items will appear here once the catalog is seeded.
+              <p className={`text-center py-8 ${dataError ? 'text-amber-200' : 'text-slate-400'}`}>
+                {dataError
+                  ? 'Store items could not be loaded. Refresh the page to try again.'
+                  : 'Store items will appear here once the catalog is seeded.'}
               </p>
             ) : (
               <Carousel
@@ -476,12 +489,19 @@ export default function LandingPageClient({
               </h2>
             </div>
             {dataLoading ? (
-              <div className="flex justify-center py-12 text-slate-400">
-                <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading rankings...
+              <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5" role="status" aria-label="Loading player rankings">
+                <span className="sr-only">Loading player rankings</span>
+                <div className="hub-loading-shimmer h-48 border border-white/5" />
+                <div className="hub-loading-shimmer h-48 border border-white/5" />
+                <div className="hub-loading-shimmer h-48 border border-white/5" />
+                <div className="hub-loading-shimmer h-48 border border-white/5" />
+                <div className="hub-loading-shimmer h-48 border border-white/5" />
               </div>
             ) : topPlayers.length === 0 ? (
-              <p className="text-center text-slate-400 py-8">
-                Be the first to sign in and claim the top spot.
+              <p className={`text-center py-8 ${dataError ? 'text-amber-200' : 'text-slate-400'}`}>
+                {dataError
+                  ? 'Player rankings could not be loaded. Refresh the page to try again.'
+                  : 'Be the first to sign in and claim the top spot.'}
               </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">

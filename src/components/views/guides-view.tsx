@@ -10,7 +10,6 @@ import {
   Gamepad2,
   Gift,
   LifeBuoy,
-  Loader2,
   Map as MapIcon,
   MessageSquare,
   PencilRuler,
@@ -26,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { HubLoadingState } from '@/components/ui/hub-loading-state';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { getGuides } from '@/lib/social-actions';
@@ -124,9 +124,7 @@ export default function GuidesView() {
       </div>
 
       {loading ? (
-        <div className="text-slate-400 flex items-center gap-2 py-12 justify-center">
-          <Loader2 className="w-5 h-5 animate-spin" /> Loading guides...
-        </div>
+        <HubLoadingState label="Loading guides" className="p-6" />
       ) : guides.length === 0 ? (
         <p className="text-slate-400 text-center py-12">
           No guides yet. Staff can publish from the Admin panel.
