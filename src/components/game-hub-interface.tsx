@@ -966,30 +966,32 @@ export default function GameHubInterface({
           currentPage === 'home' ? homeSubtitle : PAGE_META[currentPage].subtitle
         }
         navigation={
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-10 w-10 rounded-lg text-slate-300 transition-all hover:bg-primary/15 hover:text-primary"
-              onClick={handleGoBack}
-              disabled={currentPage === 'home' && pageHistoryRef.current.length === 0}
-              aria-label="Go back to the previous page"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-10 w-10 rounded-lg text-slate-300 transition-all hover:bg-primary/15 hover:text-primary"
-              onClick={() => navigate('home')}
-              disabled={currentPage === 'home'}
-              aria-label="Go to Home"
-            >
-              <Home className="h-5 w-5" />
-            </Button>
-          </div>
+          isLeftMenuOpen ? null : (
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 rounded-lg text-slate-300 transition-all hover:bg-primary/15 hover:text-primary"
+                onClick={handleGoBack}
+                disabled={currentPage === 'home' && pageHistoryRef.current.length === 0}
+                aria-label="Go back to the previous page"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 rounded-lg text-slate-300 transition-all hover:bg-primary/15 hover:text-primary"
+                onClick={() => navigate('home')}
+                disabled={currentPage === 'home'}
+                aria-label="Go to Home"
+              >
+                <Home className="h-5 w-5" />
+              </Button>
+            </div>
+          )
         }
         toolbar={
           <HubHeaderToolbar
