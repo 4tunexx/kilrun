@@ -160,8 +160,6 @@ export const THEME_SLIDER_FIELDS = [
   { key: 'primaryHoverOpacity', label: 'Primary hover fill', min: 50, max: 100, unit: '%' },
   { key: 'secondaryHoverOpacity', label: 'Secondary hover fill', min: 50, max: 100, unit: '%' },
   { key: 'panelHoverOpacity', label: 'Panel hover fill', min: 40, max: 100, unit: '%' },
-  { key: 'panelCut', label: 'Chamfer size', min: 0, max: 24, unit: 'px' },
-  { key: 'panelRadius', label: 'Rounded panel size', min: 0, max: 24, unit: 'px' },
 ] as const satisfies readonly {
   key: keyof ThemePalette;
   label: string;

@@ -35,7 +35,6 @@
     saturate(var(--hub-glass-saturation, 130%));
   backdrop-filter: blur(var(--hub-glass-blur, 20px))
     saturate(var(--hub-glass-saturation, 130%));
-  border-radius: var(--panel-radius, 12px);
 }
 
 /* Normalize legacy bordered low-opacity panel classes across the platform. */
@@ -54,7 +53,6 @@
     saturate(var(--hub-inset-saturation, 120%));
   backdrop-filter: blur(var(--hub-inset-blur, 14px))
     saturate(var(--hub-inset-saturation, 120%));
-  border-radius: var(--panel-radius, 12px);
 }
 
 :where(div, section, article, li)[class*='bg-slate-900/'][class*='border'][class*='rounded'][class*='hover:bg-']:not(.hub-glass-panel):hover,

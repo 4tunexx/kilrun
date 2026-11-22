@@ -72,7 +72,10 @@ export function AdminThemePalettePanel() {
   };
 
   const updateStyle = (
-    key: (typeof THEME_SLIDER_FIELDS)[number]['key'],
+    key:
+      | (typeof THEME_SLIDER_FIELDS)[number]['key']
+      | 'panelCut'
+      | 'panelRadius',
     value: number
   ) => {
     preview({ ...draftPalette, [key]: value });
@@ -161,6 +164,61 @@ export function AdminThemePalettePanel() {
             ))}
           </div>
 
+          <section className="hub-glass-inset space-y-4 rounded-lg border p-4">
+            <div>
+              <h3 className="font-semibold text-foreground">Panel corners</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Kilrun’s clipped corners are the default. Choose a shape and tune either corner
+                size; the preview updates immediately.
+              </p>
+            </div>
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-foreground">Corner style</legend>
+              <div className="flex flex-wrap gap-2">
+                {([
+                  ['chamfer', 'Kilrun cut corners'],
+                  ['square', 'Square'],
+                  ['rounded', 'Rounded'],
+                ] as const).map(([shape, label]) => (
+                  <Button
+                    key={shape}
+                    type="button"
+                    variant={draftPalette.panelShape === shape ? 'default' : 'outline'}
+                    aria-pressed={draftPalette.panelShape === shape}
+                    onClick={() => preview({ ...draftPalette, panelShape: shape })}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </fieldset>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {([
+                ['panelCut', 'Cut-corner size'],
+                ['panelRadius', 'Rounded-corner size'],
+              ] as const).map(([key, label]) => (
+                <label key={key} className="space-y-2">
+                  <span className="flex items-center justify-between gap-2 text-sm">
+                    <span className="text-foreground">{label}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {draftPalette[key]}px
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={24}
+                    step={1}
+                    value={draftPalette[key]}
+                    onChange={(event) => updateStyle(key, Number(event.currentTarget.value))}
+                    className="w-full accent-primary"
+                    aria-label={label}
+                  />
+                </label>
+              ))}
+            </div>
+          </section>
+
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {THEME_COLOR_FIELDS.map(({ key, label }) => (
               <label
@@ -219,26 +277,6 @@ export function AdminThemePalettePanel() {
                 </label>
               ))}
             </div>
-            <fieldset>
-              <legend className="mb-2 text-sm font-medium text-foreground">Panel shape</legend>
-              <div className="flex flex-wrap gap-2">
-                {([
-                  ['chamfer', 'Kilrun cut corners'],
-                  ['square', 'Square'],
-                  ['rounded', 'Rounded'],
-                ] as const).map(([shape, label]) => (
-                  <Button
-                    key={shape}
-                    type="button"
-                    variant={draftPalette.panelShape === shape ? 'default' : 'outline'}
-                    aria-pressed={draftPalette.panelShape === shape}
-                    onClick={() => preview({ ...draftPalette, panelShape: shape })}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-            </fieldset>
           </section>
 
           <div className="flex flex-wrap gap-2">
