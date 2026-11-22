@@ -157,25 +157,25 @@ svg.text-primary:hover {
 @keyframes hub-loading-reduced-pulse {
   0%,
   100% {
-    opacity: 0.45;
+    opacity: 0.3;
   }
   50% {
-    opacity: 0.9;
+    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .hub-loading-shimmer {
-    animation: hub-loading-reduced-pulse 2.8s ease-in-out infinite;
+    animation: hub-loading-reduced-pulse 1.8s ease-in-out infinite;
   }
 
   .hub-loading-progress {
-    animation: hub-loading-reduced-pulse 2.8s ease-in-out infinite;
+    animation: hub-loading-reduced-pulse 1.8s ease-in-out infinite;
     width: 100%;
   }
 
-  .hub-loading-state[data-compact='true'] .hub-loading-indicator {
-    animation: hub-loading-reduced-pulse 2.8s ease-in-out infinite;
+  .hub-loading-state .hub-loading-indicator {
+    animation: hub-loading-reduced-pulse 1.8s ease-in-out infinite;
   }
 
   .hub-glass-inset-interactive {

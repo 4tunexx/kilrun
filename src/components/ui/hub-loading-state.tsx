@@ -15,7 +15,6 @@ export function HubLoadingState({
     <section
       role="status"
       aria-label={label}
-      data-compact={compact}
       className={`hub-loading-state hub-glass-panel border shadow-lg shadow-black/20 ${className}`}
     >
       <div className="flex items-center gap-3">
