@@ -10,6 +10,9 @@ export type ThemePalette = {
   secondaryHover: string;
   secondaryHoverOpacity: number;
   accent: string;
+  destructive: string;
+  destructiveHover: string;
+  destructiveHoverOpacity: number;
   background: string;
   surface: string;
   foreground: string;
@@ -17,6 +20,7 @@ export type ThemePalette = {
   border: string;
   glassStroke: string;
   icon: string;
+  iconHover: string;
   glassTint: string;
   insetTint: string;
   panelHoverTint: string;
@@ -47,6 +51,9 @@ const ORIGINAL_STYLE = {
   secondaryHover: '#2d374e',
   secondaryHoverOpacity: 80,
   accent: '#fafafa',
+  destructive: '#811d1d',
+  destructiveHover: '#a12323',
+  destructiveHoverOpacity: 90,
   background: '#161b27',
   surface: '#1e2434',
   foreground: '#fafafa',
@@ -54,6 +61,7 @@ const ORIGINAL_STYLE = {
   border: '#2d374e',
   glassStroke: '#94a3b8',
   icon: '#e13d48',
+  iconHover: '#e13d48',
   glassTint: '#0f172a',
   insetTint: '#0f172a',
   panelHoverTint: '#1e293b',
@@ -133,11 +141,14 @@ export const THEME_COLOR_FIELDS = [
   { key: 'surface', label: 'Panel surface' },
   { key: 'secondary', label: 'Secondary controls' },
   { key: 'accent', label: 'Highlight / ghost hover' },
+  { key: 'destructive', label: 'Destructive buttons' },
+  { key: 'destructiveHover', label: 'Destructive button hover' },
   { key: 'foreground', label: 'Main text' },
   { key: 'muted', label: 'Muted text' },
   { key: 'border', label: 'Panel borders' },
   { key: 'glassStroke', label: 'Glass panel strokes' },
   { key: 'icon', label: 'Accent icons' },
+  { key: 'iconHover', label: 'Accent icon hover' },
   { key: 'glassTint', label: 'Glass tint' },
   { key: 'insetTint', label: 'Inset glass tint' },
   { key: 'panelHoverTint', label: 'Panel hover fill' },
@@ -159,6 +170,7 @@ export const THEME_SLIDER_FIELDS = [
   { key: 'buttonHoverBrightness', label: 'Button hover brightness', min: 100, max: 125, unit: '%' },
   { key: 'primaryHoverOpacity', label: 'Primary hover fill', min: 50, max: 100, unit: '%' },
   { key: 'secondaryHoverOpacity', label: 'Secondary hover fill', min: 50, max: 100, unit: '%' },
+  { key: 'destructiveHoverOpacity', label: 'Destructive hover fill', min: 50, max: 100, unit: '%' },
   { key: 'panelHoverOpacity', label: 'Panel hover fill', min: 40, max: 100, unit: '%' },
 ] as const satisfies readonly {
   key: keyof ThemePalette;
@@ -240,6 +252,12 @@ export function parseThemePalette(value: unknown): ThemePalette {
     secondaryHoverOpacity: boundedNumber(
       parsed.secondaryHoverOpacity,
       ORIGINAL_STYLE.secondaryHoverOpacity,
+      50,
+      100
+    ),
+    destructiveHoverOpacity: boundedNumber(
+      parsed.destructiveHoverOpacity,
+      ORIGINAL_STYLE.destructiveHoverOpacity,
       50,
       100
     ),
@@ -350,10 +368,15 @@ export function themePaletteCssVariables(value: unknown): Record<string, string>
     '--muted-foreground': muted,
     '--accent': hexToHsl(palette.accent),
     '--accent-foreground': readableForeground(palette.accent),
+    '--destructive': hexToHsl(palette.destructive),
+    '--destructive-foreground': readableForeground(palette.destructive),
+    '--destructive-hover': hexToHsl(palette.destructiveHover),
+    '--destructive-hover-opacity': alpha(palette.destructiveHoverOpacity),
     '--border': border,
     '--input': border,
     '--hub-glass-stroke': hexToHsl(palette.glassStroke),
     '--icon-color': hexToHsl(palette.icon),
+    '--icon-hover-color': hexToHsl(palette.iconHover),
     '--hub-glass-tint': hexToRgb(palette.glassTint),
     '--hub-inset-tint': hexToRgb(palette.insetTint),
     '--hub-panel-hover-tint': hexToRgb(palette.panelHoverTint),

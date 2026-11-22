@@ -91,6 +91,14 @@ button.hub-theme-button-secondary:hover:not(:disabled) {
   filter: brightness(var(--button-hover-brightness, 1.1));
 }
 
+button.hub-theme-button-destructive:hover:not(:disabled) {
+  background-color: hsl(
+    var(--destructive-hover, var(--destructive)) /
+      var(--destructive-hover-opacity, 0.9)
+  );
+  filter: brightness(var(--button-hover-brightness, 1.1));
+}
+
 button.hub-theme-button-outline:hover:not(:disabled),
 button.hub-theme-button-ghost:hover:not(:disabled) {
   background-color: hsl(var(--accent));
@@ -99,6 +107,11 @@ button.hub-theme-button-ghost:hover:not(:disabled) {
 
 svg.text-primary {
   color: hsl(var(--icon-color, var(--primary)));
+  transition: color 160ms ease;
+}
+
+svg.text-primary:hover {
+  color: hsl(var(--icon-hover-color, var(--icon-color, var(--primary))));
 }
 
 .hub-loading-shimmer {
@@ -141,15 +154,28 @@ svg.text-primary {
   }
 }
 
+@keyframes hub-loading-reduced-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hub-loading-shimmer {
-    animation: none;
+    animation: hub-loading-reduced-pulse 2.8s ease-in-out infinite;
   }
 
   .hub-loading-progress {
-    animation: none;
+    animation: hub-loading-reduced-pulse 2.8s ease-in-out infinite;
     width: 100%;
-    opacity: 0.7;
+  }
+
+  .hub-loading-state[data-compact='true'] .hub-loading-indicator {
+    animation: hub-loading-reduced-pulse 2.8s ease-in-out infinite;
   }
 
   .hub-glass-inset-interactive {

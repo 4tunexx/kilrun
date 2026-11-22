@@ -17,6 +17,8 @@ describe('theme palettes', () => {
       secondary: '#2d374e',
       glassTint: '#0f172a',
       glassOpacity: 90,
+      iconHover: '#e13d48',
+      destructive: '#811d1d',
       insetOpacity: 72,
       glassBlur: 20,
       insetBlur: 14,
@@ -48,9 +50,17 @@ describe('theme palettes', () => {
     const variables = themePaletteCssVariables({
       ...DEFAULT_THEME_PALETTE,
       primary: '#ffffff',
+      iconHover: '#ff0000',
+      destructive: '#ff0000',
+      destructiveHover: '#ffffff',
+      destructiveHoverOpacity: 75,
     });
     expect(variables['--primary']).toBe('0 0% 100%');
     expect(variables['--primary-foreground']).toBe('222 27% 12%');
+    expect(variables['--icon-hover-color']).toBe('0 100% 50%');
+    expect(variables['--destructive']).toBe('0 100% 50%');
+    expect(variables['--destructive-hover']).toBe('0 0% 100%');
+    expect(variables['--destructive-hover-opacity']).toBe('0.75');
   });
 
   it('clamps saved visual controls and exposes glass and shape CSS variables', () => {

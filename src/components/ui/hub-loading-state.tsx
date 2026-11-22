@@ -15,10 +15,11 @@ export function HubLoadingState({
     <section
       role="status"
       aria-label={label}
-      className={`hub-glass-panel border shadow-lg shadow-black/20 ${className}`}
+      data-compact={compact}
+      className={`hub-loading-state hub-glass-panel border shadow-lg shadow-black/20 ${className}`}
     >
       <div className="flex items-center gap-3">
-        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center border border-primary/30 bg-primary/10">
+        <span className="hub-loading-indicator relative flex h-10 w-10 shrink-0 items-center justify-center border border-primary/30 bg-primary/10">
           <span className="absolute inset-0 motion-safe:animate-ping border border-primary/25" aria-hidden="true" />
           <Loader2 className="h-5 w-5 motion-safe:animate-spin text-primary" aria-hidden="true" />
         </span>
