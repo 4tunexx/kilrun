@@ -63,6 +63,32 @@ const CHAT_COLLAPSE_KEY = 'kilrun.chatCollapsed';
 const PANEL =
   'hub-glass-panel border';
 
+function DashboardLoading({
+  label,
+  rows = 2,
+}: {
+  label: string;
+  rows?: number;
+}) {
+  return (
+    <div role="status" aria-label={label} className="space-y-3 py-2">
+      <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden="true" />
+        {label}
+      </span>
+      <div className="space-y-2" aria-hidden="true">
+        {Array.from({ length: rows }, (_, index) => (
+          <div
+            key={index}
+            className="hub-loading-shimmer h-2 border border-white/5"
+            style={{ width: `${92 - index * 13}%` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface HomeViewProps {
   onLaunchGame?: () => void;
   onNavigate?: (page: string) => void;
@@ -385,12 +411,7 @@ export default function HomeView({
                 <>
                   <div className="min-h-[14rem] flex-1 overflow-y-auto space-y-2 rounded-lg bg-slate-900/40 p-3 border border-slate-700/40">
                     {isLoading ? (
-                      <div className="space-y-3 py-2" role="status" aria-label="Loading chat">
-                        <span className="sr-only">Loading chat</span>
-                        <div className="hub-loading-shimmer h-8 w-3/4 border border-white/5" />
-                        <div className="hub-loading-shimmer ml-auto h-8 w-2/3 border border-white/5" />
-                        <div className="hub-loading-shimmer h-8 w-1/2 border border-white/5" />
-                      </div>
+                      <DashboardLoading label="Loading live chat" rows={3} />
                     ) : loadError ? (
                       <p className="text-sm text-amber-200">Chat could not be loaded. Refresh to try again.</p>
                     ) : chat.length === 0 ? (
@@ -489,12 +510,7 @@ export default function HomeView({
             </CardHeader>
             <CardContent className="space-y-4">
               {isLoading ? (
-                <div className="space-y-3 py-2" role="status" aria-label="Loading daily missions">
-                  <span className="sr-only">Loading daily missions</span>
-                  <div className="hub-loading-shimmer h-10 border border-white/5" />
-                  <div className="hub-loading-shimmer h-10 border border-white/5" />
-                  <div className="hub-loading-shimmer h-10 border border-white/5" />
-                </div>
+                <DashboardLoading label="Loading daily missions" rows={3} />
               ) : loadError ? (
                 <p className="text-sm text-amber-200">Dashboard data could not be loaded. Refresh to try again.</p>
               ) : dailyMissions.length === 0 ? (
@@ -568,11 +584,7 @@ export default function HomeView({
             </CardHeader>
             <CardContent className="space-y-2">
               {isLoading ? (
-                <div className="space-y-2 py-2" role="status" aria-label="Loading missions">
-                  <span className="sr-only">Loading missions</span>
-                  <div className="hub-loading-shimmer h-5 w-4/5 border border-white/5" />
-                  <div className="hub-loading-shimmer h-5 w-2/3 border border-white/5" />
-                </div>
+                <DashboardLoading label="Loading main missions" />
               ) : loadError ? (
                 <p className="text-sm text-amber-200">Dashboard data could not be loaded. Refresh to try again.</p>
               ) : (
@@ -624,11 +636,7 @@ export default function HomeView({
             </CardHeader>
             <CardContent className="space-y-2">
               {isLoading ? (
-                <div className="space-y-2 py-2" role="status" aria-label="Loading discussions">
-                  <span className="sr-only">Loading discussions</span>
-                  <div className="hub-loading-shimmer h-10 border border-white/5" />
-                  <div className="hub-loading-shimmer h-10 border border-white/5" />
-                </div>
+                <DashboardLoading label="Loading latest forum" />
               ) : loadError ? (
                 <p className="text-sm text-amber-200">Dashboard data could not be loaded. Refresh to try again.</p>
               ) : forumTopics.length === 0 ? (

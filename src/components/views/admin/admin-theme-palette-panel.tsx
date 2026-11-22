@@ -15,6 +15,7 @@ import {
   serializeThemePalette,
   THEME_COLOR_FIELDS,
   THEME_PALETTES,
+  THEME_SLIDER_FIELDS,
   type ThemePalette,
 } from '@/lib/theme-palette';
 
@@ -68,6 +69,13 @@ export function AdminThemePalettePanel() {
     setDraftPalette(next);
     applyThemePalette(next, document.documentElement);
     broadcastSiteSettings({ themePaletteJson: serializeThemePalette(next) });
+  };
+
+  const updateStyle = (
+    key: (typeof THEME_SLIDER_FIELDS)[number]['key'],
+    value: number
+  ) => {
+    preview({ ...draftPalette, [key]: value });
   };
 
   const save = async () => {
@@ -181,6 +189,58 @@ export function AdminThemePalettePanel() {
             ))}
           </div>
 
+          <section className="hub-glass-inset space-y-4 rounded-lg border p-4">
+            <div>
+              <h3 className="font-semibold text-foreground">Glass, strokes & hover</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Tune panel transparency, blur, color richness, strokes and button hover response.
+              </p>
+            </div>
+            <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+              {THEME_SLIDER_FIELDS.map(({ key, label, min, max, unit }) => (
+                <label key={key} className="space-y-2">
+                  <span className="flex items-center justify-between gap-2 text-sm">
+                    <span className="text-foreground">{label}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {draftPalette[key]}
+                      {unit}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={1}
+                    value={draftPalette[key]}
+                    onChange={(event) => updateStyle(key, Number(event.currentTarget.value))}
+                    className="w-full accent-primary"
+                    aria-label={label}
+                  />
+                </label>
+              ))}
+            </div>
+            <fieldset>
+              <legend className="mb-2 text-sm font-medium text-foreground">Panel shape</legend>
+              <div className="flex flex-wrap gap-2">
+                {([
+                  ['chamfer', 'Kilrun cut corners'],
+                  ['square', 'Square'],
+                  ['rounded', 'Rounded'],
+                ] as const).map(([shape, label]) => (
+                  <Button
+                    key={shape}
+                    type="button"
+                    variant={draftPalette.panelShape === shape ? 'default' : 'outline'}
+                    aria-pressed={draftPalette.panelShape === shape}
+                    onClick={() => preview({ ...draftPalette, panelShape: shape })}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </fieldset>
+          </section>
+
           <div className="flex flex-wrap gap-2">
             <Button onClick={save} disabled={!isDirty || saving}>
               {saving ? (
@@ -221,15 +281,17 @@ export function AdminThemePalettePanel() {
             <div className="flex flex-wrap gap-2">
               <Button>Primary action</Button>
               <Button variant="secondary">Secondary</Button>
+              <Button variant="outline">Outline</Button>
+              <Button variant="ghost">Ghost</Button>
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              {[draftPalette.primary, draftPalette.surface, draftPalette.border].map((color) => (
-                <span
-                  key={color}
-                  className="h-10 rounded-md border"
-                  style={{ backgroundColor: color }}
-                />
-              ))}
+            <div className="hub-glass-inset space-y-2 rounded-md border p-3">
+              <div className="flex items-center gap-2">
+                <Palette className="h-4 w-4 text-primary" />
+                <span className="text-sm font-semibold text-foreground">Nested glass panel</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Inset visibility, blur and stroke preview independently.
+              </p>
             </div>
           </div>
         </CardContent>

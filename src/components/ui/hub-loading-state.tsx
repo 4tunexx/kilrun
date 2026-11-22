@@ -2,10 +2,12 @@ import { AlertTriangle, Loader2 } from 'lucide-react';
 
 export function HubLoadingState({
   label = 'Loading',
+  description,
   className = '',
   compact = false,
 }: {
   label?: string;
+  description?: string;
   className?: string;
   compact?: boolean;
 }) {
@@ -16,19 +18,27 @@ export function HubLoadingState({
       className={`hub-glass-panel border shadow-lg shadow-black/20 ${className}`}
     >
       <div className="flex items-center gap-3">
-        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center">
-          <span className="absolute inset-0 motion-safe:animate-ping border border-primary/30" aria-hidden="true" />
+        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center border border-primary/30 bg-primary/10">
+          <span className="absolute inset-0 motion-safe:animate-ping border border-primary/25" aria-hidden="true" />
           <Loader2 className="h-5 w-5 motion-safe:animate-spin text-primary" aria-hidden="true" />
         </span>
-        <span className="text-sm font-semibold text-slate-200">{label}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-foreground">{label}</span>
+          {description && (
+            <span className="mt-1 block text-xs text-muted-foreground">{description}</span>
+          )}
+        </span>
+        {compact && (
+          <span className="hidden shrink-0 items-center gap-1.5 sm:flex" aria-hidden="true">
+            <span className="h-1.5 w-1.5 motion-safe:animate-pulse bg-primary" />
+            <span className="h-1.5 w-1.5 motion-safe:animate-pulse bg-primary/60 [animation-delay:150ms]" />
+            <span className="h-1.5 w-1.5 motion-safe:animate-pulse bg-primary/30 [animation-delay:300ms]" />
+          </span>
+        )}
       </div>
-      {compact ? (
-        <span className="hub-loading-shimmer ml-auto h-2 w-20 border border-white/5" aria-hidden="true" />
-      ) : (
-        <div className="mt-6 grid gap-3 sm:grid-cols-3" aria-hidden="true">
-          <span className="hub-loading-shimmer h-16 border border-white/5" />
-          <span className="hub-loading-shimmer h-16 border border-white/5" />
-          <span className="hub-loading-shimmer h-16 border border-white/5" />
+      {!compact && (
+        <div className="hub-loading-track mt-5" aria-hidden="true">
+          <span className="hub-loading-progress" />
         </div>
       )}
       <span className="sr-only">Please wait while Kilrun loads this section.</span>

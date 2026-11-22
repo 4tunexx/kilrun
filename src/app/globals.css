@@ -23,37 +23,44 @@
 }
 
 .hub-glass-panel {
-  background-color: hsl(var(--card) / 0.9);
+  background-color: rgb(var(--hub-glass-tint, 15 23 42) / var(--hub-glass-opacity, 0.9));
   background-image: linear-gradient(
     135deg,
-    hsl(var(--foreground) / 0.08),
-    hsl(var(--card) / 0.08) 48%,
-    hsl(var(--background) / 0.18)
+    hsl(var(--foreground) / var(--hub-glass-highlight, 0.08)),
+    rgb(var(--hub-glass-gradient-tint, 30 41 59) / var(--hub-glass-highlight, 0.08)) 48%,
+    rgb(var(--hub-glass-shadow-tint, 2 6 23) / calc(var(--hub-glass-highlight, 0.08) * 2.25))
   );
-  border-color: hsl(var(--border) / 0.75);
-  -webkit-backdrop-filter: blur(20px) saturate(130%);
-  backdrop-filter: blur(20px) saturate(130%);
+  border-color: hsl(var(--hub-glass-stroke, 215 20% 65%) / var(--hub-border-opacity, 0.2));
+  -webkit-backdrop-filter: blur(var(--hub-glass-blur, 20px))
+    saturate(var(--hub-glass-saturation, 130%));
+  backdrop-filter: blur(var(--hub-glass-blur, 20px))
+    saturate(var(--hub-glass-saturation, 130%));
+  border-radius: var(--panel-radius, 12px);
 }
 
 /* Normalize legacy bordered low-opacity panel classes across the platform. */
 .hub-glass-inset,
 :where(div, section, article, li)[class*='bg-slate-900/'][class*='border'][class*='rounded']:not(.hub-glass-panel),
 :where(div, section, article, li)[class*='bg-slate-800/'][class*='border'][class*='rounded']:not(.hub-glass-panel) {
-  background-color: hsl(var(--card) / 0.72);
+  background-color: rgb(var(--hub-inset-tint, 15 23 42) / var(--hub-inset-opacity, 0.72));
   background-image: linear-gradient(
     135deg,
-    hsl(var(--foreground) / 0.06),
-    hsl(var(--card) / 0.05) 52%,
-    hsl(var(--background) / 0.16)
+    hsl(var(--foreground) / calc(var(--hub-glass-highlight, 0.08) * 0.75)),
+    rgb(var(--hub-glass-gradient-tint, 30 41 59) / calc(var(--hub-glass-highlight, 0.08) * 0.625)) 52%,
+    rgb(var(--hub-glass-shadow-tint, 2 6 23) / calc(var(--hub-glass-highlight, 0.08) * 2))
   );
-  border-color: hsl(var(--border) / 0.7);
-  -webkit-backdrop-filter: blur(14px) saturate(120%);
-  backdrop-filter: blur(14px) saturate(120%);
+  border-color: hsl(var(--hub-glass-stroke, 215 20% 65%) / var(--hub-inset-border-opacity, 0.16));
+  -webkit-backdrop-filter: blur(var(--hub-inset-blur, 14px))
+    saturate(var(--hub-inset-saturation, 120%));
+  backdrop-filter: blur(var(--hub-inset-blur, 14px))
+    saturate(var(--hub-inset-saturation, 120%));
+  border-radius: var(--panel-radius, 12px);
 }
 
 :where(div, section, article, li)[class*='bg-slate-900/'][class*='border'][class*='rounded'][class*='hover:bg-']:not(.hub-glass-panel):hover,
 :where(div, section, article, li)[class*='bg-slate-800/'][class*='border'][class*='rounded'][class*='hover:bg-']:not(.hub-glass-panel):hover {
-  background-color: hsl(var(--secondary) / 0.84);
+  background-color: rgb(var(--hub-panel-hover-tint, 30 41 59) / var(--hub-panel-hover-opacity, 0.84));
+  border-color: hsl(var(--hub-panel-hover-border, 25 96% 61%) / 0.55);
 }
 
 .hub-glass-inset-interactive {
@@ -64,8 +71,36 @@
 }
 
 .hub-glass-inset-interactive:hover:not(:disabled) {
-  background-color: hsl(var(--secondary) / 0.84);
+  background-color: hsl(var(--secondary-hover, var(--secondary)) / 0.84);
   border-color: hsl(var(--primary) / 0.55);
+}
+
+button.hub-theme-button {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    filter 180ms ease;
+}
+
+button.hub-theme-button-default:hover:not(:disabled) {
+  background-color: hsl(var(--primary-hover, var(--primary)) / var(--primary-hover-opacity, 0.9));
+  filter: brightness(var(--button-hover-brightness, 1.1));
+}
+
+button.hub-theme-button-secondary:hover:not(:disabled) {
+  background-color: hsl(var(--secondary-hover, var(--secondary)) / var(--secondary-hover-opacity, 0.8));
+  filter: brightness(var(--button-hover-brightness, 1.1));
+}
+
+button.hub-theme-button-outline:hover:not(:disabled),
+button.hub-theme-button-ghost:hover:not(:disabled) {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+svg.text-primary {
+  color: hsl(var(--icon-color, var(--primary)));
 }
 
 .hub-loading-shimmer {
@@ -79,9 +114,44 @@
   animation: hub-skeleton-shimmer 1.8s ease-in-out infinite;
 }
 
+.hub-loading-track {
+  height: 3px;
+  overflow: hidden;
+  background-color: hsl(var(--secondary) / 0.7);
+}
+
+.hub-loading-progress {
+  display: block;
+  width: 34%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    hsl(var(--primary)),
+    hsl(var(--accent) / 0.85),
+    transparent
+  );
+  animation: hub-loading-progress 1.35s ease-in-out infinite;
+}
+
+@keyframes hub-loading-progress {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hub-loading-shimmer {
     animation: none;
+  }
+
+  .hub-loading-progress {
+    animation: none;
+    width: 100%;
+    opacity: 0.7;
   }
 
   .hub-glass-inset-interactive {
@@ -319,7 +389,7 @@ input[type='range']::-moz-range-thumb {
 [class~='rounded-xl'],
 [class~='rounded-2xl'],
 [class~='rounded-3xl'] {
-  --cut: 10px;
+  --cut: var(--panel-cut, 10px);
   clip-path: polygon(
     var(--cut) 0,
     100% 0,
@@ -332,10 +402,30 @@ input[type='range']::-moz-range-thumb {
 
 [class~='rounded'],
 [class~='rounded-md'] {
-  --cut: 6px;
+  --cut: calc(var(--panel-cut, 10px) * 0.6);
 }
 
 [class~='rounded-2xl'],
 [class~='rounded-3xl'] {
-  --cut: 16px;
+  --cut: calc(var(--panel-cut, 10px) * 1.6);
+}
+
+html[data-panel-shape='square'] [class~='rounded'],
+html[data-panel-shape='square'] [class~='rounded-md'],
+html[data-panel-shape='square'] [class~='rounded-lg'],
+html[data-panel-shape='square'] [class~='rounded-xl'],
+html[data-panel-shape='square'] [class~='rounded-2xl'],
+html[data-panel-shape='square'] [class~='rounded-3xl'] {
+  clip-path: none;
+  border-radius: 0 !important;
+}
+
+html[data-panel-shape='rounded'] [class~='rounded'],
+html[data-panel-shape='rounded'] [class~='rounded-md'],
+html[data-panel-shape='rounded'] [class~='rounded-lg'],
+html[data-panel-shape='rounded'] [class~='rounded-xl'],
+html[data-panel-shape='rounded'] [class~='rounded-2xl'],
+html[data-panel-shape='rounded'] [class~='rounded-3xl'] {
+  clip-path: none;
+  border-radius: var(--panel-radius, 12px) !important;
 }
